@@ -1,0 +1,77 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Web Editor</title><link rel="stylesheet" href="editor/editor.css">
+<script>window.__workersConfigReady=fetch(new URL('workers.json',location.href),{cache:'no-store'}).then(async r=>{if(!r.ok)throw new Error('Failed to load workers.json ('+r.status+')');const c=await r.json();if(!c||typeof c!=='object')throw new Error('Invalid workers.json');window.WorkerConfig=c;return c;}).catch(e=>{console.error(e);window.WorkerConfig={proxy:'',github:''};return window.WorkerConfig;});</script>
+<script src="browser/external/jszip.js"></script>
+<script src="browser/lib/filesystem.js"></script>
+<script src="browser/lib/network.js"></script>
+<script src="browser/lib/emulator.js"></script>
+<script src="browser/lib/npm.js"></script>
+<script src="browser/lib/endpoints/app.js"></script>
+<script src="browser/lib/endpoints/static.js"></script>
+<script src="browser/lib/keepalive.js"></script>
+<script src="browser/console.js"></script>
+<script src="editor/file-icons.js"></script>
+<script src="editor/previews/manager.js"></script>
+<script src="editor/previews/vendor/showdown.js"></script>
+<script src="editor/previews/hdr.js"></script>
+<script src="editor/previews/obj.js"></script>
+<script src="editor/previews/markdown.js"></script>
+<script src="editor/previews/html.js"></script>
+<script src="editor/previews/image.js"></script>
+<script src="editor/previews/audio.js"></script>
+<script src="editor/previews/video.js"></script>
+<script src="editor/previews/monaco.js"></script>
+<script src="editor/previews/raw.js"></script>
+<script src="editor/previews/piskel.js"></script>
+<script src="editor/file-manager.js"></script>
+<script src="editor/terminal.js"></script>
+<script src="editor/run-config.js"></script>
+<script src="editor/workbench.js"></script>
+<script src="editor/builtins/browser.js"></script>
+<script src="editor/builtins/peer.js"></script>
+<script src="editor/builtins/terminal.js"></script>
+<script src="editor/builtins/run-config.js"></script>
+<script src="editor/builtins/environment.js"></script>
+<script src="editor/builtins/ai.js"></script>
+<script src="editor/sidebar/explorer.js"></script>
+<script src="editor/sidebar/run-debug.js"></script>
+<script src="editor/sidebar/settings.js"></script>
+<script src="editor/sidebar/placeholders.js"></script>
+<script src="editor/sidebar/search.js"></script>
+<script src="editor/github.js"></script>
+<script src="editor/sidebar/profile.js"></script>
+<script src="editor/sidebar/source-control.js"></script>
+<script src="editor/ai/permissions.js"></script>
+<script src="editor/ai/providers.js"></script>
+<script src="editor/ai/context.js"></script>
+<script src="editor/ai/tools.js"></script>
+<script src="editor/ai/client.js"></script>
+<script src="editor/ai/agent.js"></script>
+<script src="editor/sidebar/activity.js"></script>
+<script src="editor/editor.js"></script>
+<script src="editor/previews/vendor/monaco/vs/loader.js"></script><style>.import-source-modal{width:min(560px,calc(100vw - 40px));box-sizing:border-box}.import-dropzone{border:2px dashed #555;padding:32px 20px;text-align:center;color:#aaa;cursor:pointer;margin:16px 0}.import-dropzone.dragover{border-color:#0f0;color:#0f0;background:#ffffff08}.editor-modal-actions{display:flex;gap:8px;justify-content:center}.editor-modal-actions button{background:#333;color:#eee;border:1px solid #444;padding:8px 12px;cursor:pointer}.editor-modal-actions button:hover{background:#444}.editor-modal-close{background:none;border:0;color:#aaa;font-size:22px;cursor:pointer}.editor-modal-close:hover{color:#fff}</style></head><body>
+<div id="toolbar"><div class="toolbar-left"><button id="uploadZipBtn">Upload ZIP</button><button id="loadRemoteBtn">Load Remote</button><button id="newZipBtn">New Project</button></div><div class="toolbar-center"><span id="projectName">Workspace</span></div><div class="toolbar-right"><button id="runBtn">Run</button><button id="runConfigBtn">Run Config</button><button id="saveProjectBtn" disabled>Save Project</button><button id="saveZipBtn">Export ZIP</button></div></div>
+<div id="main"><div id="activityBar" aria-label="Activity Bar">
+  <button class="activity-button active" id="activityExplorer" title="Explorer" aria-label="Explorer">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h6.1l1.6 2H19.5A1.5 1.5 0 0 1 21 6.5v12A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3.5 6.5h17" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+  </button>
+  <button class="activity-button" id="activitySearch" title="Search" aria-label="Search" data-placeholder="Search">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="5.8" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m15.2 15.2 4.3 4.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+  </button>
+  <button class="activity-button" id="activitySource" title="Source Control" aria-label="Source Control" data-placeholder="Source Control">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="12" r="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="7" cy="18" r="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.9 7.1 15.1 10.9M8.9 16.9 15.1 13.1" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+  </button>
+  <button class="activity-button" id="activityRun" title="Run and Debug" aria-label="Run and Debug" data-placeholder="Run and Debug">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M5 4v4M5 16v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+  </button>
+  <button class="activity-button" id="activityExtensions" title="Extensions" aria-label="Extensions" data-placeholder="Extensions">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h4v5h5v4h4v4h-4v5h-4v-5H8v5H4v-5H1v-4h7z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+  </button>
+  <div class="activity-spacer"></div>
+  <button class="activity-button activity-profile" id="activityProfile" title="Profile" aria-label="Profile">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 20c.8-3.3 3.1-5 6.5-5s5.7 1.7 6.5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <button class="activity-button activity-settings" id="activitySettings" title="Settings" aria-label="Settings"><span class="settings-glyph">⚙</span></button>
+</div><div id="tree"></div><div id="resizer"></div><div id="editorPane"><div id="editorWorkbench" class="workbench-root"></div></div></div>
+<div id="statusBar"><span id="statusLeft">FileSystem: loading…</span><span id="statusSaved">Saved: —</span><span id="statusRight">CWD: /</span></div>
+<div id="contextMenu" class="context-menu"><ul></ul></div><input id="fileUploader" type="file" multiple hidden><input id="zipInput" type="file" accept=".zip" hidden>
+<script>window.addEventListener('DOMContentLoaded',async()=>{try{await window.__editorInitPromise;await window.EditorApp.start();}catch(e){console.error(e);}});</script></body></html>
