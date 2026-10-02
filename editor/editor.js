@@ -784,6 +784,7 @@ window.__editorInitPromise = (async function () {
       requestAnimationFrame(() => modal.classList.add('show'));
     });
   }
+  window.confirmWorkspaceSwitch = confirmWorkspaceSwitch;
   function renameProject() {
     const el = $('projectName');
     if (!el || el.tagName === 'INPUT') return;
