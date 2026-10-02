@@ -1707,10 +1707,23 @@ window.__editorInitPromise = (async function () {
   }
   async function importFileSystemSource(source, name) {
     try {
-      const fs = await FileSystem.create(source, {
+      let filesystemSource = source;
+      const zipSource = isZipSource(source);
+
+      if (zipSource) {
+        if (source instanceof File || source instanceof Blob) {
+          filesystemSource = await flattenProjectZip(source);
+        } else if (Array.isArray(source) && source.length === 1 && source[0] instanceof File) {
+          filesystemSource = await flattenProjectZip(source[0]);
+        } else if (source instanceof FileSystemFileHandle) {
+          filesystemSource = await flattenProjectZip(await source.getFile());
+        }
+      }
+
+      const fs = await FileSystem.create(filesystemSource, {
         sync: false
       });
-      const projectName = isZipSource(source) ? stripZipProjectName(name) : (name || 'Workspace');
+      const projectName = zipSource ? stripZipProjectName(name) : (name || 'Workspace');
       await replaceFileSystem(fs, projectName || 'Workspace', true);
       closeImportModal();
     } catch (e) {
@@ -1776,12 +1789,13 @@ window.__editorInitPromise = (async function () {
     if (github.length) return github;
     return [url.href];
   }
-  async function flattenRemoteProjectZip(file, projectName) {
+  async function flattenProjectZip(file) {
     if (typeof JSZip === 'undefined') return file;
     const zip = await JSZip.loadAsync(file);
     const entries = [];
     const topLevels = new Set();
     let hasRootFile = false;
+
     zip.forEach((relativePath, entry) => {
       const path = relativePath.replace(/^\/+|\/+$/g, '');
       if (!path) return;
@@ -1791,17 +1805,16 @@ window.__editorInitPromise = (async function () {
         return;
       }
       topLevels.add(parts[0]);
-      entries.push({path, entry, relativePath});
+      entries.push({path, entry});
     });
+
+    // Only remove a wrapper when the archive is unambiguously wrapped:
+    // no files at the ZIP root, and exactly one top-level folder.
     if (hasRootFile || topLevels.size !== 1 || !entries.length) return file;
+
     const root = [...topLevels][0];
-    const expected = String(projectName || '').trim().replace(/\/$/, '');
-    if (!expected) return file;
-    const rootLower = root.toLowerCase();
-    const expectedLower = expected.toLowerCase();
-    const rootMatchesProject = rootLower === expectedLower || rootLower === expectedLower + '-main' || rootLower === expectedLower + '-master';
-    if (!rootMatchesProject) return file;
     if (!entries.some(item => item.path.startsWith(root + '/'))) return file;
+
     const out = new JSZip();
     for (const item of entries) {
       if (!item.path.startsWith(root + '/')) continue;
@@ -1810,6 +1823,7 @@ window.__editorInitPromise = (async function () {
       if (item.entry.dir) out.folder(target);
       else out.file(target, await item.entry.async('uint8array'));
     }
+
     const blob = await out.generateAsync({type:'blob'});
     return new File([blob], file.name, {type:'application/zip'});
   }
@@ -1824,7 +1838,7 @@ window.__editorInitPromise = (async function () {
         if (!blob?.size) throw new Error('GitHub returned an empty project archive.');
         const name = info.name || github.repo;
         let file = new File([blob], name + '.zip', {type:'application/zip'});
-        file = await flattenRemoteProjectZip(file, name);
+        file = await flattenProjectZip(file);
         return {file, name, source:`github:${github.owner}/${github.repo}@${branch}`, gitRemote:{provider:'github',owner:github.owner,repo:github.repo,branch}, projectId:`github:${github.owner}/${github.repo}@${branch}`};
       } catch (e) {
         if (e?.status !== 404 && e?.status !== 401) throw e;
@@ -1848,7 +1862,7 @@ window.__editorInitPromise = (async function () {
         }
         const name = remoteProjectName(url);
         let file = new File([blob], name + '.zip', {type:'application/zip'});
-        file = await flattenRemoteProjectZip(file, name);
+        file = await flattenProjectZip(file);
         return {file, name, source: candidate, gitRemote:null, projectId:null};
       } catch (e) {
         lastStatus = e?.message || String(e);
@@ -1899,7 +1913,7 @@ window.__editorInitPromise = (async function () {
     if (!blob?.size) throw new Error('GitHub returned an empty project archive.');
     const name = info?.name || parsed.repo;
     let file = new File([blob], name + '.zip', {type:'application/zip'});
-    file = await flattenRemoteProjectZip(file, name);
+    file = await flattenProjectZip(file);
     const fs = await FileSystem.create(file, {sync:false});
     const branch = info?.default_branch || parsed.branch || 'main';
     const projectId = `github:${parsed.owner}/${parsed.repo}@${ref}`;
@@ -1917,7 +1931,7 @@ window.__editorInitPromise = (async function () {
     const blob = await github.downloadArchive(repo.owner, repo.repo, branch);
     if (!blob?.size) throw new Error('GitHub returned an empty project archive.');
     let file = new File([blob], (info.name || repo.repo) + '.zip', {type:'application/zip'});
-    file = await flattenRemoteProjectZip(file, info.name || repo.repo);
+    file = await flattenProjectZip(file);
     const fs = await FileSystem.create(file, {sync:false});
     const projectId = `github:${repo.owner}/${repo.repo}@${branch}`;
     await replaceFileSystem(fs, info.name || repo.repo || 'Remote Project', true, {projectId, gitRemote:{provider:'github',owner:repo.owner,repo:repo.repo,branch}});
@@ -1953,10 +1967,22 @@ window.__editorInitPromise = (async function () {
       modal.querySelector('.remote-url-section')?.after(error);
     };
     const setBusy = (value, label = 'Open Remote Project') => {
-      busy = !!value; open.disabled = busy || !selectedRepo || !selectedBranch; cancel.disabled = busy;
+      busy = !!value;
+      open.disabled = busy || !input.value.trim();
+      cancel.disabled = busy;
       open.textContent = busy ? label : 'Open Remote Project';
     };
-    const updateOpenState = () => { open.disabled = busy || !selectedRepo || !selectedBranch; };
+    const updateOpenState = () => {
+      open.disabled = busy || !input.value.trim();
+    };
+    const setProjectUrl = (repo, branch) => {
+      if (!repo?.owner || !repo?.repo) return;
+      const encodedOwner = encodeURIComponent(String(repo.owner));
+      const encodedRepo = encodeURIComponent(String(repo.repo));
+      const encodedBranch = branch ? String(branch).split('/').map(part => encodeURIComponent(part)).join('/') : '';
+      input.value = `https://github.com/${encodedOwner}/${encodedRepo}${encodedBranch ? `/tree/${encodedBranch}` : ''}`;
+      updateOpenState();
+    };
     const renderRepoList = () => {
       const list = githubContent.querySelector('[data-github-repos]');
       if (!list) return;
@@ -1990,7 +2016,10 @@ window.__editorInitPromise = (async function () {
       filter.value = repoFilter;
       filter.addEventListener('input', e => { repoFilter = e.target.value; renderRepoList(); });
       githubContent.querySelector('[data-github-refresh]').onclick = () => loadRepoList(true);
-      githubContent.querySelector('[data-github-branch]').onchange = e => { selectedBranch = e.target.value; updateOpenState(); };
+      githubContent.querySelector('[data-github-branch]').onchange = e => {
+        selectedBranch = e.target.value;
+        setProjectUrl(selectedRepo, selectedBranch);
+      };
       renderRepoList(); renderBranchState();
       const newButton = githubContent.querySelector('[data-github-new]'), createPanel = githubContent.querySelector('[data-github-create]');
       newButton.onclick = () => { createPanel.hidden = !createPanel.hidden; if (!createPanel.hidden) createPanel.querySelector('[data-new-name]').focus(); };
@@ -2006,11 +2035,16 @@ window.__editorInitPromise = (async function () {
     const selectRepoObject = async repo => {
       if (!repo?.owner || !repo?.repo) { showError(new Error('Invalid GitHub repository.')); return; }
       selectedRepo = repo; selectedBranch = repo.defaultBranch || 'main'; branches = [];
+      setProjectUrl(selectedRepo, selectedBranch);
       renderRepoList(); renderBranchState();
       branchLoading = true; renderBranchState();
       try { branches = await window.GitHubService.listBranches(repo.owner, repo.repo); if (!branches.length) branches = [selectedBranch]; if (!branches.includes(selectedBranch)) selectedBranch = branches.includes(repo.defaultBranch) ? repo.defaultBranch : branches[0]; }
       catch (e) { branches = [selectedBranch]; showError(e); }
-      finally { branchLoading = false; renderBranchState(); }
+      finally {
+        branchLoading = false;
+        setProjectUrl(selectedRepo, selectedBranch);
+        renderBranchState();
+      }
     };
     const selectRepo = async fullName => {
       const repo = repos.find(x => x.fullName === fullName);
@@ -2027,24 +2061,31 @@ window.__editorInitPromise = (async function () {
     const unsubscribe = window.GitHubService?.onChange?.(() => { selectedRepo = null; selectedBranch = ''; branches = []; repos = []; repoFilter = ''; renderGithub(); if (window.GitHubService.isSignedIn()) void loadRepoList(); });
     const submit = async () => {
       if (busy) return;
-      if (selectedRepo) {
-        if (!selectedBranch) return;
-        setBusy(true, 'Loading repository…'); modal.querySelectorAll('[data-github-content] button,[data-github-content] input,[data-github-content] select').forEach(el => el.disabled = true);
-        try { await openGithubRepository({...selectedRepo, branch:selectedBranch}, options); } catch (e) { setBusy(false); showError(e); modal.querySelectorAll('[data-github-content] button,[data-github-content] input,[data-github-content] select').forEach(el => el.disabled = false); }
-        return;
-      }
-      const value = input.value.trim(); if (!value) { input.focus(); return; }
-      setBusy(true, 'Loading…'); input.disabled = true; modal.querySelector('.remote-import-error')?.remove();
+      const value = input.value.trim();
+      if (!value) { input.focus(); return; }
+      setBusy(true, 'Loading…');
+      input.disabled = true;
+      modal.querySelector('.remote-import-error')?.remove();
+      modal.querySelectorAll('[data-github-content] button,[data-github-content] input,[data-github-content] select').forEach(el => el.disabled = true);
       const ok = await importRemoteProject(value, {onError:showError, returnToChooser:options.returnToChooser, chooserOptions:options.chooserOptions});
-      if (!ok) { setBusy(false); input.disabled = false; input.focus(); }
+      if (!ok) {
+        setBusy(false);
+        input.disabled = false;
+        modal.querySelectorAll('[data-github-content] button,[data-github-content] input,[data-github-content] select').forEach(el => el.disabled = false);
+        input.focus();
+      }
     };
     const cleanup = () => unsubscribe?.();
     modal.querySelector('.editor-modal-close').onclick = () => { cleanup(); close(); };
     cancel.onclick = () => { cleanup(); close(); };
     open.onclick = submit;
+    input.addEventListener('input', () => {
+      updateOpenState();
+    });
     input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } else if (e.key === 'Escape') { e.preventDefault(); cleanup(); close(); } };
     modal.addEventListener('click', e => { if (e.target === modal) { cleanup(); close(); } });
     renderGithub();
+    updateOpenState();
     if (window.GitHubService?.isSignedIn?.()) void loadRepoList();
     requestAnimationFrame(() => modal.classList.add('show'));
   }

@@ -88,7 +88,7 @@ window.__deploymentNetworkReady = (async function() {
     if (!blob.size) throw new Error('GitHub returned an empty project archive.');
     return blob;
   }
-  function flattenZip(file, projectName, owner = '', revision = '') {
+  function flattenZip(file) {
     return JSZip.loadAsync(file).then(async zip => {
       const entries = [], tops = new Set(); let rootFile = false;
       zip.forEach((path, entry) => {
@@ -100,21 +100,7 @@ window.__deploymentNetworkReady = (async function() {
       });
       if (rootFile || tops.size !== 1 || !entries.length) return file;
       const root = [...tops][0];
-      const project = String(projectName || '').trim();
-      const ownerName = String(owner || '').trim();
-      const ref = String(revision || '').trim();
-      const candidates = new Set([
-        project,
-        ownerName ? `${ownerName}-${project}` : '',
-        `${project}-main`,
-        `${project}-master`,
-        ownerName ? `${ownerName}-${project}-main` : '',
-        ownerName ? `${ownerName}-${project}-master` : '',
-        ref ? `${project}-${ref}` : '',
-        ownerName && ref ? `${ownerName}-${project}-${ref}` : ''
-      ].filter(Boolean).map(value => value.toLowerCase()));
-      const rl = root.toLowerCase();
-      if (!candidates.has(rl)) return file;
+      if (!entries.some(item => item.clean.startsWith(root + '/'))) return file;
       const out = new JSZip();
       for (const item of entries) {
         if (!item.clean.startsWith(root + '/')) continue;
@@ -167,7 +153,7 @@ window.__deploymentNetworkReady = (async function() {
     let resolvedRef = commitOverride !== null ? (commitOverride && commitOverride !== 'latest' ? commitOverride : (branchOverride || repository.defaultBranch)) : (branchOverride || repository.defaultBranch);
     status.textContent = 'Downloading deployment revision…';
     let blob = await loadArchive(repo.owner, repo.repo, resolvedRef);
-    let file = await flattenZip(new File([blob], repo.repo + '.zip', {type:'application/zip'}), repo.repo, repo.owner, resolvedRef);
+    let file = await flattenZip(new File([blob], repo.repo + '.zip', {type:'application/zip'}));
     let fs = await FileSystem.create(file, {sync:false});
     let deploymentConfig = readJSON(fs, '/.editor/deployment.json');
     if (commitOverride === null && branchOverride === null) {
@@ -178,7 +164,7 @@ window.__deploymentNetworkReady = (async function() {
         status.textContent = 'Loading saved deployment revision…';
         resolvedRef = savedRef;
         blob = await loadArchive(repo.owner, repo.repo, resolvedRef);
-        file = await flattenZip(new File([blob], repo.repo + '.zip', {type:'application/zip'}), repo.repo, repo.owner, resolvedRef);
+        file = await flattenZip(new File([blob], repo.repo + '.zip', {type:'application/zip'}));
         fs = await FileSystem.create(file, {sync:false});
         deploymentConfig = readJSON(fs, '/.editor/deployment.json');
       }
