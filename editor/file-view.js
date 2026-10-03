@@ -69,11 +69,13 @@
       this.current = null;
       this.model = null;
       this.ignoreModelChange = false;
+      this.functionDecorations = [];
     }
     clear() {
       this.host.innerHTML = '';
       this.current = null;
       this.model = null;
+      this.functionDecorations = [];
       this.viewTabs.innerHTML = '';
     }
     async open(node) {
@@ -181,9 +183,19 @@
         const text = this.readText();
         this.model = monaco.editor.createModel(text, this.state.language(path));
         this.state.editor.setModel(this.model);
+        installWKFunctionDecorationStyle();
+        const refreshFunctionDecorations = () => {
+          if (!this.model || this.current !== 'Edit') return;
+          this.functionDecorations = this.state.editor.deltaDecorations(
+            this.functionDecorations || [],
+            getWKFunctionDecorations(this.model)
+          );
+        };
+        refreshFunctionDecorations();
         const listener = this.model.onDidChangeContent(() => {
           if (this.current !== 'Edit' || this.ignoreModelChange || !this.state.fs) return;
           this.writeText(this.model.getValue());
+          refreshFunctionDecorations();
           this.state.updateStatus();
         });
         this._modelListener = listener;
