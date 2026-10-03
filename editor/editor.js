@@ -433,6 +433,21 @@ window.__editorInitPromise = (async function () {
     }
     return Array.from({length: 6}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
   }
+  function normalizeDeploymentPath(value) {
+    let raw = String(value ?? '').trim();
+    if (!raw) return '/';
+    try {
+      const base = String(state.runConfig?.config?.domain || 'http://localhost:3000/');
+      const url = new URL(raw, base);
+      let path = url.pathname || '/';
+      if (!path.startsWith('/')) path = '/' + path;
+      const suffix = (url.search || '') + (url.hash || '');
+      return (path === '/' ? '/' : path.replace(/\/+$/, '')) + suffix;
+    } catch (_) {
+      if (!raw.startsWith('/')) raw = '/' + raw;
+      return raw === '/' ? '/' : raw.replace(/\/+$/, '');
+    }
+  }
   function normalizePeerPagePath(value) {
     let path = String(value ?? '').trim();
     if (!path) return '/';
@@ -455,7 +470,7 @@ window.__editorInitPromise = (async function () {
     };
     state.deploymentSettings = {
       mode: String(meta?.deployment?.mode || 'editor').trim() === 'third-party' ? 'third-party' : 'editor',
-      url: String(meta?.deployment?.url || '').trim(),
+      url: normalizeDeploymentPath(meta?.deployment?.url || state.runConfig?.config?.path || '/'),
       usePeerServer: !!meta?.deployment?.usePeerServer,
       branch: String(meta?.deployment?.branch || state.gitRemote?.branch || '').trim(),
       commit: String(meta?.deployment?.commit || '').trim(),
@@ -475,7 +490,7 @@ window.__editorInitPromise = (async function () {
     state.fs.mkdirSync?.(EDITOR_DIR);
     const deployment = {
       mode: state.deploymentSettings?.mode === 'third-party' ? 'third-party' : 'editor',
-      url: String(state.deploymentSettings?.url || '').trim(),
+      url: normalizeDeploymentPath(state.deploymentSettings?.url || '/'),
       usePeerServer: !!state.deploymentSettings?.usePeerServer,
       branch: String(state.deploymentSettings?.branch || '').trim(),
       commit: String(state.deploymentSettings?.commit || '').trim(),
@@ -1654,7 +1669,7 @@ window.__editorInitPromise = (async function () {
     state.saveProjectPermission = 'denied';
     state.projectId = options.projectId || null;
     state.gitRemote = options.gitRemote || null;
-    state.deploymentSettings = {mode:'editor', url:'', usePeerServer:false, branch:String(state.gitRemote?.branch || '').trim(), commit:'', externalUrl:'', externalMode:'iframe', hookUrl:''};
+    state.deploymentSettings = {mode:'editor', url:'/', usePeerServer:false, branch:String(state.gitRemote?.branch || '').trim(), commit:'', externalUrl:'', externalMode:'iframe', hookUrl:''};
     state.projectTemplate = !!options.isTemplate;
     state.projectName = name || 'Workspace';
     state.projectKey = state.projectName;

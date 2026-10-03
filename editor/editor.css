@@ -341,3 +341,5 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .ai-retry-grid input[type="number"] {
   min-height: 26px;
 }
+
+.run-debug-hook-row{display:flex;gap:8px;align-items:center}.run-debug-hook-row input{flex:1;min-width:0}.run-debug-hook-row button{flex:0 0 auto}.run-debug-hook-field{margin-top:8px}

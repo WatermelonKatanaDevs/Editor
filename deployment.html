@@ -319,11 +319,21 @@ window.__deploymentNetworkReady = (async function() {
     }
 
     const savedUrl = String(deploymentConfig.url || projectMeta?.deployment?.url || '').trim();
-    const target = urlOverride || savedUrl || (() => {
+    function resolveEditorTarget(value) {
+      const raw = String(value || '').trim();
       const domain = String(runConfig.domain || 'http://localhost:3000').replace(/\/+$/,'');
-      const path = String(runConfig.path || '/');
-      return domain + (path.startsWith('/') ? path : '/' + path);
-    })();
+      if (!raw) {
+        const path = String(runConfig.path || '/');
+        return domain + (path.startsWith('/') ? path : '/' + path);
+      }
+      try {
+        const absolute = new URL(raw);
+        if (/^https?:$/i.test(absolute.protocol)) return absolute.href;
+      } catch (_) {}
+      const path = raw.startsWith('/') ? raw : '/' + raw;
+      return domain + path;
+    }
+    const target = resolveEditorTarget(urlOverride || savedUrl);
     const targetUrl = new URL(target);
     const domain = targetUrl.origin;
     const runtimePath = targetUrl.pathname || '/';
