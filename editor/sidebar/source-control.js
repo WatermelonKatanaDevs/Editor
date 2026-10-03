@@ -87,14 +87,36 @@
           const repo = created?.name || name;
           const branch = created?.default_branch || 'main';
           if (!owner || !repo) throw new Error('GitHub did not return the new repository details.');
+          // Bind the workspace to the newly-created repository immediately.
+          // Do not make the user select the repo/branch again.
           setLocalGitRemote(owner, repo, branch);
           state.runDebugRefresh?.();
-          repos = []; branches = [];
+          selected = {owner:String(owner), repo:String(repo), branch:String(branch)};
+          branches = [String(branch)];
+          saveConfig();
+
+          // A repository created with autoInit:false has no branch/ref yet.
+          // Create the branch from the actual workspace contents as its initial commit.
+          renderShell();
+          button.textContent = 'Initializing…';
+          const initialCommit = await github.commitAndPush({
+            owner:String(owner),
+            repo:String(repo),
+            branch:String(branch),
+            message:'Initial commit',
+            fs:state.fs
+          });
+          if (!initialCommit.changed) {
+            throw new Error('The new GitHub repository could not be initialized because the workspace has no files.');
+          }
+
+          // Refresh repository metadata only after the initial commit exists.
+          // The selected repository and branch remain bound to the workspace.
+          repos = [];
           await loadRepositories(true);
           selected = {owner:String(owner), repo:String(repo), branch:String(branch)};
-          saveConfig();
-          renderShell();
           branches = [String(branch)];
+          saveConfig();
           renderShell();
           await refreshStatus();
           await loadHistory();
