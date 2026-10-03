@@ -243,9 +243,88 @@
       historyEl.innerHTML = '<div class="source-control-loading">Loading commits…</div>';
       try {
         const commits = await github.listCommits(selected.owner, selected.repo, selected.branch || 'main', 20);
-        historyEl.innerHTML = commits.length ? commits.map(commit => `<a class="source-control-commit-row" href="${esc(commit.url)}" target="_blank" rel="noopener"><div><strong>${esc(commit.message || '(no message)')}</strong><span>${esc(commit.author)} · ${commit.date ? new Date(commit.date).toLocaleString() : ''}</span></div><code>${esc(commit.sha.slice(0, 7))}</code></a>`).join('') : '<div class="source-control-empty-inline">No commits on this branch.</div>';
+        historyEl.innerHTML = commits.length ? commits.map(commit => `<button type="button" class="source-control-commit-row" data-commit-sha="${esc(commit.sha)}"><div><strong>${esc(commit.message || '(no message)')}</strong><span>${esc(commit.author)} · ${commit.date ? new Date(commit.date).toLocaleString() : ''}</span></div><code>${esc(commit.sha.slice(0, 7))}</code></button>`).join('') : '<div class="source-control-empty-inline">No commits on this branch.</div>';
+        historyEl.querySelectorAll('[data-commit-sha]').forEach(row => row.addEventListener('click', () => openCommitRestore(row.dataset.commitSha)));
       } catch (e) { historyEl.innerHTML = `<div class="source-control-error">${esc(e.message || String(e))}</div>`; }
     }
+    async function openCommitRestore(commitSha) {
+      if (!selected.repo || !commitSha) return;
+      let commit = null;
+      try {
+        const commits = await github.listCommits(selected.owner, selected.repo, selected.branch || 'main', 100);
+        commit = commits.find(item => item.sha === commitSha) || {sha:commitSha, message:'Selected commit', author:'Unknown', date:''};
+      } catch (_) {
+        commit = {sha:commitSha, message:'Selected commit', author:'Unknown', date:''};
+      }
+
+      const existing = document.querySelector('.source-control-restore-modal');
+      existing?.remove();
+      const modal = document.createElement('div');
+      modal.className = 'source-control-restore-modal';
+      modal.innerHTML = `<div class="source-control-restore-dialog" role="dialog" aria-modal="true">
+        <div class="source-control-restore-title">Return workspace to this commit?</div>
+        <div class="source-control-restore-info"><strong>${esc(commit.message || '(no message)')}</strong><span>${esc(commit.author || 'Unknown')} · ${commit.date ? new Date(commit.date).toLocaleString() : ''}</span><code>${esc(commit.sha.slice(0, 7))}</code></div>
+        <p>This changes the local workspace to exactly match this commit. Nothing is pushed yet. You can review the changes and make a new commit to create an undo/revert commit on the branch.</p>
+        <div class="source-control-restore-actions"><button data-restore-cancel>Cancel</button><button data-restore-confirm class="primary">Restore Workspace</button></div>
+        <div data-restore-status class="source-control-restore-status"></div>
+      </div>`;
+      document.body.appendChild(modal);
+      const close = () => modal.remove();
+      modal.querySelector('[data-restore-cancel]').onclick = close;
+      modal.addEventListener('click', e => { if (e.target === modal) close(); });
+      const confirmButton = modal.querySelector('[data-restore-confirm]');
+      const status = modal.querySelector('[data-restore-status]');
+      confirmButton.onclick = async () => {
+        confirmButton.disabled = true;
+        confirmButton.textContent = 'Restoring…';
+        status.textContent = '';
+        try {
+          const snapshot = await github.getCommitState(selected.owner, selected.repo, commitSha);
+          if (snapshot.truncated) throw new Error('GitHub truncated this commit tree, so the workspace cannot be restored safely.');
+
+          const target = new Map();
+          for (const entry of snapshot.tree) {
+            target.set(entry.path, entry);
+          }
+
+          const localPaths = state.fs.listFilesSync().map(path => String(path).replace(/^\/+/, '')).filter(path => path && !path.startsWith('.git/'));
+          for (const path of localPaths) {
+            if (!target.has(path)) state.fs.deleteFileSync(path);
+          }
+
+          const dirs = new Set();
+          for (const path of target.keys()) {
+            const parts = path.split('/');
+            let current = '';
+            for (let i = 0; i < parts.length - 1; i++) {
+              current = current ? current + '/' + parts[i] : parts[i];
+              dirs.add(current);
+            }
+          }
+          for (const dir of [...dirs].sort((a,b) => a.split('/').length - b.split('/').length)) {
+            if (!state.fs.existsSync?.(dir)) state.fs.mkdirSync(dir);
+          }
+
+          let index = 0;
+          for (const entry of snapshot.tree) {
+            status.textContent = `Restoring ${++index}/${snapshot.tree.length}…`;
+            const bytes = await github.readBlob(selected.owner, selected.repo, entry.sha);
+            state.fs.writeFileSync(entry.path, bytes);
+            state.markDirty?.(entry.path);
+          }
+          state.runDebugRefresh?.();
+          state.sidebarController?.show?.('Explorer');
+          close();
+          await refreshStatus();
+          showStatus(`Workspace restored to ${commitSha.slice(0, 7)}. Review the changes and commit them to create a new revert point.`);
+        } catch (e) {
+          status.textContent = e.message || String(e);
+          confirmButton.disabled = false;
+          confirmButton.textContent = 'Restore Workspace';
+        }
+      };
+    }
+
     async function commit() {
       const button = tree.querySelector('[data-commit]');
       const message = tree.querySelector('[data-commit-message]')?.value || '';
