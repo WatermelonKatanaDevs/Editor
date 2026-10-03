@@ -273,7 +273,7 @@
       body:JSON.stringify({name, description:String(description || '').trim(), private:!!privateRepo, auto_init:!!autoInit, has_issues:true, has_projects:false, has_wiki:false})
     });
   }
-  async function downloadArchive(owner, repo, ref = '', options = {}) {
+  async function downloadArchive(owner, repo, ref = '') {
     const token = getToken();
     if (!token) throw new Error('Not signed in to GitHub.');
     const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${branchPath(ref || 'main')}`;
@@ -289,26 +289,7 @@
       error.status = response.status; error.data = data;
       throw error;
     }
-    const total = Number(response.headers?.get?.('content-length')) || 0;
-    if (!response.body?.getReader) {
-      const blob = await response.blob();
-      options.onProgress?.(blob.size, total || blob.size);
-      return blob;
-    }
-    const reader = response.body.getReader();
-    const chunks = [];
-    let received = 0;
-    options.onProgress?.(0, total || 0);
-    while (true) {
-      const {done, value} = await reader.read();
-      if (done) break;
-      if (value) {
-        chunks.push(value);
-        received += value.byteLength || value.length || 0;
-      }
-      options.onProgress?.(received, total || 0);
-    }
-    return new Blob(chunks, {type: response.headers?.get?.('content-type') || 'application/zip'});
+    return response.blob();
   }
   function branchPath(branch) { return String(branch || 'main').split('/').filter(Boolean).map(encodeURIComponent).join('/'); }
   async function listBranches(owner, repo) {
