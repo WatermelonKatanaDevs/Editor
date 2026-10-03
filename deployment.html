@@ -568,7 +568,7 @@ window.__deploymentNetworkReady = (async function() {
     } catch (_) {}
     setProgress('Starting project…', null, 'Launching deployment runtime…');
     status.textContent='Starting project…';
-    const response=await network.request(pageURL,location.origin,{},'deployment'); if(!response?.ok)throw new Error(`Project entry page failed to load (${response?.status||'no response'}).`); const html=await response.text(); await page.setDocument(html,true,pageURL); stage.classList.add('ready'); status.remove();
+    const response=await network.request(pageURL,location.origin,{},'deployment'); if(!response?.ok)throw new Error(`Project entry page failed to load (${response?.status||'no response'}).`); const html=await response.text(); await page.setDocument(html,true,pageURL); stage.classList.add('ready'); setProgress('Deployment ready',100,pageURL); hideProgress(); status.remove();
   }
   main().catch(showError);
 })();

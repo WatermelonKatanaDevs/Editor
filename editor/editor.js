@@ -1619,7 +1619,7 @@ window.__editorInitPromise = (async function () {
     const file = new File([blob], basename(template.file) || 'template.zip', {type:'application/zip'});
     updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
     const fs = await FileSystem.create(file, {sync:false});
-    updateRemoteLoadProgress('Starting workspace…', 97, info.name || repo.repo || 'Remote Project');
+    updateRemoteLoadProgress('Starting workspace…', 97, template.title || 'Workspace');
     const projectId = makeProjectId();
     const projectName = template.title || 'Workspace';
     fs.mkdirSync(EDITOR_DIR);
@@ -1745,7 +1745,11 @@ window.__editorInitPromise = (async function () {
   }
   async function importFileSystemSource(source, name) {
     const zipSource = isZipSource(source);
-    if (zipSource) showRemoteLoadProgress('Opening local project');
+    if (zipSource) {
+      // The source picker should disappear before the actual archive-loading progress UI appears.
+      closeImportModal();
+      showRemoteLoadProgress('Opening local project');
+    }
     try {
       let filesystemSource = source;
 
@@ -2053,6 +2057,8 @@ window.__editorInitPromise = (async function () {
   }
   async function importRemoteProject(input, options = {}) {
     try {
+      // Replace the repository/source chooser with the loading progress UI immediately.
+      finishRemoteImport();
       const remote = await fetchRemoteProject(input);
       updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
       const fs = await FileSystem.create(remote.file, {sync:false});
