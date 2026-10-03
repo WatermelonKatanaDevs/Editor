@@ -92,4 +92,4 @@ Hook payloads are ordinary JavaScript objects. `ai.beforeRun` can return a repla
 
 The editor also exposes built-in GitHub AI tools. They use the existing GitHub sign-in from the Editor Profile and are separately permissioned as `githubRead` and `githubWrite`. GitHub write actions remain disabled until the user grants permission.
 
-An extension can also register tools directly with `EditorExtensionAPI.registerAITool(extensionId, tool)` and remove one with `unregisterAITool(name).
+An extension can also register tools directly with `EditorExtensionAPI.registerAITool(extensionId, tool)` and remove one with `unregisterAITool(name)`.
