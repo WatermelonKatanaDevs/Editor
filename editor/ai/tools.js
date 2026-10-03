@@ -100,6 +100,45 @@
     add({name:'run_browser_console', permission:'browser', description:'Run JavaScript in a Browser tab using its DevTools-style console execution context and return the result.', parameters:{type:'object',required:['code'],properties:{tabId:{type:'string'},code:{type:'string'}},additionalProperties:false}, execute:async args => { const win=getBrowserWindow(); if(!win?.runAIBrowserConsole)throw new Error('Browser console is unavailable.'); return await win.runAIBrowserConsole(args.tabId?String(args.tabId):null,String(args.code||'')); }});
     add({name:'browser_network_request', permission:'network', description:'Make an arbitrary HTTP request through the editor Network API. The request uses the normal Network endpoint chain, so proxy/direct fallback rules still apply. Returns status, headers, and textual/JSON response data.', parameters:{type:'object',required:['url'],properties:{url:{type:'string'},method:{type:'string'},headers:{type:'object'},body:{type:'string'},maxChars:{type:'number'}},additionalProperties:false}, execute:async args => { const network=state.browserNetwork||window.__sharedBrowserNetwork; if(!network?.request)throw new Error('Network API is unavailable.'); const url=String(args.url||'').trim(); if(!url)throw new Error('URL is required.'); const method=String(args.method||'GET').toUpperCase(); const headers={...(args.headers&&typeof args.headers==='object'?args.headers:{})}; const init={method,headers}; if(args.body!=null && !['GET','HEAD'].includes(method))init.body=String(args.body); const response=await network.request(new Request(url,init),'ai'); if(!response)throw new Error('No endpoint returned a response.'); const maxChars=Math.max(1000,Math.min(500000,Number(args.maxChars)||100000)); const raw=await response.text(); let json=null; try{json=JSON.parse(raw);}catch(_){} return {url:response.url||url,status:response.status,statusText:response.statusText,ok:response.ok,headers:Object.fromEntries(response.headers.entries()),text:raw.slice(0,maxChars),json,truncated:raw.length>maxChars,totalLength:raw.length}; }});
     add({name:'get_browser_output', permission:'browser', description:'Read recent console errors and output from emulated browser pages.', parameters:{type:'object',properties:{limit:{type:'number'},clear:{type:'boolean'}},additionalProperties:false}, execute:async args => { const win=state.browserFrame?.contentWindow; if(!win)return {available:false,output:[]}; const output=win.getAIBrowserOutput?.({limit:Math.max(1,Math.min(200,Number(args.limit)||100))}) || []; if(args.clear)win.clearAIBrowserOutput?.(); return {available:true,output}; }});
+    // Built-in GitHub tools. These use the editor's existing OAuth session and are
+    // deliberately permission-gated separately from generic network access.
+    const github = window.GitHubService;
+    const requireGitHub = () => {
+      if (!github?.isSignedIn?.()) throw new Error('Sign in to GitHub from the editor Profile before using GitHub tools.');
+      return github;
+    };
+    add({name:'github_status', permission:'githubRead', description:'Check whether the user is signed in to GitHub and return the signed-in account.', parameters:{type:'object',properties:{},additionalProperties:false}, execute:async () => {
+      const service=github;
+      if (!service?.isSignedIn?.()) return {signedIn:false,user:null};
+      const user=service.getUser?.() || null;
+      return {signedIn:true,user:user ? {login:user.login,name:user.name,avatarUrl:user.avatar_url||user.avatarUrl||''} : null};
+    }});
+    add({name:'github_list_repositories', permission:'githubRead', description:'List repositories available to the signed-in GitHub account.', parameters:{type:'object',properties:{},additionalProperties:false}, execute:async () => {
+      return requireGitHub().listRepositories();
+    }});
+    add({name:'github_get_repository', permission:'githubRead', description:'Get metadata for a GitHub repository.', parameters:{type:'object',required:['owner','repo'],properties:{owner:{type:'string'},repo:{type:'string'}},additionalProperties:false}, execute:async args => {
+      return requireGitHub().getRepository(String(args.owner||''),String(args.repo||''));
+    }});
+    add({name:'github_create_repository', permission:'githubWrite', description:'Create a GitHub repository for the signed-in user.', parameters:{type:'object',required:['name'],properties:{name:{type:'string'},description:{type:'string'},privateRepo:{type:'boolean'},autoInit:{type:'boolean'}},additionalProperties:false}, execute:async args => {
+      const result=await requireGitHub().createRepository({name:String(args.name||''),description:String(args.description||''),privateRepo:!!args.privateRepo,autoInit:args.autoInit!==false});
+      return {id:result?.id,name:result?.name,fullName:result?.full_name,url:result?.html_url,defaultBranch:result?.default_branch};
+    }});
+    add({name:'github_list_branches', permission:'githubRead', description:'List branches in a GitHub repository.', parameters:{type:'object',required:['owner','repo'],properties:{owner:{type:'string'},repo:{type:'string'}},additionalProperties:false}, execute:async args => {
+      return requireGitHub().listBranches(String(args.owner||''),String(args.repo||''));
+    }});
+    add({name:'github_list_commits', permission:'githubRead', description:'List recent commits for a GitHub repository branch.', parameters:{type:'object',required:['owner','repo'],properties:{owner:{type:'string'},repo:{type:'string'},branch:{type:'string'},count:{type:'integer',minimum:1,maximum:100}},additionalProperties:false}, execute:async args => {
+      return requireGitHub().listCommits(String(args.owner||''),String(args.repo||''),String(args.branch||'main'),Math.max(1,Math.min(100,Number(args.count)||20)));
+    }});
+    add({name:'github_compare_working_tree', permission:'githubRead', description:'Compare the current editor workspace with a GitHub repository branch and report added, modified, and deleted files.', parameters:{type:'object',required:['owner','repo','branch'],properties:{owner:{type:'string'},repo:{type:'string'},branch:{type:'string'}},additionalProperties:false}, execute:async args => {
+      const service=requireGitHub();
+      const remote=await service.getRemoteState(String(args.owner||''),String(args.repo||''),String(args.branch||'main'));
+      const changes=await service.compareWorkingTree(state.fs,remote.tree);
+      return {remoteCommitSha:remote.commitSha,changes:changes.map(x=>({path:x.path,type:x.type}))};
+    }});
+    add({name:'github_commit_and_push', permission:'githubWrite', description:'Commit the current editor workspace changes to a GitHub repository branch and push them. This changes the remote repository.', parameters:{type:'object',required:['owner','repo','branch','message'],properties:{owner:{type:'string'},repo:{type:'string'},branch:{type:'string'},message:{type:'string'}},additionalProperties:false}, execute:async args => {
+      const result=await requireGitHub().commitAndPush({owner:String(args.owner||''),repo:String(args.repo||''),branch:String(args.branch||'main'),message:String(args.message||''),fs:state.fs});
+      return {changed:!!result.changed,commitSha:result.commitSha,changes:(result.changes||[]).map(x=>({path:x.path,type:x.type}))};
+    }});
     return {map:tools, list:()=>[...tools.values()]};
   }
   root.makeAITools = makeTools;
