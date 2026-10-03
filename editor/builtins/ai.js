@@ -323,7 +323,9 @@
     document.body.appendChild(modal);render();requestAnimationFrame(()=>modal.classList.add('show'));
   }
 
-  async function editorExtensionHooks(name, payload) { try { return await window.EditorExtensionAPI?.runAIHook?.(name, payload) || payload; } catch (e) { console.warn('Editor AI extension hook failed:', name, e); return payload; } }\n\n  factories.ai = function(ctx) {
+  async function editorExtensionHooks(name, payload) { try { return await window.EditorExtensionAPI?.runAIHook?.(name, payload) || payload; } catch (e) { console.warn('Editor AI extension hook failed:', name, e); return payload; } }
+
+  factories.ai = function(ctx) {
     const {state, onOpen, runConfigured}=ctx;
     const updateStatus = state.updateStatus;
     let currentGroup = null, currentTab = null;
