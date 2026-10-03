@@ -8,6 +8,14 @@
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color:#ddd;font:13px system-ui,sans-serif}
 #status{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#999;background:#000;z-index:10;pointer-events:none}
 #status.error{color:#f0a0a8;white-space:pre-wrap;text-align:center;padding:24px;box-sizing:border-box}
+#progress{position:fixed;left:50%;top:50%;width:min(520px,calc(100vw - 48px));transform:translate(-50%,-50%);z-index:11;color:#aaa;text-align:center}
+#progress.hidden{display:none}
+#progressTitle{font-size:14px;margin-bottom:12px;color:#ddd}
+#progressTrack{width:100%;height:8px;border-radius:999px;background:#202020;overflow:hidden;box-shadow:inset 0 0 0 1px #303030}
+#progressBar{height:100%;width:0%;background:#3cdfa9;border-radius:999px;transition:width .12s ease}
+#progress.indeterminate #progressBar{width:35%;animation:deploymentProgress 1.15s ease-in-out infinite}
+#progressMeta{margin-top:9px;font-size:12px;color:#777;min-height:16px}
+@keyframes deploymentProgress{0%{transform:translateX(-130%)}100%{transform:translateX(360%)}}
 #stage{position:fixed;inset:0;display:none;background:#000}
 #stage.ready{display:block}
 #stage iframe{width:100%;height:100%;border:0;display:block;background:#fff}
@@ -30,6 +38,11 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color:
 <body>
 <div id="stage"></div>
 <div id="status">Loading deployment…</div>
+<div id="progress">
+  <div id="progressTitle">Loading deployment…</div>
+  <div id="progressTrack"><div id="progressBar"></div></div>
+  <div id="progressMeta"></div>
+</div>
 <script>
 window.__deploymentNetworkReady = (async function() {
   const workers = await fetch('workers.json',{cache:'no-store'}).then(async r => {
@@ -54,7 +67,65 @@ window.__deploymentNetworkReady = (async function() {
 (async () => {
   const status = document.getElementById('status');
   const stage = document.getElementById('stage');
+  const progress = document.getElementById('progress');
+  const progressTitle = document.getElementById('progressTitle');
+  const progressBar = document.getElementById('progressBar');
+  const progressMeta = document.getElementById('progressMeta');
   const params = new URLSearchParams(location.search);
+
+  function formatBytes(bytes) {
+    const n = Number(bytes) || 0;
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+
+  function setProgress(title, percent = null, meta = '') {
+    progress.classList.remove('hidden');
+    progress.classList.toggle('indeterminate', percent == null);
+    progressTitle.textContent = title;
+    progressMeta.textContent = meta;
+    if (percent != null && Number.isFinite(Number(percent))) {
+      progressBar.style.width = `${Math.max(0, Math.min(100, Number(percent)))}%`;
+    }
+  }
+
+  function hideProgress() {
+    progress.classList.add('hidden');
+    progress.classList.remove('indeterminate');
+  }
+
+  async function responseToBlobWithProgress(response, label) {
+    const total = Number(response.headers?.get?.('content-length')) || 0;
+    if (!response.body?.getReader) {
+      setProgress(label, total ? 12 : null, total ? formatBytes(total) : 'Preparing download…');
+      const blob = await response.blob();
+      setProgress(label, 100, formatBytes(blob.size));
+      return blob;
+    }
+
+    const reader = response.body.getReader();
+    const chunks = [];
+    let received = 0;
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      chunks.push(value);
+      received += value.byteLength;
+      const percent = total ? (received / total) * 100 : null;
+      setProgress(
+        label,
+        percent,
+        total ? `${formatBytes(received)} / ${formatBytes(total)}` : `${formatBytes(received)} downloaded`
+      );
+    }
+
+    const blob = new Blob(chunks, {type: response.headers?.get?.('content-type') || 'application/zip'});
+    setProgress(label, 100, formatBytes(blob.size));
+    return blob;
+  }
   const githubURL = params.get('github') || params.get('githubUrl') || '';
   let resolvedCommit = params.get('commit') || params.get('sha') || '';
   const requestedPath = params.get('path') || params.get('url') || '';
@@ -63,6 +134,7 @@ window.__deploymentNetworkReady = (async function() {
 
   function showError(error) {
     console.error(error);
+    hideProgress();
     status.textContent = error?.message || String(error);
     status.className = 'error';
   }
@@ -84,12 +156,21 @@ window.__deploymentNetworkReady = (async function() {
     const codeload = `https://codeload.github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zip/${encodeURIComponent(ref).replace(/%2F/g,'/')}`;
     const response = await network.request(codeload, undefined, {}, 'deployment-archive');
     if (!response.ok) throw new Error(`GitHub archive download failed (${response.status}).`);
-    const blob = await response.blob();
+    setProgress('Downloading project archive…', response.headers?.get?.('content-length') ? 0 : null, 'Connecting to GitHub…');
+    const blob = await responseToBlobWithProgress(response, 'Downloading project archive…');
     if (!blob.size) throw new Error('GitHub returned an empty project archive.');
     return blob;
   }
   function flattenZip(file) {
-    return JSZip.loadAsync(file).then(async zip => {
+    setProgress('Inspecting project archive…', 0, 'Reading ZIP structure…');
+    return JSZip.loadAsync(file, {
+      createFolders: true,
+      onUpdate: meta => setProgress(
+        'Inspecting project archive…',
+        Number(meta?.percent) || 0,
+        meta?.currentFile ? `Reading ${meta.currentFile}` : 'Reading ZIP structure…'
+      )
+    }).then(async zip => {
       const entries = [], tops = new Set(); let rootFile = false;
       zip.forEach((path, entry) => {
         const clean = path.replace(/^\/+|\/+$/g,'');
@@ -109,7 +190,14 @@ window.__deploymentNetworkReady = (async function() {
         if (item.entry.dir) out.folder(target);
         else out.file(target, await item.entry.async('uint8array'));
       }
-      const blob = await out.generateAsync({type:'blob'});
+      const blob = await out.generateAsync(
+        {type:'blob'},
+        meta => setProgress(
+          'Flattening project archive…',
+          Number(meta?.percent) || 0,
+          meta?.currentFile ? `Writing ${meta.currentFile}` : 'Building normalized archive…'
+        )
+      );
       return new File([blob], file.name || 'project.zip', {type:'application/zip'});
     });
   }
@@ -161,10 +249,14 @@ window.__deploymentNetworkReady = (async function() {
       : (branchOverride || repository.defaultBranch);
 
     async function loadRevision(ref) {
-      status.textContent = 'Downloading deployment revision…';
+      status.textContent = 'Loading deployment revision…';
+      setProgress('Downloading project archive…', null, 'Preparing download…');
       let blob = await loadArchive(repo.owner, repo.repo, ref);
+      setProgress('Preparing project files…', null, `Archive downloaded: ${formatBytes(blob.size)}`);
       let file = await flattenZip(new File([blob], repo.repo + '.zip', {type:'application/zip'}));
+      setProgress('Indexing project files…', null, 'Building virtual filesystem…');
       let fs = await FileSystem.create(file, {sync:false});
+      setProgress('Project ready', 100, `${formatBytes(blob.size)} archive`);
       return {blob,file,fs};
     }
 
@@ -260,6 +352,8 @@ window.__deploymentNetworkReady = (async function() {
         stage.appendChild(iframe);
         stage.classList.add('ready');
         canonicalizeThirdParty();
+        setProgress('Deployment ready', 100, pageURL);
+        setTimeout(hideProgress, 180);
         status.remove();
         return;
       }
@@ -308,12 +402,15 @@ window.__deploymentNetworkReady = (async function() {
         });
       }
       installExternalInterceptors(page);
+      setProgress('Loading third-party deployment…', null, pageURL);
       const response = await network.request(pageURL, domain, {}, 'third-party-deployment');
       if (!response?.ok) throw new Error(`Third-party deployment failed to load (${response?.status || 'no response'}).`);
       const html = await getExternalDocumentContent(response,pageURL);
       await page.setDocument(html,true,pageURL);
       externalRuntimeReady = true;
       canonicalizeThirdParty();
+      setProgress('Deployment ready', 100, pageURL);
+      setTimeout(hideProgress, 180);
       status.remove();
       return;
     }
@@ -469,6 +566,7 @@ window.__deploymentNetworkReady = (async function() {
     try {
       const canonical=new URL(location.href); canonical.searchParams.delete('githubUrl'); canonical.searchParams.delete('sha'); canonical.searchParams.set('github',githubURL); canonical.searchParams.set('commit',resolvedRef); if(branchOverride!==null)canonical.searchParams.set('branch',branchOverride);else canonical.searchParams.delete('branch'); canonical.searchParams.delete('path'); canonical.searchParams.delete('deploymentMode'); canonical.searchParams.delete('externalUrl'); canonical.searchParams.delete('externalMode'); canonical.searchParams.set('url',pageURL); if(usePeerServer)canonical.searchParams.set('peerServer','1');else canonical.searchParams.delete('peerServer'); canonical.searchParams.delete('usePeerNetwork'); history.replaceState({},document.title,canonical.pathname+canonical.search+canonical.hash);
     } catch (_) {}
+    setProgress('Starting project…', null, 'Launching deployment runtime…');
     status.textContent='Starting project…';
     const response=await network.request(pageURL,location.origin,{},'deployment'); if(!response?.ok)throw new Error(`Project entry page failed to load (${response?.status||'no response'}).`); const html=await response.text(); await page.setDocument(html,true,pageURL); stage.classList.add('ready'); status.remove();
   }
