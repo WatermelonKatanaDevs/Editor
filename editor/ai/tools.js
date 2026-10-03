@@ -141,18 +141,18 @@
     }});
     add({name:'github_read_file', permission:'githubRead', description:'Read a text file from a GitHub repository using the signed-in account.', parameters:{type:'object',required:['owner','repo','path'],properties:{owner:{type:'string'},repo:{type:'string'},path:{type:'string'}},additionalProperties:false}, execute:async args => {
       const service=requireGitHub();
-      const path=String(args.path||'').replace(/^\\/+/, '');
+      const path=String(args.path||'').replace(/^\/+/, '');
       const data=await service.request('/repos/'+encodeURIComponent(String(args.owner||''))+'/'+encodeURIComponent(String(args.repo||''))+'/contents/'+path.split('/').map(encodeURIComponent).join('/'));
       if(Array.isArray(data)) return {directory:true,entries:data.map(x=>({name:x.name,path:x.path,type:x.type,sha:x.sha}))};
       if(!data?.content) throw new Error('GitHub returned no file content.');
-      const binary=atob(String(data.content).replace(/\\s/g,''));
+      const binary=atob(String(data.content).replace(/\s/g,''));
       const bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));
       const content=new TextDecoder().decode(bytes);
       return {path:data.path,sha:data.sha,content};
     }});
     add({name:'github_write_file', permission:'githubWrite', description:'Create or replace a text file in a GitHub repository. This changes the remote repository.', parameters:{type:'object',required:['owner','repo','path','content','message'],properties:{owner:{type:'string'},repo:{type:'string'},path:{type:'string'},content:{type:'string'},message:{type:'string'},sha:{type:'string',description:'Current blob SHA when replacing an existing file. If omitted, the tool reads it first.'}},additionalProperties:false}, execute:async args => {
       const service=requireGitHub();
-      const owner=String(args.owner||''), repoName=String(args.repo||''), path=String(args.path||'').replace(/^\\/+/, '');
+      const owner=String(args.owner||''), repoName=String(args.repo||''), path=String(args.path||'').replace(/^\/+/, '');
       let sha=String(args.sha||'');
       if(!sha){
         try {
@@ -170,7 +170,7 @@
     }});
     add({name:'github_delete_file', permission:'githubWrite', description:'Delete a file from a GitHub repository. This changes the remote repository.', parameters:{type:'object',required:['owner','repo','path','message'],properties:{owner:{type:'string'},repo:{type:'string'},path:{type:'string'},message:{type:'string'},sha:{type:'string',description:'The current blob SHA. If omitted, the tool reads the file first.'}},additionalProperties:false}, execute:async args => {
       const service=requireGitHub();
-      const owner=String(args.owner||''), repoName=String(args.repo||''), path=String(args.path||'').replace(/^\\/+/, '');
+      const owner=String(args.owner||''), repoName=String(args.repo||''), path=String(args.path||'').replace(/^\/+/, '');
       let sha=String(args.sha||'');
       if(!sha){ const current=await service.request('/repos/'+encodeURIComponent(owner)+'/'+encodeURIComponent(repoName)+'/contents/'+path.split('/').map(encodeURIComponent).join('/')); sha=String(current?.sha||''); }
       if(!sha) throw new Error('A current file SHA is required to delete a GitHub file.');
