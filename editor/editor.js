@@ -443,12 +443,53 @@ window.__editorInitPromise = (async function () {
     }
     return Array.from({length: 6}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
   }
+  function normalizeDeploymentPath(value) {
+    let raw = String(value ?? '').trim();
+    if (!raw) return '/';
+    try {
+      const base = String(state.runConfig?.config?.domain || 'http://localhost:3000/');
+      const url = new URL(raw, base);
+      let path = url.pathname || '/';
+      if (!path.startsWith('/')) path = '/' + path;
+      const suffix = (url.search || '') + (url.hash || '');
+      return (path === '/' ? '/' : path.replace(/\/+$/, '')) + suffix;
+    } catch (_) {
+      if (!raw.startsWith('/')) raw = '/' + raw;
+      return raw === '/' ? '/' : raw.replace(/\/+$/, '');
+    }
+  }
   function normalizePeerPagePath(value) {
     let path = String(value ?? '').trim();
     if (!path) return '/';
     if (!path.startsWith('/')) path = '/' + path;
     return path;
   }
+  function hydrateGitRemoteFromSavedSelection() {
+    if (state.gitRemote?.provider === 'github' && state.gitRemote.owner && state.gitRemote.repo) return true;
+    const projectId = String(state.projectId || '').trim();
+    if (!projectId) return false;
+
+    try {
+      const saved = JSON.parse(localStorage.getItem('editor.github.project.' + encodeURIComponent(projectId)) || 'null');
+      if (saved?.owner && saved?.repo) {
+        state.gitRemote = {
+          provider: 'github',
+          owner: String(saved.owner),
+          repo: String(saved.repo),
+          branch: String(saved.branch || 'main')
+        };
+        return true;
+      }
+    } catch (_) {}
+
+    const match = projectId.match(/^github:([^/]+)\/([^@]+)@(.+)$/);
+    if (match) {
+      state.gitRemote = {provider:'github', owner:String(match[1]), repo:String(match[2]), branch:String(match[3] || 'main')};
+      return true;
+    }
+    return false;
+  }
+
   function loadProjectMetadata() {
     const meta = readEditorJson(EDITOR_PROJECT_PATH);
     if (meta?.id && String(meta.id).trim()) state.projectId = String(meta.id).trim();
@@ -465,7 +506,7 @@ window.__editorInitPromise = (async function () {
     };
     state.deploymentSettings = {
       mode: String(meta?.deployment?.mode || 'editor').trim() === 'third-party' ? 'third-party' : 'editor',
-      url: String(meta?.deployment?.url || '').trim(),
+      url: normalizeDeploymentPath(meta?.deployment?.url || state.runConfig?.config?.path || '/'),
       usePeerServer: !!meta?.deployment?.usePeerServer,
       branch: String(meta?.deployment?.branch || state.gitRemote?.branch || '').trim(),
       commit: String(meta?.deployment?.commit || '').trim(),
@@ -474,6 +515,7 @@ window.__editorInitPromise = (async function () {
       hookUrl: String(meta?.deployment?.hookUrl || '').trim()
     };
     if (!state.projectId) state.projectId = makeProjectId();
+    hydrateGitRemoteFromSavedSelection();
     return meta;
   }
   function saveProjectMetadata() {
@@ -485,7 +527,7 @@ window.__editorInitPromise = (async function () {
     state.fs.mkdirSync?.(EDITOR_DIR);
     const deployment = {
       mode: state.deploymentSettings?.mode === 'third-party' ? 'third-party' : 'editor',
-      url: String(state.deploymentSettings?.url || '').trim(),
+      url: normalizeDeploymentPath(state.deploymentSettings?.url || '/'),
       usePeerServer: !!state.deploymentSettings?.usePeerServer,
       branch: String(state.deploymentSettings?.branch || '').trim(),
       commit: String(state.deploymentSettings?.commit || '').trim(),
@@ -1504,9 +1546,22 @@ window.__editorInitPromise = (async function () {
     updateStatus();
   }
   async function openZipFile(f) {
-    await replaceFileSystem(await FileSystem.create(f, {
-      sync: false
-    }), stripZipProjectName(f.name), true);
+    showRemoteLoadProgress('Opening local project');
+    try {
+      updateRemoteLoadProgress('Inspecting project archive…', 8, formatProgressBytes(f?.size || 0) + ' received');
+      const flattened = await flattenProjectZip(f);
+      updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
+      const fs = await FileSystem.create(flattened, { sync: false });
+      updateRemoteLoadProgress('Starting workspace…', 97, stripZipProjectName(f.name));
+      await replaceFileSystem(fs, stripZipProjectName(f.name), true);
+      updateRemoteLoadProgress('Local project ready', 100, 'Workspace loaded');
+      const modal = remoteLoadProgress?.modal;
+      remoteLoadProgress = null;
+      setTimeout(() => modal?.remove(), 180);
+    } catch (e) {
+      failRemoteLoadProgress(e);
+      throw e;
+    }
   }
   function setupDefaultNodeLayout() {
     const wb = state.workbench;
@@ -1593,18 +1648,42 @@ window.__editorInitPromise = (async function () {
     return templateCatalogPromise;
   }
   async function createTemplateProject(template) {
-    const manifestURL = new URL(TEMPLATE_MANIFEST_URL, document.baseURI);
-    const fileURL = new URL(template.file, manifestURL).href;
-    const response = await fetch(fileURL, {cache:'no-store'});
-    if (!response.ok) throw new Error(`Failed to load template "${template.title}" (${response.status}).`);
-    const blob = await response.blob();
-    const file = new File([blob], basename(template.file) || 'template.zip', {type:'application/zip'});
-    const fs = await FileSystem.create(file, {sync:false});
-    const projectId = makeProjectId();
-    const projectName = template.title || 'Workspace';
-    fs.mkdirSync(EDITOR_DIR);
-    fs.writeFileSync(EDITOR_PROJECT_PATH, JSON.stringify({id:projectId, name:projectName}, null, 2));
-    await replaceFileSystem(fs, projectName, false, {projectId, isTemplate:true, forceDefaultLayout:true});
+    try {
+      const manifestURL = new URL(TEMPLATE_MANIFEST_URL, document.baseURI);
+      const fileURL = new URL(template.file, manifestURL).href;
+      const response = await fetch(fileURL, {cache:'no-store'});
+      if (!response.ok) throw new Error(`Failed to load template "${template.title}" (${response.status}).`);
+      const blob = await response.blob();
+      const file = new File([blob], basename(template.file) || 'template.zip', {type:'application/zip'});
+
+      updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
+
+      const fs = await FileSystem.create(file, {sync:false});
+
+      updateRemoteLoadProgress('Starting workspace…', 97, template.title || 'Workspace');
+
+      const projectId = makeProjectId();
+      const projectName = template.title || 'Workspace';
+
+      fs.mkdirSync(EDITOR_DIR);
+      fs.writeFileSync(EDITOR_PROJECT_PATH, JSON.stringify({id:projectId, name:projectName}, null, 2));
+
+      await replaceFileSystem(fs, projectName, false, {
+        projectId,
+        isTemplate: true,
+        forceDefaultLayout: true
+      });
+
+      updateRemoteLoadProgress('Project ready', 100, 'Workspace created');
+
+      const modal = remoteLoadProgress?.modal;
+      remoteLoadProgress = null;
+
+      setTimeout(() => modal?.remove(), 180);
+    } catch (e) {
+      failRemoteLoadProgress(e);
+      throw e;
+    }
   }
 
   async function createStarter(kind, options = {}) {
@@ -1664,7 +1743,7 @@ window.__editorInitPromise = (async function () {
     state.saveProjectPermission = 'denied';
     state.projectId = options.projectId || null;
     state.gitRemote = options.gitRemote || null;
-    state.deploymentSettings = {mode:'editor', url:'', usePeerServer:false, branch:String(state.gitRemote?.branch || '').trim(), commit:'', externalUrl:'', externalMode:'iframe', hookUrl:''};
+    state.deploymentSettings = {mode:'editor', url:'/', usePeerServer:false, branch:String(state.gitRemote?.branch || '').trim(), commit:'', externalUrl:'', externalMode:'iframe', hookUrl:''};
     state.projectTemplate = !!options.isTemplate;
     state.projectName = name || 'Workspace';
     state.projectKey = state.projectName;
@@ -1724,27 +1803,46 @@ window.__editorInitPromise = (async function () {
     return source.kind === 'file' && /\.zip$/i.test(source.name || '');
   }
   async function importFileSystemSource(source, name) {
+    const zipSource = isZipSource(source);
+    if (zipSource) {
+      // The source picker should disappear before the actual archive-loading progress UI appears.
+      closeImportModal();
+      showRemoteLoadProgress('Opening local project');
+    }
     try {
       let filesystemSource = source;
-      const zipSource = isZipSource(source);
 
       if (zipSource) {
+        let zipFile = null;
         if (source instanceof File || source instanceof Blob) {
-          filesystemSource = await flattenProjectZip(source);
+          zipFile = source;
         } else if (Array.isArray(source) && source.length === 1 && source[0] instanceof File) {
-          filesystemSource = await flattenProjectZip(source[0]);
+          zipFile = source[0];
         } else if (source instanceof FileSystemFileHandle) {
-          filesystemSource = await flattenProjectZip(await source.getFile());
+          zipFile = await source.getFile();
+        }
+        if (zipFile) {
+          updateRemoteLoadProgress('Inspecting project archive…', 8, formatProgressBytes(zipFile.size || 0) + ' received');
+          filesystemSource = await flattenProjectZip(zipFile);
         }
       }
 
+      if (zipSource) updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
       const fs = await FileSystem.create(filesystemSource, {
         sync: false
       });
       const projectName = zipSource ? stripZipProjectName(name) : (name || 'Workspace');
+      if (zipSource) updateRemoteLoadProgress('Starting workspace…', 97, projectName || 'Workspace');
       await replaceFileSystem(fs, projectName || 'Workspace', true);
       closeImportModal();
+      if (zipSource && remoteLoadProgress) {
+        updateRemoteLoadProgress('Local project ready', 100, 'Workspace loaded');
+        const modal = remoteLoadProgress.modal;
+        remoteLoadProgress = null;
+        setTimeout(() => modal.remove(), 180);
+      }
     } catch (e) {
+      if (zipSource) failRemoteLoadProgress(e);
       logError(e);
     }
   }
@@ -1807,9 +1905,116 @@ window.__editorInitPromise = (async function () {
     if (github.length) return github;
     return [url.href];
   }
+  let remoteLoadProgress = null;
+  function formatProgressBytes(value) {
+    const n = Number(value) || 0;
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  }
+  function showRemoteLoadProgress(title = 'Opening remote project') {
+    document.getElementById('remoteLoadProgressModal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'remoteLoadProgressModal';
+    modal.className = 'editor-modal remote-load-progress-modal show';
+    modal.innerHTML = `<div class="editor-modal-content remote-load-progress-content">
+      <div class="remote-load-progress-title">${escapeHTML(title)}</div>
+      <div class="remote-load-progress-stage" data-progress-stage>Starting…</div>
+      <div class="remote-load-progress-track"><div class="remote-load-progress-bar indeterminate" data-progress-bar></div></div>
+      <div class="remote-load-progress-meta"><span data-progress-detail>Preparing…</span><span data-progress-percent></span></div>
+    </div>`;
+    document.body.appendChild(modal);
+    remoteLoadProgress = {
+      modal,
+      stage: modal.querySelector('[data-progress-stage]'),
+      bar: modal.querySelector('[data-progress-bar]'),
+      detail: modal.querySelector('[data-progress-detail]'),
+      percent: modal.querySelector('[data-progress-percent]')
+    };
+    return remoteLoadProgress;
+  }
+  function updateRemoteLoadProgress(stage, percent = null, detail = '') {
+    const p = remoteLoadProgress || showRemoteLoadProgress();
+    p.stage.textContent = stage || '';
+    p.detail.textContent = detail || '';
+    if (percent == null || !Number.isFinite(Number(percent))) {
+      p.bar.classList.add('indeterminate');
+      p.percent.textContent = '';
+      return;
+    }
+    const value = Math.max(0, Math.min(100, Number(percent)));
+    p.bar.classList.remove('indeterminate');
+    p.bar.style.width = `${value}%`;
+    p.percent.textContent = `${Math.round(value)}%`;
+  }
+  function finishRemoteLoadProgress() {
+    if (!remoteLoadProgress) return;
+    updateRemoteLoadProgress('Remote project ready', 100, 'Workspace loaded');
+    const modal = remoteLoadProgress.modal;
+    const state = remoteLoadProgress;
+    remoteLoadProgress = null;
+    setTimeout(() => {
+      if (state.modal === modal) modal.remove();
+      else modal.remove();
+    }, 180);
+  }
+  function failRemoteLoadProgress(error) {
+    if (!remoteLoadProgress) return;
+    const p = remoteLoadProgress;
+    p.stage.textContent = 'Unable to open remote project';
+    p.detail.textContent = error?.message || String(error || 'Unknown error');
+    p.bar.classList.remove('indeterminate');
+    p.bar.style.width = '100%';
+    p.bar.style.background = '#a94b4b';
+    p.percent.textContent = '';
+    const err = document.createElement('div');
+    err.className = 'remote-load-progress-error';
+    err.textContent = error?.message || String(error || 'Unknown error');
+    p.modal.querySelector('.remote-load-progress-content').appendChild(err);
+    const modal = p.modal;
+    remoteLoadProgress = null;
+    setTimeout(() => modal.remove(), 900);
+  }
+  async function responseToBlobWithEditorProgress(response, startPercent, endPercent, label) {
+    const total = Number(response?.headers?.get?.('content-length')) || 0;
+    if (!response?.body?.getReader) {
+      updateRemoteLoadProgress(label, total ? startPercent : null, total ? `0 B / ${formatProgressBytes(total)}` : 'Receiving archive…');
+      const blob = await response.blob();
+      updateRemoteLoadProgress(label, endPercent, total ? `${formatProgressBytes(blob.size)} downloaded` : 'Archive downloaded');
+      return blob;
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let received = 0;
+    updateRemoteLoadProgress(label, total ? startPercent : null, total ? `0 B / ${formatProgressBytes(total)}` : 'Receiving archive…');
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      if (value) {
+        chunks.push(value);
+        received += value.byteLength || value.length || 0;
+      }
+      const ratio = total ? received / total : 0;
+      const percent = total ? startPercent + (endPercent - startPercent) * ratio : null;
+      updateRemoteLoadProgress(label, percent, total ? `${formatProgressBytes(received)} / ${formatProgressBytes(total)}` : `${formatProgressBytes(received)} downloaded`);
+    }
+    const contentType = response.headers?.get?.('content-type') || 'application/zip';
+    const blob = new Blob(chunks, {type: contentType});
+    updateRemoteLoadProgress(label, endPercent, total ? `${formatProgressBytes(received)} / ${formatProgressBytes(total)}` : `${formatProgressBytes(received)} downloaded`);
+    return blob;
+  }
+
   async function flattenProjectZip(file) {
     if (typeof JSZip === 'undefined') return file;
-    const zip = await JSZip.loadAsync(file);
+    updateRemoteLoadProgress('Inspecting project archive…', 60, formatProgressBytes(file?.size || 0) + ' received');
+    const zip = await JSZip.loadAsync(file, {
+      onUpdate(meta) {
+        const pct = 60 + ((Number(meta?.percent) || 0) / 100) * 8;
+        const currentFile = meta?.currentFile ? ` — ${meta.currentFile}` : '';
+        updateRemoteLoadProgress('Reading project archive…', pct, `${Math.round(Number(meta?.percent) || 0)}%${currentFile}`);
+      }
+    });
+    updateRemoteLoadProgress('Reading project files…', 68, `${Object.keys(zip.files || {}).length} archive entries`);
     const entries = [];
     const topLevels = new Set();
     let hasRootFile = false;
@@ -1842,17 +2047,30 @@ window.__editorInitPromise = (async function () {
       else out.file(target, await item.entry.async('uint8array'));
     }
 
-    const blob = await out.generateAsync({type:'blob'});
+    updateRemoteLoadProgress('Rebuilding project archive…', 76, 'Removing wrapper folder');
+    const blob = await out.generateAsync({type:'blob', streamFiles:true}, meta => {
+      const value = 76 + (Number(meta?.percent) || 0) * 0.12;
+      updateRemoteLoadProgress('Rebuilding project archive…', value, `${Math.round(Number(meta?.percent) || 0)}%`);
+    });
+    updateRemoteLoadProgress('Project archive ready…', 88, formatProgressBytes(blob.size));
     return new File([blob], file.name, {type:'application/zip'});
   }
   async function fetchRemoteProject(url) {
     if (!state.browserNetwork?.request) throw new Error('Network is not initialized.');
+    showRemoteLoadProgress();
+    updateRemoteLoadProgress('Preparing remote project…', 2, url);
     const github = githubRepositoryFromUrl(url);
     if (github && window.GitHubService?.isSignedIn?.()) {
       try {
         const info = await window.GitHubService.getRepository(github.owner, github.repo);
         const branch = github.branch || info.default_branch || 'main';
-        const blob = await window.GitHubService.downloadArchive(github.owner, github.repo, branch);
+        updateRemoteLoadProgress('Downloading project archive…', 5, 'GitHub');
+        const blob = await window.GitHubService.downloadArchive(github.owner, github.repo, branch, {
+          onProgress(received, total) {
+            const pct = total ? 5 + (received / total) * 50 : null;
+            updateRemoteLoadProgress('Downloading project archive…', pct, total ? `${formatProgressBytes(received)} / ${formatProgressBytes(total)}` : `${formatProgressBytes(received)} downloaded`);
+          }
+        });
         if (!blob?.size) throw new Error('GitHub returned an empty project archive.');
         const name = info.name || github.repo;
         let file = new File([blob], name + '.zip', {type:'application/zip'});
@@ -1873,7 +2091,7 @@ window.__editorInitPromise = (async function () {
           lastStatus = `${response.status} ${response.statusText || ''}`.trim();
           continue;
         }
-        const blob = await response.blob();
+        const blob = await responseToBlobWithEditorProgress(response, 5, 55, 'Downloading project archive…');
         if (!blob.size) {
           lastStatus = 'empty response';
           continue;
@@ -1898,19 +2116,26 @@ window.__editorInitPromise = (async function () {
   }
   async function importRemoteProject(input, options = {}) {
     try {
+      // Replace the repository/source chooser with the loading progress UI immediately.
+      finishRemoteImport();
       const remote = await fetchRemoteProject(input);
+      updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
       const fs = await FileSystem.create(remote.file, {sync:false});
+      updateRemoteLoadProgress('Starting workspace…', 97, remote.name || 'Remote Project');
       await replaceFileSystem(fs, remote.name || 'Remote Project', true, {projectId:remote.projectId || undefined, gitRemote:remote.gitRemote || null});
       finishRemoteImport();
+      finishRemoteLoadProgress();
       return true;
     } catch (e) {
+      failRemoteLoadProgress(e);
       options.onError?.(e);
       return false;
     }
   }
   async function openGithubRevision(input, revision = '', options = {}) {
+    showRemoteLoadProgress();
     const parsed = githubRepositoryFromUrl(input);
-    if (!parsed) throw new Error('Enter a valid GitHub repository URL.');
+    if (!parsed) { failRemoteLoadProgress(new Error('Enter a valid GitHub repository URL.')); throw new Error('Enter a valid GitHub repository URL.'); }
     const requestedRevision = String(revision || parsed.branch || '').trim();
     let info = null;
     if (window.GitHubService?.isSignedIn?.()) {
@@ -1919,34 +2144,44 @@ window.__editorInitPromise = (async function () {
     const ref = requestedRevision || info?.default_branch || 'main';
     let blob = null;
     if (window.GitHubService?.isSignedIn?.()) {
-      try { blob = await window.GitHubService.downloadArchive(parsed.owner, parsed.repo, ref); } catch (e) { if (e?.status !== 404 && e?.status !== 401) throw e; }
+      try { blob = await window.GitHubService.downloadArchive(parsed.owner, parsed.repo, ref, { onProgress(received, total) { const pct = total ? 5 + (received / total) * 50 : null; updateRemoteLoadProgress('Downloading project archive…', pct, total ? `${formatProgressBytes(received)} / ${formatProgressBytes(total)}` : `${formatProgressBytes(received)} downloaded`); } }); } catch (e) { if (e?.status !== 404 && e?.status !== 401) throw e; }
     }
     if (!blob) {
       if (!state.browserNetwork?.request) throw new Error('Network is not initialized.');
       const codeload = `https://codeload.github.com/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}/zip/${encodeURIComponent(ref).replace(/%2F/g, '/')}`;
       const response = await state.browserNetwork.request(codeload, location.origin, {}, 'project-import');
       if (!response?.ok) throw new Error(`GitHub archive download failed (${response?.status || 'no response'}).`);
-      blob = await response.blob();
+      blob = await responseToBlobWithEditorProgress(response, 5, 55, 'Downloading project archive…');
     }
     if (!blob?.size) throw new Error('GitHub returned an empty project archive.');
     const name = info?.name || parsed.repo;
     let file = new File([blob], name + '.zip', {type:'application/zip'});
     file = await flattenProjectZip(file);
+    updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
     const fs = await FileSystem.create(file, {sync:false});
+    updateRemoteLoadProgress('Starting workspace…', 97, name || 'Remote Project');
     const branch = info?.default_branch || parsed.branch || 'main';
     const projectId = `github:${parsed.owner}/${parsed.repo}@${ref}`;
     await replaceFileSystem(fs, name || 'Remote Project', true, {projectId, gitRemote:{provider:'github',owner:parsed.owner,repo:parsed.repo,branch, ...(requestedRevision ? {revision:ref} : {})}});
     finishRemoteImport();
+    finishRemoteLoadProgress();
     return true;
   }
 
   async function openGithubRepository(repo, options = {}) {
+    showRemoteLoadProgress();
     const github = window.GitHubService;
-    if (!github?.isSignedIn?.()) throw new Error('Sign in to GitHub to open a repository.');
+    if (!github?.isSignedIn?.()) { failRemoteLoadProgress(new Error('Sign in to GitHub to open a repository.')); throw new Error('Sign in to GitHub to open a repository.'); }
     if (!repo?.owner || !repo?.repo) throw new Error('Invalid GitHub repository.');
     const branch = String(repo.branch || repo.defaultBranch || 'main');
     const info = repo.defaultBranch ? repo : await github.getRepository(repo.owner, repo.repo);
-    const blob = await github.downloadArchive(repo.owner, repo.repo, branch);
+    updateRemoteLoadProgress('Downloading project archive…', 5, 'GitHub');
+    const blob = await github.downloadArchive(repo.owner, repo.repo, branch, {
+      onProgress(received, total) {
+        const pct = total ? 5 + (received / total) * 50 : null;
+        updateRemoteLoadProgress('Downloading project archive…', pct, total ? `${formatProgressBytes(received)} / ${formatProgressBytes(total)}` : `${formatProgressBytes(received)} downloaded`);
+      }
+    });
     if (!blob?.size) throw new Error('GitHub returned an empty project archive.');
     let file = new File([blob], (info.name || repo.repo) + '.zip', {type:'application/zip'});
     file = await flattenProjectZip(file);
@@ -1954,6 +2189,7 @@ window.__editorInitPromise = (async function () {
     const projectId = `github:${repo.owner}/${repo.repo}@${branch}`;
     await replaceFileSystem(fs, info.name || repo.repo || 'Remote Project', true, {projectId, gitRemote:{provider:'github',owner:repo.owner,repo:repo.repo,branch}});
     finishRemoteImport();
+    finishRemoteLoadProgress();
     return true;
   }
   async function openRemoteImportModal(options = {}) {
@@ -2571,6 +2807,14 @@ window.__editorInitPromise = (async function () {
     start,
     openFile,
     openBuiltin,
+    openRemoteProject: options => openRemoteImportModal(options),
+    getWorkspaceInfo: () => ({
+      loading: !!state.loading,
+      projectId: state.projectId || null,
+      projectName: state.projectName || 'Workspace',
+      gitRemote: state.gitRemote ? { ...state.gitRemote } : null,
+      hasGitHubRepository: !!(state.gitRemote?.provider === 'github' && state.gitRemote.owner && state.gitRemote.repo)
+    }),
     addWelcomeBuiltin,
     removeWelcomeBuiltin,
     runConfigured,
