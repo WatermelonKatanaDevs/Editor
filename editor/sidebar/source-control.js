@@ -225,12 +225,15 @@
         }).join('') : '<div class="source-control-clean">No changes</div>';
         changesEl.dataset.count = String(changes.length);
         const button = tree.querySelector('[data-commit]');
+        const isInitialCommit = !!remote.empty || !remote.commitSha;
         if (button) {
           button.disabled = !changes.length || !canPush;
-          button.title = canPush ? '' : 'You do not have push permission for this repository.';
+          button.textContent = isInitialCommit ? 'Initial Commit & Push' : 'Commit & Push';
+          button.title = canPush ? (isInitialCommit ? 'Create the first commit on this empty GitHub repository.' : '') : 'You do not have push permission for this repository.';
         }
         if (!canPush) showStatus('This repository is read-only for your GitHub account.', true);
         else if (remote.truncated) showStatus('GitHub truncated the remote tree; large repositories may need a more focused sync later.', true);
+        else if (isInitialCommit && changes.length) showStatus('This GitHub repository has no commits yet. Your next commit will become its initial commit.');
         else clearStatus();
       } catch (e) {
         changesEl.innerHTML = `<div class="source-control-error">${esc(e.message || String(e))}</div>`;
