@@ -156,14 +156,19 @@ window.__editorInitPromise = (async function () {
 
   function applyThemeMonaco(theme, monaco = window.monaco) {
     if (!monaco?.editor) return false;
-    const name = String(theme.id || 'node-editor');
+    const name = String(theme.id || theme.monaco?.name || 'node-editor');
+    const semanticTokenColors = {...(theme.monaco?.semanticTokenColors || {})};
+    const rules = [...(theme.monaco?.rules || [])];
+    // Keep both semantic token colors and token-theme rules populated. Older
+    // bundled Monaco builds use the latter while newer builds prefer semantic
+    // token colors for language-service classifications such as functions.
     monaco.editor.defineTheme(name, {
       base: theme.monaco?.base || 'vs-dark',
       inherit: theme.monaco?.inherit !== false,
       semanticHighlighting: theme.monaco?.semanticHighlighting !== false,
-      semanticTokenColors: {...(theme.monaco?.semanticTokenColors || {})},
+      semanticTokenColors,
       colors: {...(theme.monaco?.colors || {})},
-      rules: [...(theme.monaco?.rules || [])]
+      rules
     });
     monaco.editor.setTheme(name);
     if (typeof monaco.editor.getEditors === 'function') {
