@@ -177,6 +177,7 @@
       const result=await service.request('/repos/'+encodeURIComponent(owner)+'/'+encodeURIComponent(repoName)+'/contents/'+path.split('/').map(encodeURIComponent).join('/'),{method:'DELETE',body:JSON.stringify({message:String(args.message||''),sha})});
       return {deleted:true,path,commitSha:result?.commit?.sha||null};
     }});
+    for (const extensionTool of window.EditorExtensionAPI?.getAITools?.() || []) add(extensionTool);
     return {map:tools, list:()=>[...tools.values()]};
   }
   root.makeAITools = makeTools;
