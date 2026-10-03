@@ -1638,20 +1638,42 @@ window.__editorInitPromise = (async function () {
     return templateCatalogPromise;
   }
   async function createTemplateProject(template) {
-    const manifestURL = new URL(TEMPLATE_MANIFEST_URL, document.baseURI);
-    const fileURL = new URL(template.file, manifestURL).href;
-    const response = await fetch(fileURL, {cache:'no-store'});
-    if (!response.ok) throw new Error(`Failed to load template "${template.title}" (${response.status}).`);
-    const blob = await response.blob();
-    const file = new File([blob], basename(template.file) || 'template.zip', {type:'application/zip'});
-    updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
-    const fs = await FileSystem.create(file, {sync:false});
-    updateRemoteLoadProgress('Starting workspace…', 97, template.title || 'Workspace');
-    const projectId = makeProjectId();
-    const projectName = template.title || 'Workspace';
-    fs.mkdirSync(EDITOR_DIR);
-    fs.writeFileSync(EDITOR_PROJECT_PATH, JSON.stringify({id:projectId, name:projectName}, null, 2));
-    await replaceFileSystem(fs, projectName, false, {projectId, isTemplate:true, forceDefaultLayout:true});
+    try {
+      const manifestURL = new URL(TEMPLATE_MANIFEST_URL, document.baseURI);
+      const fileURL = new URL(template.file, manifestURL).href;
+      const response = await fetch(fileURL, {cache:'no-store'});
+      if (!response.ok) throw new Error(`Failed to load template "${template.title}" (${response.status}).`);
+      const blob = await response.blob();
+      const file = new File([blob], basename(template.file) || 'template.zip', {type:'application/zip'});
+
+      updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
+
+      const fs = await FileSystem.create(file, {sync:false});
+
+      updateRemoteLoadProgress('Starting workspace…', 97, template.title || 'Workspace');
+
+      const projectId = makeProjectId();
+      const projectName = template.title || 'Workspace';
+
+      fs.mkdirSync(EDITOR_DIR);
+      fs.writeFileSync(EDITOR_PROJECT_PATH, JSON.stringify({id:projectId, name:projectName}, null, 2));
+
+      await replaceFileSystem(fs, projectName, false, {
+        projectId,
+        isTemplate: true,
+        forceDefaultLayout: true
+      });
+
+      updateRemoteLoadProgress('Project ready', 100, 'Workspace created');
+
+      const modal = remoteLoadProgress?.modal;
+      remoteLoadProgress = null;
+
+      setTimeout(() => modal?.remove(), 180);
+    } catch (e) {
+      failRemoteLoadProgress(e);
+      throw e;
+    }
   }
 
   async function createStarter(kind, options = {}) {
