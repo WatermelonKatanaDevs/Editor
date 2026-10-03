@@ -454,6 +454,32 @@ window.__editorInitPromise = (async function () {
     if (!path.startsWith('/')) path = '/' + path;
     return path;
   }
+  function hydrateGitRemoteFromSavedSelection() {
+    if (state.gitRemote?.provider === 'github' && state.gitRemote.owner && state.gitRemote.repo) return true;
+    const projectId = String(state.projectId || '').trim();
+    if (!projectId) return false;
+
+    try {
+      const saved = JSON.parse(localStorage.getItem('editor.github.project.' + encodeURIComponent(projectId)) || 'null');
+      if (saved?.owner && saved?.repo) {
+        state.gitRemote = {
+          provider: 'github',
+          owner: String(saved.owner),
+          repo: String(saved.repo),
+          branch: String(saved.branch || 'main')
+        };
+        return true;
+      }
+    } catch (_) {}
+
+    const match = projectId.match(/^github:([^/]+)\/([^@]+)@(.+)$/);
+    if (match) {
+      state.gitRemote = {provider:'github', owner:String(match[1]), repo:String(match[2]), branch:String(match[3] || 'main')};
+      return true;
+    }
+    return false;
+  }
+
   function loadProjectMetadata() {
     const meta = readEditorJson(EDITOR_PROJECT_PATH);
     if (meta?.id && String(meta.id).trim()) state.projectId = String(meta.id).trim();
@@ -479,6 +505,7 @@ window.__editorInitPromise = (async function () {
       hookUrl: String(meta?.deployment?.hookUrl || '').trim()
     };
     if (!state.projectId) state.projectId = makeProjectId();
+    hydrateGitRemoteFromSavedSelection();
     return meta;
   }
   function saveProjectMetadata() {
