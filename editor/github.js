@@ -341,6 +341,23 @@
       url: item.html_url || ''
     })) : [];
   }
+  async function getCommitState(owner, repo, commitSha) {
+    const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+    const commit = await request(`${repoPath}/git/commits/${encodeURIComponent(commitSha)}`);
+    const treeSha = commit?.tree?.sha;
+    if (!treeSha) throw new Error('GitHub did not return the selected commit tree.');
+    const tree = await request(`${repoPath}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`);
+    const entries = Array.isArray(tree?.tree) ? tree.tree.filter(entry => entry?.type === 'blob' && entry.path && !ignoredPath(entry.path)) : [];
+    return {commitSha:String(commitSha), treeSha, tree:entries, truncated:!!tree?.truncated};
+  }
+  async function readBlob(owner, repo, sha) {
+    const data = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs/${encodeURIComponent(sha)}`);
+    if (data?.encoding !== 'base64' || typeof data.content !== 'string') throw new Error('GitHub returned an unsupported blob encoding.');
+    const binary = atob(data.content.replace(/\s/g, ''));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
   async function gitBlobSha(data) {
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || []);
     const header = new TextEncoder().encode(`blob ${bytes.length}\0`);
@@ -489,6 +506,8 @@
   root.downloadArchive = downloadArchive;
   root.listBranches = listBranches;
   root.getRemoteState = getRemoteState;
+  root.getCommitState = getCommitState;
+  root.readBlob = readBlob;
   root.listCommits = listCommits;
   root.compareWorkingTree = compareWorkingTree;
   root.commitAndPush = commitAndPush;
