@@ -210,7 +210,38 @@ window.__editorInitPromise = (async function () {
     themeObject.set({monaco: {rules}});
   };
   themeObject.apply = applyTheme;
-  window.EditorTheme = themeObject;
+
+  // Keep EditorTheme as a stable API object. Embedding pages historically
+  // assigned a complete theme object (for example, from an extension) instead
+  // of calling EditorTheme.set(). Intercept that assignment so those themes
+  // are merged into the live theme object rather than replacing its methods.
+  // This preserves EditorTheme.apply()/set*() and lets Monaco receive the
+  // assigned theme through the normal applyThemeMonaco() path.
+  Object.defineProperty(window, 'EditorTheme', {
+    configurable: true,
+    enumerable: true,
+    get: () => themeObject,
+    set: value => {
+      if (!value || typeof value !== 'object' || value === themeObject) {
+        if (value === themeObject) applyTheme();
+        return;
+      }
+      const merge = (target, source) => {
+        for (const [key, entry] of Object.entries(source)) {
+          if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+            if (!target[key] || typeof target[key] !== 'object' || Array.isArray(target[key])) {
+              target[key] = {};
+            }
+            merge(target[key], entry);
+          } else {
+            target[key] = entry;
+          }
+        }
+      };
+      merge(themeObject, value);
+      applyTheme();
+    }
+  });
   applyThemeCSS(window.EditorTheme);
 
   // ---------------------------------------------------------------------------
