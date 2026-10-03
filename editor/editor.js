@@ -925,7 +925,15 @@ window.__editorInitPromise = (async function () {
       window.MonacoEnvironment = window.MonacoEnvironment || {};
       window.MonacoEnvironment.getWorkerUrl = () => new URL('monaco-worker.js', monacoRoot).href;
       require.config({ paths: { vs: monacoVs } });
-      require(['vs/editor/editor.main'], () => resolve(window.monaco), reject);
+      require(['vs/editor/editor.main'], () => {
+        try {
+          // Monaco is loaded lazily. The global theme may have been configured
+          // before Monaco existed, so define/apply it now as well as on later
+          // theme changes.
+          applyThemeMonaco(window.EditorTheme, window.monaco);
+        } catch (_) {}
+        resolve(window.monaco);
+      }, reject);
     }).catch(e => {
       state.monacoPromise = null;
       throw e;
