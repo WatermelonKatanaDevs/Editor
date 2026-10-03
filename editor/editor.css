@@ -362,4 +362,4 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
   min-height: 26px;
 }
 
-.run-debug-hook-row{display:flex;gap:8px;align-items:center}.run-debug-hook-row input{flex:1;min-width:0}.run-debug-hook-row button{flex:0 0 auto}.run-debug-hook-field{margin-top:8px}
+.run-debug-hook-row{display:flex;gap:5px;align-items:center;margin-top:4px}.run-debug-hook-row input{flex:1;min-width:0;box-sizing:border-box;background:var(--editor-bg);color:var(--editor-text-secondary);border:1px solid #3a3a3a;border-radius:2px;padding:7px;font:10px monospace;outline:none}.run-debug-hook-row input:focus{border-color:#5a89b5}.run-debug-hook-row button{flex:0 0 auto;background:#292929;color:#bbb;border:1px solid #414141;padding:6px 9px;border-radius:2px;cursor:pointer;font-size:10px}.run-debug-hook-row button:hover:not(:disabled){background:#343434;color:var(--editor-text)}.run-debug-hook-row button:disabled{opacity:.4;cursor:default}.run-debug-hook-field{margin-top:8px}
