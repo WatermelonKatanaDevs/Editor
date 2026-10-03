@@ -1,65 +1,3 @@
-(function () {
-  const WK_FUNCTION_DECORATION_CLASS = 'wk-monaco-function-name';
-  let wkFunctionDecorationStyleInstalled = false;
-
-  function installWKFunctionDecorationStyle() {
-    if (wkFunctionDecorationStyleInstalled || document.getElementById('wk-monaco-function-decoration-style')) return;
-    const style = document.createElement('style');
-    style.id = 'wk-monaco-function-decoration-style';
-    style.textContent = '.wk-monaco-function-name { color: #3cdfa9 !important; }';
-    document.head.appendChild(style);
-    wkFunctionDecorationStyleInstalled = true;
-  }
-
-  function getWKFunctionDecorations(model) {
-    if (!model) return [];
-    const languageId = model.getLanguageId();
-    if (languageId !== 'javascript' && languageId !== 'typescript') return [];
-    const text = model.getValue();
-    const ranges = [];
-    const add = (start, end) => {
-      if (end <= start) return;
-      const a = model.getPositionAt(start);
-      const b = model.getPositionAt(end);
-      ranges.push({
-        range: {
-          startLineNumber: a.lineNumber,
-          startColumn: a.column,
-          endLineNumber: b.lineNumber,
-          endColumn: b.column
-        },
-        options: { inlineClassName: WK_FUNCTION_DECORATION_CLASS }
-      });
-    };
-
-    // Function declarations / expressions: function foo(...)
-    const declaration = /\\b(?:async\\s+)?function\\s*\\*?\\s*([A-Za-z_$][\\w$]*)\\s*\\(/g;
-    for (let match; (match = declaration.exec(text));) {
-      const offset = match.index + match[0].lastIndexOf(match[1]);
-      add(offset, offset + match[1].length);
-    }
-
-    // Arrow functions assigned to a named variable: const foo = (...) =>
-    const arrow = /\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:async\\s*)?(?:\\([^\\n]*\\)|[A-Za-z_$][\\w$]*)\\s*=>/g;
-    for (let match; (match = arrow.exec(text));) {
-      const offset = match.index + match[0].indexOf(match[1]);
-      add(offset, offset + match[1].length);
-    }
-
-    // Calls and method calls. Avoid control-flow / declaration keywords.
-    const call = /(?:\\b[A-Za-z_$][\\w$]*\\.)?([A-Za-z_$][\\w$]*)\\s*\\(/g;
-    const ignored = new Set(['if','for','while','switch','catch','with','function','constructor','typeof','instanceof']);
-    for (let match; (match = call.exec(text));) {
-      const name = match[1];
-      if (ignored.has(name)) continue;
-      const before = text.slice(0, match.index + match[0].indexOf(name));
-      if (/\\b(?:function|class)\\s*$/.test(before)) continue;
-      const offset = match.index + match[0].indexOf(name);
-      add(offset, offset + name.length);
-    }
-    return ranges;
-  }
-
   class EditorFileView {
     constructor(options = {}) {
       this.state = options.state;
@@ -69,13 +7,11 @@
       this.current = null;
       this.model = null;
       this.ignoreModelChange = false;
-      this.functionDecorations = [];
     }
     clear() {
       this.host.innerHTML = '';
       this.current = null;
       this.model = null;
-      this.functionDecorations = [];
       this.viewTabs.innerHTML = '';
     }
     async open(node) {
@@ -183,19 +119,9 @@
         const text = this.readText();
         this.model = monaco.editor.createModel(text, this.state.language(path));
         this.state.editor.setModel(this.model);
-        installWKFunctionDecorationStyle();
-        const refreshFunctionDecorations = () => {
-          if (!this.model || this.current !== 'Edit') return;
-          this.functionDecorations = this.state.editor.deltaDecorations(
-            this.functionDecorations || [],
-            getWKFunctionDecorations(this.model)
-          );
-        };
-        refreshFunctionDecorations();
         const listener = this.model.onDidChangeContent(() => {
           if (this.current !== 'Edit' || this.ignoreModelChange || !this.state.fs) return;
           this.writeText(this.model.getValue());
-          refreshFunctionDecorations();
           this.state.updateStatus();
         });
         this._modelListener = listener;
