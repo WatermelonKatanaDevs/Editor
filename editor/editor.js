@@ -2742,6 +2742,14 @@ window.__editorInitPromise = (async function () {
     start,
     openFile,
     openBuiltin,
+    openRemoteProject: options => openRemoteImportModal(options),
+    getWorkspaceInfo: () => ({
+      loading: !!state.loading,
+      projectId: state.projectId || null,
+      projectName: state.projectName || 'Workspace',
+      gitRemote: state.gitRemote ? { ...state.gitRemote } : null,
+      hasGitHubRepository: !!(state.gitRemote?.provider === 'github' && state.gitRemote.owner && state.gitRemote.repo)
+    }),
     addWelcomeBuiltin,
     removeWelcomeBuiltin,
     runConfigured,
