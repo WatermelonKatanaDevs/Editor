@@ -139,6 +139,15 @@
       const result=await requireGitHub().commitAndPush({owner:String(args.owner||''),repo:String(args.repo||''),branch:String(args.branch||'main'),message:String(args.message||''),fs:state.fs});
       return {changed:!!result.changed,commitSha:result.commitSha,changes:(result.changes||[]).map(x=>({path:x.path,type:x.type}))};
     }});
+    add({name:'github_delete_file', permission:'githubWrite', description:'Delete a file from a GitHub repository. This changes the remote repository.', parameters:{type:'object',required:['owner','repo','path','message'],properties:{owner:{type:'string'},repo:{type:'string'},path:{type:'string'},message:{type:'string'},sha:{type:'string',description:'The current blob SHA. If omitted, the tool reads the file first.'}},additionalProperties:false}, execute:async args => {
+      const service=requireGitHub();
+      const owner=String(args.owner||''), repoName=String(args.repo||''), path=String(args.path||'').replace(/^\\/+/, '');
+      let sha=String(args.sha||'');
+      if(!sha){ const current=await service.request('/repos/'+encodeURIComponent(owner)+'/'+encodeURIComponent(repoName)+'/contents/'+path.split('/').map(encodeURIComponent).join('/')); sha=String(current?.sha||''); }
+      if(!sha) throw new Error('A current file SHA is required to delete a GitHub file.');
+      const result=await service.request('/repos/'+encodeURIComponent(owner)+'/'+encodeURIComponent(repoName)+'/contents/'+path.split('/').map(encodeURIComponent).join('/'),{method:'DELETE',body:JSON.stringify({message:String(args.message||''),sha})});
+      return {deleted:true,path,commitSha:result?.commit?.sha||null};
+    }});
     return {map:tools, list:()=>[...tools.values()]};
   }
   root.makeAITools = makeTools;
