@@ -327,19 +327,26 @@
       const tree = await request(`${repoPath}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`);
       return {commitSha, treeSha, tree:Array.isArray(tree?.tree) ? tree.tree : [], truncated:!!tree?.truncated};
     } catch (e) {
-      if (e?.status === 404) return {commitSha:null, treeSha:null, tree:[], empty:true};
+      // GitHub returns 404 or 409 for a repository that has no branch/commit yet.
+      if (e?.status === 404 || e?.status === 409) return {commitSha:null, treeSha:null, tree:[], empty:true};
       throw e;
     }
   }
   async function listCommits(owner, repo, branch, count = 20) {
-    const items = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits?sha=${encodeURIComponent(branch || 'main')}&per_page=${Math.min(100, Math.max(1, count))}`);
-    return Array.isArray(items) ? items.map(item => ({
+    try {
+      const items = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits?sha=${encodeURIComponent(branch || 'main')}&per_page=${Math.min(100, Math.max(1, count))}`);
+      return Array.isArray(items) ? items.map(item => ({
       sha: item.sha,
       message: String(item.commit?.message || '').split(/\r?\n/, 1)[0],
       author: item.author?.login || item.commit?.author?.name || 'Unknown',
       date: item.commit?.author?.date || item.commit?.committer?.date || '',
       url: item.html_url || ''
-    })) : [];
+      })) : [];
+    } catch (e) {
+      // An empty GitHub repository has no commit history yet; GitHub reports this as 409.
+      if (e?.status === 404 || e?.status === 409) return [];
+      throw e;
+    }
   }
   async function getCommitState(owner, repo, commitSha) {
     const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
