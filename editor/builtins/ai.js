@@ -337,7 +337,7 @@
     let loadedProjectId=null;
     let agentMode=false, busy=false, controller=null, editingIndex=-1;
     const toolset=aiRoot.makeAITools({state,openFile:onOpen,onRefresh:()=>{state.fileManager?.refresh?.();updateStatus?.();},runConfigured,ensureNodeRuntime:()=>state.ensureNodeRuntime?.()});
-    const agent=new aiRoot.AIAgent({client:new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork),tools:toolset,permissions,requestPermission:permissionPrompt,emit:()=>{}});
+    const agent=new aiRoot.AIAgent({client:new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork),tools:toolset,permissions,requestPermission:permissionPrompt,extensionAPI:window.EditorExtensionAPI,emit:()=>{}});
     function syncChats() {
       const pid=state.projectId || 'global';
       if (loadedProjectId===pid && currentChatId) return;
