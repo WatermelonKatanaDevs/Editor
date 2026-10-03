@@ -273,12 +273,20 @@
         icon.className = 'tab-icon';
         if (t.icon) {
           try {
-            const raw = String(t.icon).replace(/^\s*<\?xml[^>]*>\s*/i, '').trim();
+            const raw = String(t.icon).trim();
             const tpl = document.createElement('template');
             tpl.innerHTML = raw;
+            const img = tpl.content.querySelector('img');
             const svg = tpl.content.querySelector('svg');
-            if (svg) icon.appendChild(svg.cloneNode(true)); else icon.textContent = '';
-          } catch (_) {
+            if (img) {
+              img.style.width = '100%';
+              img.style.height = '100%';
+              img.style.objectFit = 'contain';
+              icon.appendChild(img.cloneNode(true));
+            } else if (svg) {
+              icon.appendChild(svg.cloneNode(true));
+            }
+          } catch(e) {
             icon.textContent = '';
           }
         }
