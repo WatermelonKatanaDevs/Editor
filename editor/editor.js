@@ -1243,7 +1243,46 @@ window.__editorInitPromise = (async function () {
   function installExtensionAPI() {
     if (window.EditorExtensionAPI?.__nodeEditorAPI) return window.EditorExtensionAPI;
     const extensions = new Map();
+    const aiTools = new Map();
+    const aiHooks = new Map();
     const listeners = new Set();
+    const normalizeTool = (tool, extensionId) => {
+      if (!tool || typeof tool !== 'object') throw new TypeError('AI tool must be an object.');
+      const name = String(tool.name || '').trim();
+      if (!name) throw new Error('AI tool name is required.');
+      if (typeof tool.execute !== 'function') throw new Error(`AI tool ${name} must define execute(args).`);
+      return {
+        name,
+        description: String(tool.description || `AI tool provided by ${extensionId}`),
+        parameters: tool.parameters || {type:'object',properties:{}},
+        permission: String(tool.permission || 'extensionActions'),
+        execute: tool.execute
+      };
+    };
+    const addExtensionAITools = (extensionId, tools) => {
+      for (const tool of Array.isArray(tools) ? tools : []) {
+        const clean = normalizeTool(tool, extensionId);
+        aiTools.set(clean.name, {...clean, extensionId});
+      }
+    };
+    const removeExtensionAITools = extensionId => {
+      for (const [name, tool] of aiTools) if (tool.extensionId === extensionId) aiTools.delete(name);
+    };
+    const addExtensionAIHooks = (extensionId, hooks) => {
+      if (!hooks || typeof hooks !== 'object') return;
+      for (const [name, hook] of Object.entries(hooks)) {
+        if (typeof hook !== 'function') continue;
+        const list = aiHooks.get(name) || [];
+        list.push({extensionId, hook});
+        aiHooks.set(name, list);
+      }
+    };
+    const removeExtensionAIHooks = extensionId => {
+      for (const [name, list] of aiHooks) {
+        const next = list.filter(x => x.extensionId !== extensionId);
+        if (next.length) aiHooks.set(name, next); else aiHooks.delete(name);
+      }
+    };
     const notify = () => {
       listeners.forEach(fn => { try { fn(api.list()); } catch (_) {} });
       try {
@@ -1259,35 +1298,55 @@ window.__editorInitPromise = (async function () {
         if (!extension || typeof extension !== 'object') throw new TypeError('Extension must be an object.');
         const id = String(extension.id || '').trim();
         if (!id) throw new Error('Extension id is required.');
+        removeExtensionAITools(id);
+        removeExtensionAIHooks(id);
+        const ai = extension.ai && typeof extension.ai === 'object' ? extension.ai : {};
         const entry = {
           id,
           name: String(extension.name || id),
           description: String(extension.description || ''),
           icon: String(extension.icon || ''),
-          open: typeof extension.open === 'function' ? extension.open : null
+          open: typeof extension.open === 'function' ? extension.open : null,
+          ai: {tools:Array.isArray(extension.aiTools) ? extension.aiTools : (Array.isArray(ai.tools) ? ai.tools : []), hooks:ai.hooks || extension.aiHooks || {}}
         };
         extensions.set(id, entry);
+        addExtensionAITools(id, entry.ai.tools);
+        addExtensionAIHooks(id, entry.ai.hooks);
         notify();
         return api.createHandle(id);
       },
       unregister(id) {
-        const removed = extensions.delete(String(id));
+        const key = String(id);
+        removeExtensionAITools(key);
+        removeExtensionAIHooks(key);
+        const removed = extensions.delete(key);
         if (removed) notify();
         return removed;
       },
       list() {
-        return [...extensions.values()].map(x => ({...x}));
+        return [...extensions.values()].map(x => ({id:x.id,name:x.name,description:x.description,icon:x.icon,ai:{tools:x.ai.tools.map(t=>({name:t.name,description:t.description,parameters:t.parameters,permission:t.permission})),hooks:Object.keys(x.ai.hooks || {})}}));
       },
       get(id) {
         const x = extensions.get(String(id));
-        return x ? {...x} : null;
+        if (!x) return null;
+        return {id:x.id,name:x.name,description:x.description,icon:x.icon,open:x.open,ai:{tools:x.ai.tools.map(t=>({...t})),hooks:{...x.ai.hooks}}};
       },
-      open(id) {
-        const ext = extensions.get(String(id));
-        if (!ext) return null;
-        if (ext.open) return ext.open({state, api});
-        return null;
+      getAITools() { return [...aiTools.values()].map(x => ({...x})); },
+      getAIHooks(name) { return name ? [...(aiHooks.get(String(name)) || [])] : Object.fromEntries([...aiHooks].map(([k,v]) => [k,[...v]])); },
+      async runAIHook(name, payload) {
+        const hooks = aiHooks.get(String(name)) || [];
+        let value = payload;
+        for (const entry of hooks) value = await entry.hook(value, {state,api,extensionId:entry.extensionId});
+        return value;
       },
+      registerAITool(extensionId, tool) {
+        const id = String(extensionId || '').trim();
+        const clean = normalizeTool(tool, id || 'extension');
+        clean.extensionId = id || null;
+        aiTools.set(clean.name, clean);
+        return clean.name;
+      },
+      unregisterAITool(name) { return aiTools.delete(String(name)); },
       onChange(fn) {
         if (typeof fn !== 'function') return () => {};
         listeners.add(fn);
@@ -1300,8 +1359,19 @@ window.__editorInitPromise = (async function () {
           update(patch = {}) {
             const ext = extensions.get(key);
             if (!ext) return false;
+            removeExtensionAITools(key);
+            removeExtensionAIHooks(key);
             for (const k of ['name','description','icon']) if (patch[k] != null) ext[k] = String(patch[k]);
             if (typeof patch.open === 'function') ext.open = patch.open;
+            if (patch.ai || patch.aiTools || patch.aiHooks) {
+              const ai = patch.ai && typeof patch.ai === 'object' ? patch.ai : {};
+              ext.ai = {
+                tools:Array.isArray(patch.aiTools) ? patch.aiTools : (Array.isArray(ai.tools) ? ai.tools : ext.ai.tools || []),
+                hooks:ai.hooks || patch.aiHooks || ext.ai.hooks || {}
+              };
+            }
+            addExtensionAITools(key, ext.ai.tools);
+            addExtensionAIHooks(key, ext.ai.hooks);
             notify();
             return true;
           },
