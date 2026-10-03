@@ -57,7 +57,7 @@ window.__editorInitPromise = (async function () {
     peerServers: new Map(),
     peerRuntimeEndpoint: null,
     peerSettings: {layer: '', pagePath: '/'},
-    deploymentSettings: {url: '', usePeerServer: false, branch: '', commit: ''},
+    deploymentSettings: {mode: 'editor', url: '', usePeerServer: false, branch: '', commit: '', externalUrl: '', externalMode: 'iframe', hookUrl: ''},
     ai: null,
     environment: {},
     browserSettings: {
@@ -454,10 +454,14 @@ window.__editorInitPromise = (async function () {
       pagePath: normalizePeerPagePath(meta?.pagePath)
     };
     state.deploymentSettings = {
+      mode: String(meta?.deployment?.mode || 'editor').trim() === 'third-party' ? 'third-party' : 'editor',
       url: String(meta?.deployment?.url || '').trim(),
       usePeerServer: !!meta?.deployment?.usePeerServer,
       branch: String(meta?.deployment?.branch || state.gitRemote?.branch || '').trim(),
-      commit: String(meta?.deployment?.commit || '').trim()
+      commit: String(meta?.deployment?.commit || '').trim(),
+      externalUrl: String(meta?.deployment?.externalUrl || '').trim(),
+      externalMode: String(meta?.deployment?.externalMode || 'iframe').trim() === 'emulate' ? 'emulate' : 'iframe',
+      hookUrl: String(meta?.deployment?.hookUrl || '').trim()
     };
     if (!state.projectId) state.projectId = makeProjectId();
     return meta;
@@ -470,10 +474,14 @@ window.__editorInitPromise = (async function () {
     state.peerSettings.pagePath = normalizePeerPagePath(state.peerSettings.pagePath);
     state.fs.mkdirSync?.(EDITOR_DIR);
     const deployment = {
+      mode: state.deploymentSettings?.mode === 'third-party' ? 'third-party' : 'editor',
       url: String(state.deploymentSettings?.url || '').trim(),
       usePeerServer: !!state.deploymentSettings?.usePeerServer,
       branch: String(state.deploymentSettings?.branch || '').trim(),
       commit: String(state.deploymentSettings?.commit || '').trim(),
+      externalUrl: String(state.deploymentSettings?.externalUrl || '').trim(),
+      externalMode: state.deploymentSettings?.externalMode === 'emulate' ? 'emulate' : 'iframe',
+      hookUrl: String(state.deploymentSettings?.hookUrl || '').trim(),
       peerLayer: String(state.peerSettings?.layer || '').trim()
     };
     state.fs.writeFileSync(EDITOR_PROJECT_PATH, JSON.stringify({
@@ -784,7 +792,6 @@ window.__editorInitPromise = (async function () {
       requestAnimationFrame(() => modal.classList.add('show'));
     });
   }
-  window.confirmWorkspaceSwitch = confirmWorkspaceSwitch;
   function renameProject() {
     const el = $('projectName');
     if (!el || el.tagName === 'INPUT') return;
@@ -1647,7 +1654,7 @@ window.__editorInitPromise = (async function () {
     state.saveProjectPermission = 'denied';
     state.projectId = options.projectId || null;
     state.gitRemote = options.gitRemote || null;
-    state.deploymentSettings = {url:'', usePeerServer:false, branch:String(state.gitRemote?.branch || '').trim(), commit:''};
+    state.deploymentSettings = {mode:'editor', url:'', usePeerServer:false, branch:String(state.gitRemote?.branch || '').trim(), commit:'', externalUrl:'', externalMode:'iframe', hookUrl:''};
     state.projectTemplate = !!options.isTemplate;
     state.projectName = name || 'Workspace';
     state.projectKey = state.projectName;

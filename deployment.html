@@ -149,29 +149,175 @@ window.__deploymentNetworkReady = (async function() {
     const branchOverride = params.has('branch') ? String(params.get('branch') || '').trim() : null;
     const commitOverride = params.has('commit') ? String(params.get('commit') || '').trim() : null;
     const urlOverride = params.has('url') ? String(params.get('url') || '').trim() : null;
-    const peerOverride = params.has('peerServer') ? (params.get('peerServer') === '1' || params.get('peerServer') === 'true' || params.get('peerServer') === '') : (params.has('usePeerNetwork') ? (params.get('usePeerNetwork') === '1' || params.get('usePeerNetwork') === 'true' || params.get('usePeerNetwork') === '') : null);
-    let resolvedRef = commitOverride !== null ? (commitOverride && commitOverride !== 'latest' ? commitOverride : (branchOverride || repository.defaultBranch)) : (branchOverride || repository.defaultBranch);
-    status.textContent = 'Downloading deployment revision…';
-    let blob = await loadArchive(repo.owner, repo.repo, resolvedRef);
-    let file = await flattenZip(new File([blob], repo.repo + '.zip', {type:'application/zip'}));
-    let fs = await FileSystem.create(file, {sync:false});
-    let deploymentConfig = readJSON(fs, '/.editor/deployment.json');
-    if (commitOverride === null && branchOverride === null) {
+    const modeOverride = params.has('deploymentMode') ? String(params.get('deploymentMode') || '').trim() : null;
+    const externalUrlOverride = params.has('externalUrl') ? String(params.get('externalUrl') || '').trim() : null;
+    const externalModeOverride = params.has('externalMode') ? String(params.get('externalMode') || '').trim() : null;
+    const peerOverride = params.has('peerServer')
+      ? (params.get('peerServer') === '1' || params.get('peerServer') === 'true' || params.get('peerServer') === '')
+      : (params.has('usePeerNetwork') ? (params.get('usePeerNetwork') === '1' || params.get('usePeerNetwork') === 'true' || params.get('usePeerNetwork') === '') : null);
+
+    let resolvedRef = commitOverride !== null
+      ? (commitOverride && commitOverride !== 'latest' ? commitOverride : (branchOverride || repository.defaultBranch))
+      : (branchOverride || repository.defaultBranch);
+
+    async function loadRevision(ref) {
+      status.textContent = 'Downloading deployment revision…';
+      let blob = await loadArchive(repo.owner, repo.repo, ref);
+      let file = await flattenZip(new File([blob], repo.repo + '.zip', {type:'application/zip'}));
+      let fs = await FileSystem.create(file, {sync:false});
+      return {blob,file,fs};
+    }
+
+    let revision = await loadRevision(resolvedRef);
+    let fs = revision.fs;
+    let hasDeploymentConfig = false;
+    try { hasDeploymentConfig = !!fs.existsSync('/.editor/deployment.json'); } catch (_) {}
+    let deploymentConfig = hasDeploymentConfig ? readJSON(fs, '/.editor/deployment.json') : {};
+
+    if (commitOverride === null && branchOverride === null && hasDeploymentConfig) {
       const savedBranch = String(deploymentConfig.branch || '').trim();
       const savedCommit = String(deploymentConfig.commit || '').trim();
       const savedRef = savedCommit || savedBranch || repository.defaultBranch;
       if (savedRef && savedRef !== resolvedRef) {
         status.textContent = 'Loading saved deployment revision…';
         resolvedRef = savedRef;
-        blob = await loadArchive(repo.owner, repo.repo, resolvedRef);
-        file = await flattenZip(new File([blob], repo.repo + '.zip', {type:'application/zip'}));
-        fs = await FileSystem.create(file, {sync:false});
-        deploymentConfig = readJSON(fs, '/.editor/deployment.json');
+        revision = await loadRevision(resolvedRef);
+        fs = revision.fs;
+        try { hasDeploymentConfig = !!fs.existsSync('/.editor/deployment.json'); } catch (_) { hasDeploymentConfig = false; }
+        deploymentConfig = hasDeploymentConfig ? readJSON(fs, '/.editor/deployment.json') : {};
       }
     }
-    const runConfig = readJSON(fs, '.editor/config.json');
-    const projectMeta = readJSON(fs, '.editor/project.json');
+
+    const projectMeta = readJSON(fs, '/.editor/project.json');
+    const runConfigFromProject = readJSON(fs, '/.editor/config.json');
+    const inferredRunConfig = {
+      serverType: 'static',
+      domain: 'http://localhost:3000/',
+      path: '/',
+      rootfolder: '/',
+      runfile: '/index.html',
+      cwd: '/',
+      nodeCommand: ''
+    };
+    const runConfig = hasDeploymentConfig ? {...inferredRunConfig, ...runConfigFromProject} : inferredRunConfig;
+
+    // A project without deployment.json is intentionally treated as a static deployment.
+    // It must have a root index.html; otherwise there is no unambiguous deployment entry.
+    if (!hasDeploymentConfig) {
+      let hasIndex = false;
+      try { hasIndex = !!fs.existsSync('/index.html'); } catch (_) {}
+      if (!hasIndex) {
+        status.textContent = 'Please configure deployment in editor';
+        status.className = 'error';
+        return;
+      }
+    }
+
+    const savedMode = deploymentConfig.mode || projectMeta?.deployment?.mode ||
+      ((deploymentConfig.externalUrl || projectMeta?.deployment?.externalUrl) ? 'third-party' : 'editor');
+    const deploymentMode = modeOverride === 'third-party' || modeOverride === 'editor'
+      ? modeOverride
+      : (savedMode === 'third-party' ? 'third-party' : 'editor');
+    const externalUrl = externalUrlOverride !== null
+      ? externalUrlOverride
+      : String(deploymentConfig.externalUrl || projectMeta?.deployment?.externalUrl || '').trim();
+    const externalMode = externalModeOverride === 'emulate' || String(deploymentConfig.externalMode || projectMeta?.deployment?.externalMode || '') === 'emulate'
+      ? 'emulate'
+      : 'iframe';
     const type = runConfig.serverType === 'node' ? 'node' : 'static';
+
+    // Third-party deployments have their own target URL and do not use the editor runtime.
+    // If the URL is missing, fall through to the normal editor deployment using the rest of the settings.
+    if (deploymentMode === 'third-party' && externalUrl) {
+      const targetUrl = new URL(externalUrl);
+      const domain = targetUrl.origin;
+      const pageURL = targetUrl.href;
+
+      function canonicalizeThirdParty() {
+        try {
+          const canonical = new URL(location.href);
+          canonical.searchParams.delete('githubUrl');
+          canonical.searchParams.delete('sha');
+          canonical.searchParams.set('github', githubURL);
+          canonical.searchParams.set('commit', resolvedRef);
+          if (branchOverride !== null) canonical.searchParams.set('branch', branchOverride); else canonical.searchParams.delete('branch');
+          canonical.searchParams.delete('path');
+          canonical.searchParams.delete('url');
+          canonical.searchParams.set('deploymentMode', 'third-party');
+          canonical.searchParams.set('externalUrl', pageURL);
+          canonical.searchParams.set('externalMode', externalMode);
+          canonical.searchParams.delete('peerServer');
+          canonical.searchParams.delete('usePeerNetwork');
+          history.replaceState({}, document.title, canonical.pathname + canonical.search + canonical.hash);
+        } catch (_) {}
+      }
+
+      if (externalMode === 'iframe') {
+        stage.innerHTML = '';
+        const iframe = document.createElement('iframe');
+        iframe.src = pageURL;
+        iframe.setAttribute('allow', 'fullscreen; clipboard-read; clipboard-write');
+        stage.appendChild(iframe);
+        stage.classList.add('ready');
+        canonicalizeThirdParty();
+        status.remove();
+        return;
+      }
+
+      // Third-party emulation uses the existing browser-network + PageEmulator stack.
+      const iframe = document.createElement('iframe');
+      stage.appendChild(iframe);
+      stage.classList.add('ready');
+      const page = new PageEmulator(iframe, {network, location:{url:pageURL,origin:domain}, history:[]});
+      let externalRuntimeReady = false;
+      function forwardConsole(method, args) {
+        const target = method === 'logText' ? console.log : console[method];
+        if (typeof target !== 'function') return;
+        try { target.apply(console, Array.isArray(args) ? args : [args]); } catch (_) {}
+      }
+      function forwardError(error, location) {
+        const message = error?.message || String(error);
+        const stack = error?.error?.stack || error?.stack || '';
+        const suffix = location ? ` (${location})` : '';
+        try { console.error(`Uncaught Error${suffix}: ${message}`, stack); } catch (_) {}
+      }
+      async function getExternalDocumentContent(response, url) {
+        const contentType = String(response.headers.get('content-type') || 'text/html').toLowerCase();
+        if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml') || contentType.includes('application/xml') || contentType.includes('text/xml')) return await response.clone().text();
+        return await response.clone().text();
+      }
+      function installExternalInterceptors(currentPage) {
+        currentPage.interceptEvent('console', (method,args)=>forwardConsole(method,args));
+        currentPage.interceptEvent('error', (error,location)=>forwardError(error,location));
+        currentPage.interceptEvent('iframe-create', obj => {
+          if (!obj?.iframe) return null;
+          if (obj.iframe.pageEmulator) return obj.iframe.pageEmulator;
+          const child = new PageEmulator(obj.iframe,{network,location:{url:'about:blank',origin:currentPage.location?.origin || domain},history:[]});
+          obj.iframe.pageEmulator=child; currentPage.addChild?.(child); installExternalInterceptors(child); child.setLocation('about:blank',currentPage.location?.origin || domain); return child;
+        });
+        currentPage.interceptEvent('iframe-navigate', async obj => {
+          const frame=obj?.iframe; if(!frame) return;
+          const child=frame.pageEmulator; if(!child || !obj.src) return;
+          let target; try { target=new URL(obj.src,currentPage.location?.url || domain+'/'); } catch(_) { return; }
+          child.setLocation(target.href,target.origin);
+          const res=await child.network.request(target.href,target.origin,{},'iframe');
+          if(!res?.ok) return;
+          const html=await getExternalDocumentContent(res,target.href);
+          child.rawDocument=String(html||'');
+          await child.setDocument(html,true,target.href);
+        });
+      }
+      installExternalInterceptors(page);
+      const response = await network.request(pageURL, domain, {}, 'third-party-deployment');
+      if (!response?.ok) throw new Error(`Third-party deployment failed to load (${response?.status || 'no response'}).`);
+      const html = await getExternalDocumentContent(response,pageURL);
+      await page.setDocument(html,true,pageURL);
+      externalRuntimeReady = true;
+      canonicalizeThirdParty();
+      status.remove();
+      return;
+    }
+
     const savedUrl = String(deploymentConfig.url || projectMeta?.deployment?.url || '').trim();
     const target = urlOverride || savedUrl || (() => {
       const domain = String(runConfig.domain || 'http://localhost:3000').replace(/\/+$/,'');
@@ -230,20 +376,20 @@ window.__deploymentNetworkReady = (async function() {
       current.searchParams.delete('sha');
       current.searchParams.set('github', githubURL);
       current.searchParams.set('commit', resolvedRef);
-      if (branchOverride !== null) current.searchParams.set('branch', branchOverride);
-      else current.searchParams.delete('branch');
+      if (branchOverride !== null) current.searchParams.set('branch', branchOverride); else current.searchParams.delete('branch');
       current.searchParams.delete('path');
+      current.searchParams.delete('deploymentMode');
+      current.searchParams.delete('externalUrl');
+      current.searchParams.delete('externalMode');
       current.searchParams.set('url', resolved.origin + resolved.pathname + resolved.search + resolved.hash);
-      if (usePeerServer) current.searchParams.set('peerServer','1');
-      else current.searchParams.delete('peerServer');
+      if (usePeerServer) current.searchParams.set('peerServer','1'); else current.searchParams.delete('peerServer');
       current.searchParams.delete('usePeerNetwork');
       return current.href;
     }
     function navigateReal(target, replace = false) {
       const resolved = new URL(target, page.location.url);
       if (resolved.origin !== domain) {
-        if (replace) location.replace(resolved.href);
-        else location.assign(resolved.href);
+        if (replace) location.replace(resolved.href); else location.assign(resolved.href);
         return true;
       }
       const href = deploymentURL(resolved.href);
@@ -252,20 +398,13 @@ window.__deploymentNetworkReady = (async function() {
     }
     async function getDocumentContent(response, url, origin, page) {
       const contentType = String(response.headers.get('content-type') || 'text/html').toLowerCase();
-      if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml') || contentType.includes('application/xml') || contentType.includes('text/xml')) {
-        return await response.clone().text();
-      }
+      if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml') || contentType.includes('application/xml') || contentType.includes('text/xml')) return await response.clone().text();
       if (contentType.includes('image/') || contentType.includes('audio/') || contentType.includes('video/')) {
         const blob = await response.clone().blob();
-        const dataUrl = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = () => reject(reader.error || new Error('Failed to create data URL.'));
-          reader.readAsDataURL(blob);
-        });
-        if (contentType.includes('image/')) return `<html><body style=\"margin:0;background:#1e1e1e;display:flex;align-items:center;justify-content:center;height:100vh\"><img src=\"${dataUrl}\" style=\"max-width:100%;max-height:100%;object-fit:contain\"></body></html>`;
-        if (contentType.includes('audio/')) return `<html><body style=\"margin:0;background:#1e1e1e;display:flex;align-items:center;justify-content:center;height:100vh\"><audio controls src=\"${dataUrl}\"></audio></body></html>`;
-        return `<html><body style=\"margin:0;background:#1e1e1e;display:flex;align-items:center;justify-content:center;height:100vh\"><video controls autoplay src=\"${dataUrl}\" style=\"max-width:100%;max-height:100%\"></video></body></html>`;
+        const dataUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload=()=>resolve(reader.result); reader.onerror=()=>reject(reader.error||new Error('Failed to create data URL.')); reader.readAsDataURL(blob); });
+        if (contentType.includes('image/')) return `<html><body style="margin:0;background:#1e1e1e;display:flex;align-items:center;justify-content:center;height:100vh"><img src="${dataUrl}" style="max-width:100%;max-height:100%;object-fit:contain"></body></html>`;
+        if (contentType.includes('audio/')) return `<html><body style="margin:0;background:#1e1e1e;display:flex;align-items:center;justify-content:center;height:100vh"><audio controls src="${dataUrl}"></audio></body></html>`;
+        return `<html><body style="margin:0;background:#1e1e1e;display:flex;align-items:center;justify-content:center;height:100vh"><video controls autoplay src="${dataUrl}" style="max-width:100%;max-height:100%"></video></body></html>`;
       }
       return await response.clone().text();
     }
@@ -277,147 +416,51 @@ window.__deploymentNetworkReady = (async function() {
         if (!obj?.iframe) return null;
         if (obj.iframe.pageEmulator) return obj.iframe.pageEmulator;
         const child = new PageEmulator(obj.iframe, {network, location:{url:'about:blank',origin:page.location?.origin || domain}, history:[]});
-        obj.iframe.pageEmulator = child;
-        page.addChild?.(child);
-        installDeploymentInterceptors(child, page);
-        child.setLocation('about:blank', page.location?.origin || domain);
-        return child;
+        obj.iframe.pageEmulator = child; page.addChild?.(child); installDeploymentInterceptors(child, page); child.setLocation('about:blank', page.location?.origin || domain); return child;
       });
       page.interceptEvent('iframe-navigate', async function(obj) {
-        const frame = obj?.iframe;
-        if (!frame) return;
-        const child = frame.pageEmulator;
-        if (!child) return;
+        const frame = obj?.iframe; if (!frame) return;
+        const child = frame.pageEmulator; if (!child) return;
         const navigationId = obj.navigationId;
         if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
-        if (obj.is_doc) {
-          child.setLocation('about:srcdoc', page.location?.origin || domain);
-          child.rawDocument = String(obj.srcdoc || '');
-          if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
-          await child.setDocument(obj.srcdoc || '');
-          return;
-        }
+        if (obj.is_doc) { child.setLocation('about:srcdoc', page.location?.origin || domain); child.rawDocument=String(obj.srcdoc||''); if(navigationId!==undefined && frame.__iframeNavigationId!==navigationId)return; await child.setDocument(obj.srcdoc||''); return; }
         if (!obj.src) return;
-        let targetUrl;
-        try { targetUrl = new URL(obj.src, page.location?.url || domain + '/'); } catch (_) { return; }
+        let targetUrl; try { targetUrl = new URL(obj.src, page.location?.url || domain + '/'); } catch (_) { return; }
         child.setLocation(targetUrl.href, targetUrl.origin);
         const res = await child.network.request(targetUrl.href, targetUrl.origin, {}, 'iframe');
         if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
         if (!res || !res.ok) return;
         const rawHtml = await window.getDocumentContent(res, targetUrl.href, targetUrl.origin, obj);
         if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
-        child.rawDocument = String(rawHtml || '');
-        await child.setDocument(rawHtml);
+        child.rawDocument=String(rawHtml||''); await child.setDocument(rawHtml,true,targetUrl.href);
       });
       page.interceptEvent('embed-create', function(obj) {
         if (!obj?.embed) return null;
-        const embed = obj.embed;
+        const embed=obj.embed;
         if (embed.__embedFrame?.pageEmulator) return embed.__embedFrame.pageEmulator;
-        const ownerDocument = embed.ownerDocument || document;
-        const ownerWindow = ownerDocument.defaultView || window;
-        const frame = ownerDocument.createElement('iframe');
-        frame.setAttribute('data-embed-frame','1');
-        frame.setAttribute('frameborder','0');
-        frame.style.position = 'fixed';
-        frame.style.border = '0';
-        frame.style.margin = '0';
-        frame.style.padding = '0';
-        frame.style.background = 'transparent';
-        frame.style.zIndex = '2147483646';
-        frame.style.display = 'block';
-        ownerDocument.body?.appendChild(frame);
-        embed.style.opacity = '0';
-        embed.style.pointerEvents = 'none';
-        embed.__embedFrame = frame;
-        function syncBounds() {
-          if (!embed.isConnected || !frame.isConnected) return;
-          const r = embed.getBoundingClientRect();
-          const style = ownerWindow.getComputedStyle ? ownerWindow.getComputedStyle(embed) : null;
-          const visible = !style || (style.visibility !== 'hidden' && style.visibility !== 'collapse' && style.display !== 'none');
-          frame.style.left = r.left + 'px'; frame.style.top = r.top + 'px';
-          frame.style.width = Math.max(0, r.width) + 'px'; frame.style.height = Math.max(0, r.height) + 'px';
-          frame.style.visibility = visible ? 'visible' : 'hidden';
-          frame.style.opacity = visible ? '1' : '0';
-          frame.style.pointerEvents = visible ? 'auto' : 'none';
-        }
-        embed.__syncEmbedBounds = syncBounds;
-        ownerWindow.addEventListener('resize', syncBounds);
-        ownerWindow.addEventListener('scroll', syncBounds, true);
-        const observer = ownerWindow.MutationObserver ? new ownerWindow.MutationObserver(syncBounds) : null;
-        if (observer) observer.observe(embed, {attributes:true, attributeFilter:['style','class','hidden']});
-        syncBounds();
-        const child = new PageEmulator(frame, {network, location:{url:'about:blank',origin:page.location?.origin || domain}, history:[]});
-        frame.pageEmulator = child;
-        page.addChild?.(child);
-        installDeploymentInterceptors(child, page);
-        return child;
+        const ownerDocument=embed.ownerDocument||document; const ownerWindow=ownerDocument.defaultView||window; const frame=ownerDocument.createElement('iframe');
+        frame.setAttribute('data-embed-frame','1'); frame.setAttribute('frameborder','0'); frame.style.position='fixed'; frame.style.border='0'; frame.style.margin='0'; frame.style.padding='0'; frame.style.background='transparent'; frame.style.zIndex='2147483646'; frame.style.display='block'; ownerDocument.body?.appendChild(frame);
+        embed.style.opacity='0'; embed.style.pointerEvents='none'; embed.__embedFrame=frame;
+        function syncBounds(){ if(!embed.isConnected||!frame.isConnected)return; const r=embed.getBoundingClientRect(); const style=ownerWindow.getComputedStyle?ownerWindow.getComputedStyle(embed):null; const visible=!style||(style.visibility!=='hidden'&&style.visibility!=='collapse'&&style.display!=='none'); frame.style.left=r.left+'px'; frame.style.top=r.top+'px'; frame.style.width=Math.max(0,r.width)+'px'; frame.style.height=Math.max(0,r.height)+'px'; frame.style.visibility=visible?'visible':'hidden'; frame.style.opacity=visible?'1':'0'; frame.style.pointerEvents=visible?'auto':'none'; }
+        embed.__syncEmbedBounds=syncBounds; ownerWindow.addEventListener('resize',syncBounds); ownerWindow.addEventListener('scroll',syncBounds,true); const observer=ownerWindow.MutationObserver?new ownerWindow.MutationObserver(syncBounds):null; if(observer)observer.observe(embed,{attributes:true,attributeFilter:['style','class','hidden']}); syncBounds();
+        const child=new PageEmulator(frame,{network,location:{url:'about:blank',origin:page.location?.origin||domain},history:[]}); frame.pageEmulator=child; page.addChild?.(child); installDeploymentInterceptors(child,page); return child;
       });
-      page.interceptEvent('embed-navigate', async function(obj) {
-        const embed = obj?.embed;
-        if (!embed?.__embedFrame) return;
-        const frame = embed.__embedFrame;
-        const child = frame.pageEmulator;
-        if (!child || !obj.src) return;
-        const navigationId = obj.navigationId;
-        if (navigationId !== undefined && embed.__embedNavigationId !== navigationId) return;
-        let targetUrl;
-        try { targetUrl = new URL(obj.src, page.location?.url || domain + '/'); } catch (_) { return; }
-        child.setLocation(targetUrl.href, targetUrl.origin);
-        const res = await child.network.request(targetUrl.href, targetUrl.origin, {}, 'embed');
-        if (navigationId !== undefined && embed.__embedNavigationId !== navigationId) return;
-        if (!res || !res.ok) return;
-        const rawHtml = await window.getDocumentContent(res, targetUrl.href, targetUrl.origin, obj);
-        if (navigationId !== undefined && embed.__embedNavigationId !== navigationId) return;
-        child.rawDocument = String(rawHtml || '');
-        await child.setDocument(rawHtml, true, targetUrl.href);
-        embed.__syncEmbedBounds?.();
+      page.interceptEvent('embed-navigate', async function(obj){
+        const embed=obj?.embed; if(!embed?.__embedFrame)return; const frame=embed.__embedFrame; const child=frame.pageEmulator; if(!child||!obj.src)return; const navigationId=obj.navigationId; if(navigationId!==undefined&&embed.__embedNavigationId!==navigationId)return;
+        let targetUrl; try{targetUrl=new URL(obj.src,page.location?.url||domain+'/');}catch(_){return;} child.setLocation(targetUrl.href,targetUrl.origin); const res=await child.network.request(targetUrl.href,targetUrl.origin,{},'embed'); if(navigationId!==undefined&&embed.__embedNavigationId!==navigationId)return; if(!res||!res.ok)return; const rawHtml=await window.getDocumentContent(res,targetUrl.href,targetUrl.origin,obj); if(navigationId!==undefined&&embed.__embedNavigationId!==navigationId)return; child.rawDocument=String(rawHtml||''); await child.setDocument(rawHtml,true,targetUrl.href); embed.__syncEmbedBounds?.();
       });
     }
     installDeploymentInterceptors(page);
     page.interceptEvent('navigate', async function(url) {
-      const resolved = new URL(url, page.location.url);
-      const response = await network.request(resolved.href, resolved.origin, {}, 'navigation');
-      if (!response?.ok) {
-        navigateReal(resolved.href, false);
-        return true;
-      }
-      const rawHtml = await getDocumentContent(response, resolved.href, resolved.origin, page);
-      await page.setDocument(rawHtml, true, resolved.href);
-      page.setLocation(resolved.href, resolved.origin);
-      page.history = page.history || [];
-      page.history = page.history.slice(0, (page.historyIndex ?? page.history.length - 1) + 1);
-      page.history.push(resolved.href);
-      page.historyIndex = page.history.length - 1;
-      history.pushState({}, document.title, deploymentURL(resolved.href));
-      return true;
+      const resolved=new URL(url,page.location.url); const response=await network.request(resolved.href,resolved.origin,{},'navigation'); if(!response?.ok){navigateReal(resolved.href,false);return true;}
+      const rawHtml=await getDocumentContent(response,resolved.href,resolved.origin,page); await page.setDocument(rawHtml,true,resolved.href); page.setLocation(resolved.href,resolved.origin); page.history=page.history||[]; page.history=page.history.slice(0,(page.historyIndex??page.history.length-1)+1); page.history.push(resolved.href); page.historyIndex=page.history.length-1; history.pushState({},document.title,deploymentURL(resolved.href)); return true;
     });
-    page.interceptEvent('open', (url, activateTab) => {
-      const resolved = new URL(url, page.location.url);
-      if (resolved.origin !== domain) return window.open(resolved.href, '_blank', 'noopener');
-      const popup = window.open(deploymentURL(resolved.href), '_blank', 'noopener');
-      if (activateTab === false && popup) { try { popup.opener = null; } catch (_) {} }
-      return popup || true;
-    });
+    page.interceptEvent('open',(url,activateTab)=>{const resolved=new URL(url,page.location.url); if(resolved.origin!==domain)return window.open(resolved.href,'_blank','noopener'); const popup=window.open(deploymentURL(resolved.href),'_blank','noopener'); if(activateTab===false&&popup){try{popup.opener=null;}catch(_){}} return popup||true;});
     try {
-      const canonical = new URL(location.href);
-      canonical.searchParams.delete('githubUrl');
-      canonical.searchParams.delete('sha');
-      canonical.searchParams.set('github', githubURL);
-      canonical.searchParams.set('commit', resolvedRef);
-      if (branchOverride !== null) canonical.searchParams.set('branch', branchOverride); else canonical.searchParams.delete('branch');
-      canonical.searchParams.delete('path');
-      canonical.searchParams.set('url', pageURL);
-      if (usePeerServer) canonical.searchParams.set('peerServer','1'); else canonical.searchParams.delete('peerServer');
-      canonical.searchParams.delete('usePeerNetwork');
-      history.replaceState({}, document.title, canonical.pathname + canonical.search + canonical.hash);
+      const canonical=new URL(location.href); canonical.searchParams.delete('githubUrl'); canonical.searchParams.delete('sha'); canonical.searchParams.set('github',githubURL); canonical.searchParams.set('commit',resolvedRef); if(branchOverride!==null)canonical.searchParams.set('branch',branchOverride);else canonical.searchParams.delete('branch'); canonical.searchParams.delete('path'); canonical.searchParams.delete('deploymentMode'); canonical.searchParams.delete('externalUrl'); canonical.searchParams.delete('externalMode'); canonical.searchParams.set('url',pageURL); if(usePeerServer)canonical.searchParams.set('peerServer','1');else canonical.searchParams.delete('peerServer'); canonical.searchParams.delete('usePeerNetwork'); history.replaceState({},document.title,canonical.pathname+canonical.search+canonical.hash);
     } catch (_) {}
-    status.textContent = 'Starting project…';
-    const response = await network.request(pageURL, location.origin, {}, 'deployment');
-    if (!response?.ok) throw new Error(`Project entry page failed to load (${response?.status || 'no response'}).`);
-    const html = await response.text();
-    await page.setDocument(html, true, pageURL);
-    stage.classList.add('ready');
-    status.remove();
+    status.textContent='Starting project…';
+    const response=await network.request(pageURL,location.origin,{},'deployment'); if(!response?.ok)throw new Error(`Project entry page failed to load (${response?.status||'no response'}).`); const html=await response.text(); await page.setDocument(html,true,pageURL); stage.classList.add('ready'); status.remove();
   }
   main().catch(showError);
 })();
