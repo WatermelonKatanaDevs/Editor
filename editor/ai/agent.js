@@ -16,6 +16,14 @@
   }
   class AIAgent {
     constructor(options) { Object.assign(this,options); this.maxSteps=options.maxSteps||24; this.running=false; }
+    async runExtensionHook(name,payload) {
+      try {
+        return await this.extensionAPI?.runAIHook?.(name,payload) || payload;
+      } catch (e) {
+        this.emit?.({type:'extension_hook_error',name,error:e?.message||String(e)});
+        return payload;
+      }
+    }
     async permission(tool,args,resultPreview) {
       const name=tool.permission || 'ask'; if(name==='none')return true; const manager=this.permissions;
       const policy=manager?.get(name) || 'ask';
@@ -35,9 +43,13 @@
         if(!tool) throw new Error(`Unknown tool: ${call?.name || 'unnamed tool'}`);
         args=typeof call.arguments==='string' ? JSON.parse(call.arguments||'{}') : (call.arguments||{});
         if(!args || typeof args!=='object' || Array.isArray(args)) throw new Error('Tool arguments must be a JSON object.');
+        const before=await this.runExtensionHook?.('ai.beforeTool',{tool,args}) || {args};
+        args=before?.args && typeof before.args==='object' ? before.args : args;
         this.emit?.({type:'tool_call',name:tool.name,args});
         await this.permission(tool,args,call.preview || args);
-        const result=await tool.execute(args);
+        let result=await tool.execute(args);
+        const after=await this.runExtensionHook?.('ai.afterTool',{tool,args,result}) || {result};
+        if(after && Object.prototype.hasOwnProperty.call(after,'result')) result=after.result;
         const durationMs=Math.max(0,Math.round((performance.now?.() ?? Date.now())-started));
         this.emit?.({type:'tool_result',name:tool.name,args,result,ok:true,durationMs});
         return result;
