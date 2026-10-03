@@ -5,7 +5,7 @@
   const SYSTEM = 'You are the AI coding assistant inside a browser-based code editor. Be practical, precise, and concise. Use Markdown for explanations and fenced code blocks for code. When working on the project, inspect existing files before changing them, preserve the project\'s existing style, and verify changes by running relevant commands when available. The run_command tool uses the editor\'s virtual Node runtime, not a real operating-system shell: never prefix commands with $ and do not assume arbitrary shell features such as pipes or shell redirection are available; simple commands such as echo are supported. For project filesystem work, use the dedicated file tools.';
   const TOOL_PERMISSION_LABELS = {
     readFiles:'Read project files', searchFiles:'Search project', createFiles:'Create files', modifyFiles:'Modify files', deleteFiles:'Delete files',
-    runCommands:'Run commands', runScripts:'Run scripts', runProject:'Run project', readOutput:'Read runtime output', readEditor:'Read editor state', modifyEditor:'Modify editor', browser:'Access browser', network:'Network requests'
+    runCommands:'Run commands', runScripts:'Run scripts', runProject:'Run project', readOutput:'Read runtime output', readEditor:'Read editor state', modifyEditor:'Modify editor', browser:'Access browser', network:'Network requests', githubRead:'Read GitHub', githubWrite:'Write to GitHub', extensionActions:'Extension actions'
   };
   function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function markdown(text) {
@@ -323,7 +323,7 @@
     document.body.appendChild(modal);render();requestAnimationFrame(()=>modal.classList.add('show'));
   }
 
-  factories.ai = function(ctx) {
+  async function editorExtensionHooks(name, payload) { try { return await window.EditorExtensionAPI?.runAIHook?.(name, payload) || payload; } catch (e) { console.warn('Editor AI extension hook failed:', name, e); return payload; } }\n\n  factories.ai = function(ctx) {
     const {state, onOpen, runConfigured}=ctx;
     const updateStatus = state.updateStatus;
     let currentGroup = null, currentTab = null;
@@ -494,7 +494,7 @@
             else if(event.type==='request_start'){appendActivity(liveActivity,{kind:'request_start',text:`Requesting ${event.model} (${event.protocol})…`});}
             else if(event.type==='reasoning_summary'){appendActivity(liveActivity,{kind:'reasoning_summary',text:event.text});} else if(event.type==='reasoning'){appendActivity(liveActivity,{kind:'reasoning',text:event.text||'Model reasoning is active.'});}
           };
-          const messages=activeMessages(); const prompt=systemPrompt(true); const result=await agent.run([{role:'system',content:prompt},...messages],{systemPrompt:prompt,maxTokens:2048,retryTransport:prefs.retryTransport,maxTransportRetries:prefs.maxTransportRetries,transportRetryDelay:prefs.transportRetryDelay,onRetry:info=>agent.emit?.({type:info?.kind==='tool_parse_recovery'?'provider_retry':info?.kind==='transport_retry'?'transport_retry':'retry',...info})}); partial=result.text||partial; renderMessage(bubble,partial,code=>insertCode(code)); const activityData=liveActivity?.items||[]; chatMessages.push({role:'assistant',content:partial,activity:activityData}); if(liveActivity)liveActivity.details.open=false;
+          const messages=activeMessages(); const prompt=systemPrompt(true); const hookInput={messages:[...messages],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'}; const prepared=await editorExtensionHooks('ai.beforeRun',hookInput); const result=await agent.run([{role:'system',content:prompt},...(prepared?.messages||messages)],{systemPrompt:prompt,maxTokens:2048,retryTransport:prefs.retryTransport,maxTransportRetries:prefs.maxTransportRetries,transportRetryDelay:prefs.transportRetryDelay,onRetry:info=>agent.emit?.({type:info?.kind==='tool_parse_recovery'?'provider_retry':info?.kind==='transport_retry'?'transport_retry':'retry',...info})}); await editorExtensionHooks('ai.afterRun',{...hookInput,result}); partial=result.text||partial; renderMessage(bubble,partial,code=>insertCode(code)); const activityData=liveActivity?.items||[]; chatMessages.push({role:'assistant',content:partial,activity:activityData}); if(liveActivity)liveActivity.details.open=false;
         } else {
           const messages=[{role:'system',content:systemPrompt(false)},...activeMessages()];
           const model=agent.client.model();
