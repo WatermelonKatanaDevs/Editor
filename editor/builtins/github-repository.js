@@ -84,7 +84,7 @@
       const repositoryName = root.querySelector('[data-repository-name]');
       const renameRepository = root.querySelector('[data-rename-repository]');
       const repositoryUrl = root.querySelector('[data-repository-url]');
-      const changeRepository = root.querySelector('[data-change-repository]');
+      const changeRepositoryButton = root.querySelector('[data-change-repository]');
       const description = root.querySelector('[data-description]');
       const topics = root.querySelector('[data-topics]');
       const message = root.querySelector('[data-message]');
@@ -138,7 +138,7 @@
         }
         if (!window.confirm('Rename this GitHub repository from "' + current.repo + '" to "' + nextName + '"?')) return;
         renameRepository.disabled = true;
-        changeRepository.disabled = true;
+        changeRepositoryButton.disabled = true;
         setStatus('Renaming GitHub repository…');
         message.textContent = '';
         const oldRepositoryUrl = 'https://github.com/' + current.owner + '/' + current.repo;
@@ -177,7 +177,7 @@
           message.textContent = e?.message || String(e);
         } finally {
           renameRepository.disabled = false;
-          changeRepository.disabled = false;
+          changeRepositoryButton.disabled = false;
         }
       }
 
@@ -247,7 +247,7 @@
 
       root.querySelector('[data-reload]').onclick = load;
       renameRepository.onclick = renameRepositoryOnGitHub;
-      changeRepository.onclick = changeRepository;
+      changeRepositoryButton.onclick = changeRepository;
 
       form.onsubmit = async event => {
         event.preventDefault();
