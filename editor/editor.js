@@ -1896,7 +1896,7 @@ window.__editorInitPromise = (async function () {
     state.sidebarController?.syncSourceControlActivity?.();
     // Warm Source Control while the remote workspace finishes loading so opening
     // the sidebar does not have to wait for the repository/branch requests.
-    void state.sidebarController?.sourceControl?.preload?.();
+    if (state.gitRemote?.provider === 'github') void state.sidebarController?.sourceControl?.preload?.();
     saveProjectMetadata();
     if (!options.isTemplate) {
       const recent = recentProjects().find(x => x.id === state.projectId);
