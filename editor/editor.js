@@ -713,7 +713,14 @@ window.__editorInitPromise = (async function () {
       lastOpenedAt: extra.lastOpenedAt ?? existing.lastOpenedAt ?? 0,
       lastSavedAt: extra.lastSavedAt ?? state.lastSavedAt ?? existing.lastSavedAt ?? 0,
       lastCachedAt: extra.lastCachedAt ?? existing.lastCachedAt ?? 0,
-      unsaved: extra.unsaved ?? state.dirty ?? false
+      unsaved: extra.unsaved ?? state.dirty ?? false,
+      gitConnected: extra.gitConnected ?? (state.gitRemote?.provider === 'github') ?? existing.gitConnected ?? false,
+      gitRemote: extra.gitRemote ?? (state.gitRemote?.provider === 'github' ? {
+        provider: 'github',
+        owner: String(state.gitRemote.owner || ''),
+        repo: String(state.gitRemote.repo || ''),
+        branch: String(state.gitRemote.branch || 'main')
+      } : existing.gitRemote ?? null)
     };
     if (index < 0) list.unshift(record);
     else {
@@ -2629,7 +2636,8 @@ window.__editorInitPromise = (async function () {
   function formatRecent(record) {
     const time = record.lastOpenedAt ? new Date(record.lastOpenedAt).toLocaleDateString([], {month:'short', day:'numeric'}) : '';
     const type = record.type === 'node' ? 'Node.js' : 'Static';
-    return `<strong>${escapeHTML(record.name)}</strong><span>${type}${time ? ' • ' + time : ''}${record.unsaved ? ' • Unsaved' : ''}</span>`;
+    const git = record.gitConnected ? ' • Git connected' : '';
+    return `<strong>${escapeHTML(record.name)}</strong><span>${type}${time ? ' • ' + time : ''}${git}${record.unsaved ? ' • Unsaved' : ''}</span>`;
   }
   async function loadCachedRecent(record) {
     try {
@@ -2642,8 +2650,13 @@ window.__editorInitPromise = (async function () {
         projectId: record.id,
         fromCache: true,
         cachedDirty: !!record.unsaved,
-        lastSavedAt: record.lastSavedAt || 0
+        lastSavedAt: record.lastSavedAt || 0,
+        gitRemote: record.gitConnected ? record.gitRemote : null,
+        gitEnabled: record.gitConnected ? true : false
       });
+      if (record.gitConnected && state.gitRemote?.provider === 'github') {
+        void state.sidebarController?.sourceControl?.preload?.();
+      }
       return true;
     } catch (e) {
       logError(e);
