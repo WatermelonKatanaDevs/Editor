@@ -313,9 +313,10 @@ window.__deploymentNetworkReady = (async function() {
     const externalUrl = externalUrlOverride !== null
       ? externalUrlOverride
       : String(deploymentConfig.externalUrl || projectMeta?.deployment?.externalUrl || '').trim();
-    const externalMode = externalModeOverride === 'emulate' || String(deploymentConfig.externalMode || projectMeta?.deployment?.externalMode || '') === 'emulate'
-      ? 'emulate'
-      : 'iframe';
+    // Third-party content is always loaded natively. Do not run an external
+    // site through PageEmulator: its own browser APIs, security model, and
+    // cross-origin iframes should remain real browser primitives.
+    const externalMode = 'iframe';
     const type = runConfig.serverType === 'node' ? 'node' : 'static';
 
     // Third-party deployments have their own target URL and do not use the editor runtime.
@@ -430,8 +431,19 @@ window.__deploymentNetworkReady = (async function() {
       const path = raw.startsWith('/') ? raw : '/' + raw;
       return domain + path;
     }
-    const target = resolveEditorTarget(urlOverride || savedUrl);
+    const rawConfiguredUrl = String(urlOverride || savedUrl || '').trim();
+    const configuredDomain = normalizeDomain(runConfig.domain);
+    const target = resolveEditorTarget(rawConfiguredUrl);
     const targetUrl = new URL(target);
+
+    // A configured absolute URL that points outside the virtual deployment
+    // domain is a real site, not a project route. Leave the emulator entirely
+    // and let the browser open the site normally.
+    if (rawConfiguredUrl && /^https?:\\/\\//i.test(rawConfiguredUrl) && targetUrl.origin !== configuredDomain) {
+      location.replace(targetUrl.href);
+      return;
+    }
+
     const domain = targetUrl.origin;
     const runtimePath = targetUrl.pathname || '/';
     const usePeerServer = peerOverride === null ? (!!deploymentConfig.usePeerServer || !!projectMeta?.deployment?.usePeerServer) : !!peerOverride;
@@ -521,14 +533,40 @@ window.__deploymentNetworkReady = (async function() {
       page.interceptEvent('error', (error, location) => forwardError(error, location));
       page.interceptEvent('iframe-create', function(obj) {
         if (!obj?.iframe) return null;
-        if (obj.iframe.pageEmulator) return obj.iframe.pageEmulator;
-        const child = new PageEmulator(obj.iframe, {network, location:{url:'about:blank',origin:page.location?.origin || domain}, history:[]});
-        obj.iframe.pageEmulator = child; page.addChild?.(child); installDeploymentInterceptors(child, page); child.setLocation('about:blank', page.location?.origin || domain); return child;
+        const frame = obj.iframe;
+        frame.__originalSandbox = frame.getAttribute('sandbox');
+        let targetUrl = null;
+        try {
+          if (obj.src) targetUrl = new URL(obj.src, page.location?.url || domain + '/');
+        } catch (_) {}
+
+        // External iframes belong to the real browser. They must not become
+        // PageEmulator instances (or receive emulator URL rewriting).
+        if (targetUrl && targetUrl.origin !== domain) {
+          frame.__nativeExternalIframe = true;
+          return null;
+        }
+
+        if (frame.pageEmulator) return frame.pageEmulator;
+        const child = new PageEmulator(frame, {network, location:{url:'about:blank',origin:page.location?.origin || domain}, history:[]});
+        frame.pageEmulator = child;
+        page.addChild?.(child);
+        installDeploymentInterceptors(child, page);
+        child.setLocation('about:blank', page.location?.origin || domain);
+        return child;
       });
       page.interceptEvent('iframe-navigate', async function(obj) {
         const frame = obj?.iframe; if (!frame) return;
-        const child = frame.pageEmulator; if (!child) return;
         const navigationId = obj.navigationId;
+
+        if (frame.__nativeExternalIframe && obj.src) {
+          let targetUrl;
+          try { targetUrl = new URL(obj.src, page.location?.url || domain + '/'); } catch (_) { return; }
+          frame.src = targetUrl.href;
+          return;
+        }
+
+        const child = frame.pageEmulator; if (!child) return;
         if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
         if (obj.is_doc) { child.setLocation('about:srcdoc', page.location?.origin || domain); child.rawDocument=String(obj.srcdoc||''); if(navigationId!==undefined && frame.__iframeNavigationId!==navigationId)return; await child.setDocument(obj.srcdoc||''); return; }
         if (!obj.src) return;
