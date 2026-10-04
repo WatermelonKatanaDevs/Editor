@@ -1143,6 +1143,7 @@ window.__deploymentNetworkReady = (async function() {
     setProgress('Deployment ready', 100, pageURL);
     hideProgress();
     status.remove();
+  }
   main().catch(showError);
 })();
 </script>
