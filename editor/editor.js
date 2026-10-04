@@ -59,7 +59,7 @@ window.__editorInitPromise = (async function () {
     peerServers: new Map(),
     peerRuntimeEndpoint: null,
     peerSettings: {layer: '', pagePath: '/'},
-    deploymentSettings: {mode: 'editor', url: '', usePeerServer: false, branch: '', commit: '', externalUrl: '', externalMode: 'iframe', hookUrl: ''},
+    deploymentSettings: {mode: 'editor', url: '', usePeerServer: false, branch: '', commit: '', externalUrl: '', externalMode: 'iframe', hookUrl: '', saveEnvironmentVariables: false, saveEnvironmentVariablesExplicit: false},
     ai: null,
     environment: {},
     browserSettings: {
@@ -550,7 +550,9 @@ window.__editorInitPromise = (async function () {
       commit: String(meta?.deployment?.commit || '').trim(),
       externalUrl: String(meta?.deployment?.externalUrl || '').trim(),
       externalMode: String(meta?.deployment?.externalMode || 'iframe').trim() === 'emulate' ? 'emulate' : 'iframe',
-      hookUrl: String(meta?.deployment?.hookUrl || '').trim()
+      hookUrl: String(meta?.deployment?.hookUrl || '').trim(),
+      saveEnvironmentVariables: meta?.deployment?.saveEnvironmentVariables === true,
+      saveEnvironmentVariablesExplicit: Object.prototype.hasOwnProperty.call(meta?.deployment || {}, 'saveEnvironmentVariables')
     };
     if (!state.projectId) state.projectId = makeProjectId();
     hydrateGitRemoteFromSavedSelection();
@@ -572,7 +574,8 @@ window.__editorInitPromise = (async function () {
       externalUrl: String(state.deploymentSettings?.externalUrl || '').trim(),
       externalMode: state.deploymentSettings?.externalMode === 'emulate' ? 'emulate' : 'iframe',
       hookUrl: String(state.deploymentSettings?.hookUrl || '').trim(),
-      peerLayer: String(state.peerSettings?.layer || '').trim()
+      peerLayer: String(state.peerSettings?.layer || '').trim(),
+      saveEnvironmentVariables: state.deploymentSettings?.saveEnvironmentVariables === true
     };
     state.fs.writeFileSync(EDITOR_PROJECT_PATH, JSON.stringify({
       id: state.projectId,
@@ -637,6 +640,7 @@ window.__editorInitPromise = (async function () {
   }
   function loadProcessEnv() {
     try {
+      if (state.deploymentSettings?.saveEnvironmentVariables !== true) return false;
       if (state.fs?.existsSync(EDITOR_ENV_PATH)) {
         applyEditorEnvironment(parseProcessEnv(state.fs.readFileSync(EDITOR_ENV_PATH, 'utf8')));
         return true;
@@ -647,13 +651,23 @@ window.__editorInitPromise = (async function () {
   function saveProcessEnv() {
     if (!state.fs) return;
     try {
-      state.fs.mkdirSync?.(EDITOR_DIR);
       const lines = Object.entries(state.environment || {}).map(([key, value]) => {
         const safe = String(value ?? '').replace(/\r?\n/g, '\\n');
         return `${key}=${safe}`;
       });
-      state.fs.writeFileSync(EDITOR_ENV_PATH, lines.length ? lines.join('\n') + '\n' : '');
-      if (!state.loading) state.markDirty?.('editor/process.env');
+      if (state.deploymentSettings?.saveEnvironmentVariables === true) {
+        state.fs.mkdirSync?.(EDITOR_DIR);
+        state.fs.writeFileSync(EDITOR_ENV_PATH, lines.length ? lines.join('\n') + '\n' : '');
+        if (!state.loading) state.markDirty?.('editor/process.env');
+      } else {
+        try {
+          localStorage.setItem('editor.environment.' + (state.projectKey || 'default'), JSON.stringify(state.environment || {}));
+        } catch (_) {}
+        if (state.fs.existsSync?.(EDITOR_ENV_PATH)) {
+          state.fs.deleteFileSync?.(EDITOR_ENV_PATH);
+          if (!state.loading) state.markDirty?.('editor/process.env');
+        }
+      }
     } catch (e) {
       console.error('Failed to save process.env:', e);
     }
