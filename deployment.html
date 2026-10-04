@@ -506,6 +506,41 @@ window.__deploymentNetworkReady = (async function() {
       runtime.addEventListener('console', (method, args) => forwardConsole(method, args));
       runtime.addEventListener('error', (error, location) => forwardError(error, location));
     }
+
+    // Deployment gets its own Network instance. For same-origin WebSockets,
+    // route directly to the Node runtime before the native/proxy endpoints.
+    // Network.searchEndpoints() is designed around HTTP Response objects and
+    // therefore cannot reliably short-circuit on the mock WebSocket returned by
+    // NodeEndpoint. The Browser workbench can fall back through its shared
+    // network stack, but deployment should keep the project's socket inside
+    // the emulated runtime.
+    if (type === 'node' && runtime?.endpoint?.handleSocket) {
+      const originalNetworkSocket = network.socket.bind(network);
+      network.socket = async function(url, baseOrigin, protocols) {
+        let absoluteUrl = null;
+        try { absoluteUrl = resolveNetworkURL(url, baseOrigin); } catch (_) {}
+        if (absoluteUrl) {
+          try {
+            const socketUrl = new URL(absoluteUrl);
+            if ((socketUrl.protocol === 'ws:' || socketUrl.protocol === 'wss:') &&
+                socketUrl.host === new URL(domain).host) {
+              network.dispatchEvent('socketstart', absoluteUrl, protocols);
+              try {
+                const virtualSocket = await runtime.endpoint.handleSocket(absoluteUrl, protocols);
+                if (virtualSocket) {
+                  network.dispatchEvent('socketend', virtualSocket, absoluteUrl, protocols);
+                  return virtualSocket;
+                }
+              } catch (error) {
+                console.warn('[Deployment] Runtime WebSocket failed, falling back:', error);
+              }
+              network.dispatchEvent('socketend', null, absoluteUrl, protocols);
+            }
+          } catch (_) {}
+        }
+        return await originalNetworkSocket(url, baseOrigin, protocols);
+      };
+    }
     if (usePeerServer) {
       const layer = String(deploymentConfig.peerLayer || projectMeta?.peerLayer || 'peer').trim() || 'peer';
       status.textContent = 'Starting peer server…';
