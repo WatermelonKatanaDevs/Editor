@@ -835,8 +835,11 @@
         }
         server = null;
         endpoint = null;
+        if (owned) {
+          try { window.keepAlive?.stop?.(); } catch (_) {}
+          try { window.keepAlive?.disable?.(); } catch (_) {}
+        }
         ownsServer = false;
-        if (owned) stopHostKeepAlive();
       }
     };
   }
