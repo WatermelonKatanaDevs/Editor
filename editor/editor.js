@@ -12,7 +12,6 @@ window.__editorInitPromise = (async function () {
         const fallbackProxy = new ProxyNetworkEndpoint(configuredFallbackProxy, true, !!configuredFallbackProxy);
         const defaultFallback = new NetworkEndpoint();
         defaultFallback.__browserDefaultFallback = true;
-        defaultFallback.__networkRole = 'native';
         sharedNetwork.appendEndpoint(defaultFallback);
         sharedNetwork.appendEndpoint(primaryProxy);
         sharedNetwork.appendEndpoint(fallbackProxy);
