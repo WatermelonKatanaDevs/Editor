@@ -47,6 +47,13 @@
       // not dispose the embedded editor; the same host can be reattached later.
       if (tab._previewHost && tab._previewViewId === id) {
         if (tab._previewHost.parentNode !== host) host.appendChild(tab._previewHost);
+        // Embedded editors such as Piskel can retain a valid document while
+        // detached from the DOM, but their canvas renderer may not repaint
+        // after being reattached. Give the embedded frame a resize tick.
+        const frame = tab._previewHost.querySelector?.('iframe');
+        if (frame?.contentWindow) {
+          try { frame.contentWindow.dispatchEvent(new Event('resize')); } catch (_) {}
+        }
         if (tab._previewPromise) {
           try { await tab._previewPromise; } catch (_) {}
         }
