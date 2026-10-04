@@ -1564,8 +1564,15 @@ async function navigateToInTab(tab, rawUrl, isNewNavigation = true, reloadCurren
   }
   
   tab.url = absoluteUrl;
-  window.dispatchEvent(new CustomEvent('browser-before-reload',{detail:{tab,page:tab.page,isReload:!!isReload,isNavigation:hasLoadedDocument,clearDevTools:hasLoadedDocument && appSettings.clearDevToolsOnReload!==false}}));
-  window.dispatchEvent(new CustomEvent('browser-navigation-start',{detail:{tab,page:tab.page,url:absoluteUrl}}));
+
+  // history.pushState()/replaceState() is a same-document URL change, not a
+  // browser reload/navigation. Do not fire the reload lifecycle events here:
+  // those events are also used to clear/reinitialize DevTools state.
+  const isHistoryStateChange = isNewNavigation && !reloadCurrentTab && !isReload;
+  if (!isHistoryStateChange) {
+    window.dispatchEvent(new CustomEvent('browser-before-reload',{detail:{tab,page:tab.page,isReload:!!isReload,isNavigation:hasLoadedDocument,clearDevTools:hasLoadedDocument && appSettings.clearDevToolsOnReload!==false}}));
+    window.dispatchEvent(new CustomEvent('browser-navigation-start',{detail:{tab,page:tab.page,url:absoluteUrl}}));
+  }
 
   if (isNewNavigation) {
     tab.page.history = tab.page.history.slice(0, tab.page.historyIndex + 1);
