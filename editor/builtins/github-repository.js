@@ -11,7 +11,26 @@
     }
 
     function render(g) {
-      const root = document.createElement('div');
+      const style = document.createElement('style');
+      style.textContent = `
+        .editor-github-repository-page { box-sizing:border-box; width:min(760px,100%); margin:0 auto; padding:36px; color:#eee; }
+        .editor-github-repository-header h2 { margin:0 0 8px; font-size:28px; }
+        .editor-github-repository-header p { margin:0 0 24px; color:#aaa; }
+        .editor-github-repository-card { background:#1e1e1e; border:1px solid #333; border-radius:10px; padding:22px; }
+        .editor-github-repository-status { color:#aaa; }
+        .editor-github-repository-status.error { color:#f88; }
+        .editor-github-repository-card label { display:block; margin:0 0 18px; color:#ddd; }
+        .editor-github-repository-card input { display:block; width:100%; box-sizing:border-box; margin-top:7px; padding:10px 12px; background:#151515; color:#eee; border:1px solid #444; border-radius:5px; font:inherit; }
+        .editor-github-repository-name { color:#aaa; margin-bottom:22px; font-family:monospace; }
+        .editor-github-repository-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; }
+        .editor-github-repository-actions button { padding:9px 14px; background:#333; color:#eee; border:1px solid #555; border-radius:4px; cursor:pointer; }
+        .editor-github-repository-actions button[type="submit"] { background:#176b4a; }
+        .editor-github-repository-actions button:disabled { opacity:.5; cursor:default; }
+        .editor-github-repository-message { margin-top:14px; color:#aaa; }
+        .editor-github-repository-message.success { color:#6dca9a; }
+        .editor-github-repository-message.error { color:#f88; }
+        @media (max-width:600px) { .editor-github-repository-page { padding:20px; } }
+      `;
       root.className = 'editor-github-repository-page';
       root.innerHTML = `
         <div class="editor-github-repository-header">
@@ -32,6 +51,7 @@
           </form>
         </div>
       `;
+      g.viewBody.appendChild(style);
       g.viewBody.appendChild(root);
 
       const status = root.querySelector('[data-status]');
