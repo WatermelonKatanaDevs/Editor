@@ -1957,9 +1957,17 @@
           // Pass false if features specify background rules, or default to foreground (true)
           const activateTab = !features || !features.includes('background');
           const newPage = sendEvent('open', resolved, activateTab);
-          
-          // Return a mock window context matching standard JS expectations
-          return newPage.iframe.contentWindow.__windowProxy || newPage.iframe.contentWindow;
+
+          // An open interceptor may create an emulated PageEmulator, return
+          // its iframe/window proxy, or hand the URL to the real browser for
+          // an external origin. Do not assume every result has an iframe.
+          if (!newPage) return null;
+          if (newPage.__windowProxy) return newPage.__windowProxy;
+          if (newPage.iframe) {
+            const contentWindow = newPage.iframe.contentWindow;
+            return contentWindow?.__windowProxy || contentWindow || newPage;
+          }
+          return newPage;
         };
 
         ['MouseEvent', 'KeyboardEvent', 'FocusEvent', 'UIEvent'].forEach(eventName => {
