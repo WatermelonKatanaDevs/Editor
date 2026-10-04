@@ -1881,6 +1881,12 @@ window.__editorInitPromise = (async function () {
     state.lastCachedAt = 0;
     loadEditorConfig();
     loadProjectMetadata();
+    // URL/project metadata can describe the original GitHub source, but a
+    // detached remix workspace must not inherit that repository.
+    if (options.projectId) state.projectId = String(options.projectId);
+    if (options.gitEnabled === false) state.gitRemote = null;
+    state.projectOwner = options.projectOwner !== false;
+    state.gitEnabled = options.gitEnabled !== false;
     getBuiltin('environment')?.load();
     state.fileManager.setFileSystem(fs);
     state.fileManager.setShowHiddenFolders?.(state.behavior.showHiddenFolders);
