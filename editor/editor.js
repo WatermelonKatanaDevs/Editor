@@ -1893,6 +1893,7 @@ window.__editorInitPromise = (async function () {
     state.fileManager.refresh();
     state.runConfig = new EditorRunConfig(state);
     state.runConfig.detect();
+    state.sidebarController?.syncSourceControlActivity?.();
     saveProjectMetadata();
     if (!options.isTemplate) {
       const recent = recentProjects().find(x => x.id === state.projectId);
