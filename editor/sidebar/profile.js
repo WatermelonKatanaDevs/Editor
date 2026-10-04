@@ -1,7 +1,7 @@
 (function() {
   const root = window.EditorSidebar = window.EditorSidebar || {};
   root.Profile = function(options) {
-    const {tree} = options;
+    const {tree, state} = options;
     const github = window.GitHubService;
     let unsubscribe = null;
     let installation = null;
