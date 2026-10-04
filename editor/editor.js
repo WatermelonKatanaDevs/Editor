@@ -36,6 +36,8 @@ window.__editorInitPromise = (async function () {
     projectName: 'Workspace',
     projectKey: 'workspace',
     projectId: null,
+    projectOwner: true,
+    gitEnabled: true,
     gitRemote: null,
     projectTemplate: false,
     lastSavedAt: 0,
@@ -1732,6 +1734,7 @@ window.__editorInitPromise = (async function () {
     const restored = state.workbench.restore(layout.workbench, data => makeLayoutTab(data, state.runConfig?.config?.serverType));
     if (!restored) return false;
     state.sidebarController.restoreCollapsed(layout.collapsedPaths || []);
+    if (layout.sidebar === 'Source Control' && state.gitEnabled === false) layout.sidebar = 'explorer';
     if (layout.sidebar === 'explorer' || layout.sidebar === 'settings' || layout.sidebar === 'Search' || layout.sidebar === 'Source Control' || layout.sidebar === 'Run and Debug' || layout.sidebar === 'Extensions' || layout.sidebar === 'Profile') {
       state.sidebarController.show(layout.sidebar);
     } else {
@@ -1865,7 +1868,9 @@ window.__editorInitPromise = (async function () {
     state.fs = fs;
     state.saveProjectPermission = 'denied';
     state.projectId = options.projectId || null;
-    state.gitRemote = options.gitRemote || null;
+    state.projectOwner = options.projectOwner !== false;
+    state.gitEnabled = options.gitEnabled !== false;
+    state.gitRemote = state.gitEnabled ? (options.gitRemote || null) : null;
     state.deploymentSettings = {mode:'editor', url:'/', usePeerServer:false, branch:String(state.gitRemote?.branch || '').trim(), commit:'', externalUrl:'', externalMode:'iframe', hookUrl:''};
     state.projectTemplate = !!options.isTemplate;
     state.projectName = name || 'Workspace';
@@ -2290,7 +2295,7 @@ window.__editorInitPromise = (async function () {
     updateRemoteLoadProgress('Starting workspace…', 97, name || 'Remote Project');
     const branch = info?.default_branch || parsed.branch || 'main';
     const projectId = `github:${parsed.owner}/${parsed.repo}@${ref}`;
-    await replaceFileSystem(fs, name || 'Remote Project', true, {projectId, gitRemote:{provider:'github',owner:parsed.owner,repo:parsed.repo,branch, ...(requestedRevision ? {revision:ref} : {})}});
+    await replaceFileSystem(fs, name || 'Remote Project', true, {projectId, gitEnabled: options.gitEnabled !== false, projectOwner: options.projectOwner !== false, gitRemote:{provider:'github',owner:parsed.owner,repo:parsed.repo,branch, ...(requestedRevision ? {revision:ref} : {})}});
     finishRemoteImport();
     finishRemoteLoadProgress();
     return true;
@@ -2888,10 +2893,12 @@ window.__editorInitPromise = (async function () {
     const params = new URLSearchParams(location.search);
     const githubURL = params.get('github') || params.get('githubUrl') || '';
     if (!githubURL) return false;
+    const gitEnabled = params.get('git') !== '0' && params.get('git') !== 'disabled';
+    const projectOwner = params.get('projectOwner') !== '0' && params.get('projectOwner') !== 'false';
     if (!(await confirmWorkspaceSwitch('opening the project from the URL'))) return false;
     const commit = params.get('commit') || params.get('sha') || '';
     try {
-      await openGithubRevision(githubURL, commit, {fromURL:true});
+      await openGithubRevision(githubURL, commit, {fromURL:true, gitEnabled, projectOwner});
       return true;
     } catch (e) {
       logError(e);
@@ -2935,12 +2942,15 @@ window.__editorInitPromise = (async function () {
     start,
     openFile,
     openBuiltin,
+    showSidebar: name => state.sidebarController?.show?.(name),
     openRemoteProject: options => openRemoteImportModal(options),
     getWorkspaceInfo: () => ({
       loading: !!state.loading,
       projectId: state.projectId || null,
       projectName: state.projectName || 'Workspace',
       gitRemote: state.gitRemote ? { ...state.gitRemote } : null,
+      gitEnabled: state.gitEnabled !== false,
+      projectOwner: state.projectOwner !== false,
       hasGitHubRepository: !!(state.gitRemote?.provider === 'github' && state.gitRemote.owner && state.gitRemote.repo)
     }),
     addWelcomeBuiltin,
