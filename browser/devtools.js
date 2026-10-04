@@ -4371,13 +4371,13 @@ var DevToolsInternal = {
       };
       rootEvents.addEventListener('documentready',updateHandler);
       var frameHandler=function(parent,child,obj){
-        if(!created || parent!==page || !child) return;
-        registerPage(child,page);
+        if(!created || !parent || !child) return;
+        registerPage(child,parent);
         var childRecord=pageRecords.get(child);
         if(childRecord){
           childRecord.tab.url=obj?.is_doc ? 'about:srcdoc' : (obj?.src || child.location?.url || childRecord.tab.url);
           childRecord.tab.frameElement=obj?.iframe || childRecord.tab.frameElement;
-          childRecord.tab.parentTab=pageRecords.get(page)?.tab || null;
+          childRecord.tab.parentTab=pageRecords.get(parent)?.tab || null;
         }
         DevToolsInternal.console.refreshFrameSelector();
         DevToolsInternal.ui.refreshActiveViews();
