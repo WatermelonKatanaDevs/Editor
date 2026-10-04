@@ -325,6 +325,7 @@ window.__deploymentNetworkReady = (async function() {
       const targetUrl = new URL(externalUrl);
       const domain = targetUrl.origin;
       const pageURL = targetUrl.href;
+      const isGitHubUrl = /^(https?:\\/\\/)(www\\.)?github\\.com$/i.test(domain);
 
       function canonicalizeThirdParty() {
         try {
@@ -346,6 +347,12 @@ window.__deploymentNetworkReady = (async function() {
       }
 
       if (externalMode === 'iframe') {
+        // GitHub explicitly forbids being embedded with frame-ancestors 'none'.
+        // Open it as a normal top-level navigation instead of creating a frame.
+        if (isGitHubUrl) {
+          location.replace(pageURL);
+          return;
+        }
         stage.innerHTML = '';
         const iframe = document.createElement('iframe');
         iframe.src = pageURL;
