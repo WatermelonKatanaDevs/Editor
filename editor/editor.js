@@ -1331,6 +1331,11 @@ window.__editorInitPromise = (async function () {
         if (!x) return null;
         return {id:x.id,name:x.name,description:x.description,icon:x.icon,open:x.open,ai:{tools:x.ai.tools.map(t=>({...t})),hooks:{...x.ai.hooks}}};
       },
+      async open(id) {
+        const x = extensions.get(String(id));
+        if (!x || typeof x.open !== 'function') return null;
+        return await x.open({state, api, extensionId:x.id});
+      },
       getAITools() { return [...aiTools.values()].map(x => ({...x})); },
       getAIHooks(name) { return name ? [...(aiHooks.get(String(name)) || [])] : Object.fromEntries([...aiHooks].map(([k,v]) => [k,[...v]])); },
       async runAIHook(name, payload) {
