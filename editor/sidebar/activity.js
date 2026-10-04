@@ -145,7 +145,7 @@
       explorer, runDebug, settings, extensions, search, sourceControl, profile, show, dispose() { extensions.dispose?.(); githubUnsubscribe?.(); },
       setActiveActivity(id) { document.querySelectorAll('.activity-button').forEach(x => x.classList.toggle('active', x.id === id)); },
       restoreCollapsed: paths => explorer.restoreCollapsed(paths),
-      setWidth, collapse, expand, getWidth: () => width
+      setWidth, collapse, expand, getWidth: () => width, syncSourceControlActivity
     };
   };
 })();
