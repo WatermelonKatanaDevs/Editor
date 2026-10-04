@@ -487,7 +487,7 @@
     throw lastError || new Error('GitHub repository is still initializing.');
   }
 
-  async function commitAndPush({owner, repo, branch, message, fs}) {
+  async function commitAndPush({owner, repo, branch, message, fs, _retry = false}) {
     message = String(message || '').trim();
     if (!message) throw new Error('Enter a commit message.');
     let remote = null;
@@ -526,8 +526,21 @@
       if (remote.commitSha) commitBody.parents = [remote.commitSha];
       const commit = await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/commits', {method:'POST', body:JSON.stringify(commitBody)});
       const refPath = '/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/refs/heads/' + branchPath(branch);
-      if (remote.commitSha) await request(refPath, {method:'PATCH', body:JSON.stringify({sha:commit.sha, force:false})});
-      else await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/refs', {method:'POST', body:JSON.stringify({ref:'refs/heads/' + branch, sha:commit.sha})});
+      try {
+        if (remote.commitSha) {
+          await request(refPath, {method:'PATCH', body:JSON.stringify({sha:commit.sha, force:false})});
+        } else {
+          await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/refs', {method:'POST', body:JSON.stringify({ref:'refs/heads/' + branch, sha:commit.sha})});
+        }
+      } catch (e) {
+        // A 422 here normally means the branch moved after we read its
+        // remote SHA. Rebuild the commit once from the latest branch state;
+        // never force-push over the intervening commit.
+        if (e?.status === 422 && !_retry) {
+          return await commitAndPush({owner, repo, branch, message, fs, _retry:true});
+        }
+        throw e;
+      }
       return {changed:true, changes, commitSha:commit.sha};
     } catch (e) {
       if (e?.status !== 403) throw e;
