@@ -458,59 +458,86 @@ window.__deploymentNetworkReady = (async function() {
     }
 
     const savedUrl = String(deploymentConfig.url || projectMeta?.deployment?.url || '').trim();
+
     function resolveEditorTarget(value) {
       const raw = String(value || '').trim();
-      const domain = String(runConfig.domain || 'http://localhost:3000').replace(/\/+$/,'');
+      const configuredDomain = normalizeDomain(runConfig.domain);
       if (!raw) {
         const path = String(runConfig.path || '/');
-        return domain + (path.startsWith('/') ? path : '/' + path);
+        return configuredDomain + (path.startsWith('/') ? path : '/' + path);
       }
       try {
         const absolute = new URL(raw);
         if (/^https?:$/i.test(absolute.protocol)) return absolute.href;
       } catch (_) {}
       const path = raw.startsWith('/') ? raw : '/' + raw;
-      return domain + path;
+      return configuredDomain + path;
     }
-    const rawConfiguredUrl = String(urlOverride || savedUrl || '').trim();
-    const configuredDomain = normalizeDomain(runConfig.domain);
-    const target = resolveEditorTarget(rawConfiguredUrl);
-    const targetUrl = new URL(target);
 
-    // A configured absolute URL that points outside the virtual deployment
-    // domain is a real site, not a project route. Leave the emulator entirely
-    // and let the browser open the site normally.
-    if (rawConfiguredUrl && (rawConfiguredUrl.startsWith('http://') || rawConfiguredUrl.startsWith('https://')) && targetUrl.origin !== configuredDomain) {
-      location.replace(targetUrl.href);
+    const rawConfiguredUrl = String(urlOverride || savedUrl || '').trim();
+    const deploymentOrigin = normalizeDomain(runConfig.domain);
+    const initialTargetUrl = new URL(resolveEditorTarget(rawConfiguredUrl));
+
+    // A deployment only emulates documents that belong to its configured
+    // origin. A different origin is a normal browser navigation.
+    if (initialTargetUrl.origin !== deploymentOrigin) {
+      location.replace(initialTargetUrl.href);
       return;
     }
 
-    const domain = targetUrl.origin;
-    const runtimePath = targetUrl.pathname || '/';
-    const usePeerServer = peerOverride === null ? (!!deploymentConfig.usePeerServer || !!projectMeta?.deployment?.usePeerServer) : !!peerOverride;
+    const domain = deploymentOrigin;
+    const runtimePath = initialTargetUrl.pathname || '/';
+    const usePeerServer = peerOverride === null
+      ? (!!deploymentConfig.usePeerServer || !!projectMeta?.deployment?.usePeerServer)
+      : !!peerOverride;
+
     let peerEndpoint = null;
-    if (usePeerServer) { try { peerEndpoint = new PeerEndpoint(); } catch (e) { console.warn('Peer network unavailable:', e); } }
+    if (usePeerServer) {
+      try { peerEndpoint = new PeerEndpoint(); }
+      catch (e) { console.warn('Peer network unavailable:', e); }
+    }
+
     const root = normalizeRoot(runConfig.rootfolder);
     let runtime;
+
     function forwardConsole(method, args) {
       const target = method === 'logText' ? console.log : console[method];
       if (typeof target !== 'function') return;
       try { target.apply(console, Array.isArray(args) ? args : [args]); } catch (_) {}
     }
+
     function forwardError(error, location) {
       const message = error?.message || String(error);
       const stack = error?.error?.stack || error?.stack || '';
       const suffix = location ? ` (${location})` : '';
       try { console.error(`Uncaught Error${suffix}: ${message}`, stack); } catch (_) {}
     }
+
     if (type === 'static') {
-      runtime = new StaticEndpoint({domain, path:runtimePath, rootfolder:root, runfile:runConfig.runfile || '/index.html', filesystem:fs});
+      runtime = new StaticEndpoint({
+        domain,
+        path: runtimePath,
+        rootfolder: root,
+        runfile: runConfig.runfile || '/index.html',
+        filesystem: fs
+      });
       await runtime.loading;
     } else {
-      runtime = new NodeEmulator({domain,rootfolder:root,pathPrefix:runtimePath,filesystem:fs,fileSystemSync:false,network,cwd:runConfig.cwd || '/',env:{NODE_ENV:'production',USER:'browser_user',...deploymentEnvironment}});
+      runtime = new NodeEmulator({
+        domain,
+        rootfolder: root,
+        pathPrefix: runtimePath,
+        filesystem: fs,
+        fileSystemSync: false,
+        network,
+        cwd: runConfig.cwd || '/',
+        env: {NODE_ENV:'production', USER:'browser_user', ...deploymentEnvironment}
+      });
       await runtime.ready;
       if (runConfig.nodeCommand) await runtime.terminalCommand(runConfig.nodeCommand);
-      if (!await runtime.waitForServer?.(10000,50)) throw new Error('Node command finished, but no listening server was created.');
+      if (!await runtime.waitForServer?.(10000,50)) {
+        throw new Error('Node command finished, but no listening server was created.');
+      }
     }
 
     const runtimeEndpoint = type === 'node' ? runtime.endpoint : runtime;
@@ -527,180 +554,389 @@ window.__deploymentNetworkReady = (async function() {
       runtime.addEventListener('console', (method, args) => forwardConsole(method, args));
       runtime.addEventListener('error', (error, location) => forwardError(error, location));
     }
+
     if (usePeerServer) {
-      const layer = String(deploymentConfig.peerLayer || projectMeta?.peerLayer || 'peer').trim() || 'peer';
+      const layer = String(
+        deploymentConfig.peerLayer ||
+        projectMeta?.peerLayer ||
+        'peer'
+      ).trim() || 'peer';
       status.textContent = 'Starting peer server…';
-      window.__deploymentPeerServer = await ensurePeerServer(domain, async()=>type === 'node' ? runtime.endpoint : runtime, {peerLayer:layer});
+      window.__deploymentPeerServer = await ensurePeerServer(
+        domain,
+        async()=>type === 'node' ? runtime.endpoint : runtime,
+        {peerLayer:layer}
+      );
     }
+
     const iframe = document.createElement('iframe');
     stage.appendChild(iframe);
-    const pageURL = targetUrl.href;
-    const page = new PageEmulator(iframe, {network, location:{url:pageURL,origin:domain}, history:[]});
+    const pageURL = initialTargetUrl.href;
+    const page = new PageEmulator(iframe, {
+      network,
+      location: {url: pageURL, origin: domain},
+      history: []
+    });
     const deploymentRootPage = page;
-    function deploymentURL(target) {
+
+    function deploymentPageUrl(target) {
+      const resolved = new URL(target, page.location.url);
+      if (resolved.origin !== domain) {
+        throw new Error('deploymentPageUrl requires a deployment-origin URL');
+      }
+
+      const current = new URL(location.href);
+      current.searchParams.delete('githubUrl');
+      current.searchParams.delete('sha');
+      current.searchParams.set('github', githubURL);
+      current.searchParams.set('commit', resolvedRef);
+      if (branchOverride !== null) current.searchParams.set('branch', branchOverride);
+      else current.searchParams.delete('branch');
+      current.searchParams.delete('path');
+      current.searchParams.delete('deploymentMode');
+      current.searchParams.delete('externalUrl');
+      current.searchParams.delete('externalMode');
+      current.searchParams.set('url', resolved.href);
+      if (usePeerServer) current.searchParams.set('peerServer', '1');
+      else current.searchParams.delete('peerServer');
+      current.searchParams.delete('usePeerNetwork');
+      return current.href;
+    }
+
+    function deploymentStateUrl(target) {
       const resolved = new URL(target, page.location.url);
       const current = new URL(location.href);
       current.searchParams.delete('githubUrl');
       current.searchParams.delete('sha');
       current.searchParams.set('github', githubURL);
       current.searchParams.set('commit', resolvedRef);
-      if (branchOverride !== null) current.searchParams.set('branch', branchOverride); else current.searchParams.delete('branch');
+      if (branchOverride !== null) current.searchParams.set('branch', branchOverride);
+      else current.searchParams.delete('branch');
       current.searchParams.delete('path');
       current.searchParams.delete('deploymentMode');
       current.searchParams.delete('externalUrl');
       current.searchParams.delete('externalMode');
-      current.searchParams.set('url', resolved.origin + resolved.pathname + resolved.search + resolved.hash);
-      if (usePeerServer) current.searchParams.set('peerServer','1'); else current.searchParams.delete('peerServer');
+      current.searchParams.set('url', resolved.href);
+      if (usePeerServer) current.searchParams.set('peerServer', '1');
+      else current.searchParams.delete('peerServer');
       current.searchParams.delete('usePeerNetwork');
       return current.href;
     }
-    function navigateReal(target, replace = false) {
+
+    function updateDeploymentBrowserUrl(target, replace = false) {
+      const href = deploymentStateUrl(target);
+      try {
+        if (replace) history.replaceState({}, document.title, href);
+        else history.pushState({}, document.title, href);
+      } catch (_) {}
+      return href;
+    }
+
+    function updatePageHistory(target, replace = false) {
+      const resolved = new URL(target, page.location.url).href;
+      page.setLocation(resolved, new URL(resolved).origin);
+      page.history = Array.isArray(page.history) ? page.history : [];
+
+      if (replace && page.history.length) {
+        if (page.historyIndex < 0) page.historyIndex = page.history.length - 1;
+        page.history[page.historyIndex] = resolved;
+      } else {
+        page.history = page.history.slice(0, page.historyIndex + 1);
+        page.history.push(resolved);
+        page.historyIndex = page.history.length - 1;
+      }
+      return resolved;
+    }
+
+    async function loadEmulatedPage(target, options = {}) {
       const resolved = new URL(target, page.location.url);
+
       if (resolved.origin !== domain) {
-        if (replace) location.replace(resolved.href); else location.assign(resolved.href);
-        return true;
-      }
-      const href = deploymentURL(resolved.href);
-      if (replace) location.replace(href); else location.assign(href);
-      return true;
-    }
-    async function getDocumentContent(response, url, origin, page) {
-      const contentType = String(response.headers.get('content-type') || 'text/html').toLowerCase();
-      if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml') || contentType.includes('application/xml') || contentType.includes('text/xml')) return await response.clone().text();
-      if (contentType.includes('image/') || contentType.includes('audio/') || contentType.includes('video/')) {
-        const blob = await response.clone().blob();
-        const dataUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload=()=>resolve(reader.result); reader.onerror=()=>reject(reader.error||new Error('Failed to create data URL.')); reader.readAsDataURL(blob); });
-        if (contentType.includes('image/')) return `<html><body style="margin:0;background:#1e1e1e;display:flex;align-items:center;justify-content:center;height:100vh"><img src="${dataUrl}" style="max-width:100%;max-height:100%;object-fit:contain"></body></html>`;
-        if (contentType.includes('audio/')) return `<html><body style="margin:0;background:#1e1e1e;display:flex;align-items:center;justify-content:center;height:100vh"><audio controls src="${dataUrl}"></audio></body></html>`;
-        return `<html><body style="margin:0;background:#1e1e1e;display:flex;align-items:center;justify-content:center;height:100vh"><video controls autoplay src="${dataUrl}" style="max-width:100%;max-height:100%"></video></body></html>`;
-      }
-      return await response.clone().text();
-    }
-    window.getDocumentContent = getDocumentContent;
-    function installDeploymentInterceptors(page, parentPage = null) {
-      page.interceptEvent('console', (method, args) => forwardConsole(method, args));
-      page.interceptEvent('error', (error, location) => forwardError(error, location));
-
-      // Every emulated page (top-level deployment, iframe, and embed) gets
-      // navigation handling. History changes stay same-document; real
-      // navigations replace only that PageEmulator's document.
-      page.interceptEvent('navigate', async function(url, isHistoryNavigation = false, replaceHistory = false) {
-        const resolved = new URL(url, page.location?.url || domain + '/');
-
-        if (isHistoryNavigation) {
-          page.setLocation(resolved.href, resolved.origin);
-          page.history = page.history || [];
-          const currentIndex = page.historyIndex ?? (page.history.length - 1);
-
-          if (replaceHistory && currentIndex >= 0 && page.history[currentIndex]) {
-            page.history[currentIndex] = resolved.href;
-            page.historyIndex = currentIndex;
-          } else {
-            page.history = page.history.slice(0, currentIndex + 1);
-            page.history.push(resolved.href);
-            page.historyIndex = page.history.length - 1;
-          }
-
-          // Only the top-level deployment owns the real browser URL.
-          if (page === deploymentRootPage) {
-            const outerUrl = deploymentURL(resolved.href);
-            try {
-              if (replaceHistory) history.replaceState({}, document.title, outerUrl);
-              else history.pushState({}, document.title, outerUrl);
-            } catch (_) {}
-          }
+        if (options.hostFrame) {
+          options.hostFrame.removeAttribute('srcdoc');
+          options.hostFrame.src = resolved.href;
           return true;
         }
+        if (options.externalReplace) location.replace(resolved.href);
+        else location.assign(resolved.href);
+        return true;
+      }
 
-        const response = await page.network.request(
+      const response = await network.request(
+        resolved.href,
+        resolved.origin,
+        {},
+        options.requestType || 'navigation'
+      );
+
+      if (!response?.ok) {
+        if (options.hostFrame) {
+          options.hostFrame.removeAttribute('srcdoc');
+          options.hostFrame.src = resolved.href;
+          return true;
+        }
+        location.assign(resolved.href);
+        return true;
+      }
+
+      const rawHtml = await getDocumentContent(
+        response,
+        resolved.href,
+        resolved.origin,
+        options.page || page
+      );
+
+      const targetPage = options.page || page;
+      await targetPage.setDocument(rawHtml, true, resolved.href);
+      targetPage.setLocation(resolved.href, resolved.origin);
+      targetPage.history = Array.isArray(targetPage.history) ? targetPage.history : [];
+
+      if (options.replaceHistory && targetPage.history.length) {
+        if (targetPage.historyIndex < 0) targetPage.historyIndex = targetPage.history.length - 1;
+        targetPage.history[targetPage.historyIndex] = resolved.href;
+      } else if (options.recordHistory !== false) {
+        targetPage.history = targetPage.history.slice(0, targetPage.historyIndex + 1);
+        targetPage.history.push(resolved.href);
+        targetPage.historyIndex = targetPage.history.length - 1;
+      }
+
+      return true;
+    }
+
+    function getDownloadName(url, filename, response) {
+      if (typeof filename === 'string' && filename.trim()) return filename.trim();
+
+      const disposition = response?.headers?.get?.('content-disposition') || '';
+      const match = disposition.match(/filename\\*=UTF-8''([^;]+)|filename=(?:"([^"]+)"|([^;]+))/i);
+      if (match) {
+        const value = (match[1] || match[2] || match[3] || '').trim();
+        if (value) {
+          try { return decodeURIComponent(value); } catch (_) { return value; }
+        }
+      }
+
+      try {
+        const parsed = new URL(response?.url || response?.requested_url || url);
+        const parts = parsed.pathname.split('/').filter(Boolean);
+        if (parts.length) {
+          const value = decodeURIComponent(parts[parts.length - 1]);
+          if (value) return value;
+        }
+      } catch (_) {}
+
+      return 'download';
+    }
+
+    async function triggerDownload(url, filename, sourcePage = page) {
+      const resolved = new URL(url, sourcePage.location?.url || page.location.url);
+
+      let response = null;
+      try {
+        response = await network.request(
           resolved.href,
           resolved.origin,
           {},
-          parentPage ? 'iframe-navigation' : 'navigation'
+          'download'
         );
+      } catch (_) {}
 
-        if (!response?.ok) {
-          if (page === deploymentRootPage) {
-            navigateReal(resolved.href, false);
-            return true;
-          }
-          console.warn('Deployment iframe navigation failed:', resolved.href, response?.status || 'no response');
-          return true;
-        }
-
-        const rawHtml = await getDocumentContent(
-          response,
-          resolved.href,
-          resolved.origin,
-          page
-        );
-
-        await page.setDocument(rawHtml, true, resolved.href);
-        page.setLocation(resolved.href, resolved.origin);
-        page.history = page.history || [];
-        page.history = page.history.slice(0, (page.historyIndex ?? page.history.length - 1) + 1);
-        page.history.push(resolved.href);
-        page.historyIndex = page.history.length - 1;
-
-        if (page === deploymentRootPage) {
-          try {
-            history.pushState({}, document.title, deploymentURL(resolved.href));
-          } catch (_) {}
-        }
-
+      if (!response?.ok) {
+        const link = document.createElement('a');
+        link.href = resolved.href;
+        if (filename) link.download = filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
         return true;
+      }
+
+      const blob = await response.blob();
+      const name = getDownloadName(resolved.href, filename, response);
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = name;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+      return true;
+    }
+
+    function clearHostedEmbed(embed) {
+      const frame = embed?.__embedFrame;
+      if (!frame) return;
+      try { frame.remove(); } catch (_) {}
+      try { frame.pageEmulator?.remove?.(); } catch (_) {}
+      try { delete frame.pageEmulator; } catch (_) {}
+      try { delete embed.__embedFrame; } catch (_) {}
+      try { embed.style.opacity = ''; } catch (_) {}
+      try { embed.style.pointerEvents = ''; } catch (_) {}
+    }
+
+    function syncHostedEmbed(embed, frame, ownerWindow) {
+      if (!embed?.isConnected || !frame?.isConnected) return;
+
+      const rect = embed.getBoundingClientRect();
+      const style = ownerWindow.getComputedStyle ? ownerWindow.getComputedStyle(embed) : null;
+      const visible = !style || (
+        style.visibility !== 'hidden' &&
+        style.visibility !== 'collapse' &&
+        style.display !== 'none'
+      );
+
+      frame.style.left = rect.left + 'px';
+      frame.style.top = rect.top + 'px';
+      frame.style.width = Math.max(0, rect.width) + 'px';
+      frame.style.height = Math.max(0, rect.height) + 'px';
+      frame.style.visibility = visible ? 'visible' : 'hidden';
+      frame.style.opacity = visible ? '1' : '0';
+      frame.style.pointerEvents = visible ? 'auto' : 'none';
+    }
+
+    function createHostedDeploymentFrame(embed) {
+      if (embed.__embedFrame?.pageEmulator) return embed.__embedFrame;
+
+      const ownerDocument = embed.ownerDocument || document;
+      const ownerWindow = ownerDocument.defaultView || window;
+      const frame = ownerDocument.createElement('iframe');
+
+      frame.setAttribute('data-embed-frame', '1');
+      frame.setAttribute('frameborder', '0');
+      frame.style.position = 'fixed';
+      frame.style.border = '0';
+      frame.style.margin = '0';
+      frame.style.padding = '0';
+      frame.style.background = 'transparent';
+      frame.style.zIndex = '2147483646';
+      frame.style.display = 'block';
+
+      ownerDocument.body?.appendChild(frame);
+
+      const child = new PageEmulator(frame, {
+        network,
+        location: {
+          url: 'about:blank',
+          origin: domain
+        },
+        history: []
       });
 
-      // window.open() from any deployment page/iframe should go through the
-      // deployment URL for the project domain, while truly external URLs open
-      // normally in a browser tab/window.
-      page.interceptEvent('open', (url, activateTab = true) => {
-        const resolved = new URL(url, page.location?.url || domain + '/');
+      frame.pageEmulator = child;
+      frame.usefulHelpers = window.__pageRegistry?.__usefulHelpers;
+      embed.__embedFrame = frame;
+      embed.style.opacity = '0';
+      embed.style.pointerEvents = 'none';
 
-        if (resolved.origin !== domain) {
-          const popup = window.open(resolved.href, '_blank', 'noopener');
+      embed.__syncEmbedBounds = () => syncHostedEmbed(embed, frame, ownerWindow);
+      ownerWindow.addEventListener('resize', embed.__syncEmbedBounds);
+      ownerWindow.addEventListener('scroll', embed.__syncEmbedBounds, true);
+
+      const observer = ownerWindow.MutationObserver
+        ? new ownerWindow.MutationObserver(embed.__syncEmbedBounds)
+        : null;
+      if (observer) {
+        observer.observe(embed, {
+          attributes: true,
+          attributeFilter: ['style', 'class', 'hidden']
+        });
+      }
+      embed.__embedCleanup = () => {
+        try { ownerWindow.removeEventListener('resize', embed.__syncEmbedBounds); } catch (_) {}
+        try { ownerWindow.removeEventListener('scroll', embed.__syncEmbedBounds, true); } catch (_) {}
+        try { observer?.disconnect?.(); } catch (_) {}
+        try { delete embed.__syncEmbedBounds; } catch (_) {}
+        try { delete embed.__embedCleanup; } catch (_) {}
+      };
+
+      embed.__syncEmbedBounds();
+      return frame;
+    }
+
+    function installEmulatedPageEvents(currentPage, options = {}) {
+      const hostFrame = options.hostFrame || null;
+      const isRootPage = currentPage === deploymentRootPage;
+
+      currentPage.interceptEvent('console', (method, args) => forwardConsole(method, args));
+      currentPage.interceptEvent('error', (error, location) => forwardError(error, location));
+
+      currentPage.interceptEvent('download', async (url, activateTab, filename) => {
+        return await triggerDownload(url, filename, currentPage);
+      });
+
+      currentPage.interceptEvent('open', (url, activateTab = true) => {
+        const resolved = new URL(url, currentPage.location?.url || domain + '/');
+
+        if (resolved.origin === domain) {
+          const popup = window.open(
+            deploymentPageUrl(resolved.href),
+            '_blank',
+            'noopener'
+          );
           if (activateTab === false && popup) {
             try { popup.opener = null; } catch (_) {}
           }
           return popup || true;
         }
 
-        const popup = window.open(deploymentURL(resolved.href), '_blank', 'noopener');
+        const popup = window.open(resolved.href, '_blank', 'noopener');
         if (activateTab === false && popup) {
           try { popup.opener = null; } catch (_) {}
         }
         return popup || true;
       });
 
-      page.interceptEvent('iframe-create', function(obj) {
+      currentPage.interceptEvent('iframe-create', function(obj) {
         if (!obj?.iframe) return null;
-        if (obj.iframe.pageEmulator) return obj.iframe.pageEmulator;
 
-        const child = new PageEmulator(obj.iframe, {
+        const frame = obj.iframe;
+        if (frame.pageEmulator) return frame.pageEmulator;
+
+        const child = new PageEmulator(frame, {
           network,
-          location: {url:'about:blank', origin:page.location?.origin || domain},
-          history:[]
+          location: {
+            url: 'about:blank',
+            origin: currentPage.location?.origin || domain
+          },
+          history: []
         });
-        obj.iframe.pageEmulator = child;
-        page.addChild?.(child);
-        installDeploymentInterceptors(child, page);
-        child.setLocation('about:blank', page.location?.origin || domain);
+
+        frame.pageEmulator = child;
+        frame.usefulHelpers = window.__pageRegistry?.__usefulHelpers;
+        currentPage.addChild?.(child);
         return child;
       });
 
-      page.interceptEvent('iframe-navigate', async function(obj) {
+      currentPage.interceptEvent('iframe-navigate', async function(obj) {
         const frame = obj?.iframe;
         if (!frame) return;
-        const child = frame.pageEmulator;
-        if (!child) return;
 
         const navigationId = obj.navigationId;
-        if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
+        if (
+          navigationId !== undefined &&
+          frame.__iframeNavigationId !== navigationId
+        ) return;
 
         if (obj.is_doc) {
-          child.setLocation('about:srcdoc', page.location?.origin || domain);
+          let child = frame.pageEmulator;
+          if (!child) {
+            child = new PageEmulator(frame, {
+              network,
+              location: {
+                url: 'about:srcdoc',
+                origin: currentPage.location?.origin || domain
+              },
+              history: []
+            });
+            frame.pageEmulator = child;
+            frame.usefulHelpers = window.__pageRegistry?.__usefulHelpers;
+            currentPage.addChild?.(child);
+          }
+
+          child.setLocation('about:srcdoc', currentPage.location?.origin || domain);
           child.rawDocument = String(obj.srcdoc || '');
-          if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
           await child.setDocument(obj.srcdoc || '');
           return;
         }
@@ -709,103 +945,40 @@ window.__deploymentNetworkReady = (async function() {
 
         let targetUrl;
         try {
-          targetUrl = new URL(obj.src, page.location?.url || domain + '/');
+          targetUrl = new URL(
+            obj.src,
+            currentPage.location?.url || domain + '/'
+          );
         } catch (_) {
           return;
         }
 
-        child.setLocation(targetUrl.href, targetUrl.origin);
-        const res = await child.network.request(targetUrl.href, targetUrl.origin, {}, 'iframe');
-        if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
-        if (!res || !res.ok) return;
+        const isInternal = targetUrl.origin === domain;
 
-        const rawHtml = await window.getDocumentContent(
-          res,
-          targetUrl.href,
-          targetUrl.origin,
-          obj
-        );
-        if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
-
-        child.rawDocument = String(rawHtml || '');
-        await child.setDocument(rawHtml, true, targetUrl.href);
-      });
-
-      page.interceptEvent('embed-create', function(obj) {
-        if (!obj?.embed) return null;
-        const embed = obj.embed;
-        if (embed.__embedFrame?.pageEmulator) return embed.__embedFrame.pageEmulator;
-
-        const ownerDocument = embed.ownerDocument || document;
-        const ownerWindow = ownerDocument.defaultView || window;
-        const frame = ownerDocument.createElement('iframe');
-        frame.setAttribute('data-embed-frame', '1');
-        frame.setAttribute('frameborder', '0');
-        frame.style.position = 'fixed';
-        frame.style.border = '0';
-        frame.style.margin = '0';
-        frame.style.padding = '0';
-        frame.style.background = 'transparent';
-        frame.style.zIndex = '2147483646';
-        frame.style.display = 'block';
-        ownerDocument.body?.appendChild(frame);
-
-        embed.style.opacity = '0';
-        embed.style.pointerEvents = 'none';
-        embed.__embedFrame = frame;
-
-        function syncBounds() {
-          if (!embed.isConnected || !frame.isConnected) return;
-          const r = embed.getBoundingClientRect();
-          const style = ownerWindow.getComputedStyle ? ownerWindow.getComputedStyle(embed) : null;
-          const visible = !style || (
-            style.visibility !== 'hidden' &&
-            style.visibility !== 'collapse' &&
-            style.display !== 'none'
-          );
-          frame.style.left = r.left + 'px';
-          frame.style.top = r.top + 'px';
-          frame.style.width = Math.max(0, r.width) + 'px';
-          frame.style.height = Math.max(0, r.height) + 'px';
-          frame.style.visibility = visible ? 'visible' : 'hidden';
-          frame.style.opacity = visible ? '1' : '0';
-          frame.style.pointerEvents = visible ? 'auto' : 'none';
-        }
-
-        embed.__syncEmbedBounds = syncBounds;
-        ownerWindow.addEventListener('resize', syncBounds);
-        ownerWindow.addEventListener('scroll', syncBounds, true);
-
-        const observer = ownerWindow.MutationObserver
-          ? new ownerWindow.MutationObserver(syncBounds)
-          : null;
-        if (observer) observer.observe(embed, {
-          attributes: true,
-          attributeFilter: ['style', 'class', 'hidden']
-        });
-        syncBounds();
-
-        const child = new PageEmulator(frame, {
-          network,
-          location: {
-            url: 'about:blank',
-            origin: page.location?.origin || domain
-          },
-          history:[]
-        });
-        frame.pageEmulator = child;
-        page.addChild?.(child);
-        installDeploymentInterceptors(child, page);
-        return child;
-      });
-
-      page.interceptEvent('embed-navigate', async function(obj) {
-        const embed = obj?.embed;
-        if (!embed?.__embedFrame) return;
-
-        const frame = embed.__embedFrame;
+        // Internal iframe pages are represented by another deployment page
+        // carrying their own ?url= parameter. External frames remain native.
         const child = frame.pageEmulator;
-        if (!child || !obj.src) return;
+        if (child) child.setLocation(targetUrl.href, targetUrl.origin);
+
+        const frameUrl = isInternal
+          ? deploymentPageUrl(targetUrl.href)
+          : targetUrl.href;
+
+        frame.removeAttribute('srcdoc');
+        frame.src = frameUrl;
+      });
+
+      currentPage.interceptEvent('embed-create', function() {
+        // setupEmbed() removes the original src before embed-navigate. No
+        // PageEmulator is necessary for a normal embed; embed-navigate decides
+        // whether it stays native, becomes a deployment iframe, or becomes a
+        // data: URL.
+        return null;
+      });
+
+      currentPage.interceptEvent('embed-navigate', async function(obj) {
+        const embed = obj?.embed;
+        if (!embed) return;
 
         const navigationId = obj.navigationId;
         if (
@@ -813,56 +986,163 @@ window.__deploymentNetworkReady = (async function() {
           embed.__embedNavigationId !== navigationId
         ) return;
 
+        if (!obj.src) return;
+
         let targetUrl;
         try {
           targetUrl = new URL(
             obj.src,
-            page.location?.url || domain + '/'
+            currentPage.location?.url || domain + '/'
           );
         } catch (_) {
           return;
         }
 
-        child.setLocation(targetUrl.href, targetUrl.origin);
+        clearHostedEmbed(embed);
 
-        const res = await child.network.request(
-          targetUrl.href,
-          targetUrl.origin,
-          {},
-          'embed'
-        );
+        if (targetUrl.origin !== domain) {
+          embed.setAttribute('src', targetUrl.href);
+          return;
+        }
 
-        if (
-          navigationId !== undefined &&
-          embed.__embedNavigationId !== navigationId
-        ) return;
-        if (!res || !res.ok) return;
+        let response;
+        try {
+          response = await network.request(
+            targetUrl.href,
+            targetUrl.origin,
+            {},
+            'embed'
+          );
+        } catch (_) {
+          embed.setAttribute('src', targetUrl.href);
+          return;
+        }
 
-        const rawHtml = await window.getDocumentContent(
-          res,
-          targetUrl.href,
-          targetUrl.origin,
-          obj
-        );
+        if (!response?.ok) {
+          embed.setAttribute('src', targetUrl.href);
+          return;
+        }
 
-        if (
-          navigationId !== undefined &&
-          embed.__embedNavigationId !== navigationId
-        ) return;
+        const contentType = String(
+          response.headers?.get?.('content-type') || ''
+        ).toLowerCase();
 
-        child.rawDocument = String(rawHtml || '');
-        await child.setDocument(rawHtml, true, targetUrl.href);
-        embed.__syncEmbedBounds?.();
+        const isHtml =
+          contentType.includes('text/html') ||
+          contentType.includes('application/xhtml+xml') ||
+          contentType.includes('application/xml') ||
+          contentType.includes('text/xml');
+
+        if (isHtml) {
+          const frame = createHostedDeploymentFrame(embed);
+          const frameUrl = deploymentPageUrl(targetUrl.href);
+
+          frame.pageEmulator?.setLocation(frameUrl, new URL(frameUrl).origin);
+          frame.src = frameUrl;
+          embed.__syncEmbedBounds?.();
+          return;
+        }
+
+        try {
+          const dataUri = await createDataUri(response.clone());
+          if (dataUri) {
+            embed.setAttribute('src', dataUri);
+            return;
+          }
+        } catch (_) {}
+
+        embed.setAttribute('src', targetUrl.href);
+      });
+
+      currentPage.interceptEvent('navigate', async function(url, ...args) {
+        const resolved = new URL(url, currentPage.location?.url || domain + '/');
+
+        const isHistoryStateChange =
+          args.length >= 2 &&
+          args[0] === true &&
+          (args[1] === false || args[1] === true);
+
+        const replaceHistory =
+          isHistoryStateChange && args[1] === true;
+
+        if (isHistoryStateChange) {
+          updatePageHistory(resolved.href, replaceHistory);
+
+          if (isRootPage) {
+            // pushState()/replaceState() only changes the deployment URL.
+            // It never recreates the emulated document, even for an external
+            // URL.
+            updateDeploymentBrowserUrl(resolved.href, replaceHistory);
+          }
+          return true;
+        }
+
+        if (resolved.origin !== domain) {
+          if (hostFrame) {
+            hostFrame.removeAttribute('srcdoc');
+            hostFrame.src = resolved.href;
+          } else {
+            location.assign(resolved.href);
+          }
+          return true;
+        }
+
+        if (isRootPage) {
+          await loadEmulatedPage(resolved.href, {
+            page: currentPage,
+            requestType: 'navigation',
+            recordHistory: true
+          });
+          updateDeploymentBrowserUrl(resolved.href, false);
+          return true;
+        }
+
+        if (hostFrame) {
+          hostFrame.removeAttribute('srcdoc');
+          hostFrame.src = deploymentPageUrl(resolved.href);
+          return true;
+        }
+
+        await loadEmulatedPage(resolved.href, {
+          page: currentPage,
+          requestType: 'navigation',
+          recordHistory: true
+        });
+        return true;
       });
     }
-    installDeploymentInterceptors(page);
-    try {
-      const canonical=new URL(location.href); canonical.searchParams.delete('githubUrl'); canonical.searchParams.delete('sha'); canonical.searchParams.set('github',githubURL); canonical.searchParams.set('commit',resolvedRef); if(branchOverride!==null)canonical.searchParams.set('branch',branchOverride);else canonical.searchParams.delete('branch'); canonical.searchParams.delete('path'); canonical.searchParams.delete('deploymentMode'); canonical.searchParams.delete('externalUrl'); canonical.searchParams.delete('externalMode'); canonical.searchParams.set('url',pageURL); if(usePeerServer)canonical.searchParams.set('peerServer','1');else canonical.searchParams.delete('peerServer'); canonical.searchParams.delete('usePeerNetwork'); history.replaceState({},document.title,canonical.pathname+canonical.search+canonical.hash);
-    } catch (_) {}
+
+    installEmulatedPageEvents(page);
+
+    // The deployment URL always records the actual emulated page currently
+    // loaded by this deployment wrapper.
+    page.setLocation(pageURL, domain);
+    page.history = [pageURL];
+    page.historyIndex = 0;
+    updateDeploymentBrowserUrl(pageURL, true);
+
     setProgress('Starting project…', null, 'Launching deployment runtime…');
-    status.textContent='Starting project…';
-    const response=await network.request(pageURL,location.origin,{},'deployment'); if(!response?.ok)throw new Error(`Project entry page failed to load (${response?.status||'no response'}).`); const html=await response.text(); await page.setDocument(html,true,pageURL); stage.classList.add('ready'); setProgress('Deployment ready',100,pageURL); hideProgress(); status.remove();
-  }
+    status.textContent = 'Starting project…';
+
+    const response = await network.request(
+      pageURL,
+      domain,
+      {},
+      'deployment'
+    );
+
+    if (!response?.ok) {
+      throw new Error(
+        `Project entry page failed to load (${response?.status || 'no response'}).`
+      );
+    }
+
+    const html = await response.text();
+    await page.setDocument(html, true, pageURL);
+    stage.classList.add('ready');
+    setProgress('Deployment ready', 100, pageURL);
+    hideProgress();
+    status.remove();
   main().catch(showError);
 })();
 </script>
