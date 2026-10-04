@@ -56,11 +56,25 @@ window.__deploymentNetworkReady = (async function() {
   const network = new Network();
   const native = new NetworkEndpoint(true, true);
   native.__networkRole = 'native';
-  const configuredFallbackProxy = typeof workers.fallbackProxy === 'string' ? workers.fallbackProxy.trim() : '';
-  const selectedProxy = configuredFallbackProxy || String(workers.proxy || '');
-  const proxy = new ProxyNetworkEndpoint(selectedProxy, true, !!selectedProxy);
-  network.appendEndpoint(native);
-  network.appendEndpoint(proxy);
+
+  // Keep the deployment network's base endpoints aligned with the browser:
+  // native fetch is the default error source, followed by the primary proxy
+  // and the optional fallback proxy.
+  const primaryProxyUrl = String(workers.proxy || '').trim();
+  const fallbackProxyUrl = typeof workers.fallbackProxy === 'string' ? workers.fallbackProxy.trim() : '';
+  const primaryProxy = new ProxyNetworkEndpoint(primaryProxyUrl, true, !!primaryProxyUrl);
+  const fallbackProxy = new ProxyNetworkEndpoint(fallbackProxyUrl, true, !!fallbackProxyUrl);
+
+  network.setEndpoints([
+    native,
+    primaryProxy,
+    fallbackProxy
+  ]);
+  network.__deploymentBaseEndpoints = {
+    native,
+    primary: primaryProxy,
+    fallback: fallbackProxy
+  };
   return network;
 })();
 
@@ -491,55 +505,27 @@ window.__deploymentNetworkReady = (async function() {
     }
     if (type === 'static') {
       runtime = new StaticEndpoint({domain, path:runtimePath, rootfolder:root, runfile:runConfig.runfile || '/index.html', filesystem:fs});
-      network.prependEndpoint(runtime);
       await runtime.loading;
-      if (peerEndpoint) network.prependEndpoint(peerEndpoint);
     } else {
       runtime = new NodeEmulator({domain,rootfolder:root,pathPrefix:runtimePath,filesystem:fs,fileSystemSync:false,network,cwd:runConfig.cwd || '/',env:{NODE_ENV:'production',USER:'browser_user',...deploymentEnvironment}});
-      network.prependEndpoint(runtime.endpoint);
       await runtime.ready;
       if (runConfig.nodeCommand) await runtime.terminalCommand(runConfig.nodeCommand);
       if (!await runtime.waitForServer?.(10000,50)) throw new Error('Node command finished, but no listening server was created.');
-      if (peerEndpoint) network.prependEndpoint(peerEndpoint);
     }
+
+    const runtimeEndpoint = type === 'node' ? runtime.endpoint : runtime;
+    const deploymentEndpoints = [runtimeEndpoint];
+    if (peerEndpoint) deploymentEndpoints.push(peerEndpoint);
+    deploymentEndpoints.push(
+      network.__deploymentBaseEndpoints.native,
+      network.__deploymentBaseEndpoints.primary,
+      network.__deploymentBaseEndpoints.fallback
+    );
+    network.setEndpoints(deploymentEndpoints);
+
     if (runtime?.addEventListener) {
       runtime.addEventListener('console', (method, args) => forwardConsole(method, args));
       runtime.addEventListener('error', (error, location) => forwardError(error, location));
-    }
-
-    // Deployment gets its own Network instance. For same-origin WebSockets,
-    // route directly to the Node runtime before the native/proxy endpoints.
-    // Network.searchEndpoints() is designed around HTTP Response objects and
-    // therefore cannot reliably short-circuit on the mock WebSocket returned by
-    // NodeEndpoint. The Browser workbench can fall back through its shared
-    // network stack, but deployment should keep the project's socket inside
-    // the emulated runtime.
-    if (type === 'node' && runtime?.endpoint?.handleSocket) {
-      const originalNetworkSocket = network.socket.bind(network);
-      network.socket = async function(url, baseOrigin, protocols) {
-        let absoluteUrl = null;
-        try { absoluteUrl = resolveNetworkURL(url, baseOrigin); } catch (_) {}
-        if (absoluteUrl) {
-          try {
-            const socketUrl = new URL(absoluteUrl);
-            if ((socketUrl.protocol === 'ws:' || socketUrl.protocol === 'wss:') &&
-                socketUrl.host === new URL(domain).host) {
-              network.dispatchEvent('socketstart', absoluteUrl, protocols);
-              try {
-                const virtualSocket = await runtime.endpoint.handleSocket(absoluteUrl, protocols);
-                if (virtualSocket) {
-                  network.dispatchEvent('socketend', virtualSocket, absoluteUrl, protocols);
-                  return virtualSocket;
-                }
-              } catch (error) {
-                console.warn('[Deployment] Runtime WebSocket failed, falling back:', error);
-              }
-              network.dispatchEvent('socketend', null, absoluteUrl, protocols);
-            }
-          } catch (_) {}
-        }
-        return await originalNetworkSocket(url, baseOrigin, protocols);
-      };
     }
     if (usePeerServer) {
       const layer = String(deploymentConfig.peerLayer || projectMeta?.peerLayer || 'peer').trim() || 'peer';
