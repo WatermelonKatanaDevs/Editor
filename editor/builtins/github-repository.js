@@ -11,6 +11,8 @@
     }
 
     function render(g) {
+      const view = document.createElement('div');
+      view.className = 'editor-github-repository-view';
       const root = document.createElement('div');
       const style = document.createElement('style');
       style.textContent = `
@@ -58,8 +60,12 @@
           </form>
         </div>
       `;
-      g.viewBody.appendChild(style);
-      g.viewBody.appendChild(root);
+      // Keep the stylesheet inside the same lifecycle-managed element as the view.
+      // Workbench reuses builtin elements when tabs are switched; having <style>
+      // as a sibling of the view lets the lifecycle hide/remove it independently.
+      view.appendChild(style);
+      view.appendChild(root);
+      g.viewBody.appendChild(view);
 
       const status = root.querySelector('[data-status]');
       const form = root.querySelector('[data-form]');
@@ -141,6 +147,7 @@
     }
 
     return {
+
       title: 'GitHub Repository',
       icon: 'GH',
       render
