@@ -225,6 +225,30 @@ window.__deploymentNetworkReady = (async function() {
     const match = raw.match(/^([^?#]*)([?#].*)?$/);
     return {pathname:match?.[1] || '/', suffix:match?.[2] || ''};
   }
+  function readProcessEnv(fs) {
+    try {
+      if (!fs?.existsSync?.('/.editor/process.env')) return {};
+      const env = {};
+      for (const raw of String(fs.readFileSync('/.editor/process.env', 'utf8') || '').split(/\r?\n/)) {
+        const line = raw.trim();
+        if (!line || line.startsWith('#')) continue;
+        const body = line.startsWith('export ') ? line.slice(7).trim() : line;
+        const i = body.indexOf('=');
+        if (i <= 0) continue;
+        const key = body.slice(0, i).trim();
+        if (!key) continue;
+        let value = body.slice(i + 1).trim();
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+        env[key] = value.replace(/\\n/g, '\n');
+      }
+      return env;
+    } catch (_) {
+      return {};
+    }
+  }
+
   function normalizeDomain(value) {
     let s = String(value || 'http://localhost:3000/').trim();
     if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) s = 'http://' + s;
@@ -316,6 +340,10 @@ window.__deploymentNetworkReady = (async function() {
     const externalMode = externalModeOverride === 'emulate' || String(deploymentConfig.externalMode || projectMeta?.deployment?.externalMode || '') === 'emulate'
       ? 'emulate'
       : 'iframe';
+    const saveEnvironmentVariables =
+      deploymentConfig.saveEnvironmentVariables === true ||
+      projectMeta?.deployment?.saveEnvironmentVariables === true;
+    const deploymentEnvironment = saveEnvironmentVariables ? readProcessEnv(fs) : {};
     const type = runConfig.serverType === 'node' ? 'node' : 'static';
 
     // Third-party deployments have their own target URL and do not use the editor runtime.
@@ -467,7 +495,7 @@ window.__deploymentNetworkReady = (async function() {
       await runtime.loading;
       if (peerEndpoint) network.prependEndpoint(peerEndpoint);
     } else {
-      runtime = new NodeEmulator({domain,rootfolder:root,pathPrefix:runtimePath,filesystem:fs,fileSystemSync:false,network,cwd:runConfig.cwd || '/',env:{NODE_ENV:'production',USER:'browser_user'}});
+      runtime = new NodeEmulator({domain,rootfolder:root,pathPrefix:runtimePath,filesystem:fs,fileSystemSync:false,network,cwd:runConfig.cwd || '/',env:{NODE_ENV:'production',USER:'browser_user',...deploymentEnvironment}});
       network.prependEndpoint(runtime.endpoint);
       await runtime.ready;
       if (runConfig.nodeCommand) await runtime.terminalCommand(runConfig.nodeCommand);
