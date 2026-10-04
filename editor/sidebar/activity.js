@@ -38,15 +38,6 @@
       activityExplorer: {kind: 'explorer', show: () => explorer.show()},
       activityProfile: {kind: 'Profile', show: () => profile.show()},
     };
-    function syncSourceControlActivity() {
-      const button = document.getElementById('activitySource');
-      const enabled = state.gitEnabled !== false;
-      if (button) {
-        button.hidden = !enabled;
-        button.setAttribute('aria-hidden', enabled ? 'false' : 'true');
-      }
-      if (!enabled && state.sidebar === 'Source Control') show('explorer');
-    }
     const MIN_WIDTH = 180;
     const MAX_WIDTH = 420;
     const HIDE_THRESHOLD = MIN_WIDTH / 2;
@@ -74,7 +65,7 @@
     }
     function show(kind) {
       const entry = Object.values(activities).find(x => x.kind === kind);
-      if (!entry || (kind === 'Source Control' && state.gitEnabled === false)) return;
+      if (!entry) return;
       const button = Object.entries(activities).find(([, x]) => x === entry)?.[0];
       const same = state.sidebar === kind && !tree.classList.contains('activity-collapsed');
       if (same) { collapse(); return; }
@@ -98,7 +89,6 @@
     }
     const githubUnsubscribe = github?.onChange?.(() => { syncProfileButton(); state.runDebugRefresh?.(); }) || null;
     syncProfileButton();
-    syncSourceControlActivity();
     resizer?.addEventListener('mousedown', e => {
       if (e.button !== 0) return;
       if (tree.classList.contains('activity-collapsed')) {
@@ -140,12 +130,11 @@
     tree.addEventListener('contextmenu', e => e.stopPropagation());
     setWidth(MIN_WIDTH);
     state.sidebar = 'explorer';
-    syncSourceControlActivity();
     return {
       explorer, runDebug, settings, extensions, search, sourceControl, profile, show, dispose() { extensions.dispose?.(); githubUnsubscribe?.(); },
       setActiveActivity(id) { document.querySelectorAll('.activity-button').forEach(x => x.classList.toggle('active', x.id === id)); },
       restoreCollapsed: paths => explorer.restoreCollapsed(paths),
-      setWidth, collapse, expand, getWidth: () => width, syncSourceControlActivity
+      setWidth, collapse, expand, getWidth: () => width
     };
   };
 })();
