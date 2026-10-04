@@ -92,7 +92,7 @@ class Network extends EventHandler {
       if (!response) return null;
       endp.dispatchEvent('returnsocket',response,absoluteUrl,protocols);
       return response;
-    });
+    }, 'socket');
     this.dispatchEvent('socketend',response,absoluteUrl,protocols);
     return response;
   }
@@ -154,6 +154,9 @@ class Network extends EventHandler {
       try {
         var response = await callback.call(this, endp);
         if (!response) continue;
+        // Socket endpoints return WebSocket/mock transport objects rather than
+        // HTTP Response objects, so the first successful socket endpoint wins.
+        if (type === 'socket') return response;
         if (response.ok) return response;
         if (endp.defaultError) responseError = response;
         lastResponse = response;
