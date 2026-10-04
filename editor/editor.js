@@ -1734,6 +1734,7 @@ window.__editorInitPromise = (async function () {
     const restored = state.workbench.restore(layout.workbench, data => makeLayoutTab(data, state.runConfig?.config?.serverType));
     if (!restored) return false;
     state.sidebarController.restoreCollapsed(layout.collapsedPaths || []);
+    state.sidebarController.syncSourceControlActivity?.();
     if (layout.sidebar === 'Source Control' && state.gitEnabled === false) layout.sidebar = 'explorer';
     if (layout.sidebar === 'explorer' || layout.sidebar === 'settings' || layout.sidebar === 'Search' || layout.sidebar === 'Source Control' || layout.sidebar === 'Run and Debug' || layout.sidebar === 'Extensions' || layout.sidebar === 'Profile') {
       state.sidebarController.show(layout.sidebar);
