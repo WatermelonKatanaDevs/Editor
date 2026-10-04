@@ -3012,9 +3012,20 @@
           reload: function() { sendEvent('navigate', DOCUMENT_URL, false); },
           toString: function() { return DOCUMENT_URL; }
         });
-        Object.defineProperty(virtualLocation, 'href', {
-          get: function() { return DOCUMENT_URL; },
-          set: function(u) { return this.assign(u); }
+        ['href', 'origin', 'protocol', 'host', 'hostname', 'pathname', 'search', 'hash'].forEach(function(prop) {
+          Object.defineProperty(virtualLocation, prop, {
+            get: function() {
+              try {
+                const current = new URL(DOCUMENT_URL);
+                return current[prop];
+              } catch (_) {
+                return prop === 'href' ? DOCUMENT_URL : '';
+              }
+            },
+            set: prop === 'href' ? function(u) { return this.assign(u); } : undefined,
+            configurable: true,
+            enumerable: true
+          });
         });
         Object.defineProperty(virtualLocation, Symbol.toStringTag, {
           value: 'Location',
@@ -3159,6 +3170,19 @@
           }
         });
 
+        function updateVirtualDocumentURL(url) {
+          try {
+            const resolvedUrl = new URL(url, DOCUMENT_URL).href;
+            DOCUMENT_URL = resolvedUrl;
+            CURRENT_PAGE_URL = resolvedUrl;
+            try { BASE_ORIGIN = new URL(resolvedUrl).origin; } catch (_) {}
+            try { window.origin = BASE_ORIGIN; } catch (_) {}
+            return resolvedUrl;
+          } catch (_) {
+            return DOCUMENT_URL;
+          }
+        }
+
         var virtualHistory;
         Object.keys(virtualHistory = {
           state: null,
@@ -3167,6 +3191,7 @@
             this.state = state;
             if (url) {
               const resolvedUrl = new URL(url, virtualLocation.href).href;
+              updateVirtualDocumentURL(resolvedUrl);
               sendEvent('navigate', resolvedUrl, true, false);
             }
           },
@@ -3174,7 +3199,8 @@
             this.state = state;
             if (url) {
               const resolvedUrl = new URL(url, virtualLocation.href).href;
-              virtualLocation.replace(resolvedUrl);
+              updateVirtualDocumentURL(resolvedUrl);
+              sendEvent('navigate', resolvedUrl, true, true);
             }
           },
           go: function(delta) {
