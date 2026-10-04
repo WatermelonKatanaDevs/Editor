@@ -767,7 +767,12 @@ window.__deploymentNetworkReady = (async function() {
 
     function clearHostedEmbed(embed) {
       const frame = embed?.__embedFrame;
-      if (!frame) return;
+      try { embed?.__embedCleanup?.(); } catch (_) {}
+      if (!frame) {
+        try { embed.style.opacity = ''; } catch (_) {}
+        try { embed.style.pointerEvents = ''; } catch (_) {}
+        return;
+      }
       try { frame.remove(); } catch (_) {}
       try { frame.pageEmulator?.remove?.(); } catch (_) {}
       try { delete frame.pageEmulator; } catch (_) {}
@@ -862,8 +867,14 @@ window.__deploymentNetworkReady = (async function() {
       currentPage.interceptEvent('console', (method, args) => forwardConsole(method, args));
       currentPage.interceptEvent('error', (error, location) => forwardError(error, location));
 
-      currentPage.interceptEvent('download', async (url, activateTab, filename) => {
-        return await triggerDownload(url, filename, currentPage);
+      currentPage.interceptEvent('download', async (url, filenameOrUnused, filename) => {
+        // emulator.js sends (url, filename); accept the historical three-argument
+        // form as well so downloads always receive the requested file name.
+        return await triggerDownload(
+          url,
+          filename ?? filenameOrUnused,
+          currentPage
+        );
       });
 
       currentPage.interceptEvent('open', (url, activateTab = true) => {
