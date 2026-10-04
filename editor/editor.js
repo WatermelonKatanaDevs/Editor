@@ -738,6 +738,9 @@ window.__editorInitPromise = (async function () {
   }
   async function saveProjectCache(force = false) {
     if (!state.fs || !state.projectId || state.loading) return false;
+    // A new template with no user changes should stay ephemeral. Do not create
+    // a local cache/recent-project entry until it is edited or explicitly saved.
+    if (state.projectTemplate && !state.dirty && !state.lastSavedAt) return false;
     if (!force && !state.dirty) return false;
     if (!('caches' in window)) return false;
     const fs = state.fs;
