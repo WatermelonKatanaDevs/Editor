@@ -2229,21 +2229,26 @@ window.__editorInitPromise = (async function () {
 
   function closeRemoteImportModal(options = {}) {
     document.getElementById('remoteImportModal')?.remove();
-    if (options.returnToChooser) showProjectChooser(options.chooserOptions || {}).catch(logError);
+    if (options.returnToChooser && !document.querySelector('.startup-modal')) {
+      showProjectChooser(options.chooserOptions || {}).catch(logError);
+    }
   }
-  function finishRemoteImport() {
+  function finishRemoteImport(options = {}) {
     document.getElementById('remoteImportModal')?.remove();
+    if (options.returnToChooser) {
+      document.querySelectorAll('.startup-modal').forEach(modal => modal.remove());
+    }
   }
   async function importRemoteProject(input, options = {}) {
     try {
       // Replace the repository/source chooser with the loading progress UI immediately.
-      finishRemoteImport();
+      finishRemoteImport({returnToChooser:options.returnToChooser});
       const remote = await fetchRemoteProject(input);
       updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
       const fs = await FileSystem.create(remote.file, {sync:false});
       updateRemoteLoadProgress('Starting workspace…', 97, remote.name || 'Remote Project');
       await replaceFileSystem(fs, remote.name || 'Remote Project', true, {projectId:remote.projectId || undefined, gitRemote:remote.gitRemote || null});
-      finishRemoteImport();
+      finishRemoteImport({returnToChooser:options.returnToChooser});
       finishRemoteLoadProgress();
       return true;
     } catch (e) {
