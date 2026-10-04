@@ -40,8 +40,6 @@ window.__deploymentAssetsReady = (async function() {
 
   // Keep asset references relative to this deployment document. Do not resolve
   // them through the emulated project URL.
-  const assetBase = new URL('.', document.baseURI).href;
-
   window.__peerLayer = new URLSearchParams(location.search).get('peerLayer') || 'peer';
 
   for (const source of sources) {
@@ -514,9 +512,10 @@ window.__deploymentNetworkReady = (async function() {
 
     const domain = deploymentOrigin;
     const runtimePath = initialTargetUrl.pathname || '/';
-    const usePeerServer = peerOverride === null
-      ? (!!deploymentConfig.usePeerServer || !!projectMeta?.deployment?.usePeerServer)
-      : !!peerOverride;
+    const savedUsePeerServer = Object.prototype.hasOwnProperty.call(deploymentConfig, 'usePeerServer')
+      ? deploymentConfig.usePeerServer === true
+      : projectMeta?.deployment?.usePeerServer === true;
+    const usePeerServer = peerOverride === null ? savedUsePeerServer : !!peerOverride;
 
     let peerEndpoint = null;
     if (usePeerServer) {
