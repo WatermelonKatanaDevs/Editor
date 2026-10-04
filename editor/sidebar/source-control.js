@@ -98,10 +98,11 @@
           branches = [String(branch)];
           saveConfig();
 
-          // A repository created with autoInit:false has no branch/ref yet.
-          // Create the branch from the actual workspace contents as its initial commit.
-          renderShell();
+          // GitHub may take a moment to provision the Git database after the
+          // repository itself has been created. commitAndPush waits through
+          // that transient 409 state before creating the initial commit.
           button.textContent = 'Initializing…';
+          showStatus('Waiting for GitHub to initialize the repository…');
           const initialCommit = await github.commitAndPush({
             owner:String(owner),
             repo:String(repo),
@@ -113,10 +114,9 @@
             throw new Error('The new GitHub repository could not be initialized because the workspace has no files.');
           }
 
-          // Refresh repository metadata only after the initial commit exists.
-          // The selected repository and branch remain bound to the workspace.
-          repos = [];
-          await loadRepositories(true);
+          // The repository is already selected. Refresh only the state that
+          // changed instead of rebuilding the entire sidebar and racing
+          // several independent repository/branch requests.
           selected = {owner:String(owner), repo:String(repo), branch:String(branch)};
           branches = [String(branch)];
           saveConfig();
@@ -220,14 +220,58 @@
           return;
         }
         const changes = await github.compareWorkingTree(state.fs, remote.tree);
-        if (token !== statusToken) return;    async function loadHistory() {
+        if (token !== statusToken) return;
+        const showHidden = !!state.behavior?.showHiddenFolders;
+        const visibleChanges = [];
+        let settingsChanged = false;
+        for (const change of changes) {
+          const path = String(change.path || '').replace(/^\/+/, '');
+          if (path === '.editor' || path.startsWith('.editor/')) {
+            settingsChanged = true;
+            if (showHidden) visibleChanges.push(change);
+          } else visibleChanges.push(change);
+        }
+        if (!showHidden && settingsChanged) visibleChanges.push({path:'.editor', type:'modified', settings:true});
+        changesEl.innerHTML = visibleChanges.length ? visibleChanges.map(c => {
+          if (c.settings) return `<div class="source-control-change"><span class="source-control-change-type source-modified">M</span><span>Settings changed</span></div>`;
+          return `<div class="source-control-change"><span class="source-control-change-type source-${c.type}">${c.type === 'modified' ? 'M' : c.type === 'added' ? 'A' : 'D'}</span><span>${esc(c.path)}</span></div>`;
+        }).join('') : '<div class="source-control-clean">No changes</div>';
+        changesEl.dataset.count = String(changes.length);
+        const button = tree.querySelector('[data-commit]');
+        const isInitialCommit = !!remote.empty || !remote.commitSha;
+        if (button) {
+          button.disabled = commitBusy || !changes.length || !canPush;
+          button.textContent = isInitialCommit ? 'Initial Commit & Push' : 'Commit & Push';
+          button.title = canPush ? (isInitialCommit ? 'Create the first commit on this empty GitHub repository.' : '') : 'You do not have push permission for this repository.';
+        }
+        if (!canPush) showStatus('This repository is read-only for your GitHub account.', true);
+        else if (remote.truncated) showStatus('GitHub truncated the remote tree; large repositories may need a more focused sync later.', true);
+        else if (isInitialCommit && changes.length) showStatus('This GitHub repository has no commits yet. Your next commit will become its initial commit.');
+        else clearStatus();
+      } catch (e) {
+        if (token !== statusToken) return;
+        changesEl.innerHTML = `<div class="source-control-error">${esc(e.message || String(e))}</div>`;
+        const button = tree.querySelector('[data-commit]');
+        if (button) button.disabled = true;
+      }
+    }
+
+    async function loadHistory() {
       const token = ++historyToken;
       const historyEl = tree.querySelector('[data-history]');
       if (!historyEl || !selected.repo) return;
       historyEl.innerHTML = '<div class="source-control-loading">Loading commits…</div>';
       try {
         const commits = await github.listCommits(selected.owner, selected.repo, selected.branch || 'main', 20);
-        if (token !== historyToken) return;    async function openCommitRestore(commitSha) {
+        if (token !== historyToken) return;
+        historyEl.innerHTML = commits.length ? commits.map(commit => `<button type="button" class="source-control-commit-row" data-commit-sha="${esc(commit.sha)}"><div><strong>${esc(commit.message || '(no message)')}</strong><span>${esc(commit.author)} · ${commit.date ? new Date(commit.date).toLocaleString() : ''}</span></div><code>${esc(commit.sha.slice(0, 7))}</code></button>`).join('') : '<div class="source-control-empty-inline">No commits on this branch.</div>';
+        historyEl.querySelectorAll('[data-commit-sha]').forEach(row => row.addEventListener('click', () => openCommitRestore(row.dataset.commitSha)));
+      } catch (e) {
+        if (token === historyToken) historyEl.innerHTML = `<div class="source-control-error">${esc(e.message || String(e))}</div>`;
+      }
+    }
+
+    async function openCommitRestore(commitSha) {
       if (!selected.repo || !commitSha) return;
       let commit = null;
       try {
@@ -310,10 +354,15 @@
       const message = tree.querySelector('[data-commit-message]')?.value || '';
       if (!button || button.disabled || commitBusy) return;
       commitBusy = true;
-      button.disabled = true; button.textContent = 'Pushing…'; clearStatus();
+      button.disabled = true;
+      button.textContent = 'Pushing…';
+      clearStatus();
       try {
         const result = await github.commitAndPush({owner:selected.owner, repo:selected.repo, branch:selected.branch || 'main', message, fs:state.fs});
-        if (!result.changed) { showStatus('Nothing to commit.'); return; }
+        if (!result.changed) {
+          showStatus('Nothing to commit.');
+          return;
+        }
         tree.querySelector('[data-commit-message]').value = '';
         showStatus(`Committed ${result.commitSha.slice(0, 7)} and pushed to ${selected.branch || 'main'}.`);
         await refreshStatus();
@@ -323,9 +372,12 @@
         await refreshStatus();
       } finally {
         commitBusy = false;
-        button.textContent = 'Commit & Push';
+        const currentButton = tree.querySelector('[data-commit]');
+        if (currentButton) currentButton.textContent = 'Commit & Push';
+        await refreshStatus();
       }
     }
+
     function showStatus(message, error = false) {
       const el = tree.querySelector('[data-status]');
       if (!el) return;
