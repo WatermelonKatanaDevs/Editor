@@ -1294,8 +1294,10 @@ function createNewPage(iframe,parentPage=null) {
         return page.tab;
       }
       renderTabContent(page.tab, resolved);
+    } else if (isHistoryStateChange) {
+      navigateToInTab(page.tab, resolved, true, false, false, replaceHistory);
     } else {
-      navigateToInTab(page.tab, resolved, ...args, replaceHistory);
+      navigateToInTab(page.tab, resolved, ...args);
     }
     return page.tab;
   });
