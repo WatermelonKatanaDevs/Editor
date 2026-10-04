@@ -2295,7 +2295,7 @@ window.__editorInitPromise = (async function () {
     const fs = await FileSystem.create(file, {sync:false});
     updateRemoteLoadProgress('Starting workspace…', 97, name || 'Remote Project');
     const branch = info?.default_branch || parsed.branch || 'main';
-    const projectId = `github:${parsed.owner}/${parsed.repo}@${ref}`;
+    const projectId = options.projectId || `github:${parsed.owner}/${parsed.repo}@${ref}`;
     await replaceFileSystem(fs, name || 'Remote Project', true, {projectId, gitEnabled: options.gitEnabled !== false, projectOwner: options.projectOwner !== false, gitRemote:{provider:'github',owner:parsed.owner,repo:parsed.repo,branch, ...(requestedRevision ? {revision:ref} : {})}});
     finishRemoteImport();
     finishRemoteLoadProgress();
@@ -2896,10 +2896,11 @@ window.__editorInitPromise = (async function () {
     if (!githubURL) return false;
     const gitEnabled = params.get('git') !== '0' && params.get('git') !== 'disabled';
     const projectOwner = params.get('projectOwner') !== '0' && params.get('projectOwner') !== 'false';
+    const projectId = params.get('projectId') || undefined;
     if (!(await confirmWorkspaceSwitch('opening the project from the URL'))) return false;
     const commit = params.get('commit') || params.get('sha') || '';
     try {
-      await openGithubRevision(githubURL, commit, {fromURL:true, gitEnabled, projectOwner});
+      await openGithubRevision(githubURL, commit, {fromURL:true, gitEnabled, projectOwner, projectId});
       return true;
     } catch (e) {
       logError(e);
