@@ -142,7 +142,7 @@ window.__deploymentNetworkReady = (async function() {
   }
   const githubURL = params.get('github') || params.get('githubUrl') || '';
   let resolvedCommit = params.get('commit') || params.get('sha') || '';
-  const requestedPath = params.get('path') || params.get('url') || '';
+  const requestedPath = params.has('url') ? String(params.get('url') || '') : String(params.get('path') || '');
   let usePeerNetwork = params.has('usePeerNetwork') ? (params.get('usePeerNetwork') === '1' || params.get('usePeerNetwork') === 'true' || params.get('usePeerNetwork') === '') : null;
   const network = await window.__deploymentNetworkReady;
 
@@ -474,7 +474,7 @@ window.__deploymentNetworkReady = (async function() {
       return configuredDomain + path;
     }
 
-    const rawConfiguredUrl = String(urlOverride || savedUrl || '').trim();
+    const rawConfiguredUrl = String(urlOverride !== null ? urlOverride : (params.has('path') ? String(params.get('path') || '') : savedUrl)).trim();
     const deploymentOrigin = normalizeDomain(runConfig.domain);
     const initialTargetUrl = new URL(resolveEditorTarget(rawConfiguredUrl));
 
