@@ -365,6 +365,14 @@
         }
         tree.querySelector('[data-commit-message]').value = '';
         showStatus(`Committed ${result.commitSha.slice(0, 7)} and pushed to ${selected.branch || 'main'}.`);
+        // GitHub can briefly lag when the branch ref is read immediately after
+        // a push. Wait for the new head before repainting the sidebar so the
+        // changes/history view does not require leaving and reopening it.
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const remote = await github.getRemoteState(selected.owner, selected.repo, selected.branch || 'main').catch(() => null);
+          if (remote?.commitSha === result.commitSha) break;
+          await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+        }
         await refreshStatus();
         await loadHistory();
       } catch (e) {
