@@ -977,6 +977,7 @@ window.__editorInitPromise = (async function () {
       runConfigured,
       logError,
       openBuiltin,
+      openRemoteProject: options => openRemoteImportModal(options),
       setupRuntime,
       getBuiltin,
       theme: window.EditorTheme,
