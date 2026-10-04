@@ -315,7 +315,10 @@
           el.classList.add('dragging');
           document.body.classList.add('workbench-dragging');
           e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', 'workbench-tab:' + t.id);
+          e.dataTransfer.setData('application/x-editor-workbench-tab', t.id);
+          // Never expose internal tab identifiers as plain text: dropping a tab
+          // onto a browser/preview surface must not navigate it to our drag token.
+          e.dataTransfer.setData('text/plain', '');
         });
         el.addEventListener('dragend', () => {
           el.classList.remove('dragging');
