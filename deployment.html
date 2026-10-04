@@ -439,7 +439,7 @@ window.__deploymentNetworkReady = (async function() {
     // A configured absolute URL that points outside the virtual deployment
     // domain is a real site, not a project route. Leave the emulator entirely
     // and let the browser open the site normally.
-    if (rawConfiguredUrl && /^https?:\\/\\//i.test(rawConfiguredUrl) && targetUrl.origin !== configuredDomain) {
+    if (rawConfiguredUrl && /^https?:\/\//i.test(rawConfiguredUrl) && targetUrl.origin !== configuredDomain) {
       location.replace(targetUrl.href);
       return;
     }
