@@ -405,6 +405,7 @@ window.__deploymentNetworkReady = (async function() {
       stage.appendChild(iframe);
       stage.classList.add('ready');
       const page = new PageEmulator(iframe, {network, location:{url:pageURL,origin:domain}, history:[]});
+    const deploymentRootPage = page;
       let externalRuntimeReady = false;
       function forwardConsole(method, args) {
         const target = method === 'logText' ? console.log : console[method];
@@ -579,42 +580,279 @@ window.__deploymentNetworkReady = (async function() {
     function installDeploymentInterceptors(page, parentPage = null) {
       page.interceptEvent('console', (method, args) => forwardConsole(method, args));
       page.interceptEvent('error', (error, location) => forwardError(error, location));
+
+      // Every emulated page (top-level deployment, iframe, and embed) gets
+      // navigation handling. History changes stay same-document; real
+      // navigations replace only that PageEmulator's document.
+      page.interceptEvent('navigate', async function(url, isHistoryNavigation = false, replaceHistory = false) {
+        const resolved = new URL(url, page.location?.url || domain + '/');
+
+        if (isHistoryNavigation) {
+          page.setLocation(resolved.href, resolved.origin);
+          page.history = page.history || [];
+          const currentIndex = page.historyIndex ?? (page.history.length - 1);
+
+          if (replaceHistory && currentIndex >= 0 && page.history[currentIndex]) {
+            page.history[currentIndex] = resolved.href;
+            page.historyIndex = currentIndex;
+          } else {
+            page.history = page.history.slice(0, currentIndex + 1);
+            page.history.push(resolved.href);
+            page.historyIndex = page.history.length - 1;
+          }
+
+          // Only the top-level deployment owns the real browser URL.
+          if (page === deploymentRootPage) {
+            const outerUrl = deploymentURL(resolved.href);
+            try {
+              if (replaceHistory) history.replaceState({}, document.title, outerUrl);
+              else history.pushState({}, document.title, outerUrl);
+            } catch (_) {}
+          }
+          return true;
+        }
+
+        const response = await page.network.request(
+          resolved.href,
+          resolved.origin,
+          {},
+          parentPage ? 'iframe-navigation' : 'navigation'
+        );
+
+        if (!response?.ok) {
+          if (page === deploymentRootPage) {
+            navigateReal(resolved.href, false);
+            return true;
+          }
+          console.warn('Deployment iframe navigation failed:', resolved.href, response?.status || 'no response');
+          return true;
+        }
+
+        const rawHtml = await getDocumentContent(
+          response,
+          resolved.href,
+          resolved.origin,
+          page
+        );
+
+        await page.setDocument(rawHtml, true, resolved.href);
+        page.setLocation(resolved.href, resolved.origin);
+        page.history = page.history || [];
+        page.history = page.history.slice(0, (page.historyIndex ?? page.history.length - 1) + 1);
+        page.history.push(resolved.href);
+        page.historyIndex = page.history.length - 1;
+
+        if (page === deploymentRootPage) {
+          try {
+            history.pushState({}, document.title, deploymentURL(resolved.href));
+          } catch (_) {}
+        }
+
+        return true;
+      });
+
+      // window.open() from any deployment page/iframe should go through the
+      // deployment URL for the project domain, while truly external URLs open
+      // normally in a browser tab/window.
+      page.interceptEvent('open', (url, activateTab = true) => {
+        const resolved = new URL(url, page.location?.url || domain + '/');
+
+        if (resolved.origin !== domain) {
+          const popup = window.open(resolved.href, '_blank', 'noopener');
+          if (activateTab === false && popup) {
+            try { popup.opener = null; } catch (_) {}
+          }
+          return popup || true;
+        }
+
+        const popup = window.open(deploymentURL(resolved.href), '_blank', 'noopener');
+        if (activateTab === false && popup) {
+          try { popup.opener = null; } catch (_) {}
+        }
+        return popup || true;
+      });
+
       page.interceptEvent('iframe-create', function(obj) {
         if (!obj?.iframe) return null;
         if (obj.iframe.pageEmulator) return obj.iframe.pageEmulator;
-        const child = new PageEmulator(obj.iframe, {network, location:{url:'about:blank',origin:page.location?.origin || domain}, history:[]});
-        obj.iframe.pageEmulator = child; page.addChild?.(child); installDeploymentInterceptors(child, page); child.setLocation('about:blank', page.location?.origin || domain); return child;
+
+        const child = new PageEmulator(obj.iframe, {
+          network,
+          location: {url:'about:blank', origin:page.location?.origin || domain},
+          history:[]
+        });
+        obj.iframe.pageEmulator = child;
+        page.addChild?.(child);
+        installDeploymentInterceptors(child, page);
+        child.setLocation('about:blank', page.location?.origin || domain);
+        return child;
       });
+
       page.interceptEvent('iframe-navigate', async function(obj) {
-        const frame = obj?.iframe; if (!frame) return;
-        const child = frame.pageEmulator; if (!child) return;
+        const frame = obj?.iframe;
+        if (!frame) return;
+        const child = frame.pageEmulator;
+        if (!child) return;
+
         const navigationId = obj.navigationId;
         if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
-        if (obj.is_doc) { child.setLocation('about:srcdoc', page.location?.origin || domain); child.rawDocument=String(obj.srcdoc||''); if(navigationId!==undefined && frame.__iframeNavigationId!==navigationId)return; await child.setDocument(obj.srcdoc||''); return; }
+
+        if (obj.is_doc) {
+          child.setLocation('about:srcdoc', page.location?.origin || domain);
+          child.rawDocument = String(obj.srcdoc || '');
+          if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
+          await child.setDocument(obj.srcdoc || '');
+          return;
+        }
+
         if (!obj.src) return;
-        let targetUrl; try { targetUrl = new URL(obj.src, page.location?.url || domain + '/'); } catch (_) { return; }
+
+        let targetUrl;
+        try {
+          targetUrl = new URL(obj.src, page.location?.url || domain + '/');
+        } catch (_) {
+          return;
+        }
+
         child.setLocation(targetUrl.href, targetUrl.origin);
         const res = await child.network.request(targetUrl.href, targetUrl.origin, {}, 'iframe');
         if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
         if (!res || !res.ok) return;
-        const rawHtml = await window.getDocumentContent(res, targetUrl.href, targetUrl.origin, obj);
+
+        const rawHtml = await window.getDocumentContent(
+          res,
+          targetUrl.href,
+          targetUrl.origin,
+          obj
+        );
         if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
-        child.rawDocument=String(rawHtml||''); await child.setDocument(rawHtml,true,targetUrl.href);
+
+        child.rawDocument = String(rawHtml || '');
+        await child.setDocument(rawHtml, true, targetUrl.href);
       });
+
       page.interceptEvent('embed-create', function(obj) {
         if (!obj?.embed) return null;
-        const embed=obj.embed;
+        const embed = obj.embed;
         if (embed.__embedFrame?.pageEmulator) return embed.__embedFrame.pageEmulator;
-        const ownerDocument=embed.ownerDocument||document; const ownerWindow=ownerDocument.defaultView||window; const frame=ownerDocument.createElement('iframe');
-        frame.setAttribute('data-embed-frame','1'); frame.setAttribute('frameborder','0'); frame.style.position='fixed'; frame.style.border='0'; frame.style.margin='0'; frame.style.padding='0'; frame.style.background='transparent'; frame.style.zIndex='2147483646'; frame.style.display='block'; ownerDocument.body?.appendChild(frame);
-        embed.style.opacity='0'; embed.style.pointerEvents='none'; embed.__embedFrame=frame;
-        function syncBounds(){ if(!embed.isConnected||!frame.isConnected)return; const r=embed.getBoundingClientRect(); const style=ownerWindow.getComputedStyle?ownerWindow.getComputedStyle(embed):null; const visible=!style||(style.visibility!=='hidden'&&style.visibility!=='collapse'&&style.display!=='none'); frame.style.left=r.left+'px'; frame.style.top=r.top+'px'; frame.style.width=Math.max(0,r.width)+'px'; frame.style.height=Math.max(0,r.height)+'px'; frame.style.visibility=visible?'visible':'hidden'; frame.style.opacity=visible?'1':'0'; frame.style.pointerEvents=visible?'auto':'none'; }
-        embed.__syncEmbedBounds=syncBounds; ownerWindow.addEventListener('resize',syncBounds); ownerWindow.addEventListener('scroll',syncBounds,true); const observer=ownerWindow.MutationObserver?new ownerWindow.MutationObserver(syncBounds):null; if(observer)observer.observe(embed,{attributes:true,attributeFilter:['style','class','hidden']}); syncBounds();
-        const child=new PageEmulator(frame,{network,location:{url:'about:blank',origin:page.location?.origin||domain},history:[]}); frame.pageEmulator=child; page.addChild?.(child); installDeploymentInterceptors(child,page); return child;
+
+        const ownerDocument = embed.ownerDocument || document;
+        const ownerWindow = ownerDocument.defaultView || window;
+        const frame = ownerDocument.createElement('iframe');
+        frame.setAttribute('data-embed-frame', '1');
+        frame.setAttribute('frameborder', '0');
+        frame.style.position = 'fixed';
+        frame.style.border = '0';
+        frame.style.margin = '0';
+        frame.style.padding = '0';
+        frame.style.background = 'transparent';
+        frame.style.zIndex = '2147483646';
+        frame.style.display = 'block';
+        ownerDocument.body?.appendChild(frame);
+
+        embed.style.opacity = '0';
+        embed.style.pointerEvents = 'none';
+        embed.__embedFrame = frame;
+
+        function syncBounds() {
+          if (!embed.isConnected || !frame.isConnected) return;
+          const r = embed.getBoundingClientRect();
+          const style = ownerWindow.getComputedStyle ? ownerWindow.getComputedStyle(embed) : null;
+          const visible = !style || (
+            style.visibility !== 'hidden' &&
+            style.visibility !== 'collapse' &&
+            style.display !== 'none'
+          );
+          frame.style.left = r.left + 'px';
+          frame.style.top = r.top + 'px';
+          frame.style.width = Math.max(0, r.width) + 'px';
+          frame.style.height = Math.max(0, r.height) + 'px';
+          frame.style.visibility = visible ? 'visible' : 'hidden';
+          frame.style.opacity = visible ? '1' : '0';
+          frame.style.pointerEvents = visible ? 'auto' : 'none';
+        }
+
+        embed.__syncEmbedBounds = syncBounds;
+        ownerWindow.addEventListener('resize', syncBounds);
+        ownerWindow.addEventListener('scroll', syncBounds, true);
+
+        const observer = ownerWindow.MutationObserver
+          ? new ownerWindow.MutationObserver(syncBounds)
+          : null;
+        if (observer) observer.observe(embed, {
+          attributes: true,
+          attributeFilter: ['style', 'class', 'hidden']
+        });
+        syncBounds();
+
+        const child = new PageEmulator(frame, {
+          network,
+          location: {
+            url: 'about:blank',
+            origin: page.location?.origin || domain
+          },
+          history:[]
+        });
+        frame.pageEmulator = child;
+        page.addChild?.(child);
+        installDeploymentInterceptors(child, page);
+        return child;
       });
-      page.interceptEvent('embed-navigate', async function(obj){
-        const embed=obj?.embed; if(!embed?.__embedFrame)return; const frame=embed.__embedFrame; const child=frame.pageEmulator; if(!child||!obj.src)return; const navigationId=obj.navigationId; if(navigationId!==undefined&&embed.__embedNavigationId!==navigationId)return;
-        let targetUrl; try{targetUrl=new URL(obj.src,page.location?.url||domain+'/');}catch(_){return;} child.setLocation(targetUrl.href,targetUrl.origin); const res=await child.network.request(targetUrl.href,targetUrl.origin,{},'embed'); if(navigationId!==undefined&&embed.__embedNavigationId!==navigationId)return; if(!res||!res.ok)return; const rawHtml=await window.getDocumentContent(res,targetUrl.href,targetUrl.origin,obj); if(navigationId!==undefined&&embed.__embedNavigationId!==navigationId)return; child.rawDocument=String(rawHtml||''); await child.setDocument(rawHtml,true,targetUrl.href); embed.__syncEmbedBounds?.();
+
+      page.interceptEvent('embed-navigate', async function(obj) {
+        const embed = obj?.embed;
+        if (!embed?.__embedFrame) return;
+
+        const frame = embed.__embedFrame;
+        const child = frame.pageEmulator;
+        if (!child || !obj.src) return;
+
+        const navigationId = obj.navigationId;
+        if (
+          navigationId !== undefined &&
+          embed.__embedNavigationId !== navigationId
+        ) return;
+
+        let targetUrl;
+        try {
+          targetUrl = new URL(
+            obj.src,
+            page.location?.url || domain + '/'
+          );
+        } catch (_) {
+          return;
+        }
+
+        child.setLocation(targetUrl.href, targetUrl.origin);
+
+        const res = await child.network.request(
+          targetUrl.href,
+          targetUrl.origin,
+          {},
+          'embed'
+        );
+
+        if (
+          navigationId !== undefined &&
+          embed.__embedNavigationId !== navigationId
+        ) return;
+        if (!res || !res.ok) return;
+
+        const rawHtml = await window.getDocumentContent(
+          res,
+          targetUrl.href,
+          targetUrl.origin,
+          obj
+        );
+
+        if (
+          navigationId !== undefined &&
+          embed.__embedNavigationId !== navigationId
+        ) return;
+
+        child.rawDocument = String(rawHtml || '');
+        await child.setDocument(rawHtml, true, targetUrl.href);
+        embed.__syncEmbedBounds?.();
       });
     }
     installDeploymentInterceptors(page);
@@ -659,7 +897,6 @@ window.__deploymentNetworkReady = (async function() {
       if (!sameDocumentUrl) history.pushState({},document.title,deploymentURL(resolved.href));
       return true;
     });
-    page.interceptEvent('open',(url,activateTab)=>{const resolved=new URL(url,page.location.url); if(resolved.origin!==domain)return window.open(resolved.href,'_blank','noopener'); const popup=window.open(deploymentURL(resolved.href),'_blank','noopener'); if(activateTab===false&&popup){try{popup.opener=null;}catch(_){}} return popup||true;});
     try {
       const canonical=new URL(location.href); canonical.searchParams.delete('githubUrl'); canonical.searchParams.delete('sha'); canonical.searchParams.set('github',githubURL); canonical.searchParams.set('commit',resolvedRef); if(branchOverride!==null)canonical.searchParams.set('branch',branchOverride);else canonical.searchParams.delete('branch'); canonical.searchParams.delete('path'); canonical.searchParams.delete('deploymentMode'); canonical.searchParams.delete('externalUrl'); canonical.searchParams.delete('externalMode'); canonical.searchParams.set('url',pageURL); if(usePeerServer)canonical.searchParams.set('peerServer','1');else canonical.searchParams.delete('peerServer'); canonical.searchParams.delete('usePeerNetwork'); history.replaceState({},document.title,canonical.pathname+canonical.search+canonical.hash);
     } catch (_) {}
