@@ -11,9 +11,12 @@
     }
 
     function render(g) {
+      const root = document.createElement('div');
       const style = document.createElement('style');
       style.textContent = `
         .editor-github-repository-page { box-sizing:border-box; width:min(760px,100%); margin:0 auto; padding:36px; color:#eee; }
+        .editor-github-repository-header { display:flex; align-items:center; gap:14px; margin-bottom:24px; }
+        .editor-github-repository-logo { width:32px; height:32px; flex:0 0 32px; filter:invert(1); }
         .editor-github-repository-header h2 { margin:0 0 8px; font-size:28px; }
         .editor-github-repository-header p { margin:0 0 24px; color:#aaa; }
         .editor-github-repository-card { background:#1e1e1e; border:1px solid #333; border-radius:10px; padding:22px; }
@@ -29,6 +32,10 @@
         .editor-github-repository-message { margin-top:14px; color:#aaa; }
         .editor-github-repository-message.success { color:#6dca9a; }
         .editor-github-repository-message.error { color:#f88; }
+        .editor-github-repository-open-title { font-size:18px; font-weight:600; margin-bottom:8px; }
+        .editor-github-repository-open-copy { color:#aaa; line-height:1.5; margin-bottom:18px; }
+        .editor-github-repository-card button { padding:9px 14px; background:#333; color:#eee; border:1px solid #555; border-radius:4px; cursor:pointer; }
+        .editor-github-repository-card button:hover { background:#444; }
         @media (max-width:600px) { .editor-github-repository-page { padding:20px; } }
       `;
       root.className = 'editor-github-repository-page';
