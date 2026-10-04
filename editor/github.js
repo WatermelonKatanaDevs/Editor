@@ -465,12 +465,40 @@
     }
     return data;
   }
+  async function createContentsFile(owner, repo, branch, change, message) {
+    const bytes = change.data instanceof Uint8Array ? change.data : new Uint8Array(change.data || []);
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunk, bytes.length)));
+    const path = change.path.split('/').map(encodeURIComponent).join('/');
+    const body = {message, content:btoa(binary)};
+    if (branch) body.branch = branch;
+    return request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path}`, {
+      method:'PUT',
+      body:JSON.stringify(body)
+    });
+  }
   async function commitAndPush({owner, repo, branch, message, fs}) {
     message = String(message || '').trim();
     if (!message) throw new Error('Enter a commit message.');
-    const remote = await getRemoteState(owner, repo, branch);
-    const changes = await compareWorkingTree(fs, remote.tree);
+    let remote = await getRemoteState(owner, repo, branch);
+    let changes = await compareWorkingTree(fs, remote.tree);
     if (!changes.length) return {changed:false, changes:[], commitSha:remote.commitSha};
+
+    // GitHub's Git Database API cannot create the first ref in an empty
+    // repository. Initialize it through the Contents API, then use the
+    // normal Git Data API for the remainder of the workspace.
+    if (remote.empty || !remote.commitSha) {
+      const first = changes.find(change => change.type !== 'deleted');
+      if (!first) throw new Error('Cannot create an initial commit because the workspace contains no files.');
+      const initialized = await createContentsFile(owner, repo, branch, first, message);
+      remote = await getRemoteState(owner, repo, branch);
+      changes = await compareWorkingTree(fs, remote.tree);
+      if (!changes.length) {
+        return {changed:true, changes:[first], commitSha:initialized?.commit?.sha || remote.commitSha};
+      }
+    }
+
     try {
       const blobs = await withConcurrency(changes.filter(x => x.type !== 'deleted'), 4, async change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:(await createBlob(owner, repo, change.data)).sha}));
       const treeEntries = [...blobs, ...changes.filter(x => x.type === 'deleted').map(change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:null}))];
