@@ -53,6 +53,10 @@
           <div class="editor-github-repository-status" data-status>Loading…</div>
           <form data-form hidden>
             <div class="editor-github-repository-name" data-name></div>
+            <label>Repository Name<input type="text" data-repository-name placeholder="repository-name" spellcheck="false" autocomplete="off"></label>
+            <div class="editor-github-repository-actions" style="margin-top:-8px;margin-bottom:22px;">
+              <button type="button" data-rename-repository>Rename Repository</button>
+            </div>
             <div class="editor-github-repository-url-row">
               <label>Repository URL<input type="text" data-repository-url placeholder="https://github.com/user/repository" spellcheck="false" autocomplete="off"></label>
               <button type="button" data-change-repository>Change</button>
@@ -77,6 +81,8 @@
       const status = root.querySelector('[data-status]');
       const form = root.querySelector('[data-form]');
       const name = root.querySelector('[data-name]');
+      const repositoryName = root.querySelector('[data-repository-name]');
+      const renameRepository = root.querySelector('[data-rename-repository]');
       const repositoryUrl = root.querySelector('[data-repository-url]');
       const changeRepository = root.querySelector('[data-change-repository]');
       const description = root.querySelector('[data-description]');
@@ -109,6 +115,70 @@
           ? parts.slice(3).map(decodeURIComponent).join('/')
           : 'main';
         return {owner, repo, branch};
+      }
+
+      async function renameRepositoryOnGitHub() {
+        const current = repository();
+        if (!current) return;
+        const nextName = String(repositoryName.value || '').trim();
+        if (!nextName) {
+          message.className = 'editor-github-repository-message error';
+          message.textContent = 'Enter a repository name.';
+          return;
+        }
+        if (!/^[A-Za-z0-9._-]+$/.test(nextName)) {
+          message.className = 'editor-github-repository-message error';
+          message.textContent = 'Repository names may only contain letters, numbers, ., _, and -.';
+          return;
+        }
+        if (nextName === current.repo) {
+          message.className = 'editor-github-repository-message';
+          message.textContent = 'That is already the repository name.';
+          return;
+        }
+        if (!window.confirm('Rename this GitHub repository from "' + current.repo + '" to "' + nextName + '"?')) return;
+        renameRepository.disabled = true;
+        changeRepository.disabled = true;
+        setStatus('Renaming GitHub repository…');
+        message.textContent = '';
+        const oldRepositoryUrl = 'https://github.com/' + current.owner + '/' + current.repo;
+        const newRepositoryUrl = 'https://github.com/' + current.owner + '/' + nextName;
+        try {
+          const data = await window.GitHubService.request('/repos/' + encodeURIComponent(current.owner) + '/' + encodeURIComponent(current.repo), {
+            method:'PATCH',
+            body:JSON.stringify({name:nextName})
+          });
+          const newRepo = String(data?.name || nextName);
+          state.gitRemote = {provider:'github', owner:current.owner, repo:newRepo, branch:current.branch};
+          state.projectId = 'github:' + current.owner + '/' + newRepo + '@' + current.branch;
+          try { state.saveProjectMetadata?.(); } catch (_) {}
+          repositoryName.value = newRepo;
+          name.textContent = data.full_name || (current.owner + '/' + newRepo);
+          repositoryUrl.value = 'https://github.com/' + encodeURIComponent(current.owner) + '/' + encodeURIComponent(newRepo) + (current.branch !== 'main' ? '/tree/' + current.branch.split('/').map(encodeURIComponent).join('/') : '');
+          try {
+            const renameResponse = await fetch('/api/project/editor-repository-rename', {
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({oldRepository:oldRepositoryUrl,newRepository:newRepositoryUrl})
+            });
+            if (!renameResponse.ok) {
+              console.warn('GitHub repository renamed, but published-project references could not be updated:', await renameResponse.text());
+            }
+          } catch (syncError) {
+            console.warn('GitHub repository renamed, but published-project reference sync failed:', syncError);
+          }
+          setStatus('');
+          message.className = 'editor-github-repository-message success';
+          message.textContent = 'Repository renamed. Workspace metadata and published-project references were updated.';
+          try { window.EditorEvents?.emit?.('githubRepositoryRenamed', {oldRepository:oldRepositoryUrl,newRepository:newRepositoryUrl,owner:current.owner,oldName:current.repo,newName:newRepo,branch:current.branch}); } catch (_) {}
+        } catch (e) {
+          setStatus('');
+          message.className = 'editor-github-repository-message error';
+          message.textContent = e?.message || String(e);
+        } finally {
+          renameRepository.disabled = false;
+          changeRepository.disabled = false;
+        }
       }
 
       async function changeRepository() {
@@ -164,6 +234,7 @@
         try {
           const data = await window.GitHubService.request('/repos/' + encodeURIComponent(repo.owner) + '/' + encodeURIComponent(repo.repo));
           name.textContent = data.full_name || (repo.owner + '/' + repo.repo);
+          repositoryName.value = repo.repo;
           repositoryUrl.value = 'https://github.com/' + encodeURIComponent(repo.owner) + '/' + encodeURIComponent(repo.repo) + (repo.branch !== 'main' ? '/tree/' + repo.branch.split('/').map(encodeURIComponent).join('/') : '');
           description.value = data.description || '';
           topics.value = Array.isArray(data.topics) ? data.topics.join(', ') : '';
@@ -175,6 +246,7 @@
       }
 
       root.querySelector('[data-reload]').onclick = load;
+      renameRepository.onclick = renameRepositoryOnGitHub;
       changeRepository.onclick = changeRepository;
 
       form.onsubmit = async event => {
