@@ -27,9 +27,6 @@
         .editor-github-repository-card label { display:block; margin:0 0 18px; color:#ddd; }
         .editor-github-repository-card input { display:block; width:100%; box-sizing:border-box; margin-top:7px; padding:10px 12px; background:#151515; color:#eee; border:1px solid #444; border-radius:5px; font:inherit; }
         .editor-github-repository-name { color:#aaa; margin-bottom:22px; font-family:monospace; }
-        .editor-github-repository-url-row { display:flex; gap:8px; align-items:flex-end; margin-bottom:22px; }
-        .editor-github-repository-url-row label { flex:1; margin:0; }
-        .editor-github-repository-url-row button { flex:0 0 auto; }
         .editor-github-repository-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; }
         .editor-github-repository-actions button { padding:9px 14px; background:#333; color:#eee; border:1px solid #555; border-radius:4px; cursor:pointer; }
         .editor-github-repository-actions button[type="submit"] { background:#176b4a; }
@@ -57,10 +54,7 @@
             <div class="editor-github-repository-actions" style="margin-top:-8px;margin-bottom:22px;">
               <button type="button" data-rename-repository>Rename Repository</button>
             </div>
-            <div class="editor-github-repository-url-row">
-              <label>Repository URL<input type="text" data-repository-url placeholder="https://github.com/user/repository" spellcheck="false" autocomplete="off"></label>
-              <button type="button" data-change-repository>Change</button>
-            </div>
+            <label>Website<input type="text" data-website placeholder="https://example.com" spellcheck="false" autocomplete="off"></label>
             <label>Description<input type="text" data-description placeholder="Repository description"></label>
             <label>Topics<input type="text" data-topics placeholder="comma, separated, topics"></label>
             <div class="editor-github-repository-actions">
@@ -83,8 +77,7 @@
       const name = root.querySelector('[data-name]');
       const repositoryName = root.querySelector('[data-repository-name]');
       const renameRepository = root.querySelector('[data-rename-repository]');
-      const repositoryUrl = root.querySelector('[data-repository-url]');
-      const changeRepositoryButton = root.querySelector('[data-change-repository]');
+      const website = root.querySelector('[data-website]');
       const description = root.querySelector('[data-description]');
       const topics = root.querySelector('[data-topics]');
       const message = root.querySelector('[data-message]');
@@ -100,21 +93,6 @@
           .split(',')
           .map(x => x.trim().toLowerCase().replace(/[^a-z0-9_-]/g, ''))
           .filter(Boolean))].slice(0, 20);
-      }
-
-      function parseRepositoryUrl(value) {
-        let url;
-        try { url = new URL(String(value || '').trim()); } catch (_) { throw new Error('Enter a valid GitHub repository URL.'); }
-        if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com') throw new Error('Repository URL must be an HTTPS GitHub URL.');
-        const parts = url.pathname.split('/').filter(Boolean);
-        if (parts.length < 2 || parts.length > 4 || (parts[2] && parts[2] !== 'tree')) throw new Error('Use https://github.com/owner/repository or a /tree/branch URL.');
-        const owner = decodeURIComponent(parts[0]);
-        const repo = decodeURIComponent(parts[1]).replace(/\\.git$/i, '');
-        if (!owner || !repo) throw new Error('GitHub repository owner and name are required.');
-        const branch = parts[2] === 'tree' && parts.slice(3).length
-          ? parts.slice(3).map(decodeURIComponent).join('/')
-          : 'main';
-        return {owner, repo, branch};
       }
 
       async function renameRepositoryOnGitHub() {
@@ -138,7 +116,6 @@
         }
         if (!window.confirm('Rename this GitHub repository from "' + current.repo + '" to "' + nextName + '"?')) return;
         renameRepository.disabled = true;
-        changeRepositoryButton.disabled = true;
         setStatus('Renaming GitHub repository…');
         message.textContent = '';
         const oldRepositoryUrl = 'https://github.com/' + current.owner + '/' + current.repo;
@@ -154,7 +131,6 @@
           try { state.saveProjectMetadata?.(); } catch (_) {}
           repositoryName.value = newRepo;
           name.textContent = data.full_name || (current.owner + '/' + newRepo);
-          repositoryUrl.value = 'https://github.com/' + encodeURIComponent(current.owner) + '/' + encodeURIComponent(newRepo) + (current.branch !== 'main' ? '/tree/' + current.branch.split('/').map(encodeURIComponent).join('/') : '');
           try {
             const renameResponse = await fetch('/api/project/editor-repository-rename', {
               method:'POST',
@@ -177,44 +153,6 @@
           message.textContent = e?.message || String(e);
         } finally {
           renameRepository.disabled = false;
-          changeRepositoryButton.disabled = false;
-        }
-      }
-
-      async function changeRepository() {
-        const current = repository();
-        let next;
-        try { next = parseRepositoryUrl(repositoryUrl.value); } catch (e) {
-          message.className = 'editor-github-repository-message error';
-          message.textContent = e?.message || String(e);
-          return;
-        }
-        if (current && current.owner === next.owner && current.repo === next.repo && current.branch === next.branch) {
-          message.className = 'editor-github-repository-message';
-          message.textContent = 'That repository is already selected.';
-          return;
-        }
-        changeRepository.disabled = true;
-        setStatus('Checking GitHub repository…');
-        message.textContent = '';
-        try {
-          const data = await window.GitHubService.request('/repos/' + encodeURIComponent(next.owner) + '/' + encodeURIComponent(next.repo));
-          state.gitRemote = {provider:'github', owner:next.owner, repo:next.repo, branch:next.branch};
-          state.projectId = 'github:' + next.owner + '/' + next.repo + '@' + next.branch;
-          try { state.saveProjectMetadata?.(); } catch (_) {}
-          name.textContent = data.full_name || (next.owner + '/' + next.repo);
-          repositoryUrl.value = 'https://github.com/' + encodeURIComponent(next.owner) + '/' + encodeURIComponent(next.repo) + (next.branch !== 'main' ? '/tree/' + next.branch.split('/').map(encodeURIComponent).join('/') : '');
-          description.value = data.description || '';
-          topics.value = Array.isArray(data.topics) ? data.topics.join(', ') : '';
-          setStatus('');
-          message.className = 'editor-github-repository-message success';
-          message.textContent = 'Repository changed. The current workspace is now associated with this GitHub repository.';
-        } catch (e) {
-          setStatus('');
-          message.className = 'editor-github-repository-message error';
-          message.textContent = e?.message || String(e);
-        } finally {
-          changeRepository.disabled = false;
         }
       }
 
@@ -235,7 +173,7 @@
           const data = await window.GitHubService.request('/repos/' + encodeURIComponent(repo.owner) + '/' + encodeURIComponent(repo.repo));
           name.textContent = data.full_name || (repo.owner + '/' + repo.repo);
           repositoryName.value = repo.repo;
-          repositoryUrl.value = 'https://github.com/' + encodeURIComponent(repo.owner) + '/' + encodeURIComponent(repo.repo) + (repo.branch !== 'main' ? '/tree/' + repo.branch.split('/').map(encodeURIComponent).join('/') : '');
+          website.value = data.homepage || '';
           description.value = data.description || '';
           topics.value = Array.isArray(data.topics) ? data.topics.join(', ') : '';
           setStatus('');
@@ -247,7 +185,6 @@
 
       root.querySelector('[data-reload]').onclick = load;
       renameRepository.onclick = renameRepositoryOnGitHub;
-      changeRepositoryButton.onclick = changeRepository;
 
       form.onsubmit = async event => {
         event.preventDefault();
@@ -259,9 +196,18 @@
         message.textContent = 'Saving…';
         try {
           const names = normalizeTopics(topics.value);
+          const homepage = String(website.value || '').trim();
+          if (homepage) {
+            let websiteUrl;
+            try { websiteUrl = new URL(homepage); } catch (_) { throw new Error('Website must be a valid URL.'); }
+            if (!/^https?:$/.test(websiteUrl.protocol)) throw new Error('Website must use http:// or https://.');
+          }
           await window.GitHubService.request('/repos/' + encodeURIComponent(repo.owner) + '/' + encodeURIComponent(repo.repo), {
             method:'PATCH',
-            body:JSON.stringify({description:String(description.value || '').trim()})
+            body:JSON.stringify({
+              description:String(description.value || '').trim(),
+              homepage:homepage || null
+            })
           });
           await window.GitHubService.request('/repos/' + encodeURIComponent(repo.owner) + '/' + encodeURIComponent(repo.repo) + '/topics', {
             method:'PUT',
