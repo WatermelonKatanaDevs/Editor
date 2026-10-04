@@ -1277,9 +1277,27 @@ function createNewPage(iframe,parentPage=null) {
   });
   page.interceptEvent('navigate', function(url, ...args) {
     const resolved = new URL(url, page.location.url).href;
-    if (page.tab.subframe) renderTabContent(page.tab, resolved);
-    else navigateToInTab(page.tab, resolved, ...args);
-   return page.tab;
+    const isHistoryStateChange = args.length >= 2 && args[0] === true && (args[1] === false || args[1] === true);
+    const replaceHistory = isHistoryStateChange && args[1] === true;
+
+    if (page.tab.subframe) {
+      if (isHistoryStateChange) {
+        page.tab.url = resolved;
+        page.tab.page.history = page.tab.page.history || [];
+        if (replaceHistory && page.tab.page.historyIndex >= 0 && page.tab.page.history[page.tab.page.historyIndex]) {
+          page.tab.page.history[page.tab.page.historyIndex] = resolved;
+        } else {
+          page.tab.page.history = page.tab.page.history.slice(0, page.tab.page.historyIndex + 1);
+          page.tab.page.history.push(resolved);
+          page.tab.page.historyIndex = page.tab.page.history.length - 1;
+        }
+        return page.tab;
+      }
+      renderTabContent(page.tab, resolved);
+    } else {
+      navigateToInTab(page.tab, resolved, ...args, replaceHistory);
+    }
+    return page.tab;
   });
   page.interceptEvent('open', function(resolved, activateTab) {
     return window.createNewTab(resolved, activateTab).page;
@@ -1555,19 +1573,16 @@ async function navigateTo(rawUrl, isNewNavigation = true) {
   await navigateToInTab(activeTab, rawUrl, isNewNavigation);
 }
 
-async function navigateToInTab(tab, rawUrl, isNewNavigation = true, reloadCurrentTab = true, isReload = false) {
+async function navigateToInTab(tab, rawUrl, isNewNavigation = true, reloadCurrentTab = true, isReload = false, replaceHistory = false) {
   const startTime = performance.now();
   const hasLoadedDocument = !!tab._hasLoadedDocument;
   let absoluteUrl = rawUrl.trim();
   if (!absoluteUrl.startsWith('http') && !absoluteUrl.startsWith('data:')  && !absoluteUrl.startsWith('blob:')) {
     absoluteUrl = absoluteUrl.includes('.') && !absoluteUrl.includes(' ') ? 'https://' + absoluteUrl : appSettings.searchEngine + encodeURIComponent(absoluteUrl);
   }
-  
+
   tab.url = absoluteUrl;
 
-  // history.pushState()/replaceState() is a same-document URL change, not a
-  // browser reload/navigation. Do not fire the reload lifecycle events here:
-  // those events are also used to clear/reinitialize DevTools state.
   const isHistoryStateChange = isNewNavigation && !reloadCurrentTab && !isReload;
   if (!isHistoryStateChange) {
     window.dispatchEvent(new CustomEvent('browser-before-reload',{detail:{tab,page:tab.page,isReload:!!isReload,isNavigation:hasLoadedDocument,clearDevTools:hasLoadedDocument && appSettings.clearDevToolsOnReload!==false}}));
@@ -1575,11 +1590,18 @@ async function navigateToInTab(tab, rawUrl, isNewNavigation = true, reloadCurren
   }
 
   if (isNewNavigation) {
-    tab.page.history = tab.page.history.slice(0, tab.page.historyIndex + 1);
-    tab.page.history.push(absoluteUrl);
-    tab.page.historyIndex = tab.page.history.length - 1;
-    
-    historyLog.unshift({ url: absoluteUrl, time: new Date().toLocaleTimeString() });
+    tab.page.history = tab.page.history || [];
+    if (replaceHistory && tab.page.historyIndex >= 0 && tab.page.history[tab.page.historyIndex]) {
+      tab.page.history[tab.page.historyIndex] = absoluteUrl;
+    } else {
+      tab.page.history = tab.page.history.slice(0, tab.page.historyIndex + 1);
+      tab.page.history.push(absoluteUrl);
+      tab.page.historyIndex = tab.page.history.length - 1;
+    }
+
+    if (!isHistoryStateChange || !replaceHistory) {
+      historyLog.unshift({ url: absoluteUrl, time: new Date().toLocaleTimeString() });
+    }
   }
 
   if (reloadCurrentTab) {
@@ -1589,7 +1611,6 @@ async function navigateToInTab(tab, rawUrl, isNewNavigation = true, reloadCurren
     tab.loadTimeMS = Math.floor(performance.now() - startTime);
     updateLoadingProgress(100);
   }
-
 
   if (tab.id === activeTabId) {
     updateToolbarUI();
