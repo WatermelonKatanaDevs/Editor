@@ -38,20 +38,10 @@ window.__deploymentAssetsReady = (async function() {
     'browser/lib/endpoints/peer.js'
   ];
 
-  const emulatedUrl = window.__pageEmulator?.location?.url;
-  const baseElement = document.querySelector('base')?.href || '';
-  const candidates = [emulatedUrl, baseElement, document.referrer, location.href].filter(Boolean);
-
-  let assetBase = candidates[0] || location.href;
-  for (const candidate of candidates) {
-    try {
-      const parsed = new URL(candidate);
-      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-        assetBase = parsed.href;
-        break;
-      }
-    } catch (_) {}
-  }
+  // These are assets belonging to this deployment page itself, not the
+  // emulated project. Never derive their base from PageEmulator, because the
+  // project may be hosted at a completely different path or origin.
+  const assetBase = location.href;
 
   window.__peerLayer = new URLSearchParams(
     (() => {
@@ -82,12 +72,7 @@ window.__deploymentAssetsReady = (async function() {
 <script>
 window.__deploymentNetworkReady = (async function() {
   await window.__deploymentAssetsReady;
-  const workers = await fetch(new URL('workers.json', (
-    window.__pageEmulator?.location?.url ||
-    document.querySelector('base')?.href ||
-    document.referrer ||
-    location.href
-  )).href,{cache:'no-store'}).then(async r => {
+  const workers = await fetch(new URL('workers.json', location.href).href,{cache:'no-store'}).then(async r => {
     if (!r.ok) throw new Error(`Failed to load workers.json (${r.status}).`);
     return await r.json();
   }).catch(e => {
@@ -516,7 +501,12 @@ window.__deploymentNetworkReady = (async function() {
       return configuredDomain + path;
     }
 
-    const rawConfiguredUrl = String(urlOverride !== null ? urlOverride : (params.has('path') ? String(params.get('path') || '') : savedUrl)).trim();
+    // A deployment URL is optional. If none is supplied, deploy the project root.
+    const rawConfiguredUrl = String(
+      urlOverride !== null
+        ? urlOverride
+        : (params.has('path') ? String(params.get('path') || '') : (savedUrl || '/'))
+    ).trim() || '/';
     const deploymentOrigin = normalizeDomain(runConfig.domain);
     const initialTargetUrl = new URL(resolveEditorTarget(rawConfiguredUrl));
 
