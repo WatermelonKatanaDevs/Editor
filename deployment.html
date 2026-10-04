@@ -618,9 +618,46 @@ window.__deploymentNetworkReady = (async function() {
       });
     }
     installDeploymentInterceptors(page);
-    page.interceptEvent('navigate', async function(url) {
-      const resolved=new URL(url,page.location.url); const response=await network.request(resolved.href,resolved.origin,{},'navigation'); if(!response?.ok){navigateReal(resolved.href,false);return true;}
-      const rawHtml=await getDocumentContent(response,resolved.href,resolved.origin,page); await page.setDocument(rawHtml,true,resolved.href); page.setLocation(resolved.href,resolved.origin); page.history=page.history||[]; page.history=page.history.slice(0,(page.historyIndex??page.history.length-1)+1); page.history.push(resolved.href); page.historyIndex=page.history.length-1; history.pushState({},document.title,deploymentURL(resolved.href)); return true;
+    page.interceptEvent('navigate', async function(url, isHistoryNavigation = false, replaceHistory = false) {
+      const resolved=new URL(url,page.location.url);
+
+      // history.pushState()/replaceState() uses the same virtual navigate event
+      // as a real navigation, but it must not recreate the document. A number
+      // of applications (including Pumpkin Smasher) use pushState for normal
+      // UI state changes, so treating it as a document navigation causes an
+      // apparent reload and destroys the running page.
+      if (isHistoryNavigation) {
+        page.setLocation(resolved.href,resolved.origin);
+        page.history=page.history||[];
+        const currentIndex=page.historyIndex??(page.history.length-1);
+        if (replaceHistory && currentIndex >= 0 && page.history[currentIndex]) {
+          page.history[currentIndex]=resolved.href;
+          page.historyIndex=currentIndex;
+        } else {
+          page.history=page.history.slice(0,currentIndex+1);
+          page.history.push(resolved.href);
+          page.historyIndex=page.history.length-1;
+        }
+        const outerUrl=deploymentURL(resolved.href);
+        try {
+          if (replaceHistory) history.replaceState({},document.title,outerUrl);
+          else history.pushState({},document.title,outerUrl);
+        } catch (_) {}
+        return true;
+      }
+
+      const sameDocumentUrl=resolved.href===page.location.url;
+      const response=await network.request(resolved.href,resolved.origin,{},'navigation');
+      if(!response?.ok){navigateReal(resolved.href,false);return true;}
+      const rawHtml=await getDocumentContent(response,resolved.href,resolved.origin,page);
+      await page.setDocument(rawHtml,true,resolved.href);
+      page.setLocation(resolved.href,resolved.origin);
+      page.history=page.history||[];
+      page.history=page.history.slice(0,(page.historyIndex??page.history.length-1)+1);
+      page.history.push(resolved.href);
+      page.historyIndex=page.history.length-1;
+      if (!sameDocumentUrl) history.pushState({},document.title,deploymentURL(resolved.href));
+      return true;
     });
     page.interceptEvent('open',(url,activateTab)=>{const resolved=new URL(url,page.location.url); if(resolved.origin!==domain)return window.open(resolved.href,'_blank','noopener'); const popup=window.open(deploymentURL(resolved.href),'_blank','noopener'); if(activateTab===false&&popup){try{popup.opener=null;}catch(_){}} return popup||true;});
     try {
