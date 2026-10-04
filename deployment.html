@@ -583,8 +583,13 @@ window.__deploymentNetworkReady = (async function() {
     }
 
     const runtimeEndpoint = type === 'node' ? runtime.endpoint : runtime;
-    const deploymentEndpoints = [runtimeEndpoint];
+
+    // Always give the online peer endpoint first priority. This is important
+    // when a local Node/static runtime also exists: the deployment should use
+    // the already-hosted peer instance rather than shadowing it with local files.
+    const deploymentEndpoints = [];
     if (peerEndpoint) deploymentEndpoints.push(peerEndpoint);
+    deploymentEndpoints.push(runtimeEndpoint);
     deploymentEndpoints.push(
       network.__deploymentBaseEndpoints.native,
       network.__deploymentBaseEndpoints.primary,
