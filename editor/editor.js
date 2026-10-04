@@ -1080,6 +1080,9 @@ window.__editorInitPromise = (async function () {
     if (!t || !g) return;
     if (t?.builtin === 'peer') void getBuiltin('peer')?.stop(t);
     if (t?.builtin === 'group') t._groupWorkbench?.dispose?.();
+    if (t?.kind === 'builtin') {
+      try { getBuiltin(t.builtin)?.dispose?.(t); } catch (_) {}
+    }
     state.previews?.dispose(t);
     t.model?.dispose?.();
     t.editor?.dispose?.();
