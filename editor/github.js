@@ -328,7 +328,8 @@
       return {commitSha, treeSha, tree:Array.isArray(tree?.tree) ? tree.tree : [], truncated:!!tree?.truncated};
     } catch (e) {
       // GitHub returns 404 or 409 for a repository that has no branch/commit yet.
-      if (e?.status === 404 || e?.status === 409) return {commitSha:null, treeSha:null, tree:[], empty:true};
+      if (e?.status === 409) return {commitSha:null, treeSha:null, tree:[], empty:true, unavailable:true};
+      if (e?.status === 404) return {commitSha:null, treeSha:null, tree:[], empty:true};
       throw e;
     }
   }
@@ -469,48 +470,64 @@
     const bytes = change.data instanceof Uint8Array ? change.data : new Uint8Array(change.data || []);
     let binary = '';
     const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunk, bytes.length)));
+    for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, Math.min(bytes.length, i + chunk)));
     const path = change.path.split('/').map(encodeURIComponent).join('/');
     const body = {message, content:btoa(binary)};
     if (branch) body.branch = branch;
-    return request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path}`, {
-      method:'PUT',
-      body:JSON.stringify(body)
-    });
+    let lastError = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        return await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/contents/' + path, {method:'PUT', body:JSON.stringify(body)});
+      } catch (e) {
+        lastError = e;
+        if (e?.status !== 409 && e?.status !== 404) throw e;
+        await new Promise(resolve => setTimeout(resolve, 500 + attempt * 500));
+      }
+    }
+    throw lastError || new Error('GitHub repository is still initializing.');
   }
+
   async function commitAndPush({owner, repo, branch, message, fs}) {
     message = String(message || '').trim();
     if (!message) throw new Error('Enter a commit message.');
-    let remote = await getRemoteState(owner, repo, branch);
+    let remote = null;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      remote = await getRemoteState(owner, repo, branch);
+      if (!remote.unavailable) break;
+      await new Promise(resolve => setTimeout(resolve, 500 + attempt * 500));
+    }
+    if (remote?.unavailable) throw new Error('GitHub is still initializing this repository. Please try again in a moment.');
     let changes = await compareWorkingTree(fs, remote.tree);
     if (!changes.length) return {changed:false, changes:[], commitSha:remote.commitSha};
-
-    // GitHub's Git Database API cannot create the first ref in an empty
-    // repository. Initialize it through the Contents API, then use the
-    // normal Git Data API for the remainder of the workspace.
     if (remote.empty || !remote.commitSha) {
       const first = changes.find(change => change.type !== 'deleted');
       if (!first) throw new Error('Cannot create an initial commit because the workspace contains no files.');
-      const initialized = await createContentsFile(owner, repo, branch, first, message);
+      let initialized;
+      try {
+        initialized = await createContentsFile(owner, repo, branch, first, message);
+      } catch (e) {
+        if (e?.status !== 422) throw e;
+        const after = await getRemoteState(owner, repo, branch);
+        const exists = after.tree?.some(entry => entry?.type === 'blob' && entry.path === first.path);
+        if (!exists) throw e;
+        initialized = {commit:{sha:after.commitSha}};
+      }
       remote = await getRemoteState(owner, repo, branch);
       changes = await compareWorkingTree(fs, remote.tree);
-      if (!changes.length) {
-        return {changed:true, changes:[first], commitSha:initialized?.commit?.sha || remote.commitSha};
-      }
+      if (!changes.length) return {changed:true, changes:[first], commitSha:initialized?.commit?.sha || remote.commitSha};
     }
-
     try {
       const blobs = await withConcurrency(changes.filter(x => x.type !== 'deleted'), 4, async change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:(await createBlob(owner, repo, change.data)).sha}));
       const treeEntries = [...blobs, ...changes.filter(x => x.type === 'deleted').map(change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:null}))];
       const treeBody = {tree:treeEntries};
       if (remote.treeSha) treeBody.base_tree = remote.treeSha;
-      const tree = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees`, {method:'POST', body:JSON.stringify(treeBody)});
+      const tree = await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/trees', {method:'POST', body:JSON.stringify(treeBody)});
       const commitBody = {message, tree:tree.sha};
       if (remote.commitSha) commitBody.parents = [remote.commitSha];
-      const commit = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/commits`, {method:'POST', body:JSON.stringify(commitBody)});
-      const refPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs/heads/${branchPath(branch)}`;
+      const commit = await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/commits', {method:'POST', body:JSON.stringify(commitBody)});
+      const refPath = '/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/refs/heads/' + branchPath(branch);
       if (remote.commitSha) await request(refPath, {method:'PATCH', body:JSON.stringify({sha:commit.sha, force:false})});
-      else await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs`, {method:'POST', body:JSON.stringify({ref:`refs/heads/${branch}`, sha:commit.sha})});
+      else await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/refs', {method:'POST', body:JSON.stringify({ref:'refs/heads/' + branch, sha:commit.sha})});
       return {changed:true, changes, commitSha:commit.sha};
     } catch (e) {
       if (e?.status !== 403) throw e;
