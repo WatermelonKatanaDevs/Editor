@@ -261,7 +261,7 @@ body.workbench-dragging iframe{pointer-events:none}
   box-sizing:border-box !important;
 }
 
-.ai-chat-disclaimer{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;text-align:center;color:#666;font-size:11px;line-height:1.5;pointer-events:none;user-select:none;text-shadow:0 1px 2px #000}\n\n/* AI tooling polish */
+.ai-chat-disclaimer{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;text-align:center;color:#777;font-size:11px;line-height:1.5;pointer-events:none;user-select:none}\n\n/* AI tooling polish */
 .ai-compose-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .ai-agent-steps{display:inline-flex;align-items:center;gap:4px;color:#999;font-size:10px;white-space:nowrap}
 .ai-agent-steps input{width:48px!important;min-width:48px!important;box-sizing:border-box;background:var(--editor-bg);color:var(--editor-text-secondary);border:1px solid #3a3a3a;border-radius:2px;padding:4px 5px;font:11px monospace;text-align:center}
