@@ -10,7 +10,7 @@
       branch:null,
       commit:null,
       usePeerServer:null,
-      url:null,
+      path:null,
       externalUrl:null,
       externalMode:null,
       hookUrl:null,
@@ -79,7 +79,7 @@
       const d = state.deploymentSettings || {};
       return {
         mode: d.mode === 'third-party' ? 'third-party' : 'editor',
-        url: normalizeEditorPath(d.url || (state.runConfig?.config?.path || '/')),
+        path: normalizeEditorPath(d.path || d.url || (state.runConfig?.config?.path || '/')),
         usePeerServer: d.usePeerServer === true,
         branch: String(d.branch || remote()?.branch || ''),
         commit: String(d.commit || ''),
@@ -94,7 +94,7 @@
       const saved = savedDeployment();
       return {
         mode: overrides.mode === null ? saved.mode : overrides.mode,
-        url: overrides.url === null ? saved.url : overrides.url,
+        path: overrides.path === null ? saved.path : overrides.path,
         usePeerServer: overrides.usePeerServer === null ? saved.usePeerServer : overrides.usePeerServer,
         branch: overrides.branch === null ? saved.branch : overrides.branch,
         commit: overrides.commit === null ? saved.commit : overrides.commit,
@@ -107,11 +107,8 @@
       };
     }
 
-    function latestCommit(e) {
-      const saved = String(e.commit || '').trim();
-      return saved && saved !== 'latest'
-        ? saved
-        : String(deployment.commits[0]?.sha || '').trim();
+    function selectedCommit(e) {
+      return String(e.commit || 'latest').trim() || 'latest';
     }
 
     async function resolvePreviewConfig() {
@@ -122,28 +119,25 @@
       const branch = String(e.branch || '').trim();
       if (!branch) throw new Error('Select a GitHub branch before opening Deployment Preview.');
 
-      let commit = latestCommit(e);
-      if (!commit) {
-        await loadCommits(branch);
-        commit = String(e.commit || deployment.commits[0]?.sha || '').trim();
-      }
-      if (!commit) throw new Error('No commit is available for the selected branch.');
-
+      const commit = selectedCommit(e);
       const peerLayer = String(state.peerSettings?.layer || 'peer').trim() || 'peer';
-      return {
+      const config = {
         github: `https://github.com/${r.owner}/${r.repo}`,
         branch,
         commit,
-        commitSelection: String(e.commit || 'latest').trim() || 'latest',
-        url: editorDeploymentURL(e.url),
         deploymentMode: e.mode,
-        externalUrl: e.externalUrl,
         externalMode: e.externalMode,
         peerServer: e.usePeerServer,
         peerLayer,
-        saveEnvironmentVariables: e.saveEnvironmentVariables,
-        hookUrl: e.hookUrl
+        saveEnvironmentVariables: e.saveEnvironmentVariables
       };
+      if (e.mode === 'third-party') {
+        config.url = String(e.externalUrl || '').trim();
+      } else {
+        config.path = normalizeEditorPath(e.path);
+      }
+      if (e.hookUrl) config.hookUrl = e.hookUrl;
+      return config;
     }
 
     function deploymentUrl(config) {
@@ -156,17 +150,6 @@
     }
 
     async function openDeployment() {
-      const e = effective();
-      if (e.mode === 'third-party') {
-        const target = String(e.externalUrl || '').trim();
-        if (!target) throw new Error('Set a third-party Deployment URL before opening it.');
-        try {
-          window.open(new URL(target).href, '_blank', 'noopener');
-        } catch (_) {
-          throw new Error('The third-party Deployment URL is invalid.');
-        }
-        return;
-      }
       const config = await resolvePreviewConfig();
       window.open(deploymentUrl(config), '_blank', 'noopener');
     }
@@ -205,9 +188,9 @@
       section.innerHTML = `<div class="run-debug-section-title">Deployment</div>
         <div class="run-debug-field"><label>Deployment</label><select data-deploy-mode><option value="editor" ${e.mode==='editor'?'selected':''}>Editor</option><option value="third-party" ${e.mode==='third-party'?'selected':''}>Third Party</option></select></div>
         <div class="run-debug-field"><label>Branch</label><select data-deploy-branch ${deployment.branches.length ? '' : 'disabled'}><option value="" disabled ${!branch?'selected':''}>${deployment.branches.length ? 'Select branch…' : 'Loading branches…'}</option>${deployment.branches.map(b => `<option value="${esc(b)}" ${b===branch?'selected':''}>${esc(b)}</option>`).join('')}</select></div>
-        <div class="run-debug-field"><label>Commit</label><select data-deploy-commit ${deployment.commits.length || selectedCommit ? '' : 'disabled'}><option value="" ${!selectedCommit?'selected':''}>${latestLabel}</option>${deployment.commits.map(c => `<option value="${esc(c.sha)}" ${c.sha===selectedCommit?'selected':''}>${esc(c.message || c.sha.slice(0, 12))}</option>`).join('')}</select></div>
+        <div class="run-debug-field"><label>Commit</label><select data-deploy-commit ${deployment.commits.length || selectedCommit ? '' : 'disabled'}><option value="latest" ${selectedCommit === 'latest' || !selectedCommit ? 'selected':''}>${latestLabel}</option>${deployment.commits.map(c => `<option value="${esc(c.sha)}" ${c.sha===selectedCommit?'selected':''}>${esc(c.message || c.sha.slice(0, 12))}</option>`).join('')}</select></div>
         <div data-deploy-editor-fields>
-          <div class="run-debug-field"><label>Editor URL</label><input data-deploy-url type="text" value="${esc(e.url || '/')}" placeholder="/" /></div>
+          <div class="run-debug-field"><label>Editor Path</label><input data-deploy-path type="text" value="${esc(e.path || '/')}" placeholder="/" /></div>
           <label class="run-debug-toggle"><input data-deploy-peer type="checkbox" ${e.usePeerServer?'checked':''}> Use peerServer</label>
         </div>
         <div data-deploy-third-fields>
