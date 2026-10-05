@@ -2,7 +2,7 @@
   const root = window.GitHubService = window.GitHubService || {};
   const API = 'https://api.github.com';
   const API_VERSION = '2026-03-10';
-  const GITHUB_APP_SLUG = 'node-editor';
+  const GITHUB_APP_SLUG = 'watermelonkatana-editor';
   const TOKEN_SESSION_KEY = 'editor.github.token.session';
   const TOKEN_LOCAL_KEY = 'editor.github.token';
   const USER_SESSION_KEY = 'editor.github.user.session';
