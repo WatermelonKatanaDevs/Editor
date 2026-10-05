@@ -134,6 +134,7 @@
         github: `https://github.com/${r.owner}/${r.repo}`,
         branch,
         commit,
+        commitSelection: String(e.commit || 'latest').trim() || 'latest',
         url: editorDeploymentURL(e.url),
         deploymentMode: e.mode,
         externalUrl: e.externalUrl,
