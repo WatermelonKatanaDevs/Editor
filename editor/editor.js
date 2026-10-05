@@ -589,7 +589,6 @@ window.__editorInitPromise = (async function () {
     state.fs.writeFileSync(EDITOR_PROJECT_PATH, JSON.stringify({
       id: state.projectId,
       name: state.projectName,
-      peerLayer: state.peerSettings.layer,
       pagePath: state.peerSettings.pagePath,
       deployment,
       ...(state.gitRemote?.provider === 'github' && state.gitRemote.owner && state.gitRemote.repo ? {gitRemote: state.gitRemote} : {})
@@ -785,7 +784,6 @@ window.__editorInitPromise = (async function () {
           fs.writeFileSync(EDITOR_PROJECT_PATH, JSON.stringify({
             id: projectId,
             name: projectName,
-            peerLayer: peerSettings.layer,
             pagePath: peerSettings.pagePath
           }, null, 2));
         } catch (_) {}
