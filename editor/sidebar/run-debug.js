@@ -108,7 +108,10 @@
     }
 
     function latestCommit(e) {
-      return String(e.commit || deployment.commits[0]?.sha || '').trim();
+      const saved = String(e.commit || '').trim();
+      return saved && saved !== 'latest'
+        ? saved
+        : String(deployment.commits[0]?.sha || '').trim();
     }
 
     async function resolvePreviewConfig() {
