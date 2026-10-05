@@ -2994,6 +2994,12 @@ window.__editorInitPromise = (async function () {
       projectOwner: state.projectOwner !== false,
       hasGitHubRepository: !!(state.gitRemote?.provider === 'github' && state.gitRemote.owner && state.gitRemote.repo)
     }),
+    getDeploymentPreview: () => {
+      if (typeof state.getDeploymentPreview !== 'function') {
+        throw new Error('Deployment Preview is not available.');
+      }
+      return state.getDeploymentPreview();
+    },
     addWelcomeBuiltin,
     removeWelcomeBuiltin,
     runConfigured,
