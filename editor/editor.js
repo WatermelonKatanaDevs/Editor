@@ -2302,17 +2302,58 @@ window.__editorInitPromise = (async function () {
   async function openGithubRevision(input, revision = '', options = {}) {
     showRemoteLoadProgress();
     const parsed = githubRepositoryFromUrl(input);
-    if (!parsed) { failRemoteLoadProgress(new Error('Enter a valid GitHub repository URL.')); throw new Error('Enter a valid GitHub repository URL.'); }
-    const requestedRevision = String(revision || parsed.branch || '').trim();
+    if (!parsed) {
+      const error = new Error('Enter a valid GitHub repository URL.');
+      failRemoteLoadProgress(error);
+      throw error;
+    }
+
+    const requestedRevision = String(revision || '').trim();
     let info = null;
     if (window.GitHubService?.isSignedIn?.()) {
-      try { info = await window.GitHubService.getRepository(parsed.owner, parsed.repo); } catch (e) { if (e?.status !== 404 && e?.status !== 401) throw e; }
+      try {
+        info = await window.GitHubService.getRepository(parsed.owner, parsed.repo);
+      } catch (e) {
+        if (e?.status !== 404 && e?.status !== 401) throw e;
+      }
     }
-    const ref = requestedRevision || info?.default_branch || 'main';
+
+    const branch = String(options.branch || parsed.branch || info?.default_branch || 'main').trim() || 'main';
+    let ref = requestedRevision || branch;
+
+    // "latest" is stored as a symbolic project revision. Resolve it to the
+    // current HEAD of the selected branch each time the project is opened.
+    if (requestedRevision === 'latest') {
+      let commits = [];
+      try {
+        commits = await window.GitHubService?.listCommits?.(parsed.owner, parsed.repo, branch, 1) || [];
+      } catch (e) {
+        if (e?.status !== 404 && e?.status !== 401) throw e;
+      }
+      if (!commits[0]?.sha) {
+        throw new Error(`No commits are available on GitHub branch "${branch}".`);
+      }
+      ref = commits[0].sha;
+    }
+
     let blob = null;
     if (window.GitHubService?.isSignedIn?.()) {
-      try { blob = await window.GitHubService.downloadArchive(parsed.owner, parsed.repo, ref, { onProgress(received, total) { const pct = total ? 5 + (received / total) * 50 : null; updateRemoteLoadProgress('Downloading project archive…', pct, total ? `${formatProgressBytes(received)} / ${formatProgressBytes(total)}` : `${formatProgressBytes(received)} downloaded`); } }); } catch (e) { if (e?.status !== 404 && e?.status !== 401) throw e; }
+      try {
+        blob = await window.GitHubService.downloadArchive(parsed.owner, parsed.repo, ref, {
+          onProgress(received, total) {
+            const pct = total ? 5 + (received / total) * 50 : null;
+            updateRemoteLoadProgress(
+              'Downloading project archive…',
+              pct,
+              total ? `${formatProgressBytes(received)} / ${formatProgressBytes(total)}` : `${formatProgressBytes(received)} downloaded`
+            );
+          }
+        });
+      } catch (e) {
+        if (e?.status !== 404 && e?.status !== 401) throw e;
+      }
     }
+
     if (!blob) {
       if (!state.browserNetwork?.request) throw new Error('Network is not initialized.');
       const codeload = `https://codeload.github.com/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}/zip/${encodeURIComponent(ref).replace(/%2F/g, '/')}`;
@@ -2320,6 +2361,7 @@ window.__editorInitPromise = (async function () {
       if (!response?.ok) throw new Error(`GitHub archive download failed (${response?.status || 'no response'}).`);
       blob = await responseToBlobWithEditorProgress(response, 5, 55, 'Downloading project archive…');
     }
+
     if (!blob?.size) throw new Error('GitHub returned an empty project archive.');
     const name = info?.name || parsed.repo;
     let file = new File([blob], name + '.zip', {type:'application/zip'});
@@ -2327,9 +2369,20 @@ window.__editorInitPromise = (async function () {
     updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
     const fs = await FileSystem.create(file, {sync:false});
     updateRemoteLoadProgress('Starting workspace…', 97, name || 'Remote Project');
-    const branch = info?.default_branch || parsed.branch || 'main';
+
     const projectId = options.projectId || `github:${parsed.owner}/${parsed.repo}@${ref}`;
-    await replaceFileSystem(fs, name || 'Remote Project', true, {projectId, gitEnabled: options.gitEnabled !== false, projectOwner: options.projectOwner !== false, gitRemote:{provider:'github',owner:parsed.owner,repo:parsed.repo,branch, ...(requestedRevision ? {revision:ref} : {})}});
+    await replaceFileSystem(fs, name || 'Remote Project', true, {
+      projectId,
+      gitEnabled: options.gitEnabled !== false,
+      projectOwner: options.projectOwner !== false,
+      gitRemote: {
+        provider:'github',
+        owner:parsed.owner,
+        repo:parsed.repo,
+        branch,
+        revision:requestedRevision === 'latest' ? 'latest' : ref
+      }
+    });
     finishRemoteImport();
     finishRemoteLoadProgress();
     return true;
@@ -2938,8 +2991,9 @@ window.__editorInitPromise = (async function () {
     const projectId = params.get('projectId') || undefined;
     if (!(await confirmWorkspaceSwitch('opening the project from the URL'))) return false;
     const commit = params.get('commit') || params.get('sha') || '';
+    const branch = params.get('branch') || '';
     try {
-      await openGithubRevision(githubURL, commit, {fromURL:true, gitEnabled, projectOwner, projectId});
+      await openGithubRevision(githubURL, commit, {fromURL:true, gitEnabled, projectOwner, projectId, branch});
       return true;
     } catch (e) {
       logError(e);
