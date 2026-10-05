@@ -516,10 +516,6 @@ window.__deploymentNetworkReady = (async function() {
       current.searchParams.set('commit', commitOverride);
       current.searchParams.set('deploymentMode', 'editor');
        current.searchParams.set('path', (resolved.pathname || '/') + (resolved.search || '') + (resolved.hash || ''));
-
-
-      current.searchParams.set('peerServer', usePeerServer ? '1' : '0');
-      current.searchParams.set('peerLayer', peerLayer);
       current.searchParams.set('saveEnvironmentVariables', saveEnvironmentVariables ? '1' : '0');
 
       return current.href;
@@ -535,10 +531,6 @@ window.__deploymentNetworkReady = (async function() {
       current.searchParams.set('commit', commitOverride);
       current.searchParams.set('deploymentMode', 'editor');
        current.searchParams.set('path', (resolved.pathname || '/') + (resolved.search || '') + (resolved.hash || ''));
-
-
-      current.searchParams.set('peerServer', usePeerServer ? '1' : '0');
-      current.searchParams.set('peerLayer', peerLayer);
       current.searchParams.set('saveEnvironmentVariables', saveEnvironmentVariables ? '1' : '0');
 
       return current.href;
