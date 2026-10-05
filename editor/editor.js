@@ -2317,6 +2317,51 @@ window.__editorInitPromise = (async function () {
     }
 
     const requestedRevision = String(revision || '').trim();
+
+    // A project owner needs GitHub authentication because opening their project
+    // from a project URL is an authenticated editing flow. Non-owners, however,
+    // must be able to view the public repository anonymously, just like the
+    // "Open Remote Project" URL flow below.
+    if (options.projectOwner !== false && !window.GitHubService?.isSignedIn?.()) {
+      const github = window.GitHubService;
+      if (!github?.startLogin) {
+        const error = new Error('Sign in to GitHub to open your project.');
+        failRemoteLoadProgress(error);
+        throw error;
+      }
+
+      const shouldSignIn = window.confirm(
+        'This is your project. Please sign in to GitHub to continue.'
+      );
+      if (!shouldSignIn) {
+        const error = new Error('GitHub sign-in is required to open your project.');
+        failRemoteLoadProgress(error);
+        throw error;
+      }
+
+      await new Promise(async (resolve, reject) => {
+        let settled = false;
+        let unsubscribe = null;
+        const finish = (error) => {
+          if (settled) return;
+          settled = true;
+          unsubscribe?.();
+          error ? reject(error) : resolve();
+        };
+
+        unsubscribe = github.onChange?.(() => {
+          if (github.isSignedIn?.()) finish();
+        });
+
+        try {
+          await github.startLogin();
+          if (github.isSignedIn?.()) finish();
+        } catch (error) {
+          finish(error);
+        }
+      });
+    }
+
     let info = null;
     if (window.GitHubService?.isSignedIn?.()) {
       try {
@@ -2332,16 +2377,25 @@ window.__editorInitPromise = (async function () {
     // "latest" is stored as a symbolic project revision. Resolve it to the
     // current HEAD of the selected branch each time the project is opened.
     if (requestedRevision === 'latest') {
-      let commits = [];
-      try {
-        commits = await window.GitHubService?.listCommits?.(parsed.owner, parsed.repo, branch, 1) || [];
-      } catch (e) {
-        if (e?.status !== 404 && e?.status !== 401) throw e;
+      // Signed-in owners can resolve the symbolic "latest" revision to a SHA,
+      // preserving the existing authenticated project behavior. For anonymous
+      // non-owner viewers, the public codeload endpoint can resolve the branch
+      // directly, so do not make an authenticated API request just to determine
+      // its current HEAD.
+      if (window.GitHubService?.isSignedIn?.()) {
+        let commits = [];
+        try {
+          commits = await window.GitHubService.listCommits(parsed.owner, parsed.repo, branch, 1) || [];
+        } catch (e) {
+          if (e?.status !== 404 && e?.status !== 401) throw e;
+        }
+        if (!commits[0]?.sha) {
+          throw new Error(`No commits are available on GitHub branch "${branch}".`);
+        }
+        ref = commits[0].sha;
+      } else {
+        ref = branch;
       }
-      if (!commits[0]?.sha) {
-        throw new Error(`No commits are available on GitHub branch "${branch}".`);
-      }
-      ref = commits[0].sha;
     }
 
     let blob = null;
