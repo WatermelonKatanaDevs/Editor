@@ -58,7 +58,7 @@ window.__editorInitPromise = (async function () {
     peerServers: new Map(),
     peerRuntimeEndpoint: null,
     peerSettings: {layer: '', pagePath: '/'},
-    deploymentSettings: {thirdParty: false, path: '/', usePeerServer: false, branch: '', commit: 'latest', externalUrl: '', externalMode: 'iframe', hookUrl: '', saveEnvironmentVariables: false, saveEnvironmentVariablesExplicit: false},
+    deploymentSettings: {thirdParty: false, externalUrl: '', branch: '', commit: 'latest', path: '/'},
     ai: null,
     environment: {},
     browserSettings: {
@@ -537,20 +537,30 @@ window.__editorInitPromise = (async function () {
       state.projectName = String(meta.name).trim();
       state.projectKey = state.projectName;
     }
+    const legacyDeployment = meta?.deployment || {};
+    const legacyPeerLayer = String(meta?.peerLayer || '').trim();
+    const legacyUsePeerServer = legacyDeployment.usePeerServer === true;
+    const legacySaveEnvironmentVariables = legacyDeployment.saveEnvironmentVariables === true;
+    if (!String(state.runConfig?.config?.peerLayer || '').trim() && legacyPeerLayer) {
+      state.runConfig.config.peerLayer = legacyPeerLayer;
+    }
+    if (!Object.prototype.hasOwnProperty.call(state.runConfig?.config || {}, 'usePeerServer')) {
+      state.runConfig.config.usePeerServer = legacyUsePeerServer;
+    }
+    if (!Object.prototype.hasOwnProperty.call(state.runConfig?.config || {}, 'saveEnvironmentVariables')) {
+      state.runConfig.config.saveEnvironmentVariables = legacySaveEnvironmentVariables;
+    }
     state.peerSettings = {
-      layer: String(meta?.peerLayer || '').trim() || makePeerLayer(),
+      layer: String(state.runConfig?.config?.peerLayer || legacyPeerLayer).trim() || makePeerLayer(),
       pagePath: normalizePeerPagePath(meta?.pagePath)
     };
+    state.runConfig.config.peerLayer = state.peerSettings.layer;
     state.deploymentSettings = {
-      thirdParty: meta?.deployment?.thirdParty === true || String(meta?.deployment?.mode || 'editor').trim() === 'third-party',
-      path: normalizeDeploymentPath(meta?.deployment?.path || meta?.deployment?.url || state.runConfig?.config?.path || '/'),
-      usePeerServer: !!meta?.deployment?.usePeerServer,
-      branch: String(meta?.deployment?.branch || state.gitRemote?.branch || '').trim(),
-      commit: String(meta?.deployment?.commit || 'latest').trim() || 'latest',
-      externalUrl: String(meta?.deployment?.externalUrl || '').trim(),
-      externalMode: String(meta?.deployment?.externalMode || 'iframe').trim() === 'emulate' ? 'emulate' : 'iframe',
-      saveEnvironmentVariables: meta?.deployment?.saveEnvironmentVariables === true,
-      saveEnvironmentVariablesExplicit: Object.prototype.hasOwnProperty.call(meta?.deployment || {}, 'saveEnvironmentVariables')
+      thirdParty: legacyDeployment.thirdParty === true || String(legacyDeployment.mode || 'editor').trim() === 'third-party',
+      externalUrl: String(legacyDeployment.externalUrl || '').trim(),
+      branch: String(legacyDeployment.branch || state.gitRemote?.branch || '').trim(),
+      commit: String(legacyDeployment.commit || 'latest').trim() || 'latest',
+      path: normalizeDeploymentPath(legacyDeployment.path ?? legacyDeployment.url ?? state.runConfig?.config?.path || '/')
     };
     if (!state.projectId) state.projectId = makeProjectId();
     hydrateGitRemoteFromSavedSelection();
@@ -563,16 +573,18 @@ window.__editorInitPromise = (async function () {
     state.peerSettings.layer = String(state.peerSettings.layer || makePeerLayer()).trim();
     state.peerSettings.pagePath = normalizePeerPagePath(state.peerSettings.pagePath);
     state.fs.mkdirSync?.(EDITOR_DIR);
+    if (state.runConfig?.config) {
+      state.runConfig.config.peerLayer = String(state.peerSettings?.layer || '').trim() || makePeerLayer();
+      state.runConfig.config.usePeerServer = state.runConfig.config.usePeerServer === true;
+      state.runConfig.config.saveEnvironmentVariables = state.runConfig.config.saveEnvironmentVariables === true;
+      state.runConfig.save?.();
+    }
     const deployment = {
       thirdParty: state.deploymentSettings?.thirdParty === true || state.deploymentSettings?.mode === 'third-party',
-      path: normalizeDeploymentPath(state.deploymentSettings?.path || state.deploymentSettings?.url || '/'),
-      usePeerServer: !!state.deploymentSettings?.usePeerServer,
+      externalUrl: String(state.deploymentSettings?.externalUrl || '').trim(),
       branch: String(state.deploymentSettings?.branch || '').trim(),
       commit: String(state.deploymentSettings?.commit || 'latest').trim() || 'latest',
-      externalUrl: String(state.deploymentSettings?.externalUrl || '').trim(),
-      externalMode: state.deploymentSettings?.externalMode === 'emulate' ? 'emulate' : 'iframe',
-      peerLayer: String(state.peerSettings?.layer || '').trim(),
-      saveEnvironmentVariables: state.deploymentSettings?.saveEnvironmentVariables === true
+      path: normalizeDeploymentPath(state.deploymentSettings?.path || state.deploymentSettings?.url || '/')
     };
     state.fs.writeFileSync(EDITOR_PROJECT_PATH, JSON.stringify({
       id: state.projectId,
@@ -637,7 +649,7 @@ window.__editorInitPromise = (async function () {
   }
   function loadProcessEnv() {
     try {
-      if (state.deploymentSettings?.saveEnvironmentVariables !== true) return false;
+      if (state.runConfig?.config?.saveEnvironmentVariables !== true) return false;
       if (state.fs?.existsSync(EDITOR_ENV_PATH)) {
         applyEditorEnvironment(parseProcessEnv(state.fs.readFileSync(EDITOR_ENV_PATH, 'utf8')));
         return true;
@@ -652,7 +664,7 @@ window.__editorInitPromise = (async function () {
         const safe = String(value ?? '').replace(/\r?\n/g, '\\n');
         return `${key}=${safe}`;
       });
-      if (state.deploymentSettings?.saveEnvironmentVariables === true) {
+      if (state.runConfig?.config?.saveEnvironmentVariables === true) {
         state.fs.mkdirSync?.(EDITOR_DIR);
         state.fs.writeFileSync(EDITOR_ENV_PATH, lines.length ? lines.join('\n') + '\n' : '');
         if (!state.loading) state.markDirty?.('editor/process.env');
@@ -1893,7 +1905,7 @@ window.__editorInitPromise = (async function () {
     state.projectOwner = options.projectOwner !== false;
     state.gitEnabled = options.gitEnabled !== false;
     state.gitRemote = state.gitEnabled ? (options.gitRemote || null) : null;
-    state.deploymentSettings = {mode:'editor', path:'/', usePeerServer:false, branch:String(state.gitRemote?.branch || '').trim(), commit:'latest', externalUrl:'', externalMode:'iframe', hookUrl:''};
+    state.deploymentSettings = {thirdParty:false, externalUrl:'', branch:String(state.gitRemote?.branch || '').trim(), commit:'latest', path:'/'};
     state.projectTemplate = !!options.isTemplate;
     state.projectName = name || 'Workspace';
     state.projectKey = state.projectName;
@@ -1901,6 +1913,7 @@ window.__editorInitPromise = (async function () {
     state.lastSavedAt = 0;
     state.lastCachedAt = 0;
     loadEditorConfig();
+    state.runConfig = new EditorRunConfig(state);
     loadProjectMetadata();
     // URL/project metadata can describe the original GitHub source, but a
     // detached remix workspace must not inherit that repository.
@@ -1912,7 +1925,6 @@ window.__editorInitPromise = (async function () {
     state.fileManager.setFileSystem(fs);
     state.fileManager.setShowHiddenFolders?.(state.behavior.showHiddenFolders);
     state.fileManager.refresh();
-    state.runConfig = new EditorRunConfig(state);
     state.runConfig.detect();
     state.sidebarController?.syncSourceControlActivity?.();
     // Warm Source Control while the remote workspace finishes loading so opening
