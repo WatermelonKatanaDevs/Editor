@@ -89,13 +89,12 @@
       return {
         thirdParty: d.thirdParty === true || d.mode === 'third-party',
         path: normalizeEditorPath(d.path || d.url || (state.runConfig?.config?.path || '/')),
-        usePeerServer: d.usePeerServer === true,
+        usePeerServer: state.runConfig?.config?.usePeerServer === true,
         branch: String(d.branch || remote()?.branch || ''),
         commit: String(d.commit || 'latest').trim() || 'latest',
         externalUrl: String(d.externalUrl || ''),
-        externalMode: d.externalMode === 'emulate' ? 'emulate' : 'iframe',
         hookUrl: readLocalHook(),
-        saveEnvironmentVariables: d.saveEnvironmentVariables === true
+        saveEnvironmentVariables: state.runConfig?.config?.saveEnvironmentVariables === true
       };
     }
 
@@ -108,7 +107,6 @@
         branch: overrides.branch === null ? saved.branch : overrides.branch,
         commit: overrides.commit === null ? saved.commit : overrides.commit,
         externalUrl: overrides.externalUrl === null ? saved.externalUrl : overrides.externalUrl,
-        externalMode: overrides.externalMode === null ? saved.externalMode : overrides.externalMode,
         hookUrl: overrides.hookUrl === null ? saved.hookUrl : overrides.hookUrl,
         saveEnvironmentVariables: overrides.saveEnvironmentVariables === null
           ? saved.saveEnvironmentVariables
@@ -126,7 +124,7 @@
         const externalUrl = String(e.externalUrl || '').trim();
         if (!externalUrl) throw new Error('Set a third-party deployment URL before opening Deployment Preview.');
         try { new URL(externalUrl); } catch (_) { throw new Error('The third-party deployment URL is invalid.'); }
-        return {deploymentMode:'third-party', externalMode:'iframe', url:externalUrl};
+        return {deploymentMode:'third-party', url:externalUrl};
       }
       const r = remote();
       if (!r) throw new Error('Open a GitHub repository before opening Deployment Preview.');
@@ -137,9 +135,8 @@
         branch,
         commit: selectedCommit(e),
         deploymentMode: 'editor',
-        externalMode: 'iframe',
         peerServer: e.usePeerServer,
-        peerLayer: String(state.peerSettings?.layer || 'peer').trim() || 'peer',
+        peerLayer: String(state.runConfig?.config?.peerLayer || state.peerSettings?.layer || 'peer').trim() || 'peer',
         saveEnvironmentVariables: e.saveEnvironmentVariables,
         path: normalizeEditorPath(e.path)
       };
@@ -167,7 +164,6 @@
         usePeerServer:null,
         path:null,
         externalUrl:null,
-        externalMode:null,
         hookUrl:null,
         saveEnvironmentVariables:null
       };
@@ -261,12 +257,14 @@
       section.querySelector('[data-deploy-save]').onclick = () => {
         const d = state.deploymentSettings || (state.deploymentSettings = {});
         d.thirdParty = mode.value === 'third-party';
-        d.externalMode = 'iframe';
         d.externalUrl = externalUrl.value.trim();
-        d.path = normalizeEditorPath(pathInput.value);
-        d.usePeerServer = peer ? peer.checked : false;
         d.branch = branchInput.value || branch;
         d.commit = commitInput.value || 'latest';
+        d.path = normalizeEditorPath(pathInput.value);
+        if (state.runConfig?.config) {
+          state.runConfig.config.usePeerServer = peer ? peer.checked : false;
+          state.runConfig.config.peerLayer = String(state.peerSettings?.layer || state.runConfig.config.peerLayer || 'peer').trim() || 'peer';
+        }
         state.saveProjectMetadata?.();
         state.markDirty?.('editor/project.json');
         state.markDirty?.('editor/deployment.json');
