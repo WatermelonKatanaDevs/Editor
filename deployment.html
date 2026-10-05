@@ -160,11 +160,26 @@ window.__deploymentNetworkReady = (async function() {
     setProgress(label, 100, formatBytes(blob.size));
     return blob;
   }
-  const githubURL = params.get('github') || params.get('githubUrl') || '';
-  let resolvedCommit = params.get('commit') || params.get('sha') || '';
-  const requestedPath = params.has('url') ? String(params.get('url') || '') : String(params.get('path') || '');
-  let usePeerNetwork = params.has('usePeerNetwork') ? (params.get('usePeerNetwork') === '1' || params.get('usePeerNetwork') === 'true' || params.get('usePeerNetwork') === '') : null;
   const network = await window.__deploymentNetworkReady;
+
+  function requiredParam(name) {
+    if (!params.has(name)) throw new Error(`Deployment requires a ${name} query parameter.`);
+    const value = String(params.get(name) || '').trim();
+    if (!value) throw new Error(`Deployment requires a non-empty ${name} query parameter.`);
+    return value;
+  }
+
+  function requiredPresence(name) {
+    if (!params.has(name)) throw new Error(`Deployment requires a ${name} query parameter.`);
+    return String(params.get(name) || '');
+  }
+
+  function requiredBooleanParam(name) {
+    const raw = requiredParam(name).toLowerCase();
+    if (raw === '1' || raw === 'true') return true;
+    if (raw === '0' || raw === 'false') return false;
+    throw new Error(`Deployment parameter ${name} must be true/false.`);
+  }
 
   function showError(error) {
     console.error(error);
@@ -289,22 +304,26 @@ window.__deploymentNetworkReady = (async function() {
     try { return new URL(s).origin; } catch (_) { return 'http://localhost:3000'; }
   }
   async function main() {
-    if (!githubURL) throw new Error('Deployment requires a github query parameter.');
+    const githubURL = requiredParam('github');
     const repo = parseGithub(githubURL);
-    const repository = await getRepositoryInfo(repo.owner, repo.repo);
-    const branchOverride = params.has('branch') ? String(params.get('branch') || '').trim() : null;
-    const commitOverride = params.has('commit') ? String(params.get('commit') || '').trim() : null;
-    const urlOverride = params.has('url') ? String(params.get('url') || '').trim() : null;
-    const modeOverride = params.has('deploymentMode') ? String(params.get('deploymentMode') || '').trim() : null;
-    const externalUrlOverride = params.has('externalUrl') ? String(params.get('externalUrl') || '').trim() : null;
-    const externalModeOverride = params.has('externalMode') ? String(params.get('externalMode') || '').trim() : null;
-    const peerOverride = params.has('peerServer')
-      ? (params.get('peerServer') === '1' || params.get('peerServer') === 'true' || params.get('peerServer') === '')
-      : (params.has('usePeerNetwork') ? (params.get('usePeerNetwork') === '1' || params.get('usePeerNetwork') === 'true' || params.get('usePeerNetwork') === '') : null);
-
-    let resolvedRef = commitOverride !== null
-      ? (commitOverride && commitOverride !== 'latest' ? commitOverride : (branchOverride || repository.defaultBranch))
-      : (branchOverride || repository.defaultBranch);
+    await getRepositoryInfo(repo.owner, repo.repo);
+    const branchOverride = requiredParam('branch');
+    const commitOverride = requiredParam('commit');
+    if (commitOverride === 'latest') throw new Error('Deployment requires an exact commit SHA, not "latest".');
+    const urlOverride = requiredParam('url');
+    const modeOverride = requiredParam('deploymentMode');
+    if (modeOverride !== 'editor' && modeOverride !== 'third-party') {
+      throw new Error('Deployment mode must be "editor" or "third-party".');
+    }
+    const externalUrlOverride = requiredPresence('externalUrl').trim();
+    const externalModeOverride = requiredParam('externalMode');
+    if (externalModeOverride !== 'iframe' && externalModeOverride !== 'emulate') {
+      throw new Error('Deployment external mode must be "iframe" or "emulate".');
+    }
+    const usePeerServer = requiredBooleanParam('peerServer');
+    const peerLayer = requiredParam('peerLayer');
+    const saveEnvironmentVariables = requiredBooleanParam('saveEnvironmentVariables');
+    const resolvedRef = commitOverride;
 
     async function loadRevision(ref) {
       status.textContent = 'Loading deployment revision…';
@@ -318,27 +337,8 @@ window.__deploymentNetworkReady = (async function() {
       return {blob,file,fs};
     }
 
-    let revision = await loadRevision(resolvedRef);
-    let fs = revision.fs;
-    let hasDeploymentConfig = false;
-    try { hasDeploymentConfig = !!fs.existsSync('/.editor/deployment.json'); } catch (_) {}
-    let deploymentConfig = hasDeploymentConfig ? readJSON(fs, '/.editor/deployment.json') : {};
-
-    if (commitOverride === null && branchOverride === null && hasDeploymentConfig) {
-      const savedBranch = String(deploymentConfig.branch || '').trim();
-      const savedCommit = String(deploymentConfig.commit || '').trim();
-      const savedRef = savedCommit || savedBranch || repository.defaultBranch;
-      if (savedRef && savedRef !== resolvedRef) {
-        status.textContent = 'Loading saved deployment revision…';
-        resolvedRef = savedRef;
-        revision = await loadRevision(resolvedRef);
-        fs = revision.fs;
-        try { hasDeploymentConfig = !!fs.existsSync('/.editor/deployment.json'); } catch (_) { hasDeploymentConfig = false; }
-        deploymentConfig = hasDeploymentConfig ? readJSON(fs, '/.editor/deployment.json') : {};
-      }
-    }
-
-    const projectMeta = readJSON(fs, '/.editor/project.json');
+    const revision = await loadRevision(resolvedRef);
+    const fs = revision.fs;
     const runConfigFromProject = readJSON(fs, '/.editor/config.json');
     const inferredRunConfig = {
       serverType: 'static',
@@ -349,34 +349,10 @@ window.__deploymentNetworkReady = (async function() {
       cwd: '/',
       nodeCommand: ''
     };
-    const runConfig = hasDeploymentConfig ? {...inferredRunConfig, ...runConfigFromProject} : inferredRunConfig;
-
-    // A project without deployment.json is intentionally treated as a static deployment.
-    // It must have a root index.html; otherwise there is no unambiguous deployment entry.
-    if (!hasDeploymentConfig) {
-      let hasIndex = false;
-      try { hasIndex = !!fs.existsSync('/index.html'); } catch (_) {}
-      if (!hasIndex) {
-        status.textContent = 'Please configure deployment in editor';
-        status.className = 'error';
-        return;
-      }
-    }
-
-    const savedMode = deploymentConfig.mode || projectMeta?.deployment?.mode ||
-      ((deploymentConfig.externalUrl || projectMeta?.deployment?.externalUrl) ? 'third-party' : 'editor');
-    const deploymentMode = modeOverride === 'third-party' || modeOverride === 'editor'
-      ? modeOverride
-      : (savedMode === 'third-party' ? 'third-party' : 'editor');
-    const externalUrl = externalUrlOverride !== null
-      ? externalUrlOverride
-      : String(deploymentConfig.externalUrl || projectMeta?.deployment?.externalUrl || '').trim();
-    const externalMode = externalModeOverride === 'emulate' || String(deploymentConfig.externalMode || projectMeta?.deployment?.externalMode || '') === 'emulate'
-      ? 'emulate'
-      : 'iframe';
-    const saveEnvironmentVariables =
-      deploymentConfig.saveEnvironmentVariables === true ||
-      projectMeta?.deployment?.saveEnvironmentVariables === true;
+    const runConfig = {...inferredRunConfig, ...runConfigFromProject};
+    const deploymentMode = modeOverride;
+    const externalUrl = externalUrlOverride;
+    const externalMode = externalModeOverride;
     const deploymentEnvironment = saveEnvironmentVariables ? readProcessEnv(fs) : {};
     const type = runConfig.serverType === 'node' ? 'node' : 'static';
 
@@ -393,15 +369,18 @@ window.__deploymentNetworkReady = (async function() {
           canonical.searchParams.delete('githubUrl');
           canonical.searchParams.delete('sha');
           canonical.searchParams.set('github', githubURL);
+          canonical.searchParams.set('branch', branchOverride);
           canonical.searchParams.set('commit', resolvedRef);
-          if (branchOverride !== null) canonical.searchParams.set('branch', branchOverride); else canonical.searchParams.delete('branch');
-          canonical.searchParams.delete('path');
-          canonical.searchParams.delete('url');
           canonical.searchParams.set('deploymentMode', 'third-party');
+          canonical.searchParams.set('url', urlOverride);
           canonical.searchParams.set('externalUrl', pageURL);
           canonical.searchParams.set('externalMode', externalMode);
-          canonical.searchParams.delete('peerServer');
-          canonical.searchParams.delete('usePeerNetwork');
+          canonical.searchParams.set('peerServer', usePeerServer ? '1' : '0');
+          canonical.searchParams.set('peerLayer', peerLayer);
+          canonical.searchParams.set('saveEnvironmentVariables', saveEnvironmentVariables ? '1' : '0');
+          canonical.searchParams.delete('githubUrl');
+          canonical.searchParams.delete('sha');
+          canonical.searchParams.delete('path');
           history.replaceState({}, document.title, canonical.pathname + canonical.search + canonical.hash);
         } catch (_) {}
       }
@@ -477,15 +456,9 @@ window.__deploymentNetworkReady = (async function() {
       return;
     }
 
-    const savedUrl = String(deploymentConfig.url || projectMeta?.deployment?.url || '').trim();
-
     function resolveEditorTarget(value) {
-      const raw = String(value || '').trim();
+      const raw = String(value).trim();
       const configuredDomain = normalizeDomain(runConfig.domain);
-      if (!raw) {
-        const path = String(runConfig.path || '/');
-        return configuredDomain + (path.startsWith('/') ? path : '/' + path);
-      }
       try {
         const absolute = new URL(raw);
         if (/^https?:$/i.test(absolute.protocol)) return absolute.href;
@@ -494,12 +467,7 @@ window.__deploymentNetworkReady = (async function() {
       return configuredDomain + path;
     }
 
-    // A deployment URL is optional. If none is supplied, deploy the project root.
-    const rawConfiguredUrl = String(
-      urlOverride !== null
-        ? urlOverride
-        : (params.has('path') ? String(params.get('path') || '') : (savedUrl || '/'))
-    ).trim() || '/';
+    const rawConfiguredUrl = urlOverride;
     const deploymentOrigin = normalizeDomain(runConfig.domain);
     const initialTargetUrl = new URL(resolveEditorTarget(rawConfiguredUrl));
 
@@ -512,11 +480,6 @@ window.__deploymentNetworkReady = (async function() {
 
     const domain = deploymentOrigin;
     const runtimePath = initialTargetUrl.pathname || '/';
-    const savedUsePeerServer = Object.prototype.hasOwnProperty.call(deploymentConfig, 'usePeerServer')
-      ? deploymentConfig.usePeerServer === true
-      : projectMeta?.deployment?.usePeerServer === true;
-    const usePeerServer = peerOverride === null ? savedUsePeerServer : !!peerOverride;
-
     let peerEndpoint = null;
     if (usePeerServer) {
       try { peerEndpoint = new PeerEndpoint(); }
@@ -587,11 +550,7 @@ window.__deploymentNetworkReady = (async function() {
     }
 
     if (usePeerServer) {
-      const layer = String(
-        deploymentConfig.peerLayer ||
-        projectMeta?.peerLayer ||
-        'peer'
-      ).trim() || 'peer';
+      const layer = peerLayer;
       status.textContent = 'Starting peer server…';
       window.__deploymentPeerServer = await ensurePeerServer(
         domain,
@@ -620,17 +579,16 @@ window.__deploymentNetworkReady = (async function() {
       current.searchParams.delete('githubUrl');
       current.searchParams.delete('sha');
       current.searchParams.set('github', githubURL);
+      current.searchParams.set('branch', branchOverride);
       current.searchParams.set('commit', resolvedRef);
-      if (branchOverride !== null) current.searchParams.set('branch', branchOverride);
-      else current.searchParams.delete('branch');
-      current.searchParams.delete('path');
-      current.searchParams.delete('deploymentMode');
-      current.searchParams.delete('externalUrl');
-      current.searchParams.delete('externalMode');
+      current.searchParams.set('deploymentMode', 'editor');
       current.searchParams.set('url', resolved.href);
-      if (usePeerServer) current.searchParams.set('peerServer', '1');
-      else current.searchParams.delete('peerServer');
-      current.searchParams.delete('usePeerNetwork');
+      current.searchParams.set('externalUrl', '');
+      current.searchParams.set('externalMode', externalMode);
+      current.searchParams.set('peerServer', usePeerServer ? '1' : '0');
+      current.searchParams.set('peerLayer', peerLayer);
+      current.searchParams.set('saveEnvironmentVariables', saveEnvironmentVariables ? '1' : '0');
+      current.searchParams.delete('path');
       return current.href;
     }
 
@@ -640,17 +598,16 @@ window.__deploymentNetworkReady = (async function() {
       current.searchParams.delete('githubUrl');
       current.searchParams.delete('sha');
       current.searchParams.set('github', githubURL);
+      current.searchParams.set('branch', branchOverride);
       current.searchParams.set('commit', resolvedRef);
-      if (branchOverride !== null) current.searchParams.set('branch', branchOverride);
-      else current.searchParams.delete('branch');
-      current.searchParams.delete('path');
-      current.searchParams.delete('deploymentMode');
-      current.searchParams.delete('externalUrl');
-      current.searchParams.delete('externalMode');
+      current.searchParams.set('deploymentMode', 'editor');
       current.searchParams.set('url', resolved.href);
-      if (usePeerServer) current.searchParams.set('peerServer', '1');
-      else current.searchParams.delete('peerServer');
-      current.searchParams.delete('usePeerNetwork');
+      current.searchParams.set('externalUrl', '');
+      current.searchParams.set('externalMode', externalMode);
+      current.searchParams.set('peerServer', usePeerServer ? '1' : '0');
+      current.searchParams.set('peerLayer', peerLayer);
+      current.searchParams.set('saveEnvironmentVariables', saveEnvironmentVariables ? '1' : '0');
+      current.searchParams.delete('path');
       return current.href;
     }
 
