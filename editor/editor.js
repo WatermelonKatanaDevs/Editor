@@ -549,7 +549,6 @@ window.__editorInitPromise = (async function () {
       commit: String(meta?.deployment?.commit || 'latest').trim() || 'latest',
       externalUrl: String(meta?.deployment?.externalUrl || '').trim(),
       externalMode: String(meta?.deployment?.externalMode || 'iframe').trim() === 'emulate' ? 'emulate' : 'iframe',
-      hookUrl: String(meta?.deployment?.hookUrl || '').trim(),
       saveEnvironmentVariables: meta?.deployment?.saveEnvironmentVariables === true,
       saveEnvironmentVariablesExplicit: Object.prototype.hasOwnProperty.call(meta?.deployment || {}, 'saveEnvironmentVariables')
     };
@@ -572,7 +571,6 @@ window.__editorInitPromise = (async function () {
       commit: String(state.deploymentSettings?.commit || 'latest').trim() || 'latest',
       externalUrl: String(state.deploymentSettings?.externalUrl || '').trim(),
       externalMode: state.deploymentSettings?.externalMode === 'emulate' ? 'emulate' : 'iframe',
-      hookUrl: String(state.deploymentSettings?.hookUrl || '').trim(),
       peerLayer: String(state.peerSettings?.layer || '').trim(),
       saveEnvironmentVariables: state.deploymentSettings?.saveEnvironmentVariables === true
     };
