@@ -122,8 +122,13 @@
       if (e.thirdParty) {
         const externalUrl = String(e.externalUrl || '').trim();
         if (!externalUrl) throw new Error('Set a third-party deployment URL before opening Deployment Preview.');
-        try { new URL(externalUrl); } catch (_) { throw new Error('The third-party deployment URL is invalid.'); }
-        return {deploymentMode:'third-party', url:externalUrl};
+        try {
+          const target = new URL(externalUrl);
+          if (!/^https?:$/i.test(target.protocol)) throw new Error();
+          return {url:target.href, thirdParty:true};
+        } catch (_) {
+          throw new Error('The third-party deployment URL is invalid.');
+        }
       }
       const r = remote();
       if (!r) throw new Error('Open a GitHub repository before opening Deployment Preview.');
@@ -133,13 +138,13 @@
         github: `https://github.com/${r.owner}/${r.repo}`,
         branch,
         commit: selectedCommit(e),
-        deploymentMode: 'editor',
         usePeerServer: e.usePeerServer,
         path: normalizeEditorPath(e.path)
       };
     }
 
     function deploymentUrl(config) {
+      if (config.thirdParty) return config.url;
       const url = new URL('./deployment.html', location.href);
       for (const [key,value] of Object.entries(config)) {
         if (typeof value === 'boolean') url.searchParams.set(key, value ? '1' : '0');
