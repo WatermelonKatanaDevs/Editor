@@ -384,7 +384,9 @@ window.__deploymentNetworkReady = (async function() {
       nodeCommand: ''
     };
     const runConfig = {...inferredRunConfig, ...runConfigFromProject};
-    const usePeerServer = runConfig.usePeerServer === true;
+    // The deployment wrapper explicitly opts into the peer server. The
+    // project config still owns the peer layer itself.
+    const usePeerServer = params.get('usePeerServer') === '1';
     const peerLayer = String(runConfig.peerLayer || 'peer').trim() || 'peer';
     const saveEnvironmentVariables = runConfig.saveEnvironmentVariables === true;
     const deploymentEnvironment = saveEnvironmentVariables ? readProcessEnv(fs) : {};
@@ -517,6 +519,7 @@ window.__deploymentNetworkReady = (async function() {
       current.searchParams.set('deploymentMode', 'editor');
        current.searchParams.set('path', (resolved.pathname || '/') + (resolved.search || '') + (resolved.hash || ''));
       current.searchParams.set('saveEnvironmentVariables', saveEnvironmentVariables ? '1' : '0');
+      current.searchParams.set('usePeerServer', usePeerServer ? '1' : '0');
 
       return current.href;
     }
