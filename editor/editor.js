@@ -58,7 +58,7 @@ window.__editorInitPromise = (async function () {
     peerServers: new Map(),
     peerRuntimeEndpoint: null,
     peerSettings: {layer: '', pagePath: '/'},
-    deploymentSettings: {mode: 'editor', url: '', usePeerServer: false, branch: '', commit: '', externalUrl: '', externalMode: 'iframe', hookUrl: '', saveEnvironmentVariables: false, saveEnvironmentVariablesExplicit: false},
+    deploymentSettings: {mode: 'editor', path: '/', usePeerServer: false, branch: '', commit: 'latest', externalUrl: '', externalMode: 'iframe', hookUrl: '', saveEnvironmentVariables: false, saveEnvironmentVariablesExplicit: false},
     ai: null,
     environment: {},
     browserSettings: {
@@ -543,10 +543,10 @@ window.__editorInitPromise = (async function () {
     };
     state.deploymentSettings = {
       mode: String(meta?.deployment?.mode || 'editor').trim() === 'third-party' ? 'third-party' : 'editor',
-      url: normalizeDeploymentPath(meta?.deployment?.url || state.runConfig?.config?.path || '/'),
+      path: normalizeDeploymentPath(meta?.deployment?.path || meta?.deployment?.url || state.runConfig?.config?.path || '/'),
       usePeerServer: !!meta?.deployment?.usePeerServer,
       branch: String(meta?.deployment?.branch || state.gitRemote?.branch || '').trim(),
-      commit: String(meta?.deployment?.commit || '').trim(),
+      commit: String(meta?.deployment?.commit || 'latest').trim() || 'latest',
       externalUrl: String(meta?.deployment?.externalUrl || '').trim(),
       externalMode: String(meta?.deployment?.externalMode || 'iframe').trim() === 'emulate' ? 'emulate' : 'iframe',
       hookUrl: String(meta?.deployment?.hookUrl || '').trim(),
@@ -566,7 +566,7 @@ window.__editorInitPromise = (async function () {
     state.fs.mkdirSync?.(EDITOR_DIR);
     const deployment = {
       mode: state.deploymentSettings?.mode === 'third-party' ? 'third-party' : 'editor',
-      url: normalizeDeploymentPath(state.deploymentSettings?.url || '/'),
+      path: normalizeDeploymentPath(state.deploymentSettings?.path || state.deploymentSettings?.url || '/'),
       usePeerServer: !!state.deploymentSettings?.usePeerServer,
       branch: String(state.deploymentSettings?.branch || '').trim(),
       commit: String(state.deploymentSettings?.commit || '').trim(),
@@ -1895,7 +1895,7 @@ window.__editorInitPromise = (async function () {
     state.projectOwner = options.projectOwner !== false;
     state.gitEnabled = options.gitEnabled !== false;
     state.gitRemote = state.gitEnabled ? (options.gitRemote || null) : null;
-    state.deploymentSettings = {mode:'editor', url:'/', usePeerServer:false, branch:String(state.gitRemote?.branch || '').trim(), commit:'', externalUrl:'', externalMode:'iframe', hookUrl:''};
+    state.deploymentSettings = {mode:'editor', path:'/', usePeerServer:false, branch:String(state.gitRemote?.branch || '').trim(), commit:'latest', externalUrl:'', externalMode:'iframe', hookUrl:''};
     state.projectTemplate = !!options.isTemplate;
     state.projectName = name || 'Workspace';
     state.projectKey = state.projectName;
