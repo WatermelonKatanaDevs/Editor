@@ -137,7 +137,8 @@
         externalMode: e.externalMode,
         peerServer: e.usePeerServer,
         peerLayer,
-        saveEnvironmentVariables: e.saveEnvironmentVariables
+        saveEnvironmentVariables: e.saveEnvironmentVariables,
+        hookUrl: e.hookUrl
       };
     }
 
