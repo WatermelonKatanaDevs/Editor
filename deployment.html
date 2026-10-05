@@ -40,7 +40,6 @@ window.__deploymentAssetsReady = (async function() {
 
   // Keep asset references relative to this deployment document. Do not resolve
   // them through the emulated project URL.
-  window.__peerLayer = new URLSearchParams(location.search).get('peerLayer');
 
   for (const source of sources) {
     const script = document.createElement('script');
@@ -315,10 +314,6 @@ window.__deploymentNetworkReady = (async function() {
       throw new Error('Deployment requires a path= or url= query parameter.');
     }
 
-    const usePeerServer = requiredBooleanParam('peerServer');
-    const peerLayer = requiredParam('peerLayer');
-    const saveEnvironmentVariables = requiredBooleanParam('saveEnvironmentVariables');
-
     // Third-party deployments are intentionally just a full-screen browser iframe.
     if (modeOverride === 'third-party') {
       if (!urlOverride) throw new Error('Third-party deployments require a url= parameter.');
@@ -389,6 +384,9 @@ window.__deploymentNetworkReady = (async function() {
       nodeCommand: ''
     };
     const runConfig = {...inferredRunConfig, ...runConfigFromProject};
+    const usePeerServer = runConfig.usePeerServer === true;
+    const peerLayer = String(runConfig.peerLayer || 'peer').trim() || 'peer';
+    const saveEnvironmentVariables = runConfig.saveEnvironmentVariables === true;
     const deploymentEnvironment = saveEnvironmentVariables ? readProcessEnv(fs) : {};
     const type = runConfig.serverType === 'node' ? 'node' : 'static';
 
