@@ -3549,18 +3549,44 @@
       window.__serializePublicElement = function(elem, outer) { return serializePublicElement(elem, outer); };
       window.__isEmulatorInjectedScript = function(code) { return /createRuntimeInterceptor|__runSyncInterceptor|__pageRegistry/.test(String(code || '')); };
 
+      // Native HTML assignments bypass the MutationObserver until the current
+      // JavaScript turn has finished. That is too late for emulator-preprocessed
+      // resources: for example, innerHTML += can briefly (and sometimes
+      // permanently) install the public/raw form of an already-processed node.
+      // Explicitly run the same dynamic-node processing immediately after an
+      // HTML assignment so innerHTML/outerHTML behave like other DOM additions.
+      function processAssignedNodes(nodes) {
+        for (const node of nodes || []) {
+          if (!node) continue;
+          checkNodeAndChildren(node);
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            node.querySelectorAll('*').forEach(child => checkNodeAndChildren(child));
+          }
+        }
+      }
+
       Object.defineProperty(Element.prototype, 'innerHTML', {
         configurable: nativeElementInnerHTML.configurable,
         enumerable: nativeElementInnerHTML.enumerable,
         get() { return serializePageElement(this, false); },
-        set(value) { return nativeElementInnerHTML.set.call(this, value); }
+        set(value) {
+          nativeElementInnerHTML.set.call(this, value);
+          processAssignedNodes(Array.from(this.childNodes));
+        }
       });
 
       Object.defineProperty(Element.prototype, 'outerHTML', {
         configurable: nativeElementOuterHTML.configurable,
         enumerable: nativeElementOuterHTML.enumerable,
         get() { return serializePageElement(this, true); },
-        set(value) { return nativeElementOuterHTML.set.call(this, value); }
+        set(value) {
+          const parent = this.parentNode;
+          const before = parent ? new Set(parent.childNodes) : null;
+          nativeElementOuterHTML.set.call(this, value);
+
+          if (!parent || !before) return;
+          processAssignedNodes(Array.from(parent.childNodes).filter(node => !before.has(node)));
+        }
       });
     }
     return `(${interceptorFunction.toString()})("${source_origin}","${base_url || source_url}","${source_url}");//# sourceURL=${name}`;
