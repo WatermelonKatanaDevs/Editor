@@ -82,7 +82,7 @@
         path: normalizeEditorPath(d.path || d.url || (state.runConfig?.config?.path || '/')),
         usePeerServer: d.usePeerServer === true,
         branch: String(d.branch || remote()?.branch || ''),
-        commit: String(d.commit || ''),
+        commit: String(d.commit || 'latest').trim() || 'latest',
         externalUrl: String(d.externalUrl || ''),
         externalMode: d.externalMode === 'emulate' ? 'emulate' : 'iframe',
         hookUrl: String(d.hookUrl || ''),
@@ -160,7 +160,7 @@
         branch:null,
         commit:null,
         usePeerServer:null,
-        url:null,
+        path:null,
         externalUrl:null,
         externalMode:null,
         hookUrl:null,
@@ -202,7 +202,7 @@
       const mode = section.querySelector('[data-deploy-mode]');
       const editorFields = section.querySelector('[data-deploy-editor-fields]');
       const thirdFields = section.querySelector('[data-deploy-third-fields]');
-      const urlInput = section.querySelector('[data-deploy-url]');
+      const pathInput = section.querySelector('[data-deploy-path]');
       const externalUrl = section.querySelector('[data-deploy-external-url]');
       const branchInput = section.querySelector('[data-deploy-branch]');
       const commitInput = section.querySelector('[data-deploy-commit]');
@@ -221,7 +221,7 @@
         overrides.mode = mode.value;
         syncModeUI();
       };
-      urlInput.oninput = () => { overrides.url = normalizeEditorPath(urlInput.value); };
+      pathInput.oninput = () => { overrides.path = normalizeEditorPath(pathInput.value); };
       externalUrl.oninput = () => { overrides.externalUrl = externalUrl.value.trim(); };
       branchInput.onchange = async () => {
         overrides.branch = branchInput.value;
@@ -257,12 +257,12 @@
       section.querySelector('[data-deploy-save]').onclick = () => {
         const d = state.deploymentSettings || (state.deploymentSettings = {});
         d.mode = mode.value === 'third-party' ? 'third-party' : 'editor';
-        d.url = normalizeEditorPath(urlInput.value);
+        d.path = normalizeEditorPath(pathInput.value);
         d.externalUrl = externalUrl.value.trim();
         d.externalMode = 'iframe';
         d.usePeerServer = peer ? peer.checked : false;
         d.branch = branchInput.value || branch;
-        d.commit = commitInput.value || '';
+        d.commit = commitInput.value || 'latest';
         d.hookUrl = hook.value.trim();
         state.saveProjectMetadata?.();
         state.markDirty?.('editor/project.json');
