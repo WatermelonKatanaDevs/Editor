@@ -357,6 +357,9 @@ window.__deploymentNetworkReady = (async function() {
     const externalMode = externalModeOverride;
     const deploymentEnvironment = saveEnvironmentVariables ? readProcessEnv(fs) : {};
     const type = runConfig.serverType === 'node' ? 'node' : 'static';
+    if (deploymentMode === 'third-party' && !externalUrl) {
+      throw new Error('Third-party deployments require an external URL.');
+    }
 
     // Third-party deployments have their own target URL and do not use the editor runtime.
     // If the URL is missing, fall through to the normal editor deployment using the rest of the settings.
