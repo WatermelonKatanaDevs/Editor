@@ -121,31 +121,28 @@
     }
 
     async function resolvePreviewConfig() {
+      const e = effective();
+      if (e.mode === 'third-party') {
+        const externalUrl = String(e.externalUrl || '').trim();
+        if (!externalUrl) throw new Error('Set a third-party deployment URL before opening Deployment Preview.');
+        try { new URL(externalUrl); } catch (_) { throw new Error('The third-party deployment URL is invalid.'); }
+        return {deploymentMode:'third-party', externalMode:'iframe', url:externalUrl};
+      }
       const r = remote();
       if (!r) throw new Error('Open a GitHub repository before opening Deployment Preview.');
-
-      const e = effective();
       const branch = String(e.branch || '').trim();
       if (!branch) throw new Error('Select a GitHub branch before opening Deployment Preview.');
-
-      const commit = selectedCommit(e);
-      const peerLayer = String(state.peerSettings?.layer || 'peer').trim() || 'peer';
-      const config = {
+      return {
         github: `https://github.com/${r.owner}/${r.repo}`,
         branch,
-        commit,
-        deploymentMode: e.mode,
-        externalMode: e.externalMode,
+        commit: selectedCommit(e),
+        deploymentMode: 'editor',
+        externalMode: 'iframe',
         peerServer: e.usePeerServer,
-        peerLayer,
-        saveEnvironmentVariables: e.saveEnvironmentVariables
+        peerLayer: String(state.peerSettings?.layer || 'peer').trim() || 'peer',
+        saveEnvironmentVariables: e.saveEnvironmentVariables,
+        path: normalizeEditorPath(e.path)
       };
-      if (e.mode === 'third-party') {
-        config.url = String(e.externalUrl || '').trim();
-      } else {
-        config.path = normalizeEditorPath(e.path);
-      }
-      return config;
     }
 
     function deploymentUrl(config) {
@@ -264,13 +261,19 @@
       section.querySelector('[data-deploy-save]').onclick = () => {
         const d = state.deploymentSettings || (state.deploymentSettings = {});
         d.mode = mode.value === 'third-party' ? 'third-party' : 'editor';
-        d.path = normalizeEditorPath(pathInput.value);
-        d.externalUrl = externalUrl.value.trim();
         d.externalMode = 'iframe';
-        d.usePeerServer = peer ? peer.checked : false;
-        d.branch = branchInput.value || branch;
-        d.commit = commitInput.value || 'latest';
-        d.hookUrl = hook.value.trim();
+        d.externalUrl = externalUrl.value.trim();
+        if (d.mode === 'third-party') {
+          d.path = '';
+          d.usePeerServer = false;
+          d.branch = '';
+          d.commit = '';
+        } else {
+          d.path = normalizeEditorPath(pathInput.value);
+          d.usePeerServer = peer ? peer.checked : false;
+          d.branch = branchInput.value || branch;
+          d.commit = commitInput.value || 'latest';
+        }
         state.saveProjectMetadata?.();
         state.markDirty?.('editor/project.json');
         state.markDirty?.('editor/deployment.json');
