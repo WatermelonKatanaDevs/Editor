@@ -6,7 +6,7 @@
     let deployment = {repo:null,branches:[],commits:[],loading:false};
     let commitLoadToken = 0;
     let overrides = {
-      mode:null,
+      thirdParty:null,
       branch:null,
       commit:null,
       usePeerServer:null,
@@ -87,7 +87,7 @@
     function savedDeployment() {
       const d = state.deploymentSettings || {};
       return {
-        mode: d.mode === 'third-party' ? 'third-party' : 'editor',
+        thirdParty: d.thirdParty === true || d.mode === 'third-party',
         path: normalizeEditorPath(d.path || d.url || (state.runConfig?.config?.path || '/')),
         usePeerServer: d.usePeerServer === true,
         branch: String(d.branch || remote()?.branch || ''),
@@ -102,7 +102,7 @@
     function effective() {
       const saved = savedDeployment();
       return {
-        mode: overrides.mode === null ? saved.mode : overrides.mode,
+        thirdParty: overrides.thirdParty === null ? saved.thirdParty : overrides.thirdParty,
         path: overrides.path === null ? saved.path : overrides.path,
         usePeerServer: overrides.usePeerServer === null ? saved.usePeerServer : overrides.usePeerServer,
         branch: overrides.branch === null ? saved.branch : overrides.branch,
@@ -122,7 +122,7 @@
 
     async function resolvePreviewConfig() {
       const e = effective();
-      if (e.mode === 'third-party') {
+      if (e.thirdParty) {
         const externalUrl = String(e.externalUrl || '').trim();
         if (!externalUrl) throw new Error('Set a third-party deployment URL before opening Deployment Preview.');
         try { new URL(externalUrl); } catch (_) { throw new Error('The third-party deployment URL is invalid.'); }
@@ -161,7 +161,7 @@
 
     function resetOverrides() {
       overrides = {
-        mode:null,
+        thirdParty:null,
         branch:null,
         commit:null,
         usePeerServer:null,
@@ -222,7 +222,7 @@
 
       syncModeUI();
       mode.onchange = () => {
-        overrides.mode = mode.value;
+        overrides.thirdParty = mode.value === 'third-party';
         syncModeUI();
       };
       pathInput.oninput = () => { overrides.path = normalizeEditorPath(pathInput.value); };
@@ -260,20 +260,13 @@
 
       section.querySelector('[data-deploy-save]').onclick = () => {
         const d = state.deploymentSettings || (state.deploymentSettings = {});
-        d.mode = mode.value === 'third-party' ? 'third-party' : 'editor';
+        d.thirdParty = mode.value === 'third-party';
         d.externalMode = 'iframe';
         d.externalUrl = externalUrl.value.trim();
-        if (d.mode === 'third-party') {
-          d.path = '';
-          d.usePeerServer = false;
-          d.branch = '';
-          d.commit = '';
-        } else {
-          d.path = normalizeEditorPath(pathInput.value);
-          d.usePeerServer = peer ? peer.checked : false;
-          d.branch = branchInput.value || branch;
-          d.commit = commitInput.value || 'latest';
-        }
+        d.path = normalizeEditorPath(pathInput.value);
+        d.usePeerServer = peer ? peer.checked : false;
+        d.branch = branchInput.value || branch;
+        d.commit = commitInput.value || 'latest';
         state.saveProjectMetadata?.();
         state.markDirty?.('editor/project.json');
         state.markDirty?.('editor/deployment.json');
