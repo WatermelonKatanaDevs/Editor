@@ -219,6 +219,10 @@
     headers.set('Authorization', `Bearer ${token}`);
     if (options.body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     const init = {...options, headers, credentials:'omit'};
+    // GitHub's GET responses can be cached for up to a minute. Source Control
+    // needs the branch/tree/history state immediately after a push, so never
+    // let browser/network caching return the pre-commit state.
+    if (!init.method || String(init.method).toUpperCase() === 'GET' || String(init.method).toUpperCase() === 'HEAD') init.cache = 'no-store';
     delete init.token;
     const network = window.__sharedBrowserNetwork || window.EditorAppState?.browserNetwork;
     let response;
