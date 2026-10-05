@@ -309,7 +309,9 @@ window.__deploymentNetworkReady = (async function() {
     await getRepositoryInfo(repo.owner, repo.repo);
     const branchOverride = requiredParam('branch');
     const commitOverride = requiredParam('commit');
-    if (commitOverride === 'latest') throw new Error('Deployment requires an exact commit SHA, not "latest".');
+    if (!/^[0-9a-f]{7,40}$/i.test(commitOverride)) {
+      throw new Error('Deployment requires an exact commit SHA.');
+    }
     const urlOverride = requiredParam('url');
     const modeOverride = requiredParam('deploymentMode');
     if (modeOverride !== 'editor' && modeOverride !== 'third-party') {
