@@ -75,6 +75,15 @@
 
     function remote() { return syncRemote(); }
 
+    function hookStorageKey() {
+      const projectId = String(state.projectId || 'workspace');
+      return 'editor.deployment.hook.' + encodeURIComponent(projectId);
+    }
+
+    function readLocalHook() {
+      try { return String(localStorage.getItem(hookStorageKey()) || '').trim(); } catch (_) { return ''; }
+    }
+
     function savedDeployment() {
       const d = state.deploymentSettings || {};
       return {
@@ -85,7 +94,7 @@
         commit: String(d.commit || 'latest').trim() || 'latest',
         externalUrl: String(d.externalUrl || ''),
         externalMode: d.externalMode === 'emulate' ? 'emulate' : 'iframe',
-        hookUrl: String(d.hookUrl || ''),
+        hookUrl: readLocalHook(),
         saveEnvironmentVariables: d.saveEnvironmentVariables === true
       };
     }
@@ -136,7 +145,6 @@
       } else {
         config.path = normalizeEditorPath(e.path);
       }
-      if (e.hookUrl) config.hookUrl = e.hookUrl;
       return config;
     }
 
