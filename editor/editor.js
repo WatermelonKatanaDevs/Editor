@@ -1185,9 +1185,9 @@ window.__editorInitPromise = (async function () {
       return;
     }
 
-    if (t.kind === 'file' && t._previewViewId && t._previewViewId !== t.view) {
-      state.previews?.dispose(t);
-    }
+    // Preview instances are persistent per tab/view. Switching tabs, moving
+    // a tab between groups, or changing between Piskel and another view must
+    // not dispose the embedded editor.
     disposeTabView(t);
     clearView(g);
     if (t.kind === 'file') {
