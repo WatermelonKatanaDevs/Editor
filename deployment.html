@@ -303,36 +303,7 @@ window.__deploymentNetworkReady = (async function() {
     try { return new URL(s).origin; } catch (_) { return 'http://localhost:3000'; }
   }
   async function main() {
-    const modeOverride = requiredParam('deploymentMode');
-    if (modeOverride !== 'editor' && modeOverride !== 'third-party') {
-      throw new Error('Deployment mode must be "editor" or "third-party".');
-    }
-
-    const pathOverride = String(params.get('path') || '').trim();
-    const urlOverride = String(params.get('url') || '').trim();
-    if (!pathOverride && !urlOverride) {
-      throw new Error('Deployment requires a path= or url= query parameter.');
-    }
-
-    // Third-party deployments are intentionally just a full-screen browser iframe.
-    if (modeOverride === 'third-party') {
-      if (!urlOverride) throw new Error('Third-party deployments require a url= parameter.');
-      let target;
-      try { target = new URL(urlOverride, location.href); }
-      catch (_) { throw new Error('Invalid third-party deployment URL.'); }
-      if (!/^https?:$/i.test(target.protocol)) throw new Error('Third-party deployment URL must use HTTP(S).');
-      stage.innerHTML = '';
-      const iframe = document.createElement('iframe');
-      iframe.src = target.href;
-      iframe.setAttribute('allow', 'fullscreen; clipboard-read; clipboard-write');
-      stage.appendChild(iframe);
-      stage.classList.add('ready');
-      setProgress('Deployment ready', 100, target.href);
-      setTimeout(hideProgress, 180);
-      status.remove();
-      return;
-    }
-
+    const pathOverride = requiredParam('path');
     const githubURL = requiredParam('github');
     const repo = parseGithub(githubURL);
     await getRepositoryInfo(repo.owner, repo.repo);
