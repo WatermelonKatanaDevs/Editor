@@ -3550,12 +3550,10 @@
       window.__isEmulatorInjectedScript = function(code) { return /createRuntimeInterceptor|__runSyncInterceptor|__pageRegistry/.test(String(code || '')); };
 
       // Native HTML assignments bypass the MutationObserver until the current
-      // JavaScript turn has finished. That is too late for emulator-preprocessed
-      // resources: for example, innerHTML += can briefly (and sometimes
-      // permanently) install the public/raw form of an already-processed node.
-      // Explicitly run the same dynamic-node processing immediately after an
-      // HTML assignment so innerHTML/outerHTML behave like other DOM additions.
-      function processAssignedNodes(nodes) {
+      // JavaScript turn has finished. Re-run the same dynamic-node processing
+      // immediately, but expose it through the interceptor window so the
+      // Element prototype setter can still reach it after this scope returns.
+      window.__processAssignedNodes = function(nodes) {
         for (const node of nodes || []) {
           if (!node) continue;
           checkNodeAndChildren(node);
@@ -3563,7 +3561,7 @@
             node.querySelectorAll('*').forEach(child => checkNodeAndChildren(child));
           }
         }
-      }
+      };
 
       Object.defineProperty(Element.prototype, 'innerHTML', {
         configurable: nativeElementInnerHTML.configurable,
@@ -3571,7 +3569,7 @@
         get() { return serializePageElement(this, false); },
         set(value) {
           nativeElementInnerHTML.set.call(this, value);
-          processAssignedNodes(Array.from(this.childNodes));
+          window.__processAssignedNodes(Array.from(this.childNodes));
         }
       });
 
@@ -3585,7 +3583,7 @@
           nativeElementOuterHTML.set.call(this, value);
 
           if (!parent || !before) return;
-          processAssignedNodes(Array.from(parent.childNodes).filter(node => !before.has(node)));
+          window.__processAssignedNodes(Array.from(parent.childNodes).filter(node => !before.has(node)));
         }
       });
     }
