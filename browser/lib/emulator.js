@@ -1572,6 +1572,10 @@
           node.__editingAttribute = false;
         }
 
+        // Keep the dynamic-node processor available to the Element prototype
+        // setters below without relying on a later lexical reference.
+        window.__checkNodeAndChildren = checkNodeAndChildren;
+
         function processStyleNode(node) {
           if (node.tagName && node.tagName.toLowerCase() === 'style' && node.textContent.includes('url(')) {
             if (!node.hasAttribute('data-raw-style-text')) node.setAttribute('data-raw-style-text', node.textContent);
@@ -3551,13 +3555,7 @@
 
       // Native HTML assignments bypass the MutationObserver until the current
       // JavaScript turn has finished. Re-run the same dynamic-node processing
-      // immediately, but expose it through the interceptor window so the
-      // Element prototype setter can still reach it after this scope returns.
-      // Keep the dynamic-node processor reachable through the injected window
-      // instead of relying on the interceptor's lexical scope. Some page scripts
-      // execute through a separate eval scope, so direct references to
-      // checkNodeAndChildren can otherwise become unresolved there.
-      window.__checkNodeAndChildren = checkNodeAndChildren;
+      // immediately through the function exposed above.
       window.__processAssignedNodes = function(nodes) {
         const processNode = window.__checkNodeAndChildren;
         if (typeof processNode !== 'function') return;
