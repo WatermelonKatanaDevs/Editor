@@ -191,7 +191,7 @@
         : 'Latest';
 
        section.innerHTML = `<div class="run-debug-section-title">Deployment</div>
-         <div class="run-debug-field"><label>Deployment</label><select data-deploy-mode><option value="editor" ${e.mode==='editor'?'selected':''}>Editor</option><option value="third-party" ${e.mode==='third-party'?'selected':''}>Third Party</option></select></div>
+         <div class="run-debug-field"><label>Deployment</label><select data-deploy-mode><option value="editor" ${e.thirdParty?'':'selected'}>Editor</option><option value="third-party" ${e.thirdParty?'selected':''}>Third Party</option></select></div>
          <div data-deploy-editor-fields>
            <div class="run-debug-field"><label>Branch</label><select data-deploy-branch ${deployment.branches.length ? '' : 'disabled'}><option value="" disabled ${!branch?'selected':''}>${deployment.branches.length ? 'Select branch…' : 'Loading branches…'}</option>${deployment.branches.map(b => `<option value="${esc(b)}" ${b===branch?'selected':''}>${esc(b)}</option>`).join('')}</select></div>
            <div class="run-debug-field"><label>Commit</label><select data-deploy-commit ${deployment.commits.length || selectedCommit ? '' : 'disabled'}><option value="latest" ${selectedCommit === 'latest' || !selectedCommit ? 'selected':''}>${latestLabel}</option>${deployment.commits.map(c => `<option value="${esc(c.sha)}" ${c.sha===selectedCommit?'selected':''}>${esc(c.message || c.sha.slice(0, 12))}</option>`).join('')}</select></div>
