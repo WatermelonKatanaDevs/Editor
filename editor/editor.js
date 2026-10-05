@@ -569,7 +569,7 @@ window.__editorInitPromise = (async function () {
       path: normalizeDeploymentPath(state.deploymentSettings?.path || state.deploymentSettings?.url || '/'),
       usePeerServer: !!state.deploymentSettings?.usePeerServer,
       branch: String(state.deploymentSettings?.branch || '').trim(),
-      commit: String(state.deploymentSettings?.commit || '').trim(),
+      commit: String(state.deploymentSettings?.commit || 'latest').trim() || 'latest',
       externalUrl: String(state.deploymentSettings?.externalUrl || '').trim(),
       externalMode: state.deploymentSettings?.externalMode === 'emulate' ? 'emulate' : 'iframe',
       hookUrl: String(state.deploymentSettings?.hookUrl || '').trim(),
