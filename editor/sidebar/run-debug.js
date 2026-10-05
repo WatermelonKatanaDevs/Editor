@@ -134,15 +134,13 @@
         branch,
         commit: selectedCommit(e),
         deploymentMode: 'editor',
-        peerServer: e.usePeerServer,
-        peerLayer: String(state.runConfig?.config?.peerLayer || state.peerSettings?.layer || 'peer').trim() || 'peer',
-        saveEnvironmentVariables: e.saveEnvironmentVariables,
+        usePeerServer: e.usePeerServer,
         path: normalizeEditorPath(e.path)
       };
     }
 
     function deploymentUrl(config) {
-      const url = new URL('deployment.html', location.href);
+      const url = new URL('./deployment.html', location.href);
       for (const [key,value] of Object.entries(config)) {
         if (typeof value === 'boolean') url.searchParams.set(key, value ? '1' : '0');
         else url.searchParams.set(key, String(value ?? ''));
