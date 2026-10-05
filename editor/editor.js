@@ -560,7 +560,7 @@ window.__editorInitPromise = (async function () {
       externalUrl: String(legacyDeployment.externalUrl || '').trim(),
       branch: String(legacyDeployment.branch || state.gitRemote?.branch || '').trim(),
       commit: String(legacyDeployment.commit || 'latest').trim() || 'latest',
-      path: normalizeDeploymentPath(legacyDeployment.path ?? legacyDeployment.url ?? state.runConfig?.config?.path || '/')
+      path: normalizeDeploymentPath((legacyDeployment.path ?? legacyDeployment.url ?? state.runConfig?.config?.path) || '/')
     };
     if (!state.projectId) state.projectId = makeProjectId();
     hydrateGitRemoteFromSavedSelection();
