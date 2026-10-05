@@ -12,7 +12,6 @@
       usePeerServer:null,
       path:null,
       externalUrl:null,
-      externalMode:null,
       hookUrl:null,
       saveEnvironmentVariables:null
     };
