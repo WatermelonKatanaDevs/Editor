@@ -193,20 +193,19 @@
         ? `Latest — ${esc(deployment.commits[0].message || deployment.commits[0].sha.slice(0, 7))}`
         : 'Latest';
 
-      section.innerHTML = `<div class="run-debug-section-title">Deployment</div>
-        <div class="run-debug-field"><label>Deployment</label><select data-deploy-mode><option value="editor" ${e.mode==='editor'?'selected':''}>Editor</option><option value="third-party" ${e.mode==='third-party'?'selected':''}>Third Party</option></select></div>
-        <div class="run-debug-field"><label>Branch</label><select data-deploy-branch ${deployment.branches.length ? '' : 'disabled'}><option value="" disabled ${!branch?'selected':''}>${deployment.branches.length ? 'Select branch…' : 'Loading branches…'}</option>${deployment.branches.map(b => `<option value="${esc(b)}" ${b===branch?'selected':''}>${esc(b)}</option>`).join('')}</select></div>
-        <div class="run-debug-field"><label>Commit</label><select data-deploy-commit ${deployment.commits.length || selectedCommit ? '' : 'disabled'}><option value="latest" ${selectedCommit === 'latest' || !selectedCommit ? 'selected':''}>${latestLabel}</option>${deployment.commits.map(c => `<option value="${esc(c.sha)}" ${c.sha===selectedCommit?'selected':''}>${esc(c.message || c.sha.slice(0, 12))}</option>`).join('')}</select></div>
-        <div data-deploy-editor-fields>
-          <div class="run-debug-field"><label>Editor Path</label><input data-deploy-path type="text" value="${esc(e.path || '/')}" placeholder="/" /></div>
-          <label class="run-debug-toggle"><input data-deploy-peer type="checkbox" ${e.usePeerServer?'checked':''}> Use peerServer</label>
-        </div>
-        <div data-deploy-third-fields>
-          <div class="run-debug-field"><label>Deployment URL</label><input data-deploy-external-url type="text" value="${esc(e.externalUrl)}" placeholder="https://example.com/" /></div>
-          <div class="run-debug-hook-field"><label>Deployment Hook</label><div class="run-debug-hook-row"><input data-deploy-hook type="text" value="${esc(e.hookUrl)}" placeholder="https://example.com/deploy-hook" /><button data-deploy-hook-trigger ${e.hookUrl?'':'disabled'}>Trigger</button></div></div>
-        </div>
-        <div class="run-debug-deploy-actions"><button data-deploy-save>Save Deployment Settings</button><button data-deploy-open class="primary">Open Deployment</button></div>`;
-
+       section.innerHTML = `<div class="run-debug-section-title">Deployment</div>
+         <div class="run-debug-field"><label>Deployment</label><select data-deploy-mode><option value="editor" ${e.mode==='editor'?'selected':''}>Editor</option><option value="third-party" ${e.mode==='third-party'?'selected':''}>Third Party</option></select></div>
+         <div data-deploy-editor-fields>
+           <div class="run-debug-field"><label>Branch</label><select data-deploy-branch ${deployment.branches.length ? '' : 'disabled'}><option value="" disabled ${!branch?'selected':''}>${deployment.branches.length ? 'Select branch…' : 'Loading branches…'}</option>${deployment.branches.map(b => `<option value="${esc(b)}" ${b===branch?'selected':''}>${esc(b)}</option>`).join('')}</select></div>
+           <div class="run-debug-field"><label>Commit</label><select data-deploy-commit ${deployment.commits.length || selectedCommit ? '' : 'disabled'}><option value="latest" ${selectedCommit === 'latest' || !selectedCommit ? 'selected':''}>${latestLabel}</option>${deployment.commits.map(c => `<option value="${esc(c.sha)}" ${c.sha===selectedCommit?'selected':''}>${esc(c.message || c.sha.slice(0, 12))}</option>`).join('')}</select></div>
+           <div class="run-debug-field"><label>Deployment Path</label><input data-deploy-path type="text" value="${esc(e.path || '/')}" placeholder="/" /></div>
+           <label class="run-debug-toggle"><input data-deploy-peer type="checkbox" ${e.usePeerServer?'checked':''}> Use peerServer</label>
+         </div>
+         <div data-deploy-third-fields>
+           <div class="run-debug-field"><label>External URL</label><input data-deploy-external-url type="text" value="${esc(e.externalUrl)}" placeholder="https://example.com/" /></div>
+           <div class="run-debug-hook-field"><label>Deployment Hook</label><div class="run-debug-hook-row"><input data-deploy-hook type="text" value="${esc(e.hookUrl)}" placeholder="https://example.com/deploy-hook" /><button data-deploy-hook-trigger ${e.hookUrl?'':'disabled'}>Trigger</button></div></div>
+         </div>
+         <div class="run-debug-deploy-actions"><button data-deploy-save>Save Deployment Settings</button><button data-deploy-open class="primary">Open Deployment</button></div>`;
       const mode = section.querySelector('[data-deploy-mode]');
       const editorFields = section.querySelector('[data-deploy-editor-fields]');
       const thirdFields = section.querySelector('[data-deploy-third-fields]');
