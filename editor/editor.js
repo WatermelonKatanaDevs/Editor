@@ -698,6 +698,13 @@ window.__editorInitPromise = (async function () {
     if ($('statusRight')) $('statusRight').textContent = `CWD: ${state.nodeEmulator?.cwd || '/'}` + (state.dirty ? ' • Unsaved' : '');
     const projectEl = $('projectName');
     if (projectEl && projectEl.tagName !== 'INPUT') projectEl.textContent = state.projectName || 'Workspace';
+    const exportZip = $('saveZipBtn');
+    if (exportZip) {
+      const canExport = !!state.fs && state.projectOwner === false;
+      exportZip.hidden = !canExport;
+      exportZip.disabled = !canExport;
+      exportZip.title = canExport ? 'Export project as a ZIP (Ctrl+E)' : '';
+    }
     const save = $('saveProjectBtn');
     if (save) {
       const hasHandle = !!state.fs?.canSave?.();
@@ -881,7 +888,7 @@ window.__editorInitPromise = (async function () {
     }
   }
   async function exportProject() {
-    if (!state.fs) return false;
+    if (!state.fs || state.projectOwner !== false) return false;
     try {
       const blob = await state.fs.exportZip();
       const a = document.createElement('a');
@@ -3005,8 +3012,10 @@ window.__editorInitPromise = (async function () {
           return;
         }
         if (e.key.toLowerCase() === 'e' && !e.shiftKey && !e.altKey) {
-          e.preventDefault();
-          exportProject();
+          if (state.projectOwner === false) {
+            e.preventDefault();
+            exportProject();
+          }
           return;
         }
         if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
