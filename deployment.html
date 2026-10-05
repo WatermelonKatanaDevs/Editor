@@ -309,8 +309,24 @@ window.__deploymentNetworkReady = (async function() {
     await getRepositoryInfo(repo.owner, repo.repo);
     const branchOverride = requiredParam('branch');
     const commitOverride = requiredParam('commit');
-    if (!/^[0-9a-f]{7,40}$/i.test(commitOverride)) {
-      throw new Error('Deployment requires an exact commit SHA.');
+    let resolvedRef = commitOverride;
+    if (commitOverride === 'latest') {
+      const commitsResponse = await network.request(
+        `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/commits?sha=${encodeURIComponent(branchOverride)}&per_page=1`,
+        undefined,
+        {headers:{Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2026-03-10'}},
+        'deployment-github-latest'
+      );
+      if (!commitsResponse?.ok) {
+        throw new Error(`Unable to resolve latest commit for branch "${branchOverride}" (${commitsResponse?.status || 'no response'}).`);
+      }
+      const commits = await commitsResponse.json().catch(() => []);
+      resolvedRef = String(commits?.[0]?.sha || '').trim();
+      if (!/^[0-9a-f]{7,40}$/i.test(resolvedRef)) {
+        throw new Error(`No commits are available on GitHub branch "${branchOverride}".`);
+      }
+    } else if (!/^[0-9a-f]{7,40}$/i.test(commitOverride)) {
+      throw new Error('Deployment requires a commit SHA or "latest".');
     }
     const urlOverride = requiredParam('url');
     const modeOverride = requiredParam('deploymentMode');
@@ -325,8 +341,6 @@ window.__deploymentNetworkReady = (async function() {
     const usePeerServer = requiredBooleanParam('peerServer');
     const peerLayer = requiredParam('peerLayer');
     const saveEnvironmentVariables = requiredBooleanParam('saveEnvironmentVariables');
-    const resolvedRef = commitOverride;
-
     async function loadRevision(ref) {
       status.textContent = 'Loading deployment revision…';
       setProgress('Downloading project archive…', null, 'Preparing download…');
