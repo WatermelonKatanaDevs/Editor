@@ -40,7 +40,7 @@ window.__deploymentAssetsReady = (async function() {
 
   // Keep asset references relative to this deployment document. Do not resolve
   // them through the emulated project URL.
-  window.__peerLayer = new URLSearchParams(location.search).get('peerLayer') || '';
+  window.__peerLayer = new URLSearchParams(location.search).get('peerLayer');
 
   for (const source of sources) {
     const script = document.createElement('script');
