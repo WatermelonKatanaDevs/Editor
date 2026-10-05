@@ -58,7 +58,7 @@ window.__editorInitPromise = (async function () {
     peerServers: new Map(),
     peerRuntimeEndpoint: null,
     peerSettings: {layer: '', pagePath: '/'},
-    deploymentSettings: {mode: 'editor', path: '/', usePeerServer: false, branch: '', commit: 'latest', externalUrl: '', externalMode: 'iframe', hookUrl: '', saveEnvironmentVariables: false, saveEnvironmentVariablesExplicit: false},
+    deploymentSettings: {thirdParty: false, path: '/', usePeerServer: false, branch: '', commit: 'latest', externalUrl: '', externalMode: 'iframe', hookUrl: '', saveEnvironmentVariables: false, saveEnvironmentVariablesExplicit: false},
     ai: null,
     environment: {},
     browserSettings: {
@@ -542,7 +542,7 @@ window.__editorInitPromise = (async function () {
       pagePath: normalizePeerPagePath(meta?.pagePath)
     };
     state.deploymentSettings = {
-      mode: String(meta?.deployment?.mode || 'editor').trim() === 'third-party' ? 'third-party' : 'editor',
+      thirdParty: meta?.deployment?.thirdParty === true || String(meta?.deployment?.mode || 'editor').trim() === 'third-party',
       path: normalizeDeploymentPath(meta?.deployment?.path || meta?.deployment?.url || state.runConfig?.config?.path || '/'),
       usePeerServer: !!meta?.deployment?.usePeerServer,
       branch: String(meta?.deployment?.branch || state.gitRemote?.branch || '').trim(),
@@ -564,7 +564,7 @@ window.__editorInitPromise = (async function () {
     state.peerSettings.pagePath = normalizePeerPagePath(state.peerSettings.pagePath);
     state.fs.mkdirSync?.(EDITOR_DIR);
     const deployment = {
-      mode: state.deploymentSettings?.mode === 'third-party' ? 'third-party' : 'editor',
+      thirdParty: state.deploymentSettings?.thirdParty === true || state.deploymentSettings?.mode === 'third-party',
       path: normalizeDeploymentPath(state.deploymentSettings?.path || state.deploymentSettings?.url || '/'),
       usePeerServer: !!state.deploymentSettings?.usePeerServer,
       branch: String(state.deploymentSettings?.branch || '').trim(),
