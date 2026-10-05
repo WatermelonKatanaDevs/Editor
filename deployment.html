@@ -304,6 +304,40 @@ window.__deploymentNetworkReady = (async function() {
     try { return new URL(s).origin; } catch (_) { return 'http://localhost:3000'; }
   }
   async function main() {
+    const modeOverride = requiredParam('deploymentMode');
+    if (modeOverride !== 'editor' && modeOverride !== 'third-party') {
+      throw new Error('Deployment mode must be "editor" or "third-party".');
+    }
+
+    const pathOverride = String(params.get('path') || '').trim();
+    const urlOverride = String(params.get('url') || '').trim();
+    if (!pathOverride && !urlOverride) {
+      throw new Error('Deployment requires a path= or url= query parameter.');
+    }
+
+    const usePeerServer = requiredBooleanParam('peerServer');
+    const peerLayer = requiredParam('peerLayer');
+    const saveEnvironmentVariables = requiredBooleanParam('saveEnvironmentVariables');
+
+    // Third-party deployments are intentionally just a full-screen browser iframe.
+    if (modeOverride === 'third-party') {
+      if (!urlOverride) throw new Error('Third-party deployments require a url= parameter.');
+      let target;
+      try { target = new URL(urlOverride, location.href); }
+      catch (_) { throw new Error('Invalid third-party deployment URL.'); }
+      if (!/^https?:$/i.test(target.protocol)) throw new Error('Third-party deployment URL must use HTTP(S).');
+      stage.innerHTML = '';
+      const iframe = document.createElement('iframe');
+      iframe.src = target.href;
+      iframe.setAttribute('allow', 'fullscreen; clipboard-read; clipboard-write');
+      stage.appendChild(iframe);
+      stage.classList.add('ready');
+      setProgress('Deployment ready', 100, target.href);
+      setTimeout(hideProgress, 180);
+      status.remove();
+      return;
+    }
+
     const githubURL = requiredParam('github');
     const repo = parseGithub(githubURL);
     await getRepositoryInfo(repo.owner, repo.repo);
@@ -328,27 +362,16 @@ window.__deploymentNetworkReady = (async function() {
     } else if (!/^[0-9a-f]{7,40}$/i.test(commitOverride)) {
       throw new Error('Deployment requires a commit SHA or "latest".');
     }
-    const urlOverride = requiredParam('url');
-    const modeOverride = requiredParam('deploymentMode');
-    if (modeOverride !== 'editor' && modeOverride !== 'third-party') {
-      throw new Error('Deployment mode must be "editor" or "third-party".');
-    }
-    const externalUrlOverride = requiredPresence('externalUrl').trim();
-    const externalModeOverride = requiredParam('externalMode');
-    if (externalModeOverride !== 'iframe' && externalModeOverride !== 'emulate') {
-      throw new Error('Deployment external mode must be "iframe" or "emulate".');
-    }
-    const usePeerServer = requiredBooleanParam('peerServer');
-    const peerLayer = requiredParam('peerLayer');
-    const saveEnvironmentVariables = requiredBooleanParam('saveEnvironmentVariables');
+
+    const rawTarget = pathOverride || urlOverride;
     async function loadRevision(ref) {
       status.textContent = 'Loading deployment revision…';
       setProgress('Downloading project archive…', null, 'Preparing download…');
-      let blob = await loadArchive(repo.owner, repo.repo, ref);
+      const blob = await loadArchive(repo.owner, repo.repo, ref);
       setProgress('Preparing project files…', null, `Archive downloaded: ${formatBytes(blob.size)}`);
-      let file = await flattenZip(new File([blob], repo.repo + '.zip', {type:'application/zip'}));
+      const file = await flattenZip(new File([blob], repo.repo + '.zip', {type:'application/zip'}));
       setProgress('Indexing project files…', null, 'Building virtual filesystem…');
-      let fs = await FileSystem.create(file, {sync:false});
+      const fs = await FileSystem.create(file, {sync:false});
       setProgress('Project ready', 100, `${formatBytes(blob.size)} archive`);
       return {blob,file,fs};
     }
@@ -366,117 +389,11 @@ window.__deploymentNetworkReady = (async function() {
       nodeCommand: ''
     };
     const runConfig = {...inferredRunConfig, ...runConfigFromProject};
-    const deploymentMode = modeOverride;
-    const externalUrl = externalUrlOverride;
-    const externalMode = externalModeOverride;
     const deploymentEnvironment = saveEnvironmentVariables ? readProcessEnv(fs) : {};
     const type = runConfig.serverType === 'node' ? 'node' : 'static';
-    if (deploymentMode === 'third-party' && !externalUrl) {
-      throw new Error('Third-party deployments require an external URL.');
-    }
-
-    // Third-party deployments have their own target URL and do not use the editor runtime.
-    // If the URL is missing, fall through to the normal editor deployment using the rest of the settings.
-    if (deploymentMode === 'third-party' && externalUrl) {
-      const targetUrl = new URL(externalUrl);
-      const domain = targetUrl.origin;
-      const pageURL = targetUrl.href;
-
-      function canonicalizeThirdParty() {
-        try {
-          const canonical = new URL(location.href);
-          canonical.searchParams.delete('githubUrl');
-          canonical.searchParams.delete('sha');
-          canonical.searchParams.set('github', githubURL);
-          canonical.searchParams.set('branch', branchOverride);
-          canonical.searchParams.set('commit', resolvedRef);
-          canonical.searchParams.set('deploymentMode', 'third-party');
-          canonical.searchParams.set('url', urlOverride);
-          canonical.searchParams.set('externalUrl', pageURL);
-          canonical.searchParams.set('externalMode', externalMode);
-          canonical.searchParams.set('peerServer', usePeerServer ? '1' : '0');
-          canonical.searchParams.set('peerLayer', peerLayer);
-          canonical.searchParams.set('saveEnvironmentVariables', saveEnvironmentVariables ? '1' : '0');
-          canonical.searchParams.delete('githubUrl');
-          canonical.searchParams.delete('sha');
-          canonical.searchParams.delete('path');
-          history.replaceState({}, document.title, canonical.pathname + canonical.search + canonical.hash);
-        } catch (_) {}
-      }
-
-      if (externalMode === 'iframe') {
-        stage.innerHTML = '';
-        const iframe = document.createElement('iframe');
-        iframe.src = pageURL;
-        iframe.setAttribute('allow', 'fullscreen; clipboard-read; clipboard-write');
-        stage.appendChild(iframe);
-        stage.classList.add('ready');
-        canonicalizeThirdParty();
-        setProgress('Deployment ready', 100, pageURL);
-        setTimeout(hideProgress, 180);
-        status.remove();
-        return;
-      }
-
-      // Third-party emulation uses the existing browser-network + PageEmulator stack.
-      const iframe = document.createElement('iframe');
-      stage.appendChild(iframe);
-      stage.classList.add('ready');
-      const page = new PageEmulator(iframe, {network, location:{url:pageURL,origin:domain}, history:[]});
-      let externalRuntimeReady = false;
-      function forwardConsole(method, args) {
-        const target = method === 'logText' ? console.log : console[method];
-        if (typeof target !== 'function') return;
-        try { target.apply(console, Array.isArray(args) ? args : [args]); } catch (_) {}
-      }
-      function forwardError(error, location) {
-        const message = error?.message || String(error);
-        const stack = error?.error?.stack || error?.stack || '';
-        const suffix = location ? ` (${location})` : '';
-        try { console.error(`Uncaught Error${suffix}: ${message}`, stack); } catch (_) {}
-      }
-      async function getExternalDocumentContent(response, url) {
-        const contentType = String(response.headers.get('content-type') || 'text/html').toLowerCase();
-        if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml') || contentType.includes('application/xml') || contentType.includes('text/xml')) return await response.clone().text();
-        return await response.clone().text();
-      }
-      function installExternalInterceptors(currentPage) {
-        currentPage.interceptEvent('console', (method,args)=>forwardConsole(method,args));
-        currentPage.interceptEvent('error', (error,location)=>forwardError(error,location));
-        currentPage.interceptEvent('iframe-create', obj => {
-          if (!obj?.iframe) return null;
-          if (obj.iframe.pageEmulator) return obj.iframe.pageEmulator;
-          const child = new PageEmulator(obj.iframe,{network,location:{url:'about:blank',origin:currentPage.location?.origin || domain},history:[]});
-          obj.iframe.pageEmulator=child; currentPage.addChild?.(child); installExternalInterceptors(child); child.setLocation('about:blank',currentPage.location?.origin || domain); return child;
-        });
-        currentPage.interceptEvent('iframe-navigate', async obj => {
-          const frame=obj?.iframe; if(!frame) return;
-          const child=frame.pageEmulator; if(!child || !obj.src) return;
-          let target; try { target=new URL(obj.src,currentPage.location?.url || domain+'/'); } catch(_) { return; }
-          child.setLocation(target.href,target.origin);
-          const res=await child.network.request(target.href,target.origin,{},'iframe');
-          if(!res?.ok) return;
-          const html=await getExternalDocumentContent(res,target.href);
-          child.rawDocument=String(html||'');
-          await child.setDocument(html,true,target.href);
-        });
-      }
-      installExternalInterceptors(page);
-      setProgress('Loading third-party deployment…', null, pageURL);
-      const response = await network.request(pageURL, domain, {}, 'third-party-deployment');
-      if (!response?.ok) throw new Error(`Third-party deployment failed to load (${response?.status || 'no response'}).`);
-      const html = await getExternalDocumentContent(response,pageURL);
-      await page.setDocument(html,true,pageURL);
-      externalRuntimeReady = true;
-      canonicalizeThirdParty();
-      setProgress('Deployment ready', 100, pageURL);
-      setTimeout(hideProgress, 180);
-      status.remove();
-      return;
-    }
 
     function resolveEditorTarget(value) {
-      const raw = String(value).trim();
+      const raw = String(value || '').trim();
       const configuredDomain = normalizeDomain(runConfig.domain);
       try {
         const absolute = new URL(raw);
@@ -486,12 +403,10 @@ window.__deploymentNetworkReady = (async function() {
       return configuredDomain + path;
     }
 
-    const rawConfiguredUrl = urlOverride;
     const deploymentOrigin = normalizeDomain(runConfig.domain);
-    const initialTargetUrl = new URL(resolveEditorTarget(rawConfiguredUrl));
+    const initialTargetUrl = new URL(resolveEditorTarget(rawTarget));
 
-    // A deployment only emulates documents that belong to its configured
-    // origin. A different origin is a normal browser navigation.
+    // A deployment only emulates documents that belong to its configured origin.
     if (initialTargetUrl.origin !== deploymentOrigin) {
       location.replace(initialTargetUrl.href);
       return;
@@ -499,6 +414,7 @@ window.__deploymentNetworkReady = (async function() {
 
     const domain = deploymentOrigin;
     const runtimePath = initialTargetUrl.pathname || '/';
+
     let peerEndpoint = null;
     if (usePeerServer) {
       try { peerEndpoint = new PeerEndpoint(); }
