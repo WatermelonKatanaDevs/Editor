@@ -3553,12 +3553,19 @@
       // JavaScript turn has finished. Re-run the same dynamic-node processing
       // immediately, but expose it through the interceptor window so the
       // Element prototype setter can still reach it after this scope returns.
+      // Keep the dynamic-node processor reachable through the injected window
+      // instead of relying on the interceptor's lexical scope. Some page scripts
+      // execute through a separate eval scope, so direct references to
+      // checkNodeAndChildren can otherwise become unresolved there.
+      window.__checkNodeAndChildren = checkNodeAndChildren;
       window.__processAssignedNodes = function(nodes) {
+        const processNode = window.__checkNodeAndChildren;
+        if (typeof processNode !== 'function') return;
         for (const node of nodes || []) {
           if (!node) continue;
-          checkNodeAndChildren(node);
+          processNode(node);
           if (node.nodeType === Node.ELEMENT_NODE) {
-            node.querySelectorAll('*').forEach(child => checkNodeAndChildren(child));
+            node.querySelectorAll('*').forEach(child => processNode(child));
           }
         }
       };
