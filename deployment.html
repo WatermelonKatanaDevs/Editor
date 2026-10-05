@@ -515,15 +515,15 @@ window.__deploymentNetworkReady = (async function() {
       current.searchParams.delete('sha');
       current.searchParams.set('github', githubURL);
       current.searchParams.set('branch', branchOverride);
-      current.searchParams.set('commit', resolvedRef);
+      current.searchParams.set('commit', commitOverride);
       current.searchParams.set('deploymentMode', 'editor');
-      current.searchParams.set('url', resolved.href);
-      current.searchParams.set('externalUrl', '');
-      current.searchParams.set('externalMode', externalMode);
+       current.searchParams.set('path', (resolved.pathname || '/') + (resolved.search || '') + (resolved.hash || ''));
+
+
       current.searchParams.set('peerServer', usePeerServer ? '1' : '0');
       current.searchParams.set('peerLayer', peerLayer);
       current.searchParams.set('saveEnvironmentVariables', saveEnvironmentVariables ? '1' : '0');
-      current.searchParams.delete('path');
+
       return current.href;
     }
 
@@ -534,15 +534,15 @@ window.__deploymentNetworkReady = (async function() {
       current.searchParams.delete('sha');
       current.searchParams.set('github', githubURL);
       current.searchParams.set('branch', branchOverride);
-      current.searchParams.set('commit', resolvedRef);
+      current.searchParams.set('commit', commitOverride);
       current.searchParams.set('deploymentMode', 'editor');
-      current.searchParams.set('url', resolved.href);
-      current.searchParams.set('externalUrl', '');
-      current.searchParams.set('externalMode', externalMode);
+       current.searchParams.set('path', (resolved.pathname || '/') + (resolved.search || '') + (resolved.hash || ''));
+
+
       current.searchParams.set('peerServer', usePeerServer ? '1' : '0');
       current.searchParams.set('peerLayer', peerLayer);
       current.searchParams.set('saveEnvironmentVariables', saveEnvironmentVariables ? '1' : '0');
-      current.searchParams.delete('path');
+
       return current.href;
     }
 
