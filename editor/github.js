@@ -331,9 +331,13 @@
       const tree = await request(`${repoPath}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`);
       return {commitSha, treeSha, tree:Array.isArray(tree?.tree) ? tree.tree : [], truncated:!!tree?.truncated};
     } catch (e) {
-      // GitHub returns 404 or 409 for a repository that has no branch/commit yet.
-      if (e?.status === 409) return {commitSha:null, treeSha:null, tree:[], empty:true, unavailable:true};
-      if (e?.status === 404) return {commitSha:null, treeSha:null, tree:[], empty:true};
+      // An empty repository has no refs yet. GitHub reports the missing
+      // branch as 409 ("Git Repository is empty"), so that is a normal empty
+      // state, not an initialization failure. Git-data writes below will
+      // create the first tree, root commit, and branch ref.
+      if (e?.status === 409 || e?.status === 404) {
+        return {commitSha:null, treeSha:null, tree:[], empty:true};
+      }
       throw e;
     }
   }
