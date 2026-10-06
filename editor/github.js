@@ -384,19 +384,99 @@
   }
   function ignoredPath(path) {
     const p = String(path || '').replace(/^\/+/, '');
-    return p === '.git' || p.startsWith('.git/') || p === 'node_modules' || p.startsWith('node_modules/');
+    return p === '.git' || p.startsWith('.git/');
   }
+
+  function gitIgnoreRegex(pattern) {
+    let p = String(pattern || '').trim();
+    if (!p || p.startsWith('#')) return null;
+    if (p.endsWith('\\')) p = p.slice(0, -1);
+    if (!p) return null;
+    const negated = p.startsWith('!');
+    if (negated) p = p.slice(1);
+    const anchored = p.startsWith('/');
+    if (anchored) p = p.slice(1);
+    const directoryOnly = p.endsWith('/');
+    if (directoryOnly) p = p.replace(/\/+$/, '');
+    if (!p) return null;
+
+    const escape = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const glob = value => {
+      let out = '';
+      for (let i = 0; i < value.length; i++) {
+        const ch = value[i];
+        if (ch === '*') {
+          if (value[i + 1] === '*') {
+            while (value[i + 1] === '*') i++;
+            if (value[i + 1] === '/') { i++; out += '(?:.*/)?'; }
+            else out += '.*';
+          } else out += '[^/]*';
+        } else if (ch === '?') out += '[^/]';
+        else if (ch === '[') {
+          const end = value.indexOf(']', i + 1);
+          if (end > i + 1) {
+            const body = value.slice(i + 1, end);
+            out += '[' + (body[0] === '!' ? '^' + body.slice(1) : body) + ']';
+            i = end;
+          } else out += '\\[';
+        } else out += escape(ch);
+      }
+      return out;
+    };
+
+    const body = glob(p);
+    let source;
+    if (p.includes('/')) source = (anchored ? '^' : '^(?:.*/)?') + body;
+    else source = '^(?:.*/)?' + body;
+    source += directoryOnly ? '(?:/.*)?$' : '$';
+    try { return {negated, regex:new RegExp(source)}; } catch (_) { return null; }
+  }
+
+  function readGitIgnore(fs) {
+    const entries = [];
+    try {
+      if (!fs?.existsSync?.('.gitignore')) return entries;
+      const text = fs.readFileSync('.gitignore', 'utf8');
+      for (const raw of String(text || '').split(/\r?\n/)) {
+        const entry = gitIgnoreRegex(raw);
+        if (entry) entries.push(entry);
+      }
+    } catch (_) {}
+    return entries;
+  }
+
+  function isGitIgnored(path, rules) {
+    const p = String(path || '').replace(/^\/+/, '');
+    if (!p || ignoredPath(p)) return true;
+    let ignored = false;
+    for (const rule of rules || []) {
+      if (rule.regex.test(p)) ignored = !rule.negated;
+    }
+    return ignored;
+  }
+
   async function compareWorkingTree(fs, remoteTree) {
     if (!fs) throw new Error('No workspace filesystem is open.');
-    const localPaths = fs.listFilesSync().map(path => String(path).replace(/^\/+/, '')).filter(path => path && !ignoredPath(path));
+    const rules = readGitIgnore(fs);
+    const localPaths = fs.listFilesSync()
+      .map(path => String(path).replace(/^\/+/, ''))
+      .filter(path => path && !ignoredPath(path));
     const remoteFiles = new Map();
-    for (const entry of remoteTree || []) if (entry?.type === 'blob' && entry.path && !ignoredPath(entry.path)) remoteFiles.set(entry.path, entry);
+    for (const entry of remoteTree || []) {
+      if (entry?.type === 'blob' && entry.path && !ignoredPath(entry.path)) remoteFiles.set(entry.path, entry);
+    }
+
     const changes = [];
     for (const path of localPaths) {
       const data = fs.readFileSync(path, 'binary');
       const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || []);
       const sha = await gitBlobSha(bytes);
       const remote = remoteFiles.get(path);
+
+      // .gitignore only suppresses untracked local additions. A file already
+      // tracked by Git must remain comparable even if it later becomes ignored.
+      if (!remote && isGitIgnored(path, rules)) continue;
+
       if (!remote) changes.push({path, type:'added', sha, data:bytes});
       else if (remote.sha !== sha) changes.push({path, type:'modified', sha, data:bytes, mode:remote.mode || '100644'});
       remoteFiles.delete(path);
@@ -406,13 +486,7 @@
     changes.sort((a,b) => (order[a.type] - order[b.type]) || a.path.localeCompare(b.path));
     return changes;
   }
-  function bytesToBase64(data) {
-    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || []);
-    let binary = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunk, bytes.length)));
-    return btoa(binary);
-  }
+
   async function createBlob(owner, repo, data) {
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || []);
     if (bytes.byteLength > 95 * 1024 * 1024) throw new Error(`File is too large for the GitHub API: ${bytes.byteLength.toLocaleString()} bytes.`);
