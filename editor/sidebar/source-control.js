@@ -331,7 +331,6 @@
           // target commit cannot survive the restore.
           const localPaths = state.fs.listFilesSync().map(path => String(path).replace(/^\/+/, '')).filter(Boolean);
           for (const path of localPaths) {
-            state.fs.markDirty?.(path);
             state.fs.deleteFileSync(path);
             state.markDirty?.(path);
           }
