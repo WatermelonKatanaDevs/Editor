@@ -700,7 +700,7 @@ window.__editorInitPromise = (async function () {
     if (projectEl && projectEl.tagName !== 'INPUT') projectEl.textContent = state.projectName || 'Workspace';
     const exportZip = $('saveZipBtn');
     if (exportZip) {
-      const canExport = !!state.fs && state.projectOwner === false;
+      const canExport = !!state.fs && (state.projectOwner === false || !state.projectId);
       exportZip.hidden = !canExport;
       exportZip.disabled = !canExport;
       exportZip.title = canExport ? 'Export project as a ZIP (Ctrl+E)' : '';
@@ -3012,7 +3012,7 @@ window.__editorInitPromise = (async function () {
           return;
         }
         if (e.key.toLowerCase() === 'e' && !e.shiftKey && !e.altKey) {
-          if (state.projectOwner === false) {
+          if (state.projectOwner === false || !state.projectId) {
             e.preventDefault();
             exportProject();
           }
