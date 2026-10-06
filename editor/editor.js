@@ -1572,6 +1572,110 @@ window.__editorInitPromise = (async function () {
     }
     state.staticEndpoint = null;
   }
+  function nodeRuntimePath(root, relative) {
+    const base = String(root || '/').replace(/^\/+|\/+$/g, '');
+    const name = String(relative || '').replace(/^\/+/, '');
+    return '/' + [base, name].filter(Boolean).join('/');
+  }
+
+  function hasNodeDependencies(fs, root) {
+    if (!fs) return false;
+    const nodeModulesPath = nodeRuntimePath(root, 'node_modules');
+    if (fs.isDirectorySync?.(nodeModulesPath) || fs.existsSync?.(nodeModulesPath)) return true;
+    const prefix = nodeModulesPath.replace(/\/+$/, '') + '/';
+    try {
+      return fs.listFilesSync().some(path => String(path || '').startsWith(prefix));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function nodeDependencyManifest(fs, config) {
+    const root = String(config?.rootfolder || '/').replace(/^\/+|\/+$/g, '');
+    const packageJson = nodeRuntimePath(root, 'package.json');
+    const packageLock = nodeRuntimePath(root, 'package-lock.json');
+    return {
+      root,
+      packageJson,
+      packageLock,
+      hasPackageJson: !!fs?.existsSync?.(packageJson),
+      hasLockfile: !!fs?.existsSync?.(packageLock)
+    };
+  }
+
+  async function installNodeDependencies(runtime, config) {
+    const fs = state.fs;
+    const manifest = nodeDependencyManifest(fs, config);
+    if (!manifest.hasPackageJson || hasNodeDependencies(fs, manifest.root)) return false;
+
+    const command = manifest.hasLockfile ? 'npm ci' : 'npm install';
+    if (remoteLoadProgress) {
+      updateRemoteLoadProgress(
+        'Installing Node dependencies…',
+        null,
+        manifest.hasLockfile ? 'Running npm ci from package-lock.json' : 'Running npm install from package.json'
+      );
+    }
+
+    await runtime.terminalCommand(command);
+    return true;
+  }
+
+  async function preloadNodeDependencies() {
+    const config = state.runConfig?.config;
+    if (!state.fs || config?.serverType !== 'node') return false;
+
+    const manifest = nodeDependencyManifest(state.fs, config);
+    if (!manifest.hasPackageJson || hasNodeDependencies(state.fs, manifest.root)) return false;
+
+    let net = state.browserNetwork;
+    if (!net) {
+      for (const info of state.browserTabs.values()) {
+        if (!info?.ready) continue;
+        try {
+          net = await info.ready;
+        } catch (_) {}
+        if (net) break;
+      }
+    }
+    if (!net) return false;
+
+    if (remoteLoadProgress) {
+      updateRemoteLoadProgress(
+        'Installing Node dependencies…',
+        null,
+        manifest.hasLockfile ? 'Running npm ci from package-lock.json' : 'Running npm install from package.json'
+      );
+    }
+
+    const emulator = new NodeEmulator({
+      domain: String(config.domain || 'http://localhost:3000').replace(/\/+$/, ''),
+      rootfolder: manifest.root,
+      pathPrefix: config.path || '/',
+      filesystem: state.fs,
+      fileSystemSync: false,
+      network: net,
+      cwd: config.cwd || '/',
+      env: {
+        NODE_ENV: 'development',
+        USER: 'browser_user',
+        ...state.environment
+      }
+    });
+
+    try {
+      await emulator.ready;
+      const installed = await installNodeDependencies(emulator, config);
+      if (installed) {
+        state.fileManager?.refresh?.();
+        updateStatus();
+      }
+      return installed;
+    } finally {
+      try { emulator.destroy?.(); } catch (_) {}
+    }
+  }
+
   state.ensureNodeRuntime = async function() {
     if (state.nodeEmulator) return state.nodeEmulator;
     if (!state.fs || !state.browserNetwork) throw new Error('Node runtime is not ready.');
@@ -1619,9 +1723,10 @@ window.__editorInitPromise = (async function () {
         state.markDirty?.();
         updateStatus();
       });
-      if (net.replaceRuntimeEndpoint) net.replaceRuntimeEndpoint(emulator.endpoint); else net.prependEndpoint(emulator.endpoint);
       try {
         await emulator.ready;
+        await installNodeDependencies(emulator, c);
+        if (net.replaceRuntimeEndpoint) net.replaceRuntimeEndpoint(emulator.endpoint); else net.prependEndpoint(emulator.endpoint);
       } catch (e) {
         try {
           net.removeEndpoint?.(emulator.endpoint);
@@ -1957,6 +2062,16 @@ window.__editorInitPromise = (async function () {
       }
     }
     if (options.fromCache) state.dirty = !!options.cachedDirty;
+    if (state.runConfig?.config?.serverType === 'node') {
+      try {
+        await preloadNodeDependencies();
+      } catch (e) {
+        // Dependency installation is retried by setupRuntime when Run is pressed.
+        // Keep the editor usable if npm is temporarily unavailable while loading.
+        state.nodeDependenciesError = e;
+        console.error('Failed to pre-install Node dependencies:', e);
+      }
+    }
     state.loading = false;
     rememberRecentProject({
       lastOpenedAt: Date.now(),
