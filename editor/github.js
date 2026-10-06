@@ -470,27 +470,6 @@
     }
     return data;
   }
-  async function createContentsFile(owner, repo, branch, change, message) {
-    const bytes = change.data instanceof Uint8Array ? change.data : new Uint8Array(change.data || []);
-    let binary = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, Math.min(bytes.length, i + chunk)));
-    const path = change.path.split('/').map(encodeURIComponent).join('/');
-    const body = {message, content:btoa(binary)};
-    if (branch) body.branch = branch;
-    let lastError = null;
-    for (let attempt = 0; attempt < 10; attempt++) {
-      try {
-        return await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/contents/' + path, {method:'PUT', body:JSON.stringify(body)});
-      } catch (e) {
-        lastError = e;
-        if (e?.status !== 409 && e?.status !== 404) throw e;
-        await new Promise(resolve => setTimeout(resolve, 500 + attempt * 500));
-      }
-    }
-    throw lastError || new Error('GitHub repository is still initializing.');
-  }
-
   async function commitAndPush({owner, repo, branch, message, fs, _retry = false}) {
     message = String(message || '').trim();
     if (!message) throw new Error('Enter a commit message.');
