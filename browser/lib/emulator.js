@@ -3445,6 +3445,7 @@
         window.__windowProxy = windowProxy;
         pageEmulator.__windowProxy = windowProxy;
         window.__rawReflectApply = rawReflectApply;
+        window.__hostOrigin = window.top.location.origin;
       })();
 
       window.__executeCode = function(__codeString, __sourceURL, __thisArg, __event) {
