@@ -1609,7 +1609,14 @@ window.__editorInitPromise = (async function () {
     const manifest = nodeDependencyManifest(fs, config);
     if (!manifest.hasPackageJson || hasNodeDependencies(fs, manifest.root)) return false;
 
-    const command = manifest.hasLockfile ? 'npm ci' : 'npm install';
+    let useCi = false;
+  if (manifest.hasLockfile) {
+    try {
+      const lock = JSON.parse(state.fs.readFileSync(manifest.packageLock, 'utf8') || '{}');
+      useCi = !!lock?.packages && typeof lock.packages === 'object' && !Array.isArray(lock.packages);
+    } catch (_) {}
+  }
+  const command = useCi ? 'npm ci' : 'npm install';
     if (remoteLoadProgress) {
       updateRemoteLoadProgress(
         'Installing Node dependencies…',

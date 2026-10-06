@@ -434,16 +434,25 @@ window.__deploymentNetworkReady = (async function() {
       // dependency tree inside the Node emulator before starting the app.
       const packageJsonPath = root === '/' ? '/package.json' : root + '/package.json';
       const packageLockPath = root === '/' ? '/package-lock.json' : root + '/package-lock.json';
-      if (fs.existsSync(packageJsonPath)) {
-        const hasLockfile = fs.existsSync(packageLockPath);
-        const packageCommand = hasLockfile ? 'npm ci' : 'npm install';
+      const nodeModulesPath = root === '/' ? '/node_modules' : root + '/node_modules';
+      const hasNodeModules = fs.existsSync(nodeModulesPath) ||
+        fs.listFilesSync().some(path => String(path || '').startsWith(nodeModulesPath.replace(/\/+$/, '') + '/'));
+      if (fs.existsSync(packageJsonPath) && !hasNodeModules) {
+        let useCi = false;
+        if (fs.existsSync(packageLockPath)) {
+          try {
+            const lock = JSON.parse(fs.readFileSync(packageLockPath, 'utf8') || '{}');
+            useCi = !!lock?.packages && typeof lock.packages === 'object' && !Array.isArray(lock.packages);
+          } catch (_) {}
+        }
+        const packageCommand = useCi ? 'npm ci' : 'npm install';
         setProgress(
           'Installing Node dependencies…',
           null,
-          hasLockfile ? 'Running npm ci from package-lock.json' : 'Running npm install from package.json'
+          useCi ? 'Running npm ci from package-lock.json' : (fs.existsSync(packageLockPath) ? 'Running npm install from package-lock.json' : 'Running npm install from package.json')
         );
         await runtime.terminalCommand(packageCommand);
-        setProgress('Dependencies installed', 100, hasLockfile ? 'package-lock.json applied' : 'package.json dependencies installed');
+        setProgress('Dependencies installed', 100, useCi ? 'package-lock.json applied' : 'package dependencies installed');
       }
 
       if (runConfig.nodeCommand) await runtime.terminalCommand(runConfig.nodeCommand);
