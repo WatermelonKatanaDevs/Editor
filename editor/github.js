@@ -406,16 +406,43 @@
     changes.sort((a,b) => (order[a.type] - order[b.type]) || a.path.localeCompare(b.path));
     return changes;
   }
-  async function createBlob(owner, repo, data) {
+  function bytesToBase64(data) {
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || []);
-    if (bytes.byteLength > 95 * 1024 * 1024) throw new Error(`File is too large for the GitHub API: ${bytes.byteLength.toLocaleString()} bytes.`);
     let binary = '';
     const chunk = 0x8000;
     for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunk, bytes.length)));
+    return btoa(binary);
+  }
+  async function createBlob(owner, repo, data) {
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || []);
+    if (bytes.byteLength > 95 * 1024 * 1024) throw new Error(`File is too large for the GitHub API: ${bytes.byteLength.toLocaleString()} bytes.`);
     return request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs`, {
       method:'POST',
-      body:JSON.stringify({content:btoa(binary), encoding:'base64'})
+      body:JSON.stringify({content:bytesToBase64(bytes), encoding:'base64'})
     });
+  }
+  async function initializeEmptyRepository(owner, repo, branch, message, changes, attempt = 0) {
+    const seed = (changes || []).find(change => change.type !== 'deleted' && change.data instanceof Uint8Array);
+    if (!seed) throw new Error('The GitHub repository is empty and the workspace has no files to initialize it with.');
+    try {
+      const path = String(seed.path || '').replace(/^\\/+/, '');
+      if (!path) throw new Error('The workspace contains no valid file to initialize the GitHub repository.');
+      const response = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`, {
+        method:'PUT',
+        body:JSON.stringify({
+          message,
+          content:bytesToBase64(seed.data),
+          branch:String(branch || 'main')
+        })
+      });
+      return response?.commit?.sha || null;
+    } catch (e) {
+      if ((e?.status === 404 || e?.status === 409) && attempt < 8) {
+        await new Promise(resolve => setTimeout(resolve, Math.min(1000 + attempt * 1000, 5000)));
+        return initializeEmptyRepository(owner, repo, branch, message, changes, attempt + 1);
+      }
+      throw e;
+    }
   }
   async function withConcurrency(items, limit, worker) {
     const out = new Array(items.length);
@@ -486,6 +513,13 @@
     if (remote?.unavailable) throw new Error('GitHub is still initializing this repository. Please try again in a moment.');
     let changes = await compareWorkingTree(fs, remote.tree);
     if (!changes.length) return {changed:false, changes:[], commitSha:remote.commitSha};
+    if (remote.empty) {
+      // GitHub does not allow raw Git-data writes against an empty repository.
+      // Initialize it through the Contents API first, then the normal Git-data
+      // path can create the complete follow-up commit.
+      await initializeEmptyRepository(owner, repo, branch, message, changes);
+      return await commitAndPush({owner, repo, branch, message, fs, _attempt:_attempt + 1});
+    }
     try {
       const blobs = await withConcurrency(changes.filter(x => x.type !== 'deleted'), 4, async change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:(await createBlob(owner, repo, change.data)).sha}));
       const treeEntries = [...blobs, ...changes.filter(x => x.type === 'deleted').map(change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:null}))];
