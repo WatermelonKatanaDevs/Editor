@@ -516,9 +516,11 @@
     if (remote.empty) {
       // GitHub does not allow raw Git-data writes against an empty repository.
       // Initialize it through the Contents API first, then the normal Git-data
-      // path can create the complete follow-up commit.
-      await initializeEmptyRepository(owner, repo, branch, message, changes);
-      return await commitAndPush({owner, repo, branch, message, fs, _attempt:_attempt + 1});
+      // path can create the remaining workspace snapshot.
+      const initializedSha = await initializeEmptyRepository(owner, repo, branch, message, changes);
+      const remainder = await commitAndPush({owner, repo, branch, message, fs, _attempt:_attempt + 1});
+      if (!remainder.changed) return {changed:true, changes, commitSha:initializedSha, initialized:true};
+      return {...remainder, initialized:true, initialCommitSha:initializedSha};
     }
     try {
       const blobs = await withConcurrency(changes.filter(x => x.type !== 'deleted'), 4, async change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:(await createBlob(owner, repo, change.data)).sha}));
