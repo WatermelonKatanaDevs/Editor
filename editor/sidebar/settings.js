@@ -33,7 +33,6 @@
           <div class="editor-settings-section">
             <h3>Git</h3>
             <label class="setting-check"><input id="setting-ignore-node-modules" type="checkbox"><span>Exclude node_modules from Source Control</span></label>
-            <p class="editor-settings-note">This is a WatermelonKatana workspace setting and does not modify <code>.gitignore</code>.</p>
           </div>
           <div class="editor-settings-section">
             <h3>Image Editing</h3>
