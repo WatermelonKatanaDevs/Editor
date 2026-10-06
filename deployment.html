@@ -429,6 +429,23 @@ window.__deploymentNetworkReady = (async function() {
         env: {NODE_ENV:'production', USER:'browser_user', ...deploymentEnvironment}
       });
       await runtime.ready;
+
+      // Published repositories normally omit node_modules. Reconstruct the
+      // dependency tree inside the Node emulator before starting the app.
+      const packageJsonPath = root === '/' ? '/package.json' : root + '/package.json';
+      const packageLockPath = root === '/' ? '/package-lock.json' : root + '/package-lock.json';
+      if (fs.existsSync(packageJsonPath)) {
+        const hasLockfile = fs.existsSync(packageLockPath);
+        const packageCommand = hasLockfile ? 'npm ci' : 'npm install';
+        setProgress(
+          'Installing Node dependencies…',
+          null,
+          hasLockfile ? 'Running npm ci from package-lock.json' : 'Running npm install from package.json'
+        );
+        await runtime.terminalCommand(packageCommand);
+        setProgress('Dependencies installed', 100, hasLockfile ? 'package-lock.json applied' : 'package.json dependencies installed');
+      }
+
       if (runConfig.nodeCommand) await runtime.terminalCommand(runConfig.nodeCommand);
       if (!await runtime.waitForServer?.(10000,50)) {
         throw new Error('Node command finished, but no listening server was created.');
