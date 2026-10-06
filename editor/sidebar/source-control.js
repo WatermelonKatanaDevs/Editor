@@ -96,6 +96,21 @@
           state.runDebugRefresh?.();
           selected = {owner:String(owner), repo:String(repo), branch:String(branch)};
           branches = [String(branch)];
+          // The repository was created after the repository list was loaded.
+          // Add it to the in-memory list immediately so the UI stays selected
+          // on the new repo instead of falling back to "Select repository…".
+          const fullName = String(owner) + '/' + String(repo);
+          if (!repos.some(item => item.fullName === fullName)) {
+            repos = [...repos, {
+              id: created?.id,
+              name: String(repo),
+              fullName,
+              owner: String(owner),
+              private: !!created?.private,
+              defaultBranch: String(branch),
+              permissions: {push:true}
+            }];
+          }
           saveConfig();
 
           // GitHub may take a moment to provision the Git database after the
