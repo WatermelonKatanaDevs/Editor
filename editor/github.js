@@ -374,6 +374,16 @@
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return bytes;
   }
+  function bytesToBase64(data) {
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || []);
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunk, bytes.length)));
+    }
+    return btoa(binary);
+  }
+
   async function gitBlobSha(data) {
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || []);
     const header = new TextEncoder().encode(`blob ${bytes.length}\0`);
