@@ -3554,20 +3554,44 @@
       window.__serializePublicElement = function(elem, outer) { return serializePublicElement(elem, outer); };
       window.__isEmulatorInjectedScript = function(code) { return /createRuntimeInterceptor|__runSyncInterceptor|__pageRegistry/.test(String(code || '')); };
 
-      // Native HTML assignments bypass the MutationObserver until the current
-      // JavaScript turn has finished. Re-run the same dynamic-node processing
-      // immediately through the function exposed above.
-      window.__processAssignedNodes = function(nodes) {
+      // Native HTML assignments bypass the MutationObserver until after the
+      // current JavaScript turn. Queue the same dynamic-node processing for a
+      // microtask instead of running it synchronously: page code must be able
+      // to see the freshly-assigned DOM in its native state before the emulator
+      // adds data/raw attributes, rewrites handlers, or virtualizes resources.
+      const assignedNodeQueue = new Set();
+      let assignedNodeFlushScheduled = false;
+
+      function flushAssignedNodes() {
+        assignedNodeFlushScheduled = false;
         const processNode = window.__checkNodeAndChildren;
-        if (typeof processNode !== 'function') return;
-        for (const node of nodes || []) {
+        if (typeof processNode !== 'function') {
+          assignedNodeQueue.clear();
+          return;
+        }
+
+        const nodes = Array.from(assignedNodeQueue);
+        assignedNodeQueue.clear();
+
+        for (const node of nodes) {
           if (!node) continue;
           processNode(node);
           if (node.nodeType === Node.ELEMENT_NODE) {
             node.querySelectorAll('*').forEach(child => processNode(child));
           }
         }
-      };
+      }
+
+      function queueAssignedNodes(nodes) {
+        for (const node of nodes || []) {
+          if (node) assignedNodeQueue.add(node);
+        }
+        if (assignedNodeFlushScheduled) return;
+        assignedNodeFlushScheduled = true;
+        Promise.resolve().then(flushAssignedNodes);
+      }
+
+      window.__processAssignedNodes = queueAssignedNodes;
 
       Object.defineProperty(Element.prototype, 'innerHTML', {
         configurable: nativeElementInnerHTML.configurable,
@@ -3575,7 +3599,7 @@
         get() { return serializePageElement(this, false); },
         set(value) {
           nativeElementInnerHTML.set.call(this, value);
-          window.__processAssignedNodes(Array.from(this.childNodes));
+          queueAssignedNodes(Array.from(this.childNodes));
         }
       });
 
@@ -3589,7 +3613,7 @@
           nativeElementOuterHTML.set.call(this, value);
 
           if (!parent || !before) return;
-          window.__processAssignedNodes(Array.from(parent.childNodes).filter(node => !before.has(node)));
+          queueAssignedNodes(Array.from(parent.childNodes).filter(node => !before.has(node)));
         }
       });
     }
