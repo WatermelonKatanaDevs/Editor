@@ -69,7 +69,7 @@ class Network extends EventHandler {
       if (!response) return null;
       endp.dispatchEvent('returnresponse',response,request,type);
       return response;
-    }, filter || r => r.ok);
+    }, filter || (r => r.ok));
     if (response) {
       response.source_url = request.url;
       response.requested_url = request.__original_url || request.url;
@@ -92,7 +92,7 @@ class Network extends EventHandler {
       if (!response) return null;
       endp.dispatchEvent('returnsocket',response,absoluteUrl,protocols);
       return response;
-    }, filter || r => true);
+    }, filter || (r => true));
     this.dispatchEvent('socketend',response,absoluteUrl,protocols);
     return response;
   }
