@@ -31,6 +31,10 @@
       this.root.addEventListener('drop', e => this.handleDrop(e));
       document.addEventListener('dragend', this._onDragEnd);
       this.createGroup();
+      // The workbench can be opened programmatically immediately after
+      // construction (for example by an extension). Render the initial group
+      // synchronously so its tab/view DOM exists before addTab/activateTab.
+      this.rebuild();
     }
     notifyLayoutChange() {
       if (!this.restoring) this.onLayoutChange(this.serialize());
