@@ -421,17 +421,14 @@
       body:JSON.stringify({content:bytesToBase64(bytes), encoding:'base64'})
     });
   }
-  async function initializeEmptyRepository(owner, repo, branch, message, changes, attempt = 0) {
-    const seed = (changes || []).find(change => change.type !== 'deleted' && change.data instanceof Uint8Array);
-    if (!seed) throw new Error('The GitHub repository is empty and the workspace has no files to initialize it with.');
+  async function initializeEmptyRepository(owner, repo, branch, attempt = 0) {
+    const placeholder = 'initialize.txt';
     try {
-      const path = String(seed.path || '').replace(/^\/+/, '');
-      if (!path) throw new Error('The workspace contains no valid file to initialize the GitHub repository.');
-      const response = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`, {
+      const response = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${placeholder}`, {
         method:'PUT',
         body:JSON.stringify({
-          message,
-          content:bytesToBase64(seed.data),
+          message:'Initialize Git repository',
+          content:bytesToBase64(new TextEncoder().encode('')),
           branch:String(branch || 'main')
         })
       });
@@ -439,7 +436,41 @@
     } catch (e) {
       if ((e?.status === 404 || e?.status === 409) && attempt < 8) {
         await new Promise(resolve => setTimeout(resolve, Math.min(1000 + attempt * 1000, 5000)));
-        return initializeEmptyRepository(owner, repo, branch, message, changes, attempt + 1);
+        return initializeEmptyRepository(owner, repo, branch, attempt + 1);
+      }
+      throw e;
+    }
+  }
+
+  async function createInitializedRepositoryCommit(owner, repo, branch, message, changes, attempt = 0) {
+    try {
+      const files = (changes || []).filter(change => change.type !== 'deleted');
+      const blobs = await withConcurrency(files, 4, async change => ({
+        path:change.path,
+        mode:change.mode || '100644',
+        type:'blob',
+        sha:(await createBlob(owner, repo, change.data)).sha
+      }));
+      if (!blobs.length) throw new Error('The workspace has no files to initialize the GitHub repository with.');
+
+      const tree = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees`, {
+        method:'POST',
+        body:JSON.stringify({tree:blobs})
+      });
+      const commit = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/commits`, {
+        method:'POST',
+        body:JSON.stringify({message, tree:tree.sha})
+      });
+      const refPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs/heads/${branchPath(branch)}`;
+      await request(refPath, {
+        method:'PATCH',
+        body:JSON.stringify({sha:commit.sha, force:true})
+      });
+      return commit.sha;
+    } catch (e) {
+      if ((e?.status === 404 || e?.status === 409) && attempt < 8) {
+        await new Promise(resolve => setTimeout(resolve, Math.min(1000 + attempt * 1000, 5000)));
+        return createInitializedRepositoryCommit(owner, repo, branch, message, changes, attempt + 1);
       }
       throw e;
     }
@@ -514,13 +545,19 @@
     let changes = await compareWorkingTree(fs, remote.tree);
     if (!changes.length) return {changed:false, changes:[], commitSha:remote.commitSha};
     if (remote.empty) {
-      // GitHub does not allow raw Git-data writes against an empty repository.
-      // Initialize it through the Contents API first, then the normal Git-data
-      // path can create the remaining workspace snapshot.
-      const initializedSha = await initializeEmptyRepository(owner, repo, branch, message, changes);
-      const remainder = await commitAndPush({owner, repo, branch, message, fs, _attempt:_attempt + 1});
-      if (!remainder.changed) return {changed:true, changes, commitSha:initializedSha, initialized:true};
-      return {...remainder, initialized:true, initialCommitSha:initializedSha};
+      // GitHub requires an empty repository to be bootstrapped through the
+      // Contents API before its Git-data API can be used. The bootstrap commit
+      // is temporary: replace the branch with one root commit containing the
+      // complete workspace so the visible history starts at "Initialized Repository".
+      await initializeEmptyRepository(owner, repo, branch);
+      const commitSha = await createInitializedRepositoryCommit(
+        owner,
+        repo,
+        branch,
+        message,
+        changes
+      );
+      return {changed:true, changes, commitSha, initialized:true};
     }
     try {
       const blobs = await withConcurrency(changes.filter(x => x.type !== 'deleted'), 4, async change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:(await createBlob(owner, repo, change.data)).sha}));
