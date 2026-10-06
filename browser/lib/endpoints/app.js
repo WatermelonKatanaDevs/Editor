@@ -19,6 +19,7 @@
   }
 
   function nodeExecution() {
+    window.__hostOrigin = window.top.location.origin;
     function normalizeNodePath(path) {
       const parts = String(path || "/").replace(/\\/g, "/").split("/").filter(Boolean);
       const out = [];
