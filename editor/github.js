@@ -227,7 +227,7 @@
     const network = window.__sharedBrowserNetwork || window.EditorAppState?.browserNetwork;
     let response;
     if (network?.request) {
-      response = await network.request(new Request(API + path, init), 'github-api');
+      response = await network.request(new Request(API + path, init), 'github-api', () => true);
       if (!response) throw new Error('GitHub API request failed: no Network endpoint returned a response.');
     } else {
       response = await fetch(API + path, init);
@@ -284,7 +284,7 @@
     const headers = new Headers({Accept:'application/vnd.github+json','X-GitHub-Api-Version':API_VERSION,Authorization:`Bearer ${token}`});
     const network = window.__sharedBrowserNetwork || window.EditorAppState?.browserNetwork;
     const request = new Request(API + path, {headers, credentials:'omit'});
-    const response = network?.request ? await network.request(request, 'github-archive') : await fetch(request);
+    const response = network?.request ? await network.request(request, 'github-archive', () => true) : await fetch(request);
     if (!response) throw new Error('GitHub archive download failed: no Network endpoint returned a response.');
     if (response.status === 401) { clearStoredAuth(); notify(); throw new Error('GitHub authentication expired. Sign in again from Profile.'); }
     if (!response.ok) {
@@ -490,7 +490,7 @@
     const headers = new Headers({'Accept':'application/json','Content-Type':'application/json','X-GitHub-Api-Version':API_VERSION,'Authorization':`Bearer ${token}`});
     const init = {method:'POST',headers,body:JSON.stringify({query,variables}),credentials:'omit'};
     const network = window.__sharedBrowserNetwork || window.EditorAppState?.browserNetwork;
-    let response = network?.request ? await network.request(new Request('https://api.github.com/graphql', init), 'github-graphql') : await fetch('https://api.github.com/graphql', init);
+    let response = network?.request ? await network.request(new Request('https://api.github.com/graphql', init), 'github-graphql', () => true) : await fetch('https://api.github.com/graphql', init);
     if (!response) throw new Error('GitHub GraphQL request failed: no Network endpoint returned a response.');
     const data = await response.json().catch(() => null);
     if (!response.ok) {
