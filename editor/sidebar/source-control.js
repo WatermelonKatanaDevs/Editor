@@ -122,7 +122,7 @@
             owner:String(owner),
             repo:String(repo),
             branch:String(branch),
-            message:'Initial commit',
+            message:'Initialized Repository',
             fs:state.fs
           });
           if (!initialCommit.changed) {
@@ -326,23 +326,22 @@
             target.set(entry.path, entry);
           }
 
-          const localPaths = state.fs.listFilesSync().map(path => String(path).replace(/^\/+/, '')).filter(path => path && !path.startsWith('.git/'));
+          // Restoring a commit is a full filesystem replacement. Clear every
+          // existing file and directory first so files that are absent from the
+          // target commit cannot survive the restore.
+          const localPaths = state.fs.listFilesSync().map(path => String(path).replace(/^\/+/, '')).filter(Boolean);
           for (const path of localPaths) {
-            if (!target.has(path)) state.fs.deleteFileSync(path);
+            state.fs.markDirty?.(path);
+            state.fs.deleteFileSync(path);
+            state.markDirty?.(path);
+          }
+          const localDirs = typeof state.fs.listDirectoriesSync === 'function'
+            ? state.fs.listDirectoriesSync().map(path => String(path).replace(/^\/+/, '')).filter(Boolean)
+            : [];
+          for (const dir of localDirs.sort((a,b) => b.split('/').length - a.split('/').length)) {
+            state.fs.deleteDirectorySync?.(dir);
           }
 
-          const dirs = new Set();
-          for (const path of target.keys()) {
-            const parts = path.split('/');
-            let current = '';
-            for (let i = 0; i < parts.length - 1; i++) {
-              current = current ? current + '/' + parts[i] : parts[i];
-              dirs.add(current);
-            }
-          }
-          for (const dir of [...dirs].sort((a,b) => a.split('/').length - b.split('/').length)) {
-            if (!state.fs.existsSync?.(dir)) state.fs.mkdirSync(dir);
-          }
 
           let index = 0;
           for (const entry of snapshot.tree) {
