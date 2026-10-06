@@ -3591,6 +3591,33 @@
         Promise.resolve().then(flushAssignedNodes);
       }
 
+      // Resource-bearing nodes need an emulator request started immediately.
+      // In particular, document.head.innerHTML += can replace an already
+      // virtualized stylesheet with its original URL; waiting for a microtask
+      // lets the native srcdoc document try to fetch that URL first.
+      function primeAssignedResources(nodes) {
+        const processNode = window.__checkNodeAndChildren;
+        if (typeof processNode !== 'function') return;
+
+        for (const node of nodes || []) {
+          if (!node || node.nodeType !== Node.ELEMENT_NODE) continue;
+
+          const resources = [];
+          if (node.matches?.('link[href], script[src], img[src], audio[src], video[src], source[src], object[data]')) {
+            resources.push(node);
+          }
+          if (node.querySelectorAll) {
+            resources.push(...node.querySelectorAll(
+              'link[href], script[src], img[src], audio[src], video[src], source[src], object[data]'
+            ));
+          }
+
+          for (const resource of resources) {
+            processNode(resource);
+          }
+        }
+      }
+
       window.__processAssignedNodes = queueAssignedNodes;
 
       Object.defineProperty(Element.prototype, 'innerHTML', {
@@ -3599,7 +3626,9 @@
         get() { return serializePageElement(this, false); },
         set(value) {
           nativeElementInnerHTML.set.call(this, value);
-          queueAssignedNodes(Array.from(this.childNodes));
+          const nodes = Array.from(this.childNodes);
+          primeAssignedResources(nodes);
+          queueAssignedNodes(nodes);
         }
       });
 
@@ -3613,7 +3642,9 @@
           nativeElementOuterHTML.set.call(this, value);
 
           if (!parent || !before) return;
-          queueAssignedNodes(Array.from(parent.childNodes).filter(node => !before.has(node)));
+          const nodes = Array.from(parent.childNodes).filter(node => !before.has(node));
+          primeAssignedResources(nodes);
+          queueAssignedNodes(nodes);
         }
       });
     }
