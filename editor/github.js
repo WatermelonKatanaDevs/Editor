@@ -503,23 +503,6 @@
     if (remote?.unavailable) throw new Error('GitHub is still initializing this repository. Please try again in a moment.');
     let changes = await compareWorkingTree(fs, remote.tree);
     if (!changes.length) return {changed:false, changes:[], commitSha:remote.commitSha};
-    if (remote.empty || !remote.commitSha) {
-      const first = changes.find(change => change.type !== 'deleted');
-      if (!first) throw new Error('Cannot create an initial commit because the workspace contains no files.');
-      let initialized;
-      try {
-        initialized = await createContentsFile(owner, repo, branch, first, message);
-      } catch (e) {
-        if (e?.status !== 422) throw e;
-        const after = await getRemoteState(owner, repo, branch);
-        const exists = after.tree?.some(entry => entry?.type === 'blob' && entry.path === first.path);
-        if (!exists) throw e;
-        initialized = {commit:{sha:after.commitSha}};
-      }
-      remote = await getRemoteState(owner, repo, branch);
-      changes = await compareWorkingTree(fs, remote.tree);
-      if (!changes.length) return {changed:true, changes:[first], commitSha:initialized?.commit?.sha || remote.commitSha};
-    }
     try {
       const blobs = await withConcurrency(changes.filter(x => x.type !== 'deleted'), 4, async change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:(await createBlob(owner, repo, change.data)).sha}));
       const treeEntries = [...blobs, ...changes.filter(x => x.type === 'deleted').map(change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:null}))];
@@ -547,6 +530,14 @@
       }
       return {changed:true, changes, commitSha:commit.sha};
     } catch (e) {
+      // A freshly-created repository may still be provisioning its Git
+      // database. Retry the whole Git-data transaction once rather than
+      // falling back to the Contents API, which cannot create a missing
+      // branch in an empty repository.
+      if ((e?.status === 404 || e?.status === 409) && !_retry) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return await commitAndPush({owner, repo, branch, message, fs, _retry:true});
+      }
       if (e?.status !== 403) throw e;
       const commitSha = await createGraphQLCommit(owner, repo, branch, message, changes, remote.commitSha);
       return {changed:true, changes, commitSha};
