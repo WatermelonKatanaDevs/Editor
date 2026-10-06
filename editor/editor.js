@@ -1055,12 +1055,25 @@ window.__editorInitPromise = (async function () {
   }
   function clearView(g) {
     g.viewBar.innerHTML = '';
-    const previous = g.__renderedTab;
-    if (previous?.kind === 'builtin' && previous._viewElement?.parentNode === g.viewBody) {
-      previous._viewElement.style.display = 'none';
-      return;
+
+    // Keep live tab views attached to the document. Removing an iframe from
+    // the DOM unloads its browsing context, which resets stateful previews
+    // such as Piskel and browser-based tools every time the user switches tabs.
+    // Persistent tab surfaces are hidden instead; temporary render elements
+    // are still removed.
+    const persistent = new Set();
+    for (const tab of g.tabs || []) {
+      if (tab._previewHost) persistent.add(tab._previewHost);
+      if (tab._viewElement) persistent.add(tab._viewElement);
     }
-    g.viewBody.innerHTML = '';
+
+    for (const child of [...g.viewBody.children]) {
+      if (persistent.has(child)) {
+        child.style.display = 'none';
+      } else {
+        child.remove();
+      }
+    }
   }
   function renderViewBar(g, t) {
     g.viewBar.innerHTML = '';
@@ -1249,7 +1262,14 @@ window.__editorInitPromise = (async function () {
     if (state.previews?.getView(file, t.view)) {
       const renderResult = state.previews.render(file, t.view, g.viewBody, g);
       if (renderResult && typeof renderResult.then === 'function') await renderResult;
-      finish('viewRender', g.viewBody.lastElementChild, { path:t.path, view:t.view });
+
+      // Reattach a preserved preview surface without rebuilding the embedded
+      // document. The surface was hidden by clearView while another tab was
+      // active.
+      const previewElement = t._previewHost || g.viewBody.lastElementChild;
+      if (previewElement) previewElement.style.display = '';
+
+      finish('viewRender', previewElement, { path:t.path, view:t.view });
       return;
     }
     const fallback = document.createElement('div');
