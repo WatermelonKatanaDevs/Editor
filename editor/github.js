@@ -425,7 +425,7 @@
     const seed = (changes || []).find(change => change.type !== 'deleted' && change.data instanceof Uint8Array);
     if (!seed) throw new Error('The GitHub repository is empty and the workspace has no files to initialize it with.');
     try {
-      const path = String(seed.path || '').replace(/^\\/+/, '');
+      const path = String(seed.path || '').replace(/^\/+/, '');
       if (!path) throw new Error('The workspace contains no valid file to initialize the GitHub repository.');
       const response = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`, {
         method:'PUT',
