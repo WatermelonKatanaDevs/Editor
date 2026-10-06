@@ -474,7 +474,7 @@
     }
     return data;
   }
-  async function commitAndPush({owner, repo, branch, message, fs, _retry = false}) {
+  async function commitAndPush({owner, repo, branch, message, fs, _attempt = 0}) {
     message = String(message || '').trim();
     if (!message) throw new Error('Enter a commit message.');
     let remote = null;
@@ -506,20 +506,21 @@
         // A 422 here normally means the branch moved after we read its
         // remote SHA. Rebuild the commit once from the latest branch state;
         // never force-push over the intervening commit.
-        if (e?.status === 422 && !_retry) {
-          return await commitAndPush({owner, repo, branch, message, fs, _retry:true});
+        if (e?.status === 422 && _attempt < 8) {
+          await new Promise(resolve => setTimeout(resolve, 500 + _attempt * 500));
+          return await commitAndPush({owner, repo, branch, message, fs, _attempt:_attempt + 1});
         }
         throw e;
       }
       return {changed:true, changes, commitSha:commit.sha};
     } catch (e) {
       // A freshly-created repository may still be provisioning its Git
-      // database. Retry the whole Git-data transaction once rather than
-      // falling back to the Contents API, which cannot create a missing
-      // branch in an empty repository.
-      if ((e?.status === 404 || e?.status === 409) && !_retry) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return await commitAndPush({owner, repo, branch, message, fs, _retry:true});
+      // database. GitHub can briefly return 404/409 for Git-data writes even
+      // after the repository itself exists, so retry the complete transaction
+      // with a bounded backoff before surfacing the error.
+      if ((e?.status === 404 || e?.status === 409) && _attempt < 8) {
+        await new Promise(resolve => setTimeout(resolve, Math.min(1000 + _attempt * 1000, 5000)));
+        return await commitAndPush({owner, repo, branch, message, fs, _attempt:_attempt + 1});
       }
       if (e?.status !== 403) throw e;
       const commitSha = await createGraphQLCommit(owner, repo, branch, message, changes, remote.commitSha);
