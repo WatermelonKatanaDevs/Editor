@@ -445,14 +445,28 @@
     return entries;
   }
 
-  function isGitIgnored(path, rules) {
+  function gitIgnoreDecision(path, rules) {
     const p = String(path || '').replace(/^\/+/, '');
     if (!p || ignoredPath(p)) return true;
-    let ignored = false;
+    let matched = null;
     for (const rule of rules || []) {
-      if (rule.regex.test(p)) ignored = !rule.negated;
+      if (rule.regex.test(p)) matched = !rule.negated;
     }
-    return ignored;
+    return matched;
+  }
+
+  function isGitIgnored(path, rules) {
+    return gitIgnoreDecision(path, rules) === true;
+  }
+
+  function isNodeModulesPath(path) {
+    return String(path || '').replace(/^\/+/, '').split('/').includes('node_modules');
+  }
+
+  function isNodeModulesIgnored(fs) {
+    const rules = readGitIgnore(fs);
+    const decision = gitIgnoreDecision('node_modules/.gitkeep', rules);
+    return decision === null ? true : decision === true;
   }
 
   async function compareWorkingTree(fs, remoteTree) {
@@ -475,7 +489,9 @@
 
       // .gitignore only suppresses untracked local additions. A file already
       // tracked by Git must remain comparable even if it later becomes ignored.
-      if (!remote && isGitIgnored(path, rules)) continue;
+      const ignoreDecision = gitIgnoreDecision(path, rules);
+      const defaultNodeModulesIgnore = isNodeModulesPath(path) && ignoreDecision === null;
+      if (!remote && (ignoreDecision === true || defaultNodeModulesIgnore)) continue;
 
       if (!remote) changes.push({path, type:'added', sha, data:bytes});
       else if (remote.sha !== sha) changes.push({path, type:'modified', sha, data:bytes, mode:remote.mode || '100644'});
@@ -701,6 +717,7 @@
   root.readBlob = readBlob;
   root.listCommits = listCommits;
   root.compareWorkingTree = compareWorkingTree;
+  root.isNodeModulesIgnored = isNodeModulesIgnored;
   root.commitAndPush = commitAndPush;
   root.gitBlobSha = gitBlobSha;
 })();
