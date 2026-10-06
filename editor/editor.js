@@ -1065,6 +1065,12 @@ window.__editorInitPromise = (async function () {
     for (const tab of g.tabs || []) {
       if (tab._previewHost) persistent.add(tab._previewHost);
       if (tab._viewElement) persistent.add(tab._viewElement);
+      // Preserve every live preview surface, not only the currently active
+      // one. Switching from Piskel to another preview must not remove the
+      // Piskel iframe from the DOM, or its browsing context will reset.
+      for (const instance of tab._previewInstances?.values?.() || []) {
+        if (instance?.host) persistent.add(instance.host);
+      }
     }
 
     for (const child of [...g.viewBody.children]) {
