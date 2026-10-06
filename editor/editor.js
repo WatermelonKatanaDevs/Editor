@@ -77,6 +77,7 @@ window.__editorInitPromise = (async function () {
       confirmBeforeReplace: true,
       confirmBeforeDelete: true,
       showHiddenFolders: false,
+      ignoreNodeModules: true,
       hideBrowserBar: true
     }
   };

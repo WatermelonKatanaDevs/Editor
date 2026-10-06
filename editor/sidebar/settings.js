@@ -32,8 +32,8 @@
           </div>
           <div class="editor-settings-section">
             <h3>Git</h3>
-            <label class="setting-check"><input id="setting-ignore-node-modules" type="checkbox"><span>Ignore node_modules</span></label>
-            <p class="editor-settings-note">Stores this preference in <code>.gitignore</code>. With no explicit rule, node_modules is ignored by default.</p>
+            <label class="setting-check"><input id="setting-ignore-node-modules" type="checkbox"><span>Exclude node_modules from Source Control</span></label>
+            <p class="editor-settings-note">This is a WatermelonKatana workspace setting and does not modify <code>.gitignore</code>.</p>
           </div>
           <div class="editor-settings-section">
             <h3>Image Editing</h3>
@@ -76,36 +76,10 @@
       const clearDevTools = $('setting-browser-clear-devtools');
       const autoDownload = $('setting-browser-autodownload');
 
-      function saveNodeModulesIgnorePreference(enabled) {
-        const fs = state.fs;
-        if (!fs) return;
-        const marker = '# WatermelonKatana: node_modules';
-        let text = '';
-        try { text = fs.existsSync('.gitignore') ? String(fs.readFileSync('.gitignore', 'utf8')) : ''; } catch (_) {}
-        const lines = text.replace(/\r/g, '').split('\n');
-        const cleaned = [];
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].trim() === marker) {
-            if (i + 1 < lines.length && /^(?:!?node_modules)\/?$/.test(lines[i + 1].trim())) i++;
-            continue;
-          }
-          cleaned.push(lines[i]);
-        }
-        while (cleaned.length && !cleaned[cleaned.length - 1].trim()) cleaned.pop();
-        if (cleaned.length) cleaned.push('');
-        cleaned.push(marker, enabled ? 'node_modules/' : '!node_modules/');
-        fs.writeFileSync('.gitignore', cleaned.join('\n') + '\n');
-        if (!state.loading) state.markDirty?.('.gitignore');
-      }
-
-      ignoreNodeModules.checked = window.GitHubService?.isNodeModulesIgnored?.(state.fs) !== false;
+      ignoreNodeModules.checked = state.behavior.ignoreNodeModules !== false;
       ignoreNodeModules.onchange = () => {
-        try {
-          saveNodeModulesIgnorePreference(ignoreNodeModules.checked);
-        } catch (e) {
-          console.error('Failed to update .gitignore:', e);
-          ignoreNodeModules.checked = window.GitHubService?.isNodeModulesIgnored?.(state.fs) !== false;
-        }
+        state.behavior.ignoreNodeModules = ignoreNodeModules.checked;
+        saveBehaviorSettings();
       };
 
       a.checked = !!state.behavior.autoSaveOnRun;

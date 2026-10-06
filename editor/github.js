@@ -463,21 +463,27 @@
     return String(path || '').replace(/^\/+/, '').split('/').includes('node_modules');
   }
 
-  function isNodeModulesIgnored(fs) {
-    const rules = readGitIgnore(fs);
-    const decision = gitIgnoreDecision('node_modules/.gitkeep', rules);
-    return decision === null ? true : decision === true;
+  function isNodeModulesIgnoredBySetting(fs) {
+    try {
+      if (!fs?.existsSync?.('.editor/settings.json')) return true;
+      const raw = fs.readFileSync('.editor/settings.json', 'utf8');
+      const settings = JSON.parse(String(raw || '{}'));
+      return settings?.ignoreNodeModules !== false;
+    } catch (_) {
+      return true;
+    }
   }
 
   async function compareWorkingTree(fs, remoteTree) {
     if (!fs) throw new Error('No workspace filesystem is open.');
     const rules = readGitIgnore(fs);
+    const ignoreNodeModules = isNodeModulesIgnoredBySetting(fs);
     const localPaths = fs.listFilesSync()
       .map(path => String(path).replace(/^\/+/, ''))
-      .filter(path => path && !ignoredPath(path));
+      .filter(path => path && !ignoredPath(path) && !(ignoreNodeModules && isNodeModulesPath(path)));
     const remoteFiles = new Map();
     for (const entry of remoteTree || []) {
-      if (entry?.type === 'blob' && entry.path && !ignoredPath(entry.path)) remoteFiles.set(entry.path, entry);
+      if (entry?.type === 'blob' && entry.path && !ignoredPath(entry.path) && !(ignoreNodeModules && isNodeModulesPath(entry.path))) remoteFiles.set(entry.path, entry);
     }
 
     const changes = [];
@@ -487,11 +493,11 @@
       const sha = await gitBlobSha(bytes);
       const remote = remoteFiles.get(path);
 
-      // .gitignore only suppresses untracked local additions. A file already
-      // tracked by Git must remain comparable even if it later becomes ignored.
+      // The node_modules workspace setting is handled above. .gitignore remains
+      // independent and only suppresses untracked local additions; a file already
+      // tracked by Git remains comparable even if it later becomes ignored.
       const ignoreDecision = gitIgnoreDecision(path, rules);
-      const defaultNodeModulesIgnore = isNodeModulesPath(path) && ignoreDecision === null;
-      if (!remote && (ignoreDecision === true || defaultNodeModulesIgnore)) continue;
+      if (!remote && ignoreDecision === true) continue;
 
       if (!remote) changes.push({path, type:'added', sha, data:bytes});
       else if (remote.sha !== sha) changes.push({path, type:'modified', sha, data:bytes, mode:remote.mode || '100644'});
@@ -717,7 +723,6 @@
   root.readBlob = readBlob;
   root.listCommits = listCommits;
   root.compareWorkingTree = compareWorkingTree;
-  root.isNodeModulesIgnored = isNodeModulesIgnored;
   root.commitAndPush = commitAndPush;
   root.gitBlobSha = gitBlobSha;
 })();
