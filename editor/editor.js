@@ -2950,6 +2950,18 @@ window.__editorInitPromise = (async function () {
       return false;
     }
   }
+
+  async function loadTopCachedRecent() {
+    // Recent Projects is the authoritative ordering for the local project
+    // cache. Try entries from the top until we find the first cache entry that
+    // still exists, so a stale record cannot prevent WK extension startup.
+    const records = recentProjects();
+    for (const record of records) {
+      if (!(await cacheHasProject(record.id))) continue;
+      if (await loadCachedRecent(record)) return true;
+    }
+    return false;
+  }
   async function showProjectChooser(options = {}) {
     const canClose = !!options.canClose;
     const modal = document.createElement('div');
@@ -3242,6 +3254,12 @@ window.__editorInitPromise = (async function () {
     }
     try {
       if (await loadProjectFromURLParams()) return;
+
+      const params = new URLSearchParams(location.search);
+      if (params.get('wkExtension') === '1') {
+        if (await loadTopCachedRecent()) return;
+      }
+
       await showProjectChooser();
     } catch (e) {
       logError(e);
