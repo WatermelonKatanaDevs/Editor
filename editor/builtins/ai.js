@@ -529,16 +529,16 @@
       const details=document.createElement('details'); details.className='ai-activity'; details.open=!!open;
       const summary=document.createElement('summary'); summary.textContent=activitySummary(items); details.appendChild(summary);
       const body=document.createElement('div'); body.className='ai-activity-body'; details.appendChild(body);
-      const activity={body,items:items||[],details}; for(const item of (items||[])) appendActivity(activity,item); summary.textContent=activitySummary(activity.items);
+      const activity={body,items:items||[],details}; for(const item of [...(items||[])]) appendActivity(activity,item,false); summary.textContent=activitySummary(activity.items);
       return details;
     }
     function beginActivity(chat,open){
       const details=renderActivity(chat,[],open); const body=details.querySelector('.ai-activity-body');
       chat.appendChild(details); return {details,body,host:details,items:[]};
     }
-    function appendActivity(activity,item){
+    function appendActivity(activity,item,record=true){
       if(!activity?.body)return;
-      if(activity.items)activity.items.push(item);
+      if(record && activity.items)activity.items.push(item);
       const row=document.createElement('div'); row.className='ai-activity-row';
       if(typeof item==='string'){row.textContent=item;}
       else if(item.kind==='tool_call'){row.innerHTML=`<strong>Tool call: ${escapeHtml(item.name)}</strong><pre>${escapeHtml(activityValue(item.args||{}))}</pre>`;}
