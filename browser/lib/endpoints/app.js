@@ -4010,7 +4010,7 @@
         return entries;
       } else if (bin === "which") {
         const name = args[0];
-        const supported = new Set(['pwd','cd','echo','printf','true','false','whoami','hostname','env','which','ls','dir','node','npm']);
+        const supported = new Set(['pwd','cd','cat','echo','printf','true','false','whoami','hostname','env','which','ls','dir','node','npm']);
         if (!name || !supported.has(name)) {
           console.logText(`${name || ''}: not found`);
           return null;
@@ -4045,6 +4045,32 @@
         const entries = listDirectory(target);
         console.logText(entries.join('  '));
         return entries;
+      } else if (bin === "cat") {
+        const files = args.filter(arg => !arg.startsWith('-'));
+        if (!files.length) {
+          const error = new Error('cat: missing file operand');
+          console.error(error.message);
+          throw error;
+        }
+        let output = '';
+        for (const fileArg of files) {
+          const target = resolveWorkingPath(fileArg);
+          const physical = getPhysicalPath(target);
+          if (!nodeEmulator.filesystem?.existsSync?.(physical)) {
+            const error = new Error(`cat: ${fileArg}: No such file`);
+            console.error(error.message);
+            throw error;
+          }
+          try {
+            output += String(nodeEmulator.filesystem.readFileSync(physical, 'utf8') ?? '');
+          } catch (e) {
+            const error = new Error(`cat: ${fileArg}: ${e?.message || 'Unable to read file'}`);
+            console.error(error.message);
+            throw error;
+          }
+        }
+        console.logText(output);
+        return output;
       } else if (bin === "node") {
         const entryArgument = args[0] || "index.js";
         const entryFile = resolveWorkingPath(entryArgument);
@@ -4070,7 +4096,7 @@
           throw e;
         }
       } else {
-        const error = new Error(`Command not found: ${bin}. The virtual terminal is not a real OS shell; supported commands are pwd, cd, echo, printf, true, false, whoami, hostname, env, which, ls/dir, node, and npm.`);
+        const error = new Error(`Command not found: ${bin}. The virtual terminal is not a real OS shell; supported commands are pwd, cd, cat, echo, printf, true, false, whoami, hostname, env, which, ls/dir, node, and npm.`);
         console.error(error.message);
         throw error;
       }
