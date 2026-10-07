@@ -1,25 +1,25 @@
-// Node.js emulator — Web Worker runtime
-// Replaces the old hidden iframe runtime while preserving the CommonJS/polyfill/HTTP/WebSocket/terminal API.
-// dependencies: network.js, filesystem.js
+// dependencies:
+// network.js
+// filesystem.js
+
 (function() {
+
   function normalizeNodePath(path) {
     const parts = String(path || "/").replace(/\\/g, "/").split("/").filter(Boolean);
     const out = [];
     for (const part of parts) {
       if (part === ".") continue;
-      if (part === "..") { if (out.length) out.pop(); }
-      else out.push(part);
+      if (part === "..") {
+        if (out.length) out.pop();
+      } else {
+        out.push(part);
+      }
     }
     return "/" + out.join("/");
   }
 
-  const nodeExecution = function nodeExecution(boot = {}) {
-    const nodeEmulator = boot.nodeEmulator || {};
-    const rpc = boot.rpc || (async () => { throw new Error("Worker RPC is not available"); });
-
-    globalThis.global = globalThis;
-    globalThis.__hostOrigin = String(boot.hostOrigin || "");
-    globalThis.nodeEmulator = nodeEmulator;
+  function nodeExecution() {
+    window.__hostOrigin = window.top.location.origin;
     function normalizeNodePath(path) {
       const parts = String(path || "/").replace(/\\/g, "/").split("/").filter(Boolean);
       const out = [];
@@ -33,48 +33,20 @@
       }
       return "/" + out.join("/");
     }
+    if (!window.nodeEmulator) throw new Error("Emulator not found!");
 
     (function() {
-      const CURRENT_PAGE_URL = String(boot.currentPageUrl || "http://127.0.0.1/");
-      const BASE_ORIGIN = String(boot.baseOrigin || "http://127.0.0.1/");
-      const originalFetch = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null;
-
-      globalThis.fetch = async function(input, data = {}, type = 'fetch') {
-        const fetchUrl = typeof input === 'string'
-          ? input
-          : (input && typeof input.url === 'string' ? input.url : String(input));
+      var CURRENT_PAGE_URL = "http://127.0.0.1/";
+      var BASE_ORIGIN = "http://127.0.0.1/";
+      const originalFetch = window.fetch.bind(window);
+      
+      window.fetch = async function(input, data = {}, type = 'fetch') {
+        const fetchUrl = typeof input === 'string' ? input : (input instanceof Request ? input.url : input);
         const resolvedUrl = new URL(fetchUrl, CURRENT_PAGE_URL).href;
-
-        let requestData = data;
-        if (input && typeof input === 'object' && typeof input.method === 'string' &&
-            typeof input.url === 'string' && input !== data) {
-          try {
-            requestData = {
-              method: input.method,
-              headers: Object.fromEntries(new Headers(input.headers || {}).entries()),
-              body: input.body || undefined,
-              credentials: input.credentials,
-              mode: input.mode,
-              cache: input.cache,
-              redirect: input.redirect,
-              referrer: input.referrer,
-              referrerPolicy: input.referrerPolicy
-            };
-          } catch (_) {}
-        }
-
-        const response = await nodeEmulator.network.request(
-          resolvedUrl,
-          BASE_ORIGIN,
-          requestData,
-          type
-        );
+        const response = await nodeEmulator.network.request(resolvedUrl, BASE_ORIGIN, data, type);
         if (response) return response;
-        if (!originalFetch) throw new Error('fetch is unavailable in the Worker runtime');
-        return await originalFetch(input, data);
+        return await originalFetch.apply(this, arguments);
       };
-
-      // CommonJS modules resolve bare `fetch(...)` through the Worker global.
     })();
 
     Object.keys(console).forEach(method => {
@@ -93,7 +65,7 @@
       setTimeout(()=>e.addEventListener(p,f,t),0);
     }
 
-    addEventListener(globalThis, 'error', function(e) {
+    addEventListener(window, 'error', function(e) {
       nodeEmulator.dispatchEvent('error',e,'[node runtime env]');
     });
 
@@ -153,11 +125,11 @@
     }
 
     // 1. Initialize Globals (Removed mockFileSystem per request)
-    globalThis.activeServers = new Map(); // Active HTTP servers bound to ports/domains
+    window.activeServers = new Map(); // Active HTTP servers bound to ports/domains
     
     // Standard Node Globals
-    globalThis.global = globalThis;
-    globalThis.process = {
+    window.global = window;
+    window.process = {
       type: 'renderer',
       env: ENV_SETTINGS,
       cwd: () => nodeEmulator.cwd || '/',
@@ -232,7 +204,6 @@
 
     // --- Modular Polyfill Suite ---
     const polyfills = {};
-    globalThis.polyfills = polyfills;
 
     {
       /**
@@ -1050,11 +1021,11 @@
         };
 
         // Expose globally
-        if (typeof globalThis !== 'undefined' && !globalThis.Buffer) {
-          globalThis.Buffer = Buffer;
+        if (typeof window !== 'undefined' && !window.Buffer) {
+          window.Buffer = Buffer;
         }
-        if (typeof globalThis !== 'undefined' && !globalThis.Buffer) {
-          globalThis.Buffer = Buffer;
+        if (typeof global !== 'undefined' && !global.Buffer) {
+          global.Buffer = Buffer;
         }
 
         module.exports = { Buffer: Buffer };
@@ -1070,9 +1041,9 @@
 
         // Dynamically retrieve the resolved FileSystem instance
         function getFS() {
-          const fsInstance = globalThis.fileSystem;
+          const fsInstance = window.fileSystem;
           if (!fsInstance || typeof fsInstance.existsSync !== 'function') {
-            throw new Error("FileSystem Error: globalThis.fileSystem is not ready or initialized.");
+            throw new Error("FileSystem Error: window.fileSystem is not ready or initialized.");
           }
           return fsInstance;
         }
@@ -1104,7 +1075,7 @@
           if (!p) return getRootFolder().slice(1).replace(/\/+$/, '');
           
           const rawPath = String(p ?? '.');
-          const cwd = (globalThis.process && typeof globalThis.process.cwd === 'function') ? globalThis.process.cwd() : '/';
+          const cwd = (window.process && typeof window.process.cwd === 'function') ? window.process.cwd() : '/';
           const resolved = rawPath.startsWith('/') ? rawPath : `${cwd}/${rawPath}`;
 
           const normalized = normalizePath(resolved);
@@ -1580,16 +1551,7 @@
           }
 
           close(cb) {
-            const ports = [];
-            try {
-              if (typeof activeServers !== 'undefined' && activeServers?.entries) {
-                for (const [port, server] of activeServers.entries()) {
-                  if (server === this) { activeServers.delete(port); ports.push(port); }
-                }
-              }
-            } catch (_) {}
             this.listening = false;
-            try { nodeEmulator?.dispatchEvent?.('serverclose', this, ports[0] ?? null); } catch (_) {}
             if (cb) cb();
             return this;
           }
@@ -2182,7 +2144,7 @@
             const wsUrl = `${protocol}//${this.remoteAddress}:${this.remotePort}`;
 
             // Instantiate our InterceptableWebSocket
-            this._ws = new globalThis.WebSocket(wsUrl, 'tcp-tunnel');
+            this._ws = new window.WebSocket(wsUrl, 'tcp-tunnel');
             this._ws.binaryType = 'arraybuffer'; // Crucial for raw byte streams
 
             this._ws.onopen = () => {
@@ -2223,7 +2185,7 @@
           _write(chunk, encoding, callback) {
             this.bytesWritten += chunk.length;
             
-            if (this._ws && this._ws.readyState === globalThis.WebSocket.OPEN) {
+            if (this._ws && this._ws.readyState === window.WebSocket.OPEN) {
               this._ws.send(chunk);
               if (callback) callback();
             } else {
@@ -2255,7 +2217,7 @@
           }
 
           destroy(error) {
-            if (this._ws && this._ws.readyState !== globalThis.WebSocket.CLOSED) {
+            if (this._ws && this._ws.readyState !== window.WebSocket.CLOSED) {
               this._ws.close();
             }
             if (error) this.emit('error', error);
@@ -2290,16 +2252,7 @@
           }
 
           close(cb) {
-            const ports = [];
-            try {
-              if (typeof activeServers !== 'undefined' && activeServers?.entries) {
-                for (const [port, server] of activeServers.entries()) {
-                  if (server === this) { activeServers.delete(port); ports.push(port); }
-                }
-              }
-            } catch (_) {}
             this.listening = false;
-            try { nodeEmulator?.dispatchEvent?.('serverclose', this, ports[0] ?? null); } catch (_) {}
             if (cb) cb();
             return this;
           }
@@ -2640,8 +2593,8 @@
       if (typeof polyfills !== 'undefined' && polyfills[cleanSpecifier]) {
         return polyfills[cleanSpecifier];
       }
-      if (typeof globalThis !== 'undefined' && globalThis.polyfills && globalThis.polyfills[cleanSpecifier]) {
-        return globalThis.polyfills[cleanSpecifier];
+      if (typeof window !== 'undefined' && window.polyfills && window.polyfills[cleanSpecifier]) {
+        return window.polyfills[cleanSpecifier];
       }
       return null;
     }
@@ -2675,8 +2628,8 @@
      * File System Reader over JSZip
      */
     async function resolveZipPath(absolutePath) {
-      const filesystem = globalThis.fileSystem;
-      if (!filesystem) throw new Error("FileSystem not found on globalThis.fileSystem.");
+      const filesystem = window.fileSystem;
+      if (!filesystem) throw new Error("FileSystem not found on window.fileSystem.");
 
       const root = String(typeof rootfolder !== 'undefined' ? rootfolder || '' : '')
         .replace(/^\/+|\/+$/g,'');
@@ -2820,7 +2773,7 @@
         return location;
       }
 
-      const filesystem = globalThis.fileSystem;
+      const filesystem = window.fileSystem;
 
       if (resolvedPath.endsWith('.json')) {
         const jsonText = filesystem.readFileSync(location.zipPath, 'utf8');
@@ -2983,7 +2936,7 @@
           resolvedPath,
           dirname(resolvedPath),
           simulatedProcess,
-          globalThis,
+          window,
           safeConsole
         );
 
@@ -3022,7 +2975,7 @@
       return executeModuleSync(location.resolvedPath);
     }
 
-    globalThis.getServer = function(urlObj) {
+    window.getServer = function(urlObj) {
       // Safely parse your custom domain variable to get the target hostname
       const targetDomainObj = typeof domain !== 'undefined' ? new URL(domain) : null;
       const targetHostname = targetDomainObj ? targetDomainObj.hostname : 'localhost';
@@ -3039,7 +2992,7 @@
       return server;
     };
 
-    globalThis.handleRequest = async function(request,type) {
+    window.handleRequest = async function(request,type) {
       let urlObj;
       try { urlObj = new URL(request.url); } catch (e) {
         return null;
@@ -3056,13 +3009,7 @@
       return await new Promise(async resolve => {
         const method = request.method || 'GET';
         const headers = request.headers || {};
-        let body = null;
-        if (request && request.body !== undefined && request.body !== null) {
-          if (typeof request.body === 'string') body = request.body;
-          else if (request.body instanceof ArrayBuffer) body = new TextDecoder().decode(new Uint8Array(request.body));
-          else if (typeof Uint8Array !== 'undefined' && request.body instanceof Uint8Array) body = new TextDecoder().decode(request.body);
-          else body = String(request.body);
-        }
+        const body = request.body ? await request.clone().text() : null;
         
         let requestPath = urlObj.pathname + urlObj.search;
         if (pathPrefix !== '/' && (requestPath === pathPrefix || requestPath.startsWith(pathPrefix + '/'))) {
@@ -3080,15 +3027,7 @@
       });
     };
 
-    function postSocketEvent(socketBackend, eventName, ...args) {
-      const socketId = socketBackend && socketBackend.__socketId;
-      if (socketId == null) return;
-      try {
-        nodeEmulator.dispatchEvent('socket', { socketId, event: eventName, args });
-      } catch (_) {}
-    }
-
-    globalThis.handleSocket = async function(absoluteUrl, protocols) {
+    window.handleSocket = async function(absoluteUrl, protocols) {
       let urlObj;
       try { urlObj = new URL(absoluteUrl); } catch (e) {
         return null;
@@ -3132,7 +3071,6 @@
             // installs its `packet` listener. A synchronous server reply would
             // arrive before that listener exists.
             setTimeout(() => {
-              postSocketEvent(mockBackend, 'open');
               if (typeof mockBackend._onOpen === 'function') mockBackend._onOpen();
             }, 0);
             return;
@@ -3155,7 +3093,6 @@
             setTimeout(() => {
               if (typeof mockBackend._onServerData !== 'function') return;
               try {
-                postSocketEvent(mockBackend, 'data', serverData);
                 mockBackend._onServerData(serverData);
               } catch (err) {
                 console.error('[VirtualWS v17] BROWSER SERVER DATA CALLBACK THREW', err && err.stack || err);
@@ -3174,7 +3111,6 @@
             size: 0,
             data: String(code) + " " + String(reason || "")
           });
-          postSocketEvent(mockBackend, 'close', code, reason);
           if (typeof mockBackend._onClose === 'function') {
             mockBackend._onClose(code, reason);
           }
@@ -3571,48 +3507,10 @@
     };
 
     // 6. Terminal Command Execution
-    class WorkerNPMProxy {
-      constructor(options = {}) {
-        this.rootfolder = String(options.rootfolder || getRuntimeRootFolder());
-      }
-
-      static splitCommand(command) {
-        const result = [];
-        const input = String(command || '');
-        let current = '';
-        let quote = null;
-        let escaped = false;
-        for (const ch of input) {
-          if (escaped) { current += ch; escaped = false; continue; }
-          if (ch === '\\') { escaped = true; continue; }
-          if (quote) {
-            if (ch === quote) quote = null;
-            else current += ch;
-            continue;
-          }
-          if (ch === '"' || ch === "'") { quote = ch; continue; }
-          if (/\s/.test(ch)) {
-            if (current) { result.push(current); current = ''; }
-          } else current += ch;
-        }
-        if (escaped) current += '\\';
-        if (current) result.push(current);
-        return result;
-      }
-
-      async run(args) {
-        return await rpc('npm.run', {
-          args: Array.from(args || []),
-          rootfolder: this.rootfolder,
-          cwd: nodeEmulator.cwd || '/'
-        });
-      }
-    }
-
-    globalThis.NPM = WorkerNPMProxy;
-
     function splitTerminalCommand(command) {
-      return WorkerNPMProxy.splitCommand(command);
+      const NpmClass = typeof window !== 'undefined' && (window.NPM || window.parent?.NPM);
+      if (NpmClass && typeof NpmClass.splitCommand === 'function') return NpmClass.splitCommand(command);
+      return String(command || '').trim().split(/\s+/).filter(Boolean);
     }
 
     function getRuntimeRootFolder() {
@@ -3623,16 +3521,30 @@
     }
 
     function getNpmManager() {
+      const NpmClass = typeof window !== 'undefined' && (window.NPM || window.parent?.NPM);
+      if (!NpmClass) return null;
       const runtimeRoot = getRuntimeRootFolder();
       if (!nodeEmulator.npm) {
-        nodeEmulator.npm = new WorkerNPMProxy({ rootfolder: runtimeRoot });
+        nodeEmulator.npm = new NpmClass({
+          filesystem: nodeEmulator.filesystem,
+          network: nodeEmulator.network,
+          rootfolder: runtimeRoot,
+          log: console,
+          env: nodeEmulator.env,
+          commandRunner: async command => await window.terminalCommand(command),
+          onFileSystemChange: () => {
+            try {
+              window.nodeEmulator?.dispatchEvent?.('filesystemchange');
+            } catch (_) {}
+          }
+        });
       } else {
         nodeEmulator.npm.rootfolder = runtimeRoot;
       }
       return nodeEmulator.npm;
     }
 
-    globalThis.terminalCommand = async function(cmd) {
+    window.terminalCommand = async function(cmd) {
       console.logText(`\$ ${cmd}`);
       const parts = splitTerminalCommand(cmd);
       const bin = parts[0];
@@ -3751,316 +3663,35 @@
       }
     };
 
-
     // Initialize app defaults
     console.log("Node Simulator environment loaded. Use terminalCommand('node index.js') to start.");
   };
 
-  function workerBootstrap() {
-  
-    'use strict';
-  
-    let runtime = null;
-    let nextHostRequestId = 1;
-    const hostRequests = new Map();
-  
-    function safeClone(value, seen = new WeakSet()) {
-      if (value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
-      if (typeof value === 'bigint') return String(value) + 'n';
-      if (typeof value === 'function') return `[Function ${value.name || 'anonymous'}]`;
-      if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack, code: value.code };
-      if (value instanceof ArrayBuffer) return value.slice(0);
-      if (ArrayBuffer.isView(value)) return new value.constructor(value);
-      if (seen.has(value)) return '[Circular]';
-      seen.add(value);
-      if (Array.isArray(value)) return value.map(v => safeClone(v, seen));
-      if (value instanceof Map) return Array.from(value.entries()).map(([k,v]) => [safeClone(k, seen), safeClone(v, seen)]);
-      if (value instanceof Set) return Array.from(value.values()).map(v => safeClone(v, seen));
-      if (typeof Headers !== 'undefined' && value instanceof Headers) return Object.fromEntries(value.entries());
-      if (typeof URLSearchParams !== 'undefined' && value instanceof URLSearchParams) return value.toString();
-      const out = {};
-      try {
-        for (const key of Object.keys(value)) out[key] = safeClone(value[key], seen);
-      } catch (_) {
-        return String(value);
-      }
-      return out;
-    }
-  
-    function postEvent(name, ...args) {
-      const payload = safeClone(args);
-      self.postMessage({ type: 'event', name, args: payload });
-    }
-  
-    function hostRpc(method, payload) {
-      const id = nextHostRequestId++;
-      return new Promise((resolve, reject) => {
-        hostRequests.set(id, { resolve, reject });
-        self.postMessage({ type: 'hostRequest', capability: runtime?.capabilityToken, id, method, payload: safeClone(payload) });
-      });
-    }
-  
-    class WorkerFileSystemProxy {
-      constructor(files = [], onWrite = null) {
-        this._files = new Map();
-        this._onWrite = typeof onWrite === 'function' ? onWrite : null;
-        this.replaceSnapshot(files);
-      }
-      _normalize(path) {
-        return String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/').replace(/(^|\/)\.\//g, '$1');
-      }
-      _bytes(value) {
-        if (value == null) return new Uint8Array(0);
-        if (value instanceof Uint8Array) return new Uint8Array(value);
-        if (value instanceof ArrayBuffer) return new Uint8Array(value.slice(0));
-        if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
-        if (typeof value === 'string') return new TextEncoder().encode(value);
-        return new TextEncoder().encode(String(value));
-      }
-      replaceSnapshot(files = []) {
-        const next = new Map();
-        for (const entry of files || []) {
-          if (!entry) continue;
-          const path = this._normalize(entry.path);
-          if (!path) continue;
-          next.set(path, this._bytes(entry.data));
-        }
-        this._files = next;
-      }
-      listFilesSync() { return Array.from(this._files.keys()); }
-      existsSync(path) { return this._files.has(this._normalize(path)); }
-      readFileSync(path, encoding) {
-        const normalized = this._normalize(path);
-        if (!this._files.has(normalized)) throw new Error(`ENOENT: no such file or directory, open '${path}'`);
-        const data = new Uint8Array(this._files.get(normalized));
-        if (encoding === 'utf8' || (encoding && encoding.encoding === 'utf8')) return new TextDecoder().decode(data);
-        return data;
-      }
-      writeFileSync(path, content) {
-        const normalized = this._normalize(path);
-        if (!normalized) throw new Error('EINVAL: invalid file path');
-        const data = this._bytes(content);
-        this._files.set(normalized, new Uint8Array(data));
-        if (this._onWrite) {
-          try { this._onWrite(normalized, new Uint8Array(data)); } catch (_) {}
-        }
-      }
-    }
-  
-    function createWorkerCompat(config) {
-      const w = Object.create(null);
-      const copyNames = [
-        'URL', 'URLSearchParams', 'Request', 'Response', 'Headers', 'FormData', 'Blob', 'File',
-        'TextEncoder', 'TextDecoder', 'ArrayBuffer', 'Uint8Array', 'Uint16Array', 'Uint32Array', 'DataView',
-        'Uint8ClampedArray', 'Int8Array', 'Int16Array', 'Int32Array', 'Float32Array', 'Float64Array',
-        'BigInt64Array', 'BigUint64Array', 'WebSocket', 'Event', 'EventTarget', 'MessageEvent',
-        'CloseEvent', 'DOMException', 'AbortController', 'AbortSignal', 'ReadableStream', 'WritableStream',
-        'TransformStream', 'crypto', 'atob', 'btoa', 'structuredClone', 'performance', 'queueMicrotask',
-        'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'setImmediate', 'clearImmediate'
-      ];
-      for (const name of copyNames) if (name in globalThis) w[name] = globalThis[name];
-      w.self = w;
-      w.window = w;
-      w.parent = w;
-      w.top = w;
-      w.global = globalThis;
-      w.location = config.location || {
-        href: config.currentPageUrl || 'http://127.0.0.1/', origin: config.hostOrigin || '',
-        protocol: 'http:', host: '127.0.0.1', hostname: '127.0.0.1', port: '', pathname: '/', search: '', hash: ''
-      };
-      w.document = undefined;
-      if (typeof globalThis.addEventListener === 'function') w.addEventListener = globalThis.addEventListener.bind(globalThis);
-      if (typeof globalThis.removeEventListener === 'function') w.removeEventListener = globalThis.removeEventListener.bind(globalThis);
-      if (typeof globalThis.dispatchEvent === 'function') w.dispatchEvent = globalThis.dispatchEvent.bind(globalThis);
-      return w;
-    }
-  
-    function serializeResponse(response) {
-      if (!response) return null;
-      return response.arrayBuffer().then(async body => ({
-        status: response.status,
-        statusText: response.statusText,
-        headers: Array.from(response.headers.entries()),
-        body
-      }));
-    }
-  
-    function serializeThrown(error) {
-      return safeClone(error instanceof Error ? error : new Error(String(error)));
-    }
-  
-    async function handleRpc(message) {
-      if (!runtime) throw new Error('Node Worker runtime is not initialized');
-      switch (message.method) {
-        case 'terminalCommand':
-          return await runtime.compat.terminalCommand(message.payload.cmd);
-        case 'eval':
-          return safeClone(await (0, eval)(String(message.payload.code || '')));
-        case 'handleRequest': {
-          const response = await runtime.compat.handleRequest(message.payload.request, message.payload.type);
-          return await serializeResponse(response);
-        }
-        case 'handleSocket': {
-          const backend = await runtime.compat.handleSocket(message.payload.url, message.payload.protocols);
-          if (!backend) return null;
-          const socketId = runtime.nextSocketId++;
-          backend.__socketId = socketId;
-          runtime.sockets.set(socketId, backend);
-          return { socketId };
-        }
-        case 'socket.clientMessage': {
-          const backend = runtime.sockets.get(message.payload.socketId);
-          if (!backend) return false;
-          backend.onClientMessage(message.payload.data);
-          return true;
-        }
-        case 'socket.sendToClient': {
-          const backend = runtime.sockets.get(message.payload.socketId);
-          if (!backend) return false;
-          backend.sendToClient(message.payload.data);
-          return true;
-        }
-        case 'socket.closeClient': {
-          const backend = runtime.sockets.get(message.payload.socketId);
-          if (!backend) return false;
-          backend.closeClient(message.payload.code, message.payload.reason);
-          runtime.sockets.delete(message.payload.socketId);
-          return true;
-        }
-        case 'getServerState': {
-          const ports = [];
-          for (const [port, server] of runtime.compat.activeServers.entries()) {
-            if (server && server.listening) ports.push(String(port));
-          }
-          return ports;
-        }
-        default:
-          throw new Error(`Unknown Worker RPC method: ${message.method}`);
-      }
-    }
-  
-    async function startRuntime(config) {
-      const fileSystem = new WorkerFileSystemProxy(config.files || [], (path, data) => {
-        self.postMessage({ type: 'hostRequest', capability: runtime?.capabilityToken, id: nextHostRequestId++, method: 'fs.write', payload: { path, data } }, [data.buffer]);
-      });
-      const network = {
-        request: async (url, baseOrigin, data, type) => {
-          const result = await hostRpc('network.request', { url, baseOrigin, data, type });
-          if (!result) return null;
-          return new Response(result.body, {
-            status: result.status,
-            statusText: result.statusText,
-            headers: result.headers || []
-          });
-        },
-        dispatchEvent: (name, ...args) => postEvent('network', name, ...args)
-      };
-      const nodeEmulator = {
-        domain: String(config.domain || ''),
-        rootfolder: String(config.rootfolder || '').replace(/^\/+|\/+$/g, ''),
-        pathPrefix: String(config.pathPrefix || '/').startsWith('/') ? String(config.pathPrefix || '/') : '/' + String(config.pathPrefix || '/'),
-        source: undefined,
-        filesystem: fileSystem,
-        cwd: String(config.cwd || '/'),
-        previousCwd: String(config.cwd || '/'),
-        env: Object.assign({}, config.env || {}),
-        fileSystemSync: config.fileSystemSync !== false,
-        network,
-        npm: null,
-        dispatchEvent: (name, ...args) => postEvent(name, ...args)
-      };
-      const compat = createWorkerCompat(config);
-      compat.fileSystem = fileSystem;
-      compat.nodeEmulator = nodeEmulator;
-      compat.network = network;
-      globalThis.__runtimeCompat = compat;
-      globalThis.window = compat;
-      globalThis.global = globalThis;
-      globalThis.__hostOrigin = String(config.hostOrigin || '');
-  
-      runtime = {
-        compat,
-        nodeEmulator,
-        fileSystem,
-        capabilityToken: String(config.capabilityToken || ''),
-        nextSocketId: 1,
-        sockets: new Map()
-      };
-  
-      try {
-        const fn = new Function(`return (${config.nodeExecution});`)();
-        fn({
-          
-          nodeEmulator,
-          rpc: hostRpc,
-          hostOrigin: config.hostOrigin,
-          currentPageUrl: config.currentPageUrl,
-          baseOrigin: config.baseOrigin,
-          location: config.location
-        });
-        self.postMessage({ type: 'ready' });
-      } catch (error) {
-        self.postMessage({ type: 'initError', error: serializeThrown(error) });
-        throw error;
-      }
-    }
-  
-    self.onmessage = async event => {
-      const message = event.data || {};
-      try {
-        if (message.type === 'init') {
-          await startRuntime(message.config);
-          return;
-        }
-        if (message.type === 'hostResponse') {
-          const pending = hostRequests.get(message.id);
-          if (!pending) return;
-          hostRequests.delete(message.id);
-          if (message.ok) pending.resolve(message.value);
-          else pending.reject(Object.assign(new Error(message.error?.message || 'Host RPC failed'), message.error || {}));
-          return;
-        }
-        if (message.type === 'syncFilesystem' && runtime) {
-          runtime.fileSystem.replaceSnapshot(message.files || []);
-          runtime.nodeEmulator.filesystem = runtime.fileSystem;
-          runtime.compat.fileSystem = runtime.fileSystem;
-          return;
-        }
-        if (message.type === 'rpc') {
-          const value = await handleRpc(message);
-          const transfer = [];
-          if (value && value.body instanceof ArrayBuffer) transfer.push(value.body);
-          self.postMessage({ type: 'rpcResult', id: message.id, ok: true, value }, transfer);
-          return;
-        }
-      } catch (error) {
-        if (message.type === 'rpc') {
-          self.postMessage({ type: 'rpcResult', id: message.id, ok: false, error: serializeThrown(error) });
-        } else if (message.type === 'init') {
-          self.postMessage({ type: 'initError', error: serializeThrown(error) });
-        }
-      }
-    };
-  }
   class NodeEndpoint extends NetworkEndpoint {
-    constructor(emulator, enabled = true) { super(enabled); this.emulator = emulator; }
-    async handleRequest(request, type) {
-      if (!this.emulator) return null;
-      return await this.emulator._handleNetworkRequest(request, type);
+    constructor(emulator, enabled = true) {
+      super(enabled);
+      this.emulator = emulator;
+    }
+    async handleRequest(request,type) {
+      if (!this.emulator?.context?.handleRequest) return null;
+      var response = await this.emulator.context.handleRequest(request, type);
+      if (response) Object.setPrototypeOf(response, Response.prototype);
+      return response;
     }
     async handleSocket(absoluteUrl, protocols) {
-      if (!this.emulator) return null;
-      return await this.emulator._handleNetworkSocket(absoluteUrl, protocols);
+      if (!this.emulator?.context?.handleRequest) return null;
+      return await this.emulator.context.handleSocket(absoluteUrl, protocols);
     }
   }
+
   class NodeEmulator extends EventHandler {
     constructor(options = {}) {
       super(options.enabled ?? true);
-      this.domain = String(options.domain || "").replace(/\/+$/, "");
-      this.rootfolder = String(options.rootfolder || "").replace(/^\/+|\/+$/g, "");
+
+      this.domain = String(options.domain || "").replace(/\/+$/ ,"");
+      this.rootfolder = String(options.rootfolder || "").replace(/^\/+|\/+$/g,"");
       this.pathPrefix = String(options.pathPrefix || "/").startsWith("/") ? String(options.pathPrefix || "/") : "/" + String(options.pathPrefix || "/");
       this.pathPrefix = this.pathPrefix === "/" ? "/" : this.pathPrefix.replace(/\/+$/, "");
-      this.options = options;
       this.source = options.source;
       this.filesystem = options.filesystem;
       this.cwd = normalizeNodePath(options.cwd || '/');
@@ -4068,332 +3699,94 @@
       this.loaded = false;
       this.env = options.env || {};
       this.fileSystemSync = options.fileSystemSync !== false;
-      this.network = options.network || new Network();
       this.endpoint = new NodeEndpoint(this);
-      this.worker = null;
-      this.workerUrl = null;
-      this.context = null;
+      this.network = options.network || new Network();
       this.loadError = null;
-      this._rpcId = 1;
-      this._rpcPending = new Map();
-      this._socketBridges = new Map();
-      this._serverState = new Map();
-      this.npm = null;
-      this._destroyed = false;
-      this._capabilityToken = (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') ? globalThis.crypto.randomUUID() : `${Math.random().toString(36).slice(2)}.${Date.now()}.${Math.random()}`;
-      this.contextReady = this._initialize();
+      this.contextReady = this.runframe();
       this.ready = this.load().catch(e => { this.loadError = e; return null; });
     }
-
-    async _snapshotFilesystem() {
-      if (!this.filesystem) return [];
-      const files = [];
-      const list = typeof this.filesystem.listFilesSync === 'function' ? this.filesystem.listFilesSync() : [];
-      for (const path of list) {
-        try {
-          const raw = this.filesystem.readFileSync(path, 'binary');
-          let data;
-          if (raw instanceof ArrayBuffer) data = raw.slice(0);
-          else if (ArrayBuffer.isView(raw)) data = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
-          else if (typeof raw === 'string') {
-            const bytes = new Uint8Array(raw.length);
-            for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i) & 0xff;
-            data = bytes.buffer;
-          } else data = new TextEncoder().encode(String(raw ?? '')).buffer;
-          files.push({ path: String(path).replace(/^\/+/, ''), data });
-        } catch (_) {}
-      }
-      return files;
-    }
-
-    _snapshotTransferList(files) { return files.map(f => f.data).filter(v => v instanceof ArrayBuffer); }
-
-    _hostOrigin() {
-      try { return location.origin; } catch (_) { return ''; }
-    }
-
-    _config(snapshot) {
-      const hostOrigin = String(this.options?.hostOrigin || this._hostOrigin());
-      let currentPageUrl = 'http://127.0.0.1/';
-      try { currentPageUrl = new URL(hostOrigin + '/').href.replace(/\/$/, '/') + ''; } catch (_) {}
-      let locationInfo = null;
+    async load() {
       try {
-        locationInfo = { href: location.href, origin: location.origin, protocol: location.protocol, host: location.host, hostname: location.hostname, port: location.port, pathname: location.pathname, search: location.search, hash: location.hash };
-      } catch (_) {}
-      return {
-        domain: this.domain,
-        rootfolder: this.rootfolder,
-        pathPrefix: this.pathPrefix,
-        cwd: this.cwd,
-        env: this.env,
-        fileSystemSync: this.fileSystemSync,
-        hostOrigin,
-        currentPageUrl,
-        baseOrigin: 'http://127.0.0.1/',
-        location: locationInfo,
-        files: snapshot,
-        capabilityToken: this._capabilityToken,
-        nodeExecution: `(${nodeExecution.toString()})`
-      };
-    }
-
-    async _initialize() {
-      try {
+        const context = await this.contextReady;
+        if (!context) throw new Error('Node runtime context could not be created.');
+        this.context = context;
+        this.context.nodeEmulator = this;
         if (!this.filesystem) {
           if (!this.source) throw new Error('No filesystem source was provided to the Node runtime.');
           this.filesystem = await FileSystem.create(this.source, { sync: this.fileSystemSync });
         }
-        const snapshot = await this._snapshotFilesystem();
-        const worker = await this._startWorker(this._config(snapshot));
-        this.context = {
-          handleRequest: (request, type) => this._handleNetworkRequest(request, type),
-          handleSocket: (url, protocols) => this._handleNetworkSocket(url, protocols),
-          terminalCommand: cmd => this.terminalCommand(cmd),
-          eval: code => this.evalInContext(code),
-          activeServers: this._serverState
-        };
-        return worker;
+        this.context.fileSystem = this.filesystem;
+        this.loaded = true;
+        this.dispatchEvent('loaded',this);
+        return this;
       } catch (e) {
         this.loadError = e;
+        this.dispatchEvent('loaderror',e);
         throw e;
       }
     }
+    runframe() {
+      this.iframe = document.createElement('iframe');
+      this.iframe.style.display = "none";
+      this.iframe.src = 'about:blank';
+      (document.body || document.documentElement).appendChild(this.iframe);
 
-    async _startWorker(config) {
-      const blob = new Blob([`(${workerBootstrap.toString()})()`], { type: 'application/javascript' });
-      this.workerUrl = URL.createObjectURL(blob);
-      const worker = new Worker(this.workerUrl);
-      this.worker = worker;
-      URL.revokeObjectURL(this.workerUrl);
-      this.workerUrl = null;
-
-      return await new Promise((resolve, reject) => {
-        let settled = false;
-        const fail = error => { if (!settled) { settled = true; try { worker.terminate(); } catch (_) {} reject(error instanceof Error ? error : new Error(String(error))); } };
-        worker.onmessage = event => {
-          const message = event.data || {};
-          if (message.type === 'ready') { if (!settled) { settled = true; resolve(worker); } return; }
-          if (message.type === 'initError') { const error = Object.assign(new Error(message.error?.message || 'Node emulator Worker initialization failed'), message.error || {}); this._handleWorkerMessage(message); fail(error); return; }
-          if (message.type === 'hostRequest') {
-            if (message.capability !== this._capabilityToken) return;
-            Promise.resolve(this._handleHostRequest(message.method, message.payload))
-              .then(value => {
-                const transfer = [];
-                if (value && value.body instanceof ArrayBuffer) transfer.push(value.body);
-                worker.postMessage({ type: 'hostResponse', id: message.id, ok: true, value }, transfer);
-              })
-              .catch(error => worker.postMessage({ type: 'hostResponse', id: message.id, ok: false, error: { name: error.name, message: error.message, stack: error.stack, code: error.code } }));
-            return;
-          }
-          if (message.type === 'event' || message.type === 'rpcResult' || message.type === 'initError') this._handleWorkerMessage(message);
-        };
-        worker.onerror = event => {
-          const error = new Error(event.message || 'Node emulator Worker failed');
-          this.dispatchEvent('error', error, '[node worker]');
-          for (const [, pending] of this._rpcPending) pending.reject(error);
-          this._rpcPending.clear();
-          fail(error);
-        };
-        worker.onmessageerror = () => fail(new Error('Node emulator Worker message could not be deserialized'));
-        try {
-          const transfers = this._snapshotTransferList(config.files || []);
-          worker.postMessage({ type: 'init', config }, transfers);
-        } catch (e) { fail(e); }
-      });
-    }
-
-    _sendWorkerRpc(method, payload = {}) {
-      if (!this.worker || this._destroyed) return Promise.reject(new Error('Node emulator Worker is not running'));
-      const id = this._rpcId++;
-      return new Promise((resolve, reject) => {
-        this._rpcPending.set(id, { resolve, reject });
-        try { this.worker.postMessage({ type: 'rpc', id, method, payload }); }
-        catch (e) { this._rpcPending.delete(id); reject(e); }
-      });
-    }
-
-    _handleWorkerMessage(message) {
-      if (message.type === 'rpcResult') {
-        const pending = this._rpcPending.get(message.id);
-        if (!pending) return;
-        this._rpcPending.delete(message.id);
-        if (message.ok) pending.resolve(message.value);
-        else pending.reject(Object.assign(new Error(message.error?.message || 'Node worker RPC failed'), message.error || {}));
-        return;
-      }
-      if (message.type === 'initError') {
-        const error = Object.assign(new Error(message.error?.message || 'Node worker initialization failed'), message.error || {});
-        this.loadError = error;
-        this.dispatchEvent('loaderror', error);
-        return;
-      }
-      if (message.type !== 'event') return;
-      const args = Array.isArray(message.args) ? message.args : [];
-      if (message.name === 'console') {
-        this.dispatchEvent('console', args[0], args[1] || []);
-      } else if (message.name === 'error') {
-        this.dispatchEvent('error', args[0], args[1] || '[node runtime env]');
-      } else if (message.name === 'serverstart') {
-        const port = args[1] != null ? String(args[1]) : null;
-        if (port != null) this._serverState.set(port, { listening: true });
-        this.dispatchEvent('serverstart', args[0], args[1]);
-      } else if (message.name === 'serverclose') {
-        const port = args[1] != null ? String(args[1]) : null;
-        if (port != null) this._serverState.delete(port);
-        this.dispatchEvent('serverclose', args[0], args[1]);
-      } else if (message.name === 'filesystemchange') {
-        this.dispatchEvent('filesystemchange');
-      } else if (message.name === 'network') {
-        try { this.network?.dispatchEvent?.(...args); } catch (e) { this.dispatchEvent('error', e, '[node network]'); }
-      } else if (message.name === 'socket') {
-        const info = args[0] || {};
-        const bridge = this._socketBridges.get(info.socketId);
-        if (!bridge) return;
-        if (info.event === 'open') bridge._onOpen?.();
-        else if (info.event === 'data') bridge._onServerData?.(info.args?.[0]);
-        else if (info.event === 'close') { bridge._onClose?.(info.args?.[0], info.args?.[1]); this._socketBridges.delete(info.socketId); }
-      }
-    }
-
-    async _handleHostRequest(method, payload) {
-      if (method === 'fs.write') {
-        if (!this.filesystem || typeof this.filesystem.writeFileSync !== 'function') throw new Error('FileSystem does not support writeFileSync');
-        const data = payload?.data instanceof Uint8Array ? payload.data : new Uint8Array(payload?.data || []);
-        this.filesystem.writeFileSync(payload.path, data);
-        this.dispatchEvent('filesystemchange');
+      const init = () => {
+        const context = this.iframe.contentWindow || this.iframe.contentDocument?.defaultView || null;
+        const doc = this.iframe.contentDocument || context?.document || null;
+        if (!context || !doc?.body) return false;
+        if (this.context) return true;
+        this.context = context;
+        this.context.nodeEmulator = this;
+        const script = doc.createElement('script');
+        script.innerHTML = `(${nodeExecution.toString()})()`;
+        doc.body.appendChild(script);
         return true;
-      }
-      if (method === 'network.request') {
-        const response = await this.network.request(payload.url, payload.baseOrigin, payload.data || {}, payload.type || 'fetch');
-        if (!response) return null;
-        const body = await response.arrayBuffer();
-        return { status: response.status, statusText: response.statusText, headers: Array.from(response.headers.entries()), body };
-      }
-      if (method === 'npm.run') {
-        const npm = this._getNpmManager();
-        if (!npm) return null;
-        const result = await npm.run(payload?.args || []);
-        await this.syncFilesystem();
-        this.dispatchEvent('filesystemchange');
-        return result;
-      }
-      throw new Error(`Unknown host request: ${method}`);
-    }
-
-    _getNpmManager() {
-      const NpmClass = typeof window !== 'undefined' && (window.NPM || window.parent?.NPM);
-      if (!NpmClass) return null;
-      const runtimeRoot = String(this.rootfolder || '').replace(/^\/+|\/+$/g, '');
-      if (!this.npm) {
-        this.npm = new NpmClass({
-          filesystem: this.filesystem,
-          network: this.network,
-          rootfolder: runtimeRoot,
-          log: console,
-          env: this.env,
-          commandRunner: async command => await this.terminalCommand(command),
-          onFileSystemChange: () => { try { this.dispatchEvent('filesystemchange'); } catch (_) {} }
-        });
-      } else this.npm.rootfolder = runtimeRoot;
-      return this.npm;
-    }
-
-    async _handleNetworkRequest(request, type) {
-      await this.ready;
-      if (this.loadError) throw this.loadError;
-      let body = null;
-      try { if (request?.body) body = await request.clone().text(); } catch (_) {}
-      const plainRequest = {
-        url: request?.url || '', method: request?.method || 'GET',
-        headers: request?.headers ? Object.fromEntries(request.headers.entries()) : {},
-        body
       };
-      const result = await this._sendWorkerRpc('handleRequest', { request: plainRequest, type });
-      if (!result) return null;
-      return new Response(result.body, { status: result.status, statusText: result.statusText, headers: result.headers || [] });
-    }
 
-    async _handleNetworkSocket(absoluteUrl, protocols) {
-      await this.ready;
-      if (this.loadError) throw this.loadError;
-      const result = await this._sendWorkerRpc('handleSocket', { url: absoluteUrl, protocols });
-      if (!result?.socketId) return null;
-      const socketId = result.socketId;
-      const bridge = {
-        socketId,
-        _onOpen: null,
-        _onServerData: null,
-        _onClose: null,
-        onClientMessage: data => this._sendWorkerRpc('socket.clientMessage', { socketId, data }),
-        closeClient: (code, reason) => { this._sendWorkerRpc('socket.closeClient', { socketId, code, reason }).catch(() => {}); },
-        sendToClient: data => this._sendWorkerRpc('socket.sendToClient', { socketId, data }).catch(() => {})
-      };
-      this._socketBridges.set(socketId, bridge);
-      return bridge;
+      if (init()) return Promise.resolve(this.context);
+      return new Promise((resolve,reject) => {
+        let attempts = 0;
+        const check = () => {
+          if (init()) return resolve(this.context);
+          if (++attempts > 100) return reject(new Error('Node runtime context could not be created.'));
+          setTimeout(check,0);
+        };
+        check();
+      });
     }
-
-    async syncFilesystem() {
-      await this.ready.catch(() => {});
-      if (!this.worker || !this.filesystem) return false;
-      const files = await this._snapshotFilesystem();
-      const transfers = this._snapshotTransferList(files);
-      this.worker.postMessage({ type: 'syncFilesystem', files }, transfers);
-      return true;
-    }
-
     hasListeningServer() {
-      for (const state of this._serverState.values()) if (state?.listening) return true;
+      try {
+        const servers = this.context?.activeServers;
+        if (!servers || typeof servers.values !== 'function') return false;
+        for (const server of servers.values()) {
+          if (server?.listening) return true;
+        }
+      } catch (_) {}
       return false;
     }
-
     async waitForServer(timeout = 10000, interval = 50) {
       const start = Date.now();
       while (Date.now() - start <= timeout) {
         if (this.hasListeningServer()) return true;
-        try {
-          const ports = await this._sendWorkerRpc('getServerState', {});
-          if (Array.isArray(ports) && ports.length) return true;
-        } catch (_) {}
         await new Promise(r => setTimeout(r, interval));
       }
       return this.hasListeningServer();
     }
-
-    async load() {
-      try {
-        await this.contextReady;
-        this.loaded = true;
-        this.dispatchEvent('loaded', this);
-        return this;
-      } catch (e) {
-        this.loadError = e;
-        this.dispatchEvent('loaderror', e);
-        throw e;
-      }
+    destroy() {
+      try { this.iframe?.remove(); } catch (e) {}
+      this.context = null;
+      this.loaded = false;
     }
-
     async terminalCommand(cmd) {
       await this.ready;
       if (this.loadError) throw this.loadError;
-      return await this._sendWorkerRpc('terminalCommand', { cmd: String(cmd ?? '') });
+      return await this.context.terminalCommand(cmd);
     }
-
     async evalInContext(code) {
       await this.ready;
       if (this.loadError) throw this.loadError;
-      return await this._sendWorkerRpc('eval', { code: String(code ?? '') });
-    }
-
-    destroy() {
-      this._destroyed = true;
-      for (const [, pending] of this._rpcPending) pending.reject(new Error('Node emulator destroyed'));
-      this._rpcPending.clear();
-      this._socketBridges.clear();
-      try { this.worker?.terminate(); } catch (_) {}
-      this.worker = null;
-      this.context = null;
-      this.loaded = false;
-      this._serverState.clear();
+      return await this.context.eval(code);
     }
   }
 
