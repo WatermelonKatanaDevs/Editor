@@ -4319,6 +4319,12 @@
       globalThis.window = compat;
       globalThis.global = globalThis;
       globalThis.__hostOrigin = String(config.hostOrigin || '');
+      // The existing fs/npm/module resolver implementations use the global
+      // FileSystem binding. In the Worker this must point at the proxied
+      // filesystem created above rather than the host-page object.
+      globalThis.fileSystem = fileSystem;
+      globalThis.filesystem = fileSystem;
+      compat.fileSystem = fileSystem;
   
       runtime = {
         compat,
