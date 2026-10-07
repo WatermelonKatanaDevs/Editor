@@ -183,7 +183,7 @@
             const next=content.join('\\n');
             const previous=mode==='create' ? null : String(state.fs.readFileSync(path,'utf8')||'');
             if(mode==='modify' && next===previous) fail(`patch for ${path} made no changes.`);
-            pending.push({path,delete:false,content:next});
+            pending.push({path,delete:false,content:next,created:mode==='create'});
           }
         }
 
@@ -205,7 +205,7 @@
         }
 
         onRefresh?.();
-        return {applied:true,files:pending.map(x=>x.delete?{path:x.path,deleted:true}:{path:x.path,changed:true,created:!state.fs.existsSync?.(x.path)})};
+        return {applied:true,files:pending.map(x=>x.delete?{path:x.path,deleted:true}:{path:x.path,changed:true,created:x.created===true})};
       }
     });
 
