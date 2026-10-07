@@ -19,6 +19,7 @@
 
     globalThis.global = globalThis;
     globalThis.__hostOrigin = String(boot.hostOrigin || "");
+    globalThis.__hostURL = String(boot.hostURL || "");
     globalThis.nodeEmulator = nodeEmulator;
     function normalizeNodePath(path) {
       const parts = String(path || "/").replace(/\\/g, "/").split("/").filter(Boolean);
@@ -4217,15 +4218,15 @@
       if (!runtime) throw new Error('Node Worker runtime is not initialized');
       switch (message.method) {
         case 'terminalCommand':
-          return await runtime.compat.terminalCommand(message.payload.cmd);
+          return await global.terminalCommand(message.payload.cmd);
         case 'eval':
           return safeClone(await (0, eval)(String(message.payload.code || '')));
         case 'handleRequest': {
-          const response = await runtime.compat.handleRequest(message.payload.request, message.payload.type);
+          const response = await global.handleRequest(message.payload.request, message.payload.type);
           return await serializeResponse(response);
         }
         case 'handleSocket': {
-          const backend = await runtime.compat.handleSocket(message.payload.url, message.payload.protocols);
+          const backend = await global.handleSocket(message.payload.url, message.payload.protocols);
           if (!backend) return null;
           const socketId = runtime.nextSocketId++;
           backend.__socketId = socketId;
@@ -4253,7 +4254,7 @@
         }
         case 'getServerState': {
           const ports = [];
-          for (const [port, server] of runtime.compat.activeServers.entries()) {
+          for (const [port, server] of global.activeServers.entries()) {
             if (server && server.listening) ports.push(String(port));
           }
           return ports;
@@ -4311,14 +4312,36 @@
         npm: null,
         dispatchEvent: (name, ...args) => postEvent(name, ...args)
       };
-      const compat = createWorkerCompat(config);
+      // The Worker itself is the Node global scope. Keep the public runtime
+      // namespace on `global`/`globalThis` rather than creating a fake window.
+      const compat = globalThis;
+      try {
+        const runtimeOrigin = String(config.domain || 'http://127.0.0.1').replace(/\/+$/, '');
+        const runtimePathRaw = String(config.pathPrefix || '/');
+        const runtimePath = runtimePathRaw.startsWith('/') ? runtimePathRaw : '/' + runtimePathRaw;
+        const virtualUrl = new URL(runtimePath || '/', runtimeOrigin + '/');
+        compat.__nodeLocation = {
+          href: virtualUrl.href,
+          origin: virtualUrl.origin,
+          protocol: virtualUrl.protocol,
+          host: virtualUrl.host,
+          hostname: virtualUrl.hostname,
+          port: virtualUrl.port,
+          pathname: virtualUrl.pathname,
+          search: virtualUrl.search,
+          hash: virtualUrl.hash,
+          reload() {},
+          assign() {},
+          replace() {}
+        };
+      } catch (_) {}
       compat.fileSystem = fileSystem;
       compat.nodeEmulator = nodeEmulator;
       compat.network = network;
       globalThis.__runtimeCompat = compat;
-      globalThis.window = compat;
       globalThis.global = globalThis;
       globalThis.__hostOrigin = String(config.hostOrigin || '');
+      globalThis.__hostURL = String(config.hostURL || '');
       // The existing fs/npm/module resolver implementations use the global
       // FileSystem binding. In the Worker this must point at the proxied
       // filesystem created above rather than the host-page object.
@@ -4343,22 +4366,13 @@
           nodeEmulator,
           rpc: hostRpc,
           hostOrigin: config.hostOrigin,
+          hostURL: config.hostURL,
           currentPageUrl: config.currentPageUrl,
           baseOrigin: config.baseOrigin,
-          location: config.location
+          location: compat.__nodeLocation
         });
 
-        // nodeExecution installs its runtime APIs on the Worker's globalThis.
-        // Mirror those APIs onto the local compatibility facade too, because the
-        // RPC bridge intentionally talks to `runtime.compat` rather than exposing
-        // the Worker global directly.
-        compat.terminalCommand = globalThis.terminalCommand;
-        compat.handleRequest = globalThis.handleRequest;
-        compat.handleSocket = globalThis.handleSocket;
-        compat.getServer = globalThis.getServer;
-        compat.activeServers = globalThis.activeServers;
-        compat.__hostOrigin = globalThis.__hostOrigin;
-        compat.global = globalThis;
+        // nodeExecution installs its runtime APIs directly on `global`.
 
         self.postMessage({ type: 'ready' });
       } catch (error) {
@@ -4385,7 +4399,7 @@
         if (message.type === 'syncFilesystem' && runtime) {
           runtime.fileSystem.replaceSnapshot(message.files || []);
           runtime.nodeEmulator.filesystem = runtime.fileSystem;
-          runtime.compat.fileSystem = runtime.fileSystem;
+          globalThis.fileSystem = runtime.fileSystem;
           return;
         }
         if (message.type === 'rpc') {
@@ -4478,12 +4492,12 @@
 
     _config(snapshot) {
       const hostOrigin = String(this.options?.hostOrigin || this._hostOrigin());
+      let hostURL = String(this.options?.hostURL || '');
+      if (!hostURL) {
+        try { hostURL = String(location.href || ''); } catch (_) {}
+      }
       let currentPageUrl = 'http://127.0.0.1/';
       try { currentPageUrl = new URL(hostOrigin + '/').href.replace(/\/$/, '/') + ''; } catch (_) {}
-      let locationInfo = null;
-      try {
-        locationInfo = { href: location.href, origin: location.origin, protocol: location.protocol, host: location.host, hostname: location.hostname, port: location.port, pathname: location.pathname, search: location.search, hash: location.hash };
-      } catch (_) {}
       let moduleParserUrls = {};
       try {
         const emulatorScript = Array.from(document.scripts || []).map(script => script.src).find(src => /\/browser\/lib\//.test(src));
@@ -4510,9 +4524,9 @@
         env: this.env,
         fileSystemSync: this.fileSystemSync,
         hostOrigin,
+        hostURL,
         currentPageUrl,
         baseOrigin: 'http://127.0.0.1/',
-        location: locationInfo,
         files: snapshot,
         enableESModules: true,
         moduleParserUrls,
@@ -4665,7 +4679,7 @@
     }
 
     _getNpmManager() {
-      const NpmClass = typeof window !== 'undefined' && (window.NPM || window.parent?.NPM);
+      const NpmClass = globalThis.NPM || globalThis.parent?.NPM;
       if (!NpmClass) return null;
       const runtimeRoot = String(this.rootfolder || '').replace(/^\/+|\/+$/g, '');
       if (!this.npm) {
