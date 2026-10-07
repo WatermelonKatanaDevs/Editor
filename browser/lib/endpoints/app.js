@@ -13,7 +13,7 @@
     return "/" + out.join("/");
   }
 
-  const nodeExecution = function nodeExecution(boot = {}) {
+  const nodeExecution =   function nodeExecution(boot = {}) {
     const nodeEmulator = boot.nodeEmulator || {};
     const rpc = boot.rpc || (async () => { throw new Error("Worker RPC is not available"); });
 
@@ -2691,7 +2691,9 @@
 
       const candidates = [
         physicalPath,
+        `${physicalPath}.mjs`,
         `${physicalPath}.js`,
+        `${physicalPath}.cjs`,
         `${physicalPath}.json`
       ];
 
@@ -2783,6 +2785,315 @@
       throw new Error(`Cannot find module '${moduleSpecifier}' required from '${parentDir}'`);
     }
 
+    // --- ES Module Support -------------------------------------------------
+    // Mirrors the browser emulator's Acorn/Astring module rewriting model, but
+    // resolves modules from the virtual filesystem instead of network URLs.
+
+    const esmModuleRecords = new Map(); // canonical path -> { namespace, loading, promise }
+    let esmImportCounter = 0;
+
+    function getModuleTooling() {
+      const ac = globalThis.acorn;
+      const as = globalThis.astring;
+      if (!ac || typeof ac.parse !== 'function' || !as || typeof as.generate !== 'function') {
+        throw new Error('ES module support requires the Acorn and Astring parser runtimes.');
+      }
+      return { acorn: ac, astring: as };
+    }
+
+    function getPatternNames(pattern, names = []) {
+      if (!pattern) return names;
+      if (pattern.type === 'Identifier') {
+        if (!names.includes(pattern.name)) names.push(pattern.name);
+      } else if (pattern.type === 'ObjectPattern') {
+        for (const prop of pattern.properties || []) {
+          if (prop.type === 'RestElement') getPatternNames(prop.argument, names);
+          else getPatternNames(prop.value || prop.argument, names);
+        }
+      } else if (pattern.type === 'ArrayPattern') {
+        for (const element of pattern.elements || []) if (element) getPatternNames(element, names);
+      } else if (pattern.type === 'RestElement') {
+        getPatternNames(pattern.argument, names);
+      } else if (pattern.type === 'AssignmentPattern') {
+        getPatternNames(pattern.left, names);
+      }
+      return names;
+    }
+
+    function makeSafeModuleSnippet(code) {
+      const { acorn } = getModuleTooling();
+      const parsed = acorn.parse(code, {
+        ecmaVersion: 'latest',
+        allowAwaitOutsideFunction: true,
+        sourceType: 'script'
+      });
+      return parsed.body.length === 1 ? parsed.body[0] : { type: 'BlockStatement', body: parsed.body };
+    }
+
+    function transformModuleNode(node) {
+      if (!node || typeof node !== 'object') return node;
+
+      if (node.type === 'ImportExpression') {
+        node.type = 'CallExpression';
+        node.callee = { type: 'Identifier', name: '__importModule' };
+        node.arguments = [transformModuleNode(node.source)];
+        delete node.source;
+        return node;
+      }
+
+      if (node.type === 'MetaProperty' &&
+          node.meta?.name === 'import' &&
+          node.property?.name === 'meta') {
+        return {
+          type: 'MemberExpression',
+          object: { type: 'Identifier', name: '__importModule' },
+          property: { type: 'Identifier', name: 'meta' },
+          computed: false,
+          optional: false
+        };
+      }
+
+      for (const key of Object.keys(node)) {
+        if (key === 'parent' || key === 'start' || key === 'end' || key === 'loc') continue;
+        const child = node[key];
+        if (Array.isArray(child)) {
+          child.forEach((item, i) => {
+            if (item && typeof item === 'object' && item.type) child[i] = transformModuleNode(item);
+          });
+        } else if (child && typeof child === 'object' && child.type) {
+          node[key] = transformModuleNode(child);
+        }
+      }
+      return node;
+    }
+
+    function transformESModuleSource(sourceCode) {
+      const { acorn, astring } = getModuleTooling();
+      let ast = acorn.parse(sourceCode, {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        allowAwaitOutsideFunction: true
+      });
+
+      const newBody = [];
+      for (const originalNode of ast.body) {
+        const node = transformModuleNode(originalNode);
+
+        if (node.type === 'ImportDeclaration') {
+          const source = JSON.stringify(node.source.value);
+          const importId = `__esmImport_${++esmImportCounter}`;
+          const specifiers = node.specifiers || [];
+
+          if (!specifiers.length) {
+            newBody.push(makeSafeModuleSnippet(`await __importModule(${source});`));
+            continue;
+          }
+
+          const statements = [`const ${importId} = await __importModule(${source});`];
+          let namespaceImported = false;
+          for (const spec of specifiers) {
+            if (spec.type === 'ImportNamespaceSpecifier') {
+              statements.push(`const ${spec.local.name} = ${importId};`);
+              namespaceImported = true;
+            } else if (spec.type === 'ImportDefaultSpecifier') {
+              statements.push(`const ${spec.local.name} = ${importId}.default;`);
+            } else if (spec.type === 'ImportSpecifier') {
+              const imported = JSON.stringify(spec.imported.name || spec.imported.value);
+              statements.push(`const ${spec.local.name} = ${importId}[${imported}];`);
+            }
+          }
+          if (namespaceImported && specifiers.length === 1) {
+            // The namespace case above already declared the local binding.
+          }
+          newBody.push(makeSafeModuleSnippet(statements.join('\n')));
+          continue;
+        }
+
+        if (node.type === 'ExportDefaultDeclaration') {
+          const declaration = node.declaration;
+          if (declaration.type === 'FunctionDeclaration' || declaration.type === 'ClassDeclaration') {
+            const name = declaration.id?.name || '__defaultExport';
+            if (!declaration.id) declaration.id = { type: 'Identifier', name };
+            newBody.push(declaration);
+            newBody.push(makeSafeModuleSnippet(`__exportModule({ default: ${name} });`));
+          } else {
+            const { astring: gen } = getModuleTooling();
+            const expr = gen.generate(declaration);
+            newBody.push(makeSafeModuleSnippet(`__exportModule({ default: (${expr}) });`));
+          }
+          continue;
+        }
+
+        if (node.type === 'ExportNamedDeclaration') {
+          if (node.declaration) {
+            const decl = node.declaration;
+            newBody.push(decl);
+            if (decl.type === 'VariableDeclaration') {
+              const names = [];
+              for (const d of decl.declarations || []) getPatternNames(d.id, names);
+              if (names.length) newBody.push(makeSafeModuleSnippet(`__exportModule({ ${names.map(n => `${JSON.stringify(n)}: ${n}`).join(', ')} });`));
+            } else if (decl.type === 'FunctionDeclaration' || decl.type === 'ClassDeclaration') {
+              if (decl.id?.name) newBody.push(makeSafeModuleSnippet(`__exportModule({ ${JSON.stringify(decl.id.name)}: ${decl.id.name} });`));
+            }
+            continue;
+          }
+
+          if (node.specifiers?.length) {
+            if (node.source) {
+              const source = JSON.stringify(node.source.value);
+              const importId = `__esmReexport_${++esmImportCounter}`;
+              const mappings = node.specifiers.map(spec => `${JSON.stringify(spec.exported.name || spec.exported.value)}: ${importId}[${JSON.stringify(spec.local.name || spec.local.value)}]`).join(', ');
+              newBody.push(makeSafeModuleSnippet(`const ${importId} = await __importModule(${source});\n__exportModule({ ${mappings} });`));
+            } else {
+              const mappings = node.specifiers.map(spec => `${JSON.stringify(spec.exported.name || spec.exported.value)}: ${spec.local.name || spec.local.value}`).join(', ');
+              newBody.push(makeSafeModuleSnippet(`__exportModule({ ${mappings} });`));
+            }
+          }
+          continue;
+        }
+
+        if (node.type === 'ExportAllDeclaration') {
+          const source = JSON.stringify(node.source.value);
+          const importId = `__esmStar_${++esmImportCounter}`;
+          if (node.exported) {
+            const name = node.exported.name || node.exported.value;
+            newBody.push(makeSafeModuleSnippet(`const ${name} = await __importModule(${source});\n__exportModule({ ${JSON.stringify(name)}: ${name} });`));
+          } else {
+            newBody.push(makeSafeModuleSnippet(`const ${importId} = await __importModule(${source});\n__exportModule(${importId});`));
+          }
+          continue;
+        }
+
+        newBody.push(node);
+      }
+
+      ast.body = newBody;
+      return astring.generate(ast);
+    }
+
+    async function packageTypeFor(filePath) {
+      let dir = dirname(filePath);
+      while (true) {
+        try {
+          const pkg = await resolveZipPath(joinPaths(dir, 'package.json'));
+          if (pkg?.zipPath) {
+            const raw = globalThis.fileSystem.readFileSync(pkg.zipPath, 'utf8');
+            const parsed = JSON.parse(raw || '{}');
+            if (parsed && typeof parsed.type === 'string') return parsed.type;
+          }
+        } catch (_) {}
+        if (dir === '/') break;
+        dir = dirname(dir);
+      }
+      return null;
+    }
+
+    async function isESModulePath(filePath) {
+      const normalized = normalizePath(filePath);
+      if (/\.mjs$/i.test(normalized)) return true;
+      if (/\.cjs$/i.test(normalized)) return false;
+      if (/\.js$/i.test(normalized)) return (await packageTypeFor(normalized)) === 'module';
+      return false;
+    }
+
+    function namespaceFromExports(value) {
+      const namespace = { default: value };
+      if (value && (typeof value === 'object' || typeof value === 'function')) {
+        for (const key of Object.keys(value)) {
+          if (!(key in namespace)) namespace[key] = value[key];
+        }
+      }
+      return namespace;
+    }
+
+    async function importModuleFrom(fileSpecifier, parentFilePath) {
+      const parentDir = dirname(parentFilePath);
+      const location = await lookupFileInZip(fileSpecifier, parentDir);
+
+      if (location.isBuiltin) return namespaceFromExports(location.exports);
+
+      const resolvedPath = location.resolvedPath;
+      const existing = esmModuleRecords.get(resolvedPath);
+      if (existing) return existing.loading ? existing.namespace : existing.promise;
+
+      if (resolvedPath.endsWith('.json')) {
+        const raw = globalThis.fileSystem.readFileSync(location.zipPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        const namespace = { default: parsed };
+        const promise = Promise.resolve(namespace);
+        esmModuleRecords.set(resolvedPath, { namespace, loading: false, promise });
+        return namespace;
+      }
+
+      const esm = await isESModulePath(resolvedPath);
+      if (!esm) {
+        await preloadModule(fileSpecifier, parentFilePath);
+        const commonjs = executeModuleSync(resolvedPath);
+        const namespace = namespaceFromExports(commonjs);
+        const promise = Promise.resolve(namespace);
+        esmModuleRecords.set(resolvedPath, { namespace, loading: false, promise });
+        return namespace;
+      }
+
+      const namespace = {};
+      const record = { namespace, loading: true, promise: null };
+      esmModuleRecords.set(resolvedPath, record);
+
+      const rawSource = globalThis.fileSystem.readFileSync(location.zipPath, 'utf8');
+      // Preserve compatibility for occasional CommonJS-style requires embedded in ESM.
+      for (const specifier of extractRequireSpecifiers(rawSource)) {
+        try { await preloadModule(specifier, resolvedPath); } catch (_) {}
+      }
+
+      const transformed = transformESModuleSource(rawSource);
+      const requireSync = createRequireSync(resolvedPath);
+      const processForModule = {
+        env: ENV_SETTINGS,
+        cwd: () => nodeEmulator.cwd || '/',
+        chdir: path => {
+          const target = resolveWorkingPath(path);
+          if (!directoryExists(target)) throw new Error(`chdir: no such directory: ${path}`);
+          const previous = nodeEmulator.cwd || '/';
+          nodeEmulator.previousCwd = previous;
+          nodeEmulator.cwd = target;
+          ENV_SETTINGS.PWD = target;
+          ENV_SETTINGS.OLDPWD = previous;
+        },
+        nextTick: (cb, ...args) => setTimeout(() => cb(...args), 0),
+        env: ENV_SETTINGS,
+        platform: 'browser'
+      };
+
+      const importMeta = {
+        url: new URL(resolvedPath.replace(/^\//, ''), CURRENT_PAGE_URL).href,
+        resolve(specifier) {
+          const candidate = String(specifier || '');
+          try { return new URL(candidate, importMeta.url).href; } catch (_) { return candidate; }
+        }
+      };
+
+      const __importModule = specifier => importModuleFrom(String(specifier), resolvedPath);
+      __importModule.meta = importMeta;
+      const __exportModule = exports => Object.assign(namespace, exports || {});
+
+      record.promise = (async () => {
+        try {
+          const factory = new Function(
+            '__importModule', '__exportModule', 'require', 'process', 'global', 'console', 'importMeta',
+            `"use strict";\nreturn (async function(){\n${transformed}\n}).call(undefined);\n//# sourceURL=${resolvedPath}`
+          );
+          await factory(__importModule, __exportModule, requireSync, processForModule, globalThis, safeConsole, importMeta);
+          record.loading = false;
+          return namespace;
+        } catch (error) {
+          esmModuleRecords.delete(resolvedPath);
+          throw error;
+        }
+      })();
+
+      return record.promise;
+    }
+
     /**
      * Extract require(...) targets from code via regex scan
      */
@@ -2836,6 +3147,7 @@
       }
 
       const rawSource = filesystem.readFileSync(location.zipPath, 'utf8');
+      const moduleIsESM = await isESModulePath(resolvedPath);
 
       // Reserve module container
       const moduleObj = { exports: {} };
@@ -2844,7 +3156,8 @@
         moduleObj: moduleObj,
         loaded: false,
         rawSource,
-        location
+        location,
+        isESModule: moduleIsESM
       };
       moduleCache.set(resolvedPath, cachedEntry);
 
@@ -2879,6 +3192,10 @@
         const resolvedPath = specifierMap.get(mapKey);
 
         if (resolvedPath && moduleCache.has(resolvedPath)) {
+          const cached = moduleCache.get(resolvedPath);
+          if (cached?.isESModule || /\.mjs$/i.test(resolvedPath)) {
+            throw new Error(`ERR_REQUIRE_ESM: Cannot synchronously require an ES module '${resolvedPath}'. Use import() instead.`);
+          }
           return executeModuleSync(resolvedPath);
         }
 
@@ -3017,6 +3334,13 @@
 
       if (location.isBuiltin) {
         return location.exports;
+      }
+
+      if (await isESModulePath(location.resolvedPath)) {
+        const namespace = await importModuleFrom(moduleSpecifier, currentFilePath);
+        return namespace?.default !== undefined && Object.keys(namespace).length === 1
+          ? namespace.default
+          : namespace;
       }
 
       return executeModuleSync(location.resolvedPath);
@@ -3754,7 +4078,7 @@
 
     // Initialize app defaults
     console.log("Node Simulator environment loaded. Use terminalCommand('node index.js') to start.");
-  };
+  };;
 
   function workerBootstrap() {
   
@@ -3939,6 +4263,24 @@
       }
     }
   
+    function loadModuleParserRuntime(config) {
+      if (globalThis.acorn?.parse && globalThis.astring?.generate) return;
+      if (typeof importScripts !== 'function') {
+        throw new Error('ES module parser runtime cannot be loaded in this Worker.');
+      }
+      const urls = config.moduleParserUrls || {};
+      const scripts = [urls.acorn, urls.astring].filter(Boolean);
+      if (!scripts.length) {
+        throw new Error('ES module parser URLs were not supplied to the Node Worker.');
+      }
+      for (const url of scripts) {
+        importScripts(String(url));
+      }
+      if (!globalThis.acorn?.parse || !globalThis.astring?.generate) {
+        throw new Error('Failed to initialize the ES module parser runtime in the Node Worker.');
+      }
+    }
+
     async function startRuntime(config) {
       const fileSystem = new WorkerFileSystemProxy(config.files || [], (path, data) => {
         self.postMessage({ type: 'hostRequest', capability: runtime?.capabilityToken, id: nextHostRequestId++, method: 'fs.write', payload: { path, data } }, [data.buffer]);
@@ -3988,6 +4330,7 @@
       };
   
       try {
+        if (config.enableESModules !== false) loadModuleParserRuntime(config);
         const fn = new Function(`return (${config.nodeExecution});`)();
         fn({
           
@@ -3998,6 +4341,19 @@
           baseOrigin: config.baseOrigin,
           location: config.location
         });
+
+        // nodeExecution installs its runtime APIs on the Worker's globalThis.
+        // Mirror those APIs onto the local compatibility facade too, because the
+        // RPC bridge intentionally talks to `runtime.compat` rather than exposing
+        // the Worker global directly.
+        compat.terminalCommand = globalThis.terminalCommand;
+        compat.handleRequest = globalThis.handleRequest;
+        compat.handleSocket = globalThis.handleSocket;
+        compat.getServer = globalThis.getServer;
+        compat.activeServers = globalThis.activeServers;
+        compat.__hostOrigin = globalThis.__hostOrigin;
+        compat.global = globalThis;
+
         self.postMessage({ type: 'ready' });
       } catch (error) {
         self.postMessage({ type: 'initError', error: serializeThrown(error) });
@@ -4042,6 +4398,7 @@
       }
     };
   }
+
   class NodeEndpoint extends NetworkEndpoint {
     constructor(emulator, enabled = true) { super(enabled); this.emulator = emulator; }
     async handleRequest(request, type) {
@@ -4053,6 +4410,7 @@
       return await this.emulator._handleNetworkSocket(absoluteUrl, protocols);
     }
   }
+
   class NodeEmulator extends EventHandler {
     constructor(options = {}) {
       super(options.enabled ?? true);
@@ -4120,6 +4478,24 @@
       try {
         locationInfo = { href: location.href, origin: location.origin, protocol: location.protocol, host: location.host, hostname: location.hostname, port: location.port, pathname: location.pathname, search: location.search, hash: location.hash };
       } catch (_) {}
+      let moduleParserUrls = {};
+      try {
+        const emulatorScript = Array.from(document.scripts || []).map(script => script.src).find(src => /\/browser\/lib\//.test(src));
+        if (emulatorScript) {
+          moduleParserUrls = {
+            acorn: new URL('../external/acorn.js', emulatorScript).href,
+            astring: new URL('../external/astring.js', emulatorScript).href
+          };
+        }
+      } catch (_) {}
+      if (!moduleParserUrls.acorn || !moduleParserUrls.astring) {
+        try {
+          moduleParserUrls = {
+            acorn: new URL('/editor/browser/external/acorn.js', location.href).href,
+            astring: new URL('/editor/browser/external/astring.js', location.href).href
+          };
+        } catch (_) {}
+      }
       return {
         domain: this.domain,
         rootfolder: this.rootfolder,
@@ -4132,6 +4508,8 @@
         baseOrigin: 'http://127.0.0.1/',
         location: locationInfo,
         files: snapshot,
+        enableESModules: true,
+        moduleParserUrls,
         capabilityToken: this._capabilityToken,
         nodeExecution: `(${nodeExecution.toString()})`
       };
