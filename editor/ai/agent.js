@@ -97,7 +97,40 @@
             for(const call of calls){const result=await this.executeTool(call);if(result?.exitEarly===true){finalText=String(result.message||'');this.emit?.({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'user',content:`Tool result for ${call.name}:\n${stringifyResult(result)}`});}
           }
         }
-        throw new Error('The agent reached its tool-step limit.');
+        // Tool steps are limited, but the agent still gets a final response pass
+        // using the results it already collected. This pass has no tools, so it
+        // cannot consume another tool step.
+        this.emit?.({
+          type:'request_start',
+          model:model.model||model.id||'model',
+          protocol:model.protocol||model.kind||'unknown',
+          final:true
+        });
+        const finalMsg=await this.client.complete(working,{
+          model,
+          systemPrompt:(options.systemPrompt||'') + '\n\nYou have reached the tool-step limit. Do not call tools. Give the user the best final answer using the tool results already collected.',
+          thinking:true,
+          maxTokens:options.maxTokens,
+          onRetry:options.onRetry,
+          max429Retries:options.max429Retries,
+          baseRetryDelay:options.baseRetryDelay,
+          retry429:options.retry429,
+          retryTransport:options.retryTransport,
+          maxTransportRetries:options.maxTransportRetries,
+          transportRetryDelay:options.transportRetryDelay,
+          onResponse:info=>this.emit?.({type:'request_response',...info})
+        });
+        const finalThink=finalMsg.reasoning_content||finalMsg.reasoning||'';
+        if(finalThink){
+          reasoning+=finalThink;
+          this.emit?.({
+            type:finalMsg.reasoning_kind==='summary'?'reasoning_summary':'reasoning',
+            text:finalThink
+          });
+        }
+        finalText=stripToolProtocol(String(finalMsg.content||''));
+        this.emit?.({type:'final',text:finalText,reasoning,stepLimitReached:true});
+        return {text:finalText,reasoning,stepLimitReached:true};
       } finally { this.running=false; }
     }
   }
