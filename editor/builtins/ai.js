@@ -523,32 +523,13 @@
         if(e?.name!=='AbortError') { partial=`**Error:** ${e?.message||String(e)}`; renderMessage(bubble,partial); if(liveActivity) appendActivity(liveActivity,{kind:'error',text:e?.message||String(e)}); const activityData=liveActivity?.items||[]; chatMessages.push({role:'assistant',content:partial,activity:activityData}); if(liveActivity) liveActivity.details.open=false; persist(); }
       } finally { busy=false; controller=null; render(g,t); }
     }
-    function activityValue(value,maxChars=20000){
-      let text;
-      try{
-        if(typeof value==='string') text=value;
-        else text=JSON.stringify(value,null,2);
-      }catch(_){text=String(value);}
-      text=String(text??'');
-      return text.length<=maxChars?text:text.slice(0,maxChars)+`\n… [truncated ${text.length-maxChars} characters]`;
-    }
-    function compactActivityItem(item){
-      if(!item || typeof item!=='object') return item;
-      const out={kind:item.kind||'activity'};
-      if(item.name!=null) out.name=String(item.name).slice(0,300);
-      if(item.ok!=null) out.ok=!!item.ok;
-      if(item.durationMs!=null) out.durationMs=Math.max(0,Number(item.durationMs)||0);
-      if(item.args!=null) out.args=activityValue(item.args,8000);
-      if(item.result!=null) out.result=activityValue(item.result,20000);
-      if(item.text!=null) out.text=activityValue(item.text,40000);
-      return out;
-    }
+    function activityValue(value,maxChars=20000){let text;try{text=JSON.stringify(value,null,2);}catch(_){text=String(value);}text=String(text??'');return text.length<=maxChars?text:text.slice(0,maxChars)+`\n… [truncated ${text.length-maxChars} characters]`;}
     function activitySummary(items){const list=items||[];const steps=list.filter(x=>x?.kind==='step').length;const tools=list.filter(x=>x?.kind==='tool_call').length;const retries=list.filter(x=>['retry','transport_retry','provider_retry'].includes(x?.kind)).length;const parts=['Agent activity'];if(steps)parts.push(`${steps} step${steps===1?'':'s'}`);if(tools)parts.push(`${tools} tool${tools===1?'':'s'}`);if(retries)parts.push(`${retries} retr${retries===1?'y':'ies'}`);return parts.join(' · ');}
     function renderActivity(chat,items,open){
       const details=document.createElement('details'); details.className='ai-activity'; details.open=!!open;
       const summary=document.createElement('summary'); summary.textContent=activitySummary(items); details.appendChild(summary);
       const body=document.createElement('div'); body.className='ai-activity-body'; details.appendChild(body);
-      const activity={body,items:[],details}; for(const item of (items||[])) appendActivity(activity,item); summary.textContent=activitySummary(activity.items);
+      const activity={body,items:items||[],details}; for(const item of (items||[])) appendActivity(activity,item); summary.textContent=activitySummary(activity.items);
       return details;
     }
     function beginActivity(chat,open){
@@ -557,24 +538,7 @@
     }
     function appendActivity(activity,item){
       if(!activity?.body)return;
-      item=compactActivityItem(item);
-      if(item?.kind==='reasoning' || item?.kind==='reasoning_summary'){
-        const last=activity.items?.[activity.items.length-1];
-        if(last?.kind===item.kind){
-          last.text=activityValue((last.text||'')+'\n'+(item.text||''),40000);
-          const existing=activity.body.lastElementChild;
-          const pre=existing?.querySelector?.('pre');
-          if(pre) pre.textContent=last.text;
-          return;
-        }
-      }
-      if(activity.items) {
-        activity.items.push(item);
-        if(activity.items.length>300) {
-          activity.items.shift();
-          activity.body.firstElementChild?.remove();
-        }
-      }
+      if(activity.items)activity.items.push(item);
       const row=document.createElement('div'); row.className='ai-activity-row';
       if(typeof item==='string'){row.textContent=item;}
       else if(item.kind==='tool_call'){row.innerHTML=`<strong>Tool call: ${escapeHtml(item.name)}</strong><pre>${escapeHtml(activityValue(item.args||{}))}</pre>`;}
