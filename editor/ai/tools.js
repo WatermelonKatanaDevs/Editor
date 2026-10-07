@@ -67,24 +67,6 @@
       const longRunning=/^(?:(?:npm|npx)\s+(?:run\s+)?(?:start|dev|serve|watch)\b|node(?:js)?\s+.+)$/i.test(command);
       if(longRunning) throw new Error('This command appears to start a long-running process. Use run_project to run the configured application instead of run_command.');
       const start=outputBuffer.length;
-      const catMatch=command.match(/^cat(?:\s+(.+))?$/i);
-      if(catMatch){
-        const rawPaths=String(catMatch[1]||'').trim();
-        if(!rawPaths) throw new Error('cat: missing file operand');
-        const paths=[];
-        const re=/"([^"]+)"|'([^']+)'|(\S+)/g;
-        let match;
-        while((match=re.exec(rawPaths))) paths.push(match[1]??match[2]??match[3]);
-        if(!paths.length) throw new Error('cat: missing file operand');
-        let output='';
-        for(const rawPath of paths){
-          const path=normalize(rawPath);
-          if(!path || !state.fs?.existsSync(path)) throw new Error(`cat: ${rawPath}: No such file`);
-          const value=state.fs.readFileSync(path,'utf8');
-          output += String(value ?? '');
-        }
-        return {command,result:output,output:[...outputBuffer.slice(start),output]};
-      }
       const result=await runner.terminalCommand(command);
       return {command,result,output:outputBuffer.slice(start)};
     }});
