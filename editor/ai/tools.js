@@ -68,7 +68,7 @@
         function cleanPath(value){
           const raw=String(value||'').split('\\t')[0].trim();
           if(raw==='/dev/null') return null;
-          if(/^a\\//.test(raw) || /^b\\//.test(raw)) return normalize(raw.slice(2));
+          if(/^a\//.test(raw) || /^b\//.test(raw)) return normalize(raw.slice(2));
           return normalize(raw);
         }
         function fail(message){ throw new Error('Patch failed: '+message); }
