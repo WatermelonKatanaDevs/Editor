@@ -90,9 +90,9 @@
             let text=''; let lastReasoning='';
             this.emit?.({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps:this.maxSteps});
             const streamOptions={model,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429};
-            for await(const chunk of this.client.stream(working,streamOptions)){text=chunk.text||text; if(chunk.reasoning&&chunk.reasoning!==lastReasoning){const delta=chunk.reasoning.slice(lastReasoning.length);if(delta){reasoning+=delta;this.emit?.({type:chunk.reasoningKind==='summary'?'reasoning_summary':'reasoning',text:delta});}lastReasoning=chunk.reasoning;} this.emit?.({type:'assistant',text});}
+            for await(const chunk of this.client.stream(working,streamOptions)){text=chunk.text||text; if(chunk.reasoning&&chunk.reasoning!==lastReasoning){const delta=chunk.reasoning.slice(lastReasoning.length);if(delta){reasoning+=delta;this.emit?.({type:chunk.reasoningKind==='summary'?'reasoning_summary':'reasoning',text:delta});}lastReasoning=chunk.reasoning;}}
             const calls=parseToolProtocol(text);
-            if(!calls.length){finalText=stripToolProtocol(text);this.emit?.({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
+            if(!calls.length){finalText=stripToolProtocol(text);this.emit?.({type:'assistant',text:finalText});this.emit?.({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
             const clean=stripToolProtocol(text);working.push({role:'assistant',content:clean});
             for(const call of calls){const result=await this.executeTool(call);if(result?.exitEarly===true){finalText=String(result.message||'');this.emit?.({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'user',content:`Tool result for ${call.name}:\n${stringifyResult(result)}`});}
           }
