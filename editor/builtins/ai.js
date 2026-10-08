@@ -593,6 +593,7 @@
         if(agentMode){
           agent.emit=event=>{
             if(event.type==='assistant'){partial=event.text||partial;renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
+            else if(event.type==='assistant_activity'){appendActivity(liveActivity,{kind:'assistant',text:event.text});}
             else if(event.type==='tool_call'){appendActivity(liveActivity,{kind:'tool_call',name:event.name,args:event.args});}
             else if(event.type==='tool_result'){appendActivity(liveActivity,{kind:'tool_result',name:event.name,args:event.args,result:event.result,ok:event.ok});}
             else if(event.type==='step'){appendActivity(liveActivity,{kind:'step',text:`Step ${event.step}/${event.maxSteps}`});tree.querySelector('[data-status]')?.replaceChildren(document.createTextNode(`Step ${event.step}/${event.maxSteps}`));}
@@ -646,6 +647,7 @@
       if(record && activity.items)activity.items.push(item);
       const row=document.createElement('div'); row.className='ai-activity-row';
       if(typeof item==='string'){row.textContent=item;}
+      else if(item.kind==='assistant'){row.innerHTML=`<strong>Assistant</strong><div class="ai-activity-assistant">${sanitizeHtml(markdown(item.text||''))}</div>`;}
       else if(item.kind==='tool_call'){row.innerHTML=`<strong>Tool call: ${escapeHtml(item.name)}</strong><pre>${escapeHtml(activityValue(item.args||{}))}</pre>`;}
       else if(item.kind==='tool_result'){const suffix=Number.isFinite(Number(item.durationMs))?` · ${Math.max(0,Math.round(item.durationMs))} ms`:'';row.innerHTML=`<strong>${item.ok?'Tool result':'Tool error'}: ${escapeHtml(item.name)}${suffix}</strong><pre>${escapeHtml(activityValue(item.result))}</pre>`;}
       else if(item.kind==='step'){row.innerHTML=`<strong>Agent step</strong><span>${escapeHtml(String(item.text||''))}</span>`;}
