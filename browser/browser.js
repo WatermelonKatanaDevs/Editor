@@ -578,7 +578,7 @@ async function openUploadPicker(input, openDownloads=true) {
   info.textContent = accept ? `Accepted: ${accept}` : (input.multiple ? 'Multiple files accepted.' : 'Choose one file.');
   const drop = document.createElement('div');
   drop.className = 'border border-dashed border-gray-600 rounded-lg p-6 text-center bg-[#202124] hover:border-indigo-500 transition-colors';
-  drop.innerHTML = '<i class="fa-solid fa-cloud-arrow-up text-2xl text-gray-500"></i><div class="mt-2 text-sm text-gray-200">Drop a downloaded file here</div><div class="mt-1 text-[11px] text-gray-500">or choose a file from this device</div>';
+  drop.innerHTML = '<i class="fa-solid fa-cloud-arrow-up text-2xl text-gray-500"></i><div class="mt-2 text-sm text-gray-200">Drop a downloaded file or a file from the editor here</div><div class="mt-1 text-[11px] text-gray-500">or choose a file from this device</div>';
   const picker = document.createElement('input');
   picker.type = 'file';
   picker.className = 'mt-4 block w-full text-xs text-gray-300';
