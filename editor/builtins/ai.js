@@ -435,7 +435,7 @@
       if(button){button.disabled=!!info?.loading;button.textContent=info?.loading?'Loading…':loaded?'Loaded':'Load model';}
       const needsLoad=local&&!loaded;
       if(input){input.disabled=needsLoad||busy;input.placeholder=needsLoad?'Load the local model first…':'Ask anything about your project…';}
-      if(send)send.disabled=needsLoad||busy;
+      if(send)send.disabled=needsLoad||busy||!input?.value?.trim();
     }
     localManager.subscribe(updateLocalStatusUI);
     function syncChats() {
@@ -567,7 +567,7 @@
       const input=tree.querySelector('[data-input]'); const send=tree.querySelector('[data-send]');
       const submit=async()=>{const text=input.value.trim();if(!text||busy)return;if(editingIndex>=0){const index=editingIndex;input.value='';resendMessage(index,text,g,t,tree);}else{input.value='';await sendMessage(text,g,t,tree);}};
       send.textContent=editingIndex>=0?'Resend':'Send';
-      const updateSendState=()=>{const active=registry.active();send.disabled=busy||!!((active?.local||active?.protocol==='local-transformers')&&!localManager.isLoaded(active.id));};
+      const updateSendState=()=>{const active=registry.active();send.disabled=!input.value.trim()||busy||!!((active?.local||active?.protocol==='local-transformers')&&!localManager.isLoaded(active.id));};
       input.addEventListener('input',updateSendState);
       send.onclick=submit; input.addEventListener('keydown',e=>{if(e.key==='Enter' && !e.shiftKey){e.preventDefault();submit();}});
       updateSendState();
