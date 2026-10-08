@@ -265,7 +265,7 @@
           try{
             const clean=registry.add({id:'local-'+modelId.replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'').toLowerCase(),name:name||('Local · '+modelId.split('/').pop()),model:modelId,protocol:'local-transformers',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true});
             if(loadNow){browser.remove();modal.remove();await useModel?.(clean.id);return clean;}
-            status.textContent='Added '+clean.model+'. Load it from the model list when ready.';return clean;
+            render();status.textContent='Added '+clean.model+'. Load it from the model list when ready.';return clean;
           }catch(e){status.textContent=e?.message||String(e);}
         };
         async function load(){
