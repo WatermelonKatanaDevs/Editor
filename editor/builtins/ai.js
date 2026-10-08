@@ -567,7 +567,10 @@
       const input=tree.querySelector('[data-input]'); const send=tree.querySelector('[data-send]');
       const submit=async()=>{const text=input.value.trim();if(!text||busy)return;if(editingIndex>=0){const index=editingIndex;input.value='';resendMessage(index,text,g,t,tree);}else{input.value='';await sendMessage(text,g,t,tree);}};
       send.textContent=editingIndex>=0?'Resend':'Send';
+      const updateSendState=()=>{send.disabled=!input.value.trim()||busy||((registry.active()?.local||registry.active()?.protocol==='local-transformers')&&!localManager.isLoaded(registry.active().id));};
+      input.addEventListener('input',updateSendState);
       send.onclick=submit; input.addEventListener('keydown',e=>{if(e.key==='Enter' && !e.shiftKey){e.preventDefault();submit();}});
+      updateSendState();
       if(editingIndex>=0){const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Cancel';cancel.title='Cancel prompt editing';cancel.onclick=()=>{cancelEdit();render(g,t);};send.parentNode.insertBefore(cancel,send);}
       if(chatMessages.length)chat.scrollTop=chat.scrollHeight;
     }
