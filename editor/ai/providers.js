@@ -139,6 +139,20 @@
       this.settings=saveModels(this.settings);
       return true;
     }
+    resetDefaults(){
+      const models=(root.LOCAL_MODELS||[]).map(cleanModel);
+      const activeModelId=String(root.DEFAULT_LOCAL_MODEL_ID||models[0]?.id||'');
+      if(!models.length)throw new Error('No built-in AI models are configured.');
+      this.settings={
+        activeModelId,
+        models,
+        disabledBuiltInIds:[],
+        huggingFaceApiKey:String(this.settings.huggingFaceApiKey||''),
+        huggingFaceRememberKey:!!this.settings.huggingFaceRememberKey
+      };
+      this.settings=saveModels(this.settings);
+      return this.settings;
+    }
     save(){this.settings=saveModels(this.settings);return this.settings;}
     exportSettings(options={}){
       const preserveKeys=options.preserveKeys!==false;
