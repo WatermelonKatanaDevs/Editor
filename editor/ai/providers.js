@@ -12,9 +12,11 @@
     'anthropic-messages': {label:'Anthropic Messages', tools:true},
     'google-gemini': {label:'Google Gemini', tools:true},
     'cohere-v2': {label:'Cohere Chat v2', tools:true},
-    'gradio-space': {label:'Gradio Space', tools:false}
+    'gradio-space': {label:'Gradio Space', tools:false},
+    'local-transformers': {label:'Local Browser Model', tools:false}
   };
   const PROVIDERS = {
+    local: {label:'Local Browser Model', protocol:'local-transformers', endpoint:'', name:'Local browser model', model:'', supportsTools:false, supportsAgentTools:true, supportsReasoning:false, supportsStreaming:true, modelBrowser:null},
     huggingface: {label:'Hugging Face', protocol:'openai-chat', endpoint:'https://router.huggingface.co/v1', name:'Hugging Face', model:'', supportsTools:true, supportsReasoning:true, supportsStreaming:true, modelBrowser:{kind:'dynamic',path:'/models',auth:'bearer',responseKey:'data',idField:'id',freeFilter:true}},
     groq: {label:'Groq', protocol:'openai-chat', endpoint:'https://api.groq.com/openai/v1', name:'Groq', model:'openai/gpt-oss-120b', supportsTools:true, supportsReasoning:true, supportsStreaming:true, modelBrowser:{kind:'dynamic',path:'/models',auth:'bearer',responseKey:'data',idField:'id',freeFilter:false}, chatOptions:[
       {match:/gpt-oss/i,body:{include_reasoning:true}},
@@ -38,13 +40,16 @@
     const kind = String(model.kind || '').trim();
     if (!protocol) protocol = kind === 'gradio-space' ? 'gradio-space' : 'openai-chat';
     if (!PROTOCOLS[protocol]) protocol = inferProtocol(model.endpoint) || '';
+    const local = protocol === 'local-transformers' || !!model.local;
     return {
       id:String(model.id || '').trim(), provider:String(model.provider || '').trim(), name:String(model.name || model.model || 'Unnamed Model').trim(),
       kind:protocol, protocol, endpoint:String(model.endpoint || '').trim(),
       remoteModel:String(model.remoteModel || model.model || '').trim(), model:String(model.model || model.remoteModel || '').trim(),
       apiKey:String(model.apiKey || ''), anonymousAuth:String(model.anonymousAuth || ''), rememberKey:!!model.rememberKey,
-      requiresKey:model.requiresKey !== false, supportsTools:model.supportsTools !== false,
-      supportsReasoning:model.supportsReasoning !== false, supportsStreaming:model.supportsStreaming !== false, public:!!model.public, useSharedKeys:model.useSharedKeys !== false
+      requiresKey:model.requiresKey !== undefined ? !!model.requiresKey : !local,
+      supportsTools:model.supportsTools !== false, supportsAgentTools:!!model.supportsAgentTools,
+      supportsReasoning:model.supportsReasoning !== false, supportsStreaming:model.supportsStreaming !== false,
+      public:!!model.public, useSharedKeys:model.useSharedKeys !== false, local, builtInLocal:!!model.builtInLocal
     };
   }
   function inferProtocol(endpoint) {
@@ -63,29 +68,29 @@
     let parsed=null;
     try { parsed=JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (_) {}
     if (!parsed) {
-      try {
-        const old=JSON.parse(localStorage.getItem('editor.aiModels.v1') || 'null');
-        if (old) parsed=old;
-      } catch (_) {}
+      try { const old=JSON.parse(localStorage.getItem('editor.aiModels.v1') || 'null'); if (old) parsed=old; } catch (_) {}
     }
-    const models=Array.isArray(parsed?.models) ? parsed.models.map(cleanModel).filter(x=>x.id && x.endpoint && x.protocol) : [];
+    const stored=Array.isArray(parsed?.models) ? parsed.models.map(cleanModel).filter(x=>x.id && x.protocol && (x.protocol==='local-transformers' ? x.model : x.endpoint)) : [];
+    const builtins=(root.LOCAL_MODELS||[]).map(cleanModel);
+    const builtinIds=new Set(builtins.map(x=>x.id));
+    const custom=stored.filter(x=>!builtinIds.has(x.id) && !LEGACY_PUBLIC_IDS.has(x.id) && x.id!==DEFAULT_MODEL.id);
+    const models=[...builtins,...custom,{...DEFAULT_MODEL}];
     const huggingFaceApiKey=String(parsed?.huggingFaceApiKey || getStoredHuggingFaceKey() || '').trim();
-    for (let i=models.length-1;i>=0;i--) {
-      if (LEGACY_PUBLIC_IDS.has(models[i].id) || models[i].id===DEFAULT_MODEL.id) models.splice(i,1);
-    }
-    models.unshift({...DEFAULT_MODEL});
+    const defaultLocalId=root.DEFAULT_LOCAL_MODEL_ID || builtins[0]?.id || DEFAULT_MODEL.id;
     let active=parsed?.activeModelId;
-    if (!models.some(x=>x.id===active) || LEGACY_PUBLIC_IDS.has(active)) active=DEFAULT_MODEL.id;
+    if(!active || !models.some(x=>x.id===active) || LEGACY_PUBLIC_IDS.has(active)) active=defaultLocalId;
     return {activeModelId:active,models,huggingFaceApiKey,huggingFaceRememberKey:!!parsed?.huggingFaceApiKey};
   }
   function saveModels(settings) {
-    const models=(settings?.models || []).map(cleanModel).filter(x=>x.id && x.endpoint && x.protocol);
-    for (let i=models.length-1;i>=0;i--) { if (models[i].id===DEFAULT_MODEL.id) models.splice(i,1); }
-    models.unshift({...DEFAULT_MODEL});
-    const active=models.some(x=>x.id===settings?.activeModelId) ? settings.activeModelId : models[0].id;
-    const rememberHF=!!settings?.huggingFaceRememberKey;const stored={version:2,activeModelId:active,huggingFaceApiKey:rememberHF?String(settings?.huggingFaceApiKey||'').trim():'',models:models.map(x=>x.rememberKey ? x : {...x,apiKey:''})};
+    const builtins=(root.LOCAL_MODELS||[]).map(cleanModel);
+    const builtinIds=new Set(builtins.map(x=>x.id));
+    const custom=(settings?.models || []).map(cleanModel).filter(x=>x.id && !builtinIds.has(x.id) && x.id!==DEFAULT_MODEL.id && x.protocol && (x.protocol==='local-transformers' ? x.model : x.endpoint));
+    const models=[...builtins,...custom,{...DEFAULT_MODEL}];
+    const active=models.some(x=>x.id===settings?.activeModelId) ? settings.activeModelId : (root.DEFAULT_LOCAL_MODEL_ID || models[0].id);
+    const rememberHF=!!settings?.huggingFaceRememberKey;
+    const stored={version:3,activeModelId:active,huggingFaceApiKey:rememberHF?String(settings?.huggingFaceApiKey||'').trim():'',huggingFaceRememberKey:rememberHF,models:custom.map(x=>x.rememberKey?x:{...x,apiKey:''})};
     try { localStorage.setItem(STORAGE_KEY,JSON.stringify(stored)); } catch (_) {}
-    return {activeModelId:active,models,huggingFaceApiKey:String(settings?.huggingFaceApiKey||getStoredHuggingFaceKey()||'').trim(),huggingFaceRememberKey:!!settings?.huggingFaceRememberKey};
+    return {activeModelId:active,models,huggingFaceApiKey:String(settings?.huggingFaceApiKey||getStoredHuggingFaceKey()||'').trim(),huggingFaceRememberKey:rememberHF};
   }
   function get(settings) { return (settings?.models || []).find(x=>x.id===settings.activeModelId) || settings?.models?.[0] || {...DEFAULT_MODEL}; }
   function protocolLabel(id) { return PROTOCOLS[id]?.label || 'Unsupported API format'; }
@@ -109,7 +114,7 @@
       return clean;
     }
     remove(id){
-      if(id===DEFAULT_MODEL.id)return false;
+      if(id===DEFAULT_MODEL.id || (root.LOCAL_MODELS||[]).some(x=>x.id===id))return false;
       this.settings.models=this.settings.models.filter(x=>x.id!==id);
       this.settings=saveModels(this.settings); return true;
     }
@@ -136,14 +141,15 @@
     providers(){return {...PROVIDERS};}
     provider(id){return PROVIDERS[id] ? {...PROVIDERS[id]} : null;}
     providerForModel(model){
-      if(model?.provider && PROVIDERS[model.provider]) return model.provider;
+      if(model?.local || model?.protocol==='local-transformers')return 'local';
+      if(model?.provider && PROVIDERS[model.provider])return model.provider;
       const endpoint=String(model?.endpoint||'').toLowerCase();
-      if(endpoint.includes('api.groq.com')) return 'groq';
-      if(endpoint.includes('generativelanguage.googleapis.com')) return 'google-gemini';
-      if(endpoint.includes('router.huggingface.co')) return 'huggingface';
+      if(endpoint.includes('api.groq.com'))return 'groq';
+      if(endpoint.includes('generativelanguage.googleapis.com'))return 'google-gemini';
+      if(endpoint.includes('router.huggingface.co'))return 'huggingface';
       return 'custom';
     }
-    protocols(){return {...PROTOCOLS};}
+      protocols(){return {...PROTOCOLS};}
   }
   root.DEFAULT_PUBLIC_AI_MODEL=DEFAULT_MODEL;
   root.isHuggingFaceEndpoint=isHuggingFaceEndpoint;
