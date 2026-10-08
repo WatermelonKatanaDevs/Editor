@@ -169,12 +169,16 @@
     }
     return {ensureLoaded,list,get,create,rename,touch,remove};
   }
-  function makeModelLabel(model, registry) {
-    if (aiRoot.isHuggingFaceEndpoint?.(model?.endpoint)) {
-      const source=registry?.getHuggingFaceKeySource?.(model)||'none';
-      return `${model.name} · ${source==='model'?'model key':source==='user'?'your key':source==='shared'?'shared fallback':'no key'}`;
+  function makeModelLabel(model, registry, localManager) {
+    if(model?.local || model?.protocol==='local-transformers'){
+      const loaded=!!localManager?.isLoaded?.(model.id);
+      return model.name+' · local'+(loaded?' · loaded':' · not loaded');
     }
-    return model.public ? `${model.name} · no key` : `${model.name}${model.apiKey ? ' · key set' : ''}`;
+    if(aiRoot.isHuggingFaceEndpoint?.(model?.endpoint)){
+      const source=registry?.getHuggingFaceKeySource?.(model)||'none';
+      return model.name+' · '+(source==='model'?'model key':source==='user'?'your key':source==='shared'?'shared fallback':'no key');
+    }
+    return model.public ? model.name+' · no key' : model.name+(model.apiKey ? ' · key set' : '');
   }
 
   function permissionPrompt(request) {
