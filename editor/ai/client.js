@@ -222,7 +222,7 @@
     return unit==='ms'?n/1000:unit==='m'?n*60:n;
   }
   class AIClient {
-    constructor(registry,network){this.registry=registry;this.network=network || window.__sharedBrowserNetwork || null;this.abortController=null;}
+    constructor(registry,network,localManager){this.registry=registry;this.network=network || window.__sharedBrowserNetwork || null;this.localManager=localManager || null;this.abortController=null;}
     model(){return this.registry.active();}
     async request(url,options={}){
       const init={...options};
@@ -269,7 +269,7 @@
         await new Promise(resolve=>setTimeout(resolve,waitMs));
       }
     }
-    cancel(){this.abortController?.abort();this.abortController=null;}
+    cancel(){this.abortController?.abort();this.abortController=null;this.localManager?.cancel?.();}
     async completeHorde(messages,options,model){
       const base=trimEndpoint(model.endpoint).replace(/\/v2$/i,'/v2');
       const headers=hordeHeaders(model);
@@ -310,6 +310,10 @@
 
     async complete(messages,options={}){
       const model=options.model||this.model();
+      if(model.protocol==='local-transformers'){
+        if(!this.localManager)throw new Error('Local AI runtime is not initialized.');
+        return await this.localManager.complete(messages,options);
+      }
       if(model.protocol==='gradio-space')return await this.completeGradio(messages,options,model);
       if(model.protocol==='ai-horde')return await this.completeHorde(messages,options,model);
       let temperature=options.temperature??.7;
@@ -341,7 +345,12 @@
     }
     async completeGradio(messages,options,model){const result={role:'assistant',content:'',reasoning_content:''};for await(const chunk of this.streamGradio(messages,options,model)){result.content=chunk.text||result.content;result.reasoning_content=chunk.reasoning||result.reasoning_content;}return result;}
     async *stream(messages,options={}){
-      const model=options.model||this.model();this.cancel();const controller=new AbortController();this.abortController=controller;
+      const model=options.model||this.model();
+      if(model.protocol==='local-transformers'){
+        if(!this.localManager)throw new Error('Local AI runtime is not initialized.');
+        yield* this.localManager.stream(messages,options);return;
+      }
+      this.cancel();const controller=new AbortController();this.abortController=controller;
       try {
         if(model.protocol==='gradio-space')yield* this.streamGradio(messages,{...options,signal:controller.signal},model);
         else if(model.protocol==='ai-horde') { const result=await this.completeHorde(messages,{...options,signal:controller.signal},model); yield {text:result.content||'',delta:result.content||'',reasoning:''}; }
