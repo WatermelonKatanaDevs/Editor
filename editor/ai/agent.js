@@ -7,6 +7,12 @@
     return out;
   }
   function stripToolProtocol(text) { return String(text||'').replace(/<tool_call>[\s\S]*?<\/tool_call>/g,'').trim(); }
+  function visibleToolProtocolText(text) {
+    const value=String(text||'');
+    const start=value.indexOf('<tool_call>');
+    if(start>=0) return value.slice(0,start).trimEnd();
+    return value;
+  }
   function stringifyResult(value, maxChars=120000) {
     let text;
     try { text=JSON.stringify(value); } catch(_) { text=String(value); }
@@ -90,7 +96,7 @@
             let text=''; let lastReasoning='';
             this.emit?.({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps:this.maxSteps});
             const streamOptions={model,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429};
-            for await(const chunk of this.client.stream(working,streamOptions)){text=chunk.text||text; if(chunk.reasoning&&chunk.reasoning!==lastReasoning){const delta=chunk.reasoning.slice(lastReasoning.length);if(delta){reasoning+=delta;this.emit?.({type:chunk.reasoningKind==='summary'?'reasoning_summary':'reasoning',text:delta});}lastReasoning=chunk.reasoning;}}
+            for await(const chunk of this.client.stream(working,streamOptions)){text=chunk.text||text; if(chunk.reasoning&&chunk.reasoning!==lastReasoning){const delta=chunk.reasoning.slice(lastReasoning.length);if(delta){reasoning+=delta;this.emit?.({type:chunk.reasoningKind==='summary'?'reasoning_summary':'reasoning',text:delta});}lastReasoning=chunk.reasoning;} const visible=visibleToolProtocolText(text); if(visible)this.emit?.({type:'assistant',text:visible});}
             const calls=parseToolProtocol(text);
             if(!calls.length){finalText=stripToolProtocol(text);this.emit?.({type:'assistant',text:finalText});this.emit?.({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
             const clean=stripToolProtocol(text);working.push({role:'assistant',content:clean});
