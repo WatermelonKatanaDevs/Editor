@@ -71,8 +71,13 @@
       try { const old=JSON.parse(localStorage.getItem('editor.aiModels.v1') || 'null'); if (old) parsed=old; } catch (_) {}
     }
     const stored=Array.isArray(parsed?.models) ? parsed.models.map(cleanModel).filter(x=>x.id && x.protocol && (x.protocol==='local-transformers' ? x.model : x.endpoint)) : [];
-    const builtins=(root.LOCAL_MODELS||[]).map(cleanModel);
-    const builtinIds=new Set(builtins.map(x=>x.id));
+    const builtinDefaults=(root.LOCAL_MODELS||[]).map(cleanModel);
+    const builtinIds=new Set(builtinDefaults.map(x=>x.id));
+    const storedById=new Map(stored.map(x=>[x.id,x]));
+    const builtins=builtinDefaults.map(base=>{
+      const saved=storedById.get(base.id);
+      return saved ? cleanModel({...base,name:saved.name||base.name,model:saved.model||base.model,remoteModel:saved.remoteModel||saved.model||base.model}) : base;
+    });
     const custom=stored.filter(x=>!builtinIds.has(x.id) && !LEGACY_PUBLIC_IDS.has(x.id) && x.id!==DEFAULT_MODEL.id);
     const models=[...builtins,...custom,{...DEFAULT_MODEL}];
     const huggingFaceApiKey=String(parsed?.huggingFaceApiKey || getStoredHuggingFaceKey() || '').trim();
@@ -82,13 +87,20 @@
     return {activeModelId:active,models,huggingFaceApiKey,huggingFaceRememberKey:!!parsed?.huggingFaceApiKey};
   }
   function saveModels(settings) {
-    const builtins=(root.LOCAL_MODELS||[]).map(cleanModel);
-    const builtinIds=new Set(builtins.map(x=>x.id));
-    const custom=(settings?.models || []).map(cleanModel).filter(x=>x.id && !builtinIds.has(x.id) && x.id!==DEFAULT_MODEL.id && x.protocol && (x.protocol==='local-transformers' ? x.model : x.endpoint));
+    const builtinDefaults=(root.LOCAL_MODELS||[]).map(cleanModel);
+    const builtinIds=new Set(builtinDefaults.map(x=>x.id));
+    const input=(settings?.models || []).map(cleanModel);
+    const builtins=builtinDefaults.map(base=>{
+      const edited=input.find(x=>x.id===base.id);
+      return edited ? cleanModel({...base,name:edited.name||base.name,model:edited.model||base.model,remoteModel:edited.model||base.model}) : base;
+    });
+    const builtinOverrides=builtins.filter((model,index)=>model.name!==builtinDefaults[index].name||model.model!==builtinDefaults[index].model);
+    const custom=input.filter(x=>x.id && !builtinIds.has(x.id) && x.id!==DEFAULT_MODEL.id && x.protocol && (x.protocol==='local-transformers' ? x.model : x.endpoint));
     const models=[...builtins,...custom,{...DEFAULT_MODEL}];
     const active=models.some(x=>x.id===settings?.activeModelId) ? settings.activeModelId : (root.DEFAULT_LOCAL_MODEL_ID || models[0].id);
     const rememberHF=!!settings?.huggingFaceRememberKey;
-    const stored={version:3,activeModelId:active,huggingFaceApiKey:rememberHF?String(settings?.huggingFaceApiKey||'').trim():'',huggingFaceRememberKey:rememberHF,models:custom.map(x=>x.rememberKey?x:{...x,apiKey:''})};
+    const storedModels=[...builtinOverrides,...custom].map(x=>x.rememberKey?x:{...x,apiKey:''});
+    const stored={version:3,activeModelId:active,huggingFaceApiKey:rememberHF?String(settings?.huggingFaceApiKey||'').trim():'',huggingFaceRememberKey:rememberHF,models:storedModels};
     try { localStorage.setItem(STORAGE_KEY,JSON.stringify(stored)); } catch (_) {}
     return {activeModelId:active,models,huggingFaceApiKey:String(settings?.huggingFaceApiKey||getStoredHuggingFaceKey()||'').trim(),huggingFaceRememberKey:rememberHF};
   }
@@ -107,7 +119,8 @@
       const protocol=String(model.protocol || model.kind || '').trim() || inferProtocol(model.endpoint);
       if (!PROTOCOLS[protocol]) throw new Error(`Unsupported AI API format. Supported formats: ${Object.values(PROTOCOLS).map(x=>x.label).join(', ')}.`);
       const clean=cleanModel({...model,protocol,kind:protocol,id:model.id || 'model-'+Math.random().toString(36).slice(2)});
-      if(!clean.id || !clean.endpoint || !clean.model) throw new Error('A model needs a name, endpoint, and model ID.');
+      const local=clean.local||clean.protocol==='local-transformers';
+      if(!clean.id || (!local&&!clean.endpoint) || !clean.model) throw new Error(local?'A local model needs a name and model ID.':'A model needs a name, endpoint, and model ID.');
       const existing=this.settings.models.findIndex(x=>x.id===clean.id);
       if(existing>=0)this.settings.models[existing]=clean;else this.settings.models.push(clean);
       this.settings=saveModels(this.settings);
