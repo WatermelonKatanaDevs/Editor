@@ -59,7 +59,7 @@
     if (!parsed) {
       try { const old=JSON.parse(localStorage.getItem('editor.aiModels.v1') || 'null'); if (old) parsed=old; } catch (_) {}
     }
-    const stored=Array.isArray(parsed?.models) ? parsed.models.map(cleanModel).filter(x=>x.id && x.protocol && x.protocol!=='ai-horde' && (x.protocol==='local-transformers' ? x.model : x.endpoint)) : [];
+    const stored=Array.isArray(parsed?.models) ? parsed.models.map(cleanModel).filter(x=>x.id && x.protocol && (x.protocol==='local-transformers' ? x.model : x.endpoint)) : [];
     const builtinDefaults=(root.LOCAL_MODELS||[]).map(cleanModel);
     const allBuiltinIds=new Set(builtinDefaults.map(x=>x.id));
     const disabledBuiltInIds=new Set(Array.isArray(parsed?.disabledBuiltInIds)?parsed.disabledBuiltInIds.map(String):[]);
@@ -93,7 +93,7 @@
       const base=builtinDefaults.find(x=>x.id===model.id);
       return base&&(model.name!==base.name||model.model!==base.model);
     });
-    const custom=input.filter(x=>x.id && !allBuiltinIds.has(x.id) && x.protocol && x.protocol!=='ai-horde' && (x.protocol==='local-transformers' ? x.model : x.endpoint));
+    const custom=input.filter(x=>x.id && !allBuiltinIds.has(x.id) && x.protocol && (x.protocol==='local-transformers' ? x.model : x.endpoint));
     let models=[...builtins,...custom];
     if(!models.length){
       disabledBuiltInIds.clear();
@@ -106,7 +106,7 @@
     try { localStorage.setItem(STORAGE_KEY,JSON.stringify(stored)); } catch (_) {}
     return {activeModelId:active,models,disabledBuiltInIds:[...disabledBuiltInIds],huggingFaceApiKey:String(settings?.huggingFaceApiKey||getStoredHuggingFaceKey()||'').trim(),huggingFaceRememberKey:rememberHF};
   }
-  function get(settings) { return (settings?.models || []).find(x=>x.id===settings.activeModelId) || settings?.models?.[0] || {...DEFAULT_MODEL}; }
+  function get(settings) { return (settings?.models || []).find(x=>x.id===settings.activeModelId) || settings?.models?.[0] || null; }
   function protocolLabel(id) { return PROTOCOLS[id]?.label || 'Unsupported API format'; }
   class ProviderRegistry {
     constructor(){ this.settings=loadModels(); this.sharedKeyCursor=0; this.settings=saveModels(this.settings); }
@@ -146,7 +146,7 @@
     }
     importSettings(payload){
       if(!payload || typeof payload!=='object' || !Array.isArray(payload.models)) throw new Error('Invalid AI model settings JSON.');
-      const imported=payload.models.map(x=>cleanModel({...x,rememberKey:!!x.rememberKey || !!x.apiKey})).filter(x=>x.id && x.protocol && x.protocol!=='ai-horde' && x.model && (x.protocol==='local-transformers' || x.endpoint));
+      const imported=payload.models.map(x=>cleanModel({...x,rememberKey:!!x.rememberKey || !!x.apiKey})).filter(x=>x.id && x.protocol && x.model && (x.protocol==='local-transformers' || x.endpoint));
       if(!imported.length)throw new Error('At least one valid AI model is required.');
       const ids=new Set();
       for(const model of imported){ if(ids.has(model.id)) throw new Error(`Duplicate model ID: ${model.id}`); ids.add(model.id); }
