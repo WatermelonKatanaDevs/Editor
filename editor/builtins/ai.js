@@ -244,9 +244,17 @@
         }catch(err){alert(`Could not import AI settings: ${err?.message||err}`);}
         finally{importInput.value='';}
       };
-      modal.querySelectorAll('[data-use]').forEach(x=>x.onclick=()=>{
-  registry.setActive(x.dataset.use);editingId='';render();onChange?.();
-});
+      modal.querySelectorAll('[data-use]').forEach(button=>button.onclick=async()=>{
+        const model=registry.settings.models.find(m=>m.id===button.dataset.use);
+        if(!model)return;
+        if(model.local||model.protocol==='local-transformers'){
+          if(model.id===registry.settings.activeModelId&&localManager?.isLoaded?.(model.id))return;
+          modal.remove();
+          try{await useModel?.(model.id);}catch(e){alert(e?.message||String(e));}
+        }else{
+          registry.setActive(model.id);editingId='';render();onChange?.();
+        }
+      });
       modal.querySelectorAll('[data-remove]').forEach(button=>button.onclick=async()=>{
         const id=button.dataset.remove;
         if(registry.settings.models.length<=1)return;
@@ -344,12 +352,6 @@
       modal.querySelectorAll('[data-local-edit]').forEach(button=>button.onclick=()=>{
         const model=registry.settings.models.find(m=>m.id===button.dataset.localEdit);
         if(model)openLocalModelEditor(model);
-      });
-      modal.querySelectorAll('[data-local-use]').forEach(button=>button.onclick=async()=>{
-        const model=registry.settings.models.find(m=>m.id===button.dataset.localUse);
-        if(!model)return;
-        if(model.id===registry.settings.activeModelId&&localManager?.isLoaded?.(model.id))return;
-        modal.remove();try{await useModel?.(model.id);}catch(e){alert(e?.message||String(e));}
       });
       const form=modal.querySelector('.ai-add-model'),add=modal.querySelector('[data-add]'),providerInput=form.querySelector('[data-provider]'),formatInput=form.querySelector('[data-format]'),endpointInput=form.querySelector('[data-endpoint]'),nameInput=form.querySelector('[data-name]'),modelInput=form.querySelector('[data-model]'),keyInput=form.querySelector('[data-key]'),hint=form.querySelector('[data-protocol-hint]');
       const hfGlobalKey=modal.querySelector('[data-hf-global-key]'),hfGlobalRemember=modal.querySelector('[data-hf-global-remember]');
