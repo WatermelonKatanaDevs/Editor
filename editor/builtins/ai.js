@@ -405,6 +405,7 @@
       if(!target)throw new Error('AI model not found.');
       const previous=registry.active();
       registry.setActive(target.id);
+      render(currentGroup,currentTab);
       try{
         if(target.local||target.protocol==='local-transformers'){
           if(!localManager.isLoaded(target.id))await localManager.load(target);
@@ -414,15 +415,18 @@
       }catch(e){
         if(previous?.id&&previous.id!==target.id){
           try{registry.setActive(previous.id);}catch(_){}
+          render(currentGroup,currentTab);
         }
         throw e;
       }
+      render(currentGroup,currentTab);
       return target;
     }
     function updateLocalStatusUI(info){
       const tree=currentTab?._viewElement;
       if(!tree)return;
       const model=registry.active(),local=!!model?.local||model?.protocol==='local-transformers';
+      const label=tree.querySelector('.ai-model-label');if(label)label.textContent=makeModelLabel(model,registry,localManager);
       const loaded=local&&localManager.isLoaded(model.id);
       const status=tree.querySelector('[data-local-status]'),text=tree.querySelector('[data-local-status-text]'),bar=tree.querySelector('[data-local-status-progress]'),button=tree.querySelector('[data-local-load]'),input=tree.querySelector('[data-input]'),send=tree.querySelector('[data-send]');
       if(status){status.hidden=!local||(!info?.loading&&!loaded);}
