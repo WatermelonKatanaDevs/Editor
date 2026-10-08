@@ -91,6 +91,7 @@
             const calls=Array.isArray(msg.tool_calls)?msg.tool_calls.map((x,i)=>({id:x.id||x._geminiCallId||`tool-${Date.now()}-${i}`,name:x.function?.name,arguments:x.function?.arguments||'{}',_geminiCallId:x._geminiCallId||null})).filter(x=>x.name):[];
             if(!calls.length){ finalText=String(msg.content||''); working.push({role:'assistant',content:finalText}); this.emit?.({type:'final',text:finalText,reasoning}); return {text:finalText,reasoning}; }
              const narration=String(msg.content||'').trim();if(narration)this.emit?.({type:'assistant_activity',text:narration});
+            working.push({role:'assistant',content:msg.content||'',tool_calls:msg.tool_calls,_geminiContent:msg._geminiContent||null});
             for(const call of calls){ const result=await this.executeTool(call); if(result?.exitEarly===true){ finalText=String(result.message||''); this.emit?.({type:'final',text:finalText,reasoning,exitedEarly:true}); return {text:finalText,reasoning,exitedEarly:true}; } working.push({role:'tool',tool_call_id:call.id,_geminiCallId:call._geminiCallId,name:call.name,content:stringifyResult(result)}); }
           } else {
             let text=''; let lastReasoning='';
