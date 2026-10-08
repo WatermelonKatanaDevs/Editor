@@ -595,7 +595,6 @@
       const title=prompt('Chat name:',chat.title);
       if(title!=null){chatStore.rename(chat.id,title);render(view.g,view.t);}
     }
-    function formatWait(seconds){const n=Math.max(0,Math.ceil(Number(seconds)||0));if(n<60)return `${n}s`;const m=Math.floor(n/60),s=n%60;return s?`${m}m ${s}s`:`${m}m`;}
     function render(g, t) {
       currentGroup = g || currentGroup || state.workbench?.getFirstLeaf?.();
       currentTab = t || currentTab || currentGroup?.tabs?.find(x => x.builtin === 'ai');
@@ -611,7 +610,7 @@
       tree.style.display = '';
       const model=registry.active(); const localModel=!!model?.local||model?.protocol==='local-transformers'; const localLoaded=!localModel||localManager.isLoaded(model.id); const chats=chatStore.list(true); const current=currentChat();
       if(!model.supportsTools && !model.supportsAgentTools) agentMode=false;
-      tree.innerHTML=`<div class="ai-panel-inner"><div class="ai-header"><div class="ai-header-left"><strong>AI Chat</strong><span class="ai-model-label">${escapeHtml(makeModelLabel(model,registry,localManager))}</span></div><div class="ai-header-right"><select class="ai-chat-select" data-chat-select ${busy?'disabled':''} title="Recent chats">${chats.map(c=>`<option value="${escapeHtml(c.id)}" ${c.id===currentChatId?'selected':''}>${escapeHtml(c.title)}</option>`).join('')}${!chats.length?'<option>No chats</option>':''}</select><div class="ai-head-actions"><button data-chat-manage ${busy?'disabled':''} title="Manage chats" aria-label="Manage chats">☰</button><button data-new ${busy?'disabled':''} title="New chat" aria-label="New chat">＋</button><button data-settings title="AI Settings" aria-label="AI Settings">⚙</button></div><div class="ai-local-head-action">${localModel&&!localLoaded?'<button data-local-load>Load model</button>':''}</div></div></div><div class="ai-chat" data-chat>${chatMessages.length ? '' : '<div class="ai-chat-disclaimer">Chats are saved inside this project. If this project is published or pushed to Git, saved chats may be visible to others.</div>'}</div><div class="ai-horde-status" data-status ${busy?'':'hidden'}>${busy?'Working…':''}</div><div class="ai-local-status" data-local-status hidden><div data-local-status-text></div><div class="ai-local-progress"><span data-local-status-progress></span></div></div><div class="ai-compose"><textarea data-input placeholder="Ask anything about your project…" rows="3"></textarea><div class="ai-compose-bar"><label class="ai-agent-toggle"><input data-agent type="checkbox" ${agentMode?'checked':''} ${model.supportsTools||model.supportsAgentTools?'':'disabled'}> Agent mode${model.supportsTools||model.supportsAgentTools?'':' (not supported by this model)'}</label><label class="ai-agent-steps">Steps <input data-agent-steps type="number" min="1" max="100" step="1" value="${Math.max(1,Math.min(100,Number(agent.maxSteps)||24))}" ${model.supportsTools||model.supportsAgentTools?'':'disabled'}></label><button data-stop ${busy?'':'disabled'}>Stop</button><button class="primary" data-send ${busy?'disabled':''}>Send</button></div></div></div>`;
+      tree.innerHTML=`<div class="ai-panel-inner"><div class="ai-header"><div class="ai-header-left"><strong>AI Chat</strong><span class="ai-model-label">${escapeHtml(makeModelLabel(model,registry,localManager))}</span></div><div class="ai-header-right"><select class="ai-chat-select" data-chat-select ${busy?'disabled':''} title="Recent chats">${chats.map(c=>`<option value="${escapeHtml(c.id)}" ${c.id===currentChatId?'selected':''}>${escapeHtml(c.title)}</option>`).join('')}${!chats.length?'<option>No chats</option>':''}</select><div class="ai-head-actions"><button data-chat-manage ${busy?'disabled':''} title="Manage chats" aria-label="Manage chats">☰</button><button data-new ${busy?'disabled':''} title="New chat" aria-label="New chat">＋</button><button data-settings title="AI Settings" aria-label="AI Settings">⚙</button></div><div class="ai-local-head-action">${localModel&&!localLoaded?'<button data-local-load>Load model</button>':''}</div></div></div><div class="ai-chat" data-chat>${chatMessages.length ? '' : '<div class="ai-chat-disclaimer">Chats are saved inside this project. If this project is published or pushed to Git, saved chats may be visible to others.</div>'}</div><div class="ai-request-status" data-status ${busy?'':'hidden'}>${busy?'Working…':''}</div><div class="ai-local-status" data-local-status hidden><div data-local-status-text></div><div class="ai-local-progress"><span data-local-status-progress></span></div></div><div class="ai-compose"><textarea data-input placeholder="Ask anything about your project…" rows="3"></textarea><div class="ai-compose-bar"><label class="ai-agent-toggle"><input data-agent type="checkbox" ${agentMode?'checked':''} ${model.supportsTools||model.supportsAgentTools?'':'disabled'}> Agent mode${model.supportsTools||model.supportsAgentTools?'':' (not supported by this model)'}</label><label class="ai-agent-steps">Steps <input data-agent-steps type="number" min="1" max="100" step="1" value="${Math.max(1,Math.min(100,Number(agent.maxSteps)||24))}" ${model.supportsTools||model.supportsAgentTools?'':'disabled'}></label><button data-stop ${busy?'':'disabled'}>Stop</button><button class="primary" data-send ${busy?'disabled':''}>Send</button></div></div></div>`;
       const chat=tree.querySelector('[data-chat]');
       for(let i=0;i<chatMessages.length;i++){const m=chatMessages[i];addMessage(chat,m.role,m.content,i,m);}
       tree.querySelector('[data-agent]').onchange=e=>{agentMode=e.target.checked;};
@@ -666,22 +665,7 @@
         } else {
           const messages=[{role:'system',content:systemPrompt(false)},...activeMessages()];
           const model=agent.client.model();
-          const queueStatus=info=>{
-            if(model.protocol!=='ai-horde') return;
-            const wait=Number(info?.waitTime);
-            const position=Number(info?.queuePosition);
-            if(info?.done){setStatus('');return;}
-            if(info?.waiting){
-              const pos=Number.isFinite(position)?Math.max(1,Math.floor(position)+1):null;
-              const waitText=Number.isFinite(wait)&&wait>0?` • ~${formatWait(wait)}`:'';
-              setStatus(pos?`Queue: #${pos}${waitText}`:`Queued${waitText}`);
-            } else if(info?.processing){
-              setStatus(Number.isFinite(wait)&&wait>0?`Processing • ~${formatWait(wait)}`:'Processing…');
-            } else {
-              setStatus('Waiting for Horde…');
-            }
-          };
-          for await(const chunk of agent.client.stream(messages,{thinking:true,maxTokens:2048,temperature:.7,topP:.9,signal:controller.signal,systemPrompt:systemPrompt(false),onQueueStatus:queueStatus,onRetry:info=>setStatus(info?.kind==='tool_parse_recovery' ? (info.text||'Retrying tool-call generation…') : info?.kind==='transport_retry' ? `Network retry in ${Math.ceil((info.waitMs||0)/1000)}s (attempt ${info.attempt}/${info.maxRetries})` : `Rate limited — retrying in ${Math.ceil(info.waitMs/1000)}s (attempt ${info.attempt}/${info.maxRetries})`)})){partial=chunk.text||partial;renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
+          for await(const chunk of agent.client.stream(messages,{thinking:true,maxTokens:2048,temperature:.7,topP:.9,signal:controller.signal,systemPrompt:systemPrompt(false),onRetry:info=>setStatus(info?.kind==='tool_parse_recovery' ? (info.text||'Retrying tool-call generation…') : info?.kind==='transport_retry' ? `Network retry in ${Math.ceil((info.waitMs||0)/1000)}s (attempt ${info.attempt}/${info.maxRetries})` : `Rate limited — retrying in ${Math.ceil(info.waitMs/1000)}s (attempt ${info.attempt}/${info.maxRetries})`)})){partial=chunk.text||partial;renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
           chatMessages.push({role:'assistant',content:partial});
         }
         persist();
