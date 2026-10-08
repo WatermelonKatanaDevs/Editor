@@ -1,3 +1,48 @@
+// Short-lived bridge for transferring actual files between the editor and its embedded browser.
+// Tokens travel through DataTransfer; the bytes stay in memory and are only read when a drop target accepts them.
+if (!window.__editorFileDropBridge) {
+  const pendingEditorDropFiles = new Map();
+  let editorDropTokenId = 0;
+  const editorDropLifetime = 5 * 60 * 1000;
+  const isTransferableFile = file => !!file && typeof file.name === 'string' && typeof file.arrayBuffer === 'function';
+  const registerPayload = payload => {
+    if (typeof payload !== 'function') {
+      const files = Array.isArray(payload) ? payload : [payload];
+      if (!files.length || !files.every(isTransferableFile)) return '';
+    }
+    const token = 'wk-file-' + Date.now().toString(36) + '-' + (++editorDropTokenId) + '-' + Math.random().toString(36).slice(2);
+    const timer = setTimeout(() => pendingEditorDropFiles.delete(token), editorDropLifetime);
+    pendingEditorDropFiles.set(token, {payload, timer});
+    return token;
+  };
+  window.__editorFileDropBridge = {
+    register(file) {
+      return registerPayload(file);
+    },
+    registerFiles(files) {
+      return registerPayload(Array.isArray(files) ? files.slice() : []);
+    },
+    registerProvider(provider) {
+      return typeof provider === 'function' ? registerPayload(provider) : '';
+    },
+    take(token) {
+      token = String(token || '');
+      const entry = pendingEditorDropFiles.get(token);
+      if (!entry) return null;
+      pendingEditorDropFiles.delete(token);
+      clearTimeout(entry.timer);
+      return typeof entry.payload === 'function' ? entry.payload() : entry.payload;
+    },
+    release(token) {
+      token = String(token || '');
+      const entry = pendingEditorDropFiles.get(token);
+      if (!entry) return;
+      pendingEditorDropFiles.delete(token);
+      clearTimeout(entry.timer);
+    }
+  };
+}
+
 window.__editorInitPromise = (async function () {
   const workers = await (window.__workersConfigReady || Promise.resolve(window.WorkerConfig || {}));
   // One Network owned by the editor/workbench and shared by every Browser iframe.

@@ -601,6 +601,36 @@ async function openUploadPicker(input, openDownloads=true) {
   drop.addEventListener('drop',async e => {
     e.preventDefault();
     drop.classList.remove('border-indigo-500');
+
+    // Files dragged from the editor's Explorer use a separate transfer type,
+    // so ordinary moves within the Explorer remain unaffected.
+    const editorToken = e.dataTransfer.getData('application/x-wk-editor-files');
+    if (editorToken) {
+      try {
+        const bridge = window.parent && window.parent !== window
+          ? window.parent.__editorFileDropBridge
+          : null;
+        const payload = await bridge?.take?.(editorToken);
+        const draggedFiles = (Array.isArray(payload) ? payload : [payload]).filter(file =>
+          file && typeof file.name === 'string' && typeof file.arrayBuffer === 'function'
+        );
+        if (!draggedFiles.length) {
+          throw new Error('The editor file is no longer available. Try dragging it again.');
+        }
+        const accepted = draggedFiles.filter(file => uploadAcceptsFile(input,file));
+        if (accepted.length !== draggedFiles.length) {
+          showToast('One or more editor files do not match the upload type.','error');
+          return;
+        }
+        if (uploadInputFiles(input,input.multiple ? accepted : accepted.slice(0,1))) {
+          closeUploadPicker();
+        }
+      } catch (err) {
+        showToast(err?.message || 'Unable to use the editor file.','error');
+      }
+      return;
+    }
+
     const rawId = e.dataTransfer.getData('application/x-proxy-download-id');
     const id = Number(rawId);
     if (!Number.isInteger(id) || id <= 0) return;
