@@ -250,7 +250,6 @@
   registry.setActive(x.dataset.use);editingId='';render();onChange?.();
 });
       modal.querySelectorAll('[data-remove]').forEach(x=>x.onclick=()=>{registry.remove(x.dataset.remove);editingId='';render();onChange?.();});
-      modal.querySelector('[data-add-local]').onclick=()=>openLocalModelBrowser();
       const localEditor=modal.querySelector('[data-local-editor]');
       const localNameInput=modal.querySelector('[data-local-name]');
       const localModelInput=modal.querySelector('[data-local-model]');
