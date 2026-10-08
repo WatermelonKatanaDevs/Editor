@@ -198,16 +198,19 @@
     let editingId='';
     const render=()=>{
       const models=registry.settings.models, providers=registry.providers();
-      modal.innerHTML=`<div class="editor-modal-content ai-settings-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>AI Settings</h2><p>Configure models, the extra instructions you give them, and usage behavior.</p><div class="ai-settings-tabs"><button data-settings-tab="models" class="active">Models</button><button data-settings-tab="context">Context</button><button data-settings-tab="analytics">Analytics</button></div><div data-settings-panel="models"><div class="ai-settings-columns"><section><div class="ai-section-title ai-settings-section-heading"><span>Models</span><span class="ai-settings-transfer"><button type="button" data-export-ai>Export JSON</button><button type="button" data-import-ai>Import JSON</button><input data-import-ai-file type="file" accept="application/json,.json" hidden></span></div><label class="ai-check ai-export-keys"><input data-preserve-ai-keys type="checkbox" checked> Preserve API keys in export</label><div class="ai-export-warning">API keys are written to the JSON file in plain text when enabled. Only share the exported file if you are comfortable sharing those keys.</div><div class="ai-model-list">${models.map(m=>{
-  const local=!!m.local||m.protocol==='local-transformers';
+      modal.innerHTML=`<div class="editor-modal-content ai-settings-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>AI Settings</h2><p>Configure models, the extra instructions you give them, and usage behavior.</p><div class="ai-settings-tabs"><button data-settings-tab="models" class="active">Models</button><button data-settings-tab="context">Context</button><button data-settings-tab="analytics">Analytics</button></div><div data-settings-panel="models"><div class="ai-settings-columns"><section><div class="ai-section-title ai-settings-section-heading"><span>Models</span><span class="ai-settings-transfer"><button type="button" data-export-ai>Export JSON</button><button type="button" data-import-ai>Import JSON</button><input data-import-ai-file type="file" accept="application/json,.json" hidden></span></div><label class="ai-check ai-export-keys"><input data-preserve-ai-keys type="checkbox" checked> Preserve API keys in export</label><div class="ai-export-warning">API keys are written to the JSON file in plain text when enabled. Only share the exported file if you are comfortable sharing those keys.</div><div class="ai-model-list">\${models.filter(m=>!m.local&&m.protocol!=='local-transformers').map(m=>{
   const active=m.id===registry.settings.activeModelId;
-  const loaded=local&&!!localManager?.isLoaded?.(m.id);
-  const action=local?(active&&loaded?'Active':'Load'):(active?'Active':'Use');
-  const details=local?'Local browser model · '+m.model:(registry.protocolLabel(m.protocol)+' · '+(m.supportsTools?'tool calling':'prompt tools')+' · '+(m.supportsReasoning?'reasoning':'no reasoning'));
-  const edit=local?'':'<button data-edit="'+escapeHtml(m.id)+'">Edit</button>';
-  const remove=(local||m.id===aiRoot.DEFAULT_PUBLIC_AI_MODEL.id)?'':'<button data-remove="'+escapeHtml(m.id)+'">×</button>';
-  return '<div class="ai-model-row '+(active?'active':'')+'"><div class="ai-model-main"><strong>'+escapeHtml(m.name)+'</strong><span>'+escapeHtml(details)+'</span></div><button data-use="'+escapeHtml(m.id)+'">'+action+'</button>'+edit+remove+'</div>';
-}).join('')}</div><div class="ai-model-actions"><button class="ai-settings-add" data-add>+ Add remote model</button><button class="ai-settings-add" data-add-local>+ Add local model</button></div><div class="ai-local-load-status" data-local-settings-status hidden><div data-local-settings-text></div><div class="ai-local-progress"><span data-local-settings-progress></span></div></div><div class="ai-add-model" hidden><label>Provider<select data-provider>${Object.entries(providers).filter(([id])=>id!=='local').map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>API format<select data-format>${Object.entries(aiRoot.AI_PROTOCOLS||{}).map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>Name<input data-name placeholder="My model"></label><label>Endpoint<input data-endpoint placeholder="https://api.example.com/v1"></label><label>Model ID <div class="ai-model-input-row"><input data-model placeholder="model-name"><button type="button" data-browse-models>Browse models</button></div></label><label>API key <input data-key type="password" placeholder="Enter your provider key"></label><label class="ai-check"><input data-remember type="checkbox"> Remember API key on this device</label><label class="ai-check"><input data-tools type="checkbox" checked> Supports native tool calling</label><label class="ai-check"><input data-thinking type="checkbox" checked> Supports reasoning</label><div class="ai-add-hint" data-protocol-hint>Select a provider to fill in its API format and endpoint. You can override the endpoint for compatible services.</div><div class="ai-add-actions"><button data-cancel-model>Cancel</button><button data-save-model>Save model</button></div></div><div class="ai-hf-account"><div class="ai-section-title">Hugging Face</div><label>Your API key<input data-hf-global-key type="password" placeholder="hf_..."></label><label class="ai-check"><input data-hf-global-remember type="checkbox"> Remember your key on this device</label><div class="ai-add-hint">Used for Hugging Face models that do not have their own key. Add a key here or on an individual model.</div></div></section><section><div class="ai-section-title">Permissions</div><div class="ai-permission-list">${Object.entries(permissions.all()).map(([k,v])=>`<label><span>${escapeHtml(TOOL_PERMISSION_LABELS[k]||k)}</span><select data-permission="${k}"><option value="always" ${v==='always'?'selected':''}>Always allow</option><option value="ask" ${v==='ask'?'selected':''}>Ask each time</option><option value="never" ${v==='never'?'selected':''}>Never allow</option></select></label>`).join('')}</div><button data-reset-permissions class="ai-settings-reset">Reset permissions</button></section></div><div class="ai-settings-note">Providers can fill in the API format and default endpoint automatically. Providers may expose either a live model list or a fixed set of known models.</div></div><div data-settings-panel="context" hidden><div class="ai-context-panel"><h3 class="ai-section-title">Model context &amp; instructions</h3><p class="ai-settings-note-inline">These are added to the built-in coding-assistant instructions. They persist on this device and apply to your AI chats.</p><label>Additional instructions<textarea data-custom-instructions placeholder="Example: Prefer small, focused changes. Explain tradeoffs briefly."></textarea></label><label>Agent-only instructions<textarea data-agent-instructions placeholder="Example: Before editing, inspect related files and run a targeted verification after each major change."></textarea></label><label class="ai-check"><input data-show-activity type="checkbox"> Show agent activity in chat</label><h3 class="ai-section-title">Request recovery</h3><label class="ai-check"><input data-retry-429 type="checkbox"> Automatically retry HTTP 429 rate limits</label><div class="ai-retry-grid"><label>Max 429 retries<input data-max-retries type="number" min="0" max="10"></label><label>Base delay (ms)<input data-base-delay type="number" min="250" max="30000" step="250"></label></div><label class="ai-check"><input data-retry-transport type="checkbox"> Retry transport/CORS failures</label><div class="ai-retry-grid"><label>Max transport retries<input data-max-transport-retries type="number" min="0" max="10"></label><label>Transport delay (ms)<input data-transport-delay type="number" min="250" max="30000" step="250"></label></div><p class="ai-settings-note-inline">HTTP responses such as 429 are handled separately from transport failures such as CORS or connection errors.</p><h3 class="ai-section-title">Tool-call recovery</h3><label class="ai-check"><input data-tool-recovery type="checkbox"> Retry supported tool-call parse failures</label><div class="ai-retry-grid"><label>Max recovery retries<input data-tool-recovery-retries type="number" min="0" max="10"></label><span></span></div><p class="ai-settings-note-inline">Providers can opt into a recovery strategy through their API adapter. The agent itself does not special-case providers.</p></div></div><div data-settings-panel="analytics" hidden><div class="ai-analytics-panel"><div class="ai-analytics-cards" data-analytics-cards></div><h3 class="ai-section-title">By model</h3><div data-analytics-models class="ai-analytics-models"></div><button data-reset-analytics class="ai-settings-reset">Reset analytics</button></div></div></div>`;
+  const details=registry.protocolLabel(m.protocol)+' · '+(m.supportsTools?'tool calling':'prompt tools')+' · '+(m.supportsReasoning?'reasoning':'no reasoning');
+  return '<div class="ai-model-row '+(active?'active':'')+'"><div class="ai-model-main"><strong>'+escapeHtml(m.name)+'</strong><span>'+escapeHtml(details)+'</span></div><button data-use="'+escapeHtml(m.id)+'">'+(active?'Active':'Use')+'</button><button data-edit="'+escapeHtml(m.id)+'">Edit</button>'+(m.id===aiRoot.DEFAULT_PUBLIC_AI_MODEL.id?'':'<button data-remove="'+escapeHtml(m.id)+'">×</button>')+'</div>';
+}).join('')}</div>
+<div class="ai-local-model-section"><div class="ai-section-title">Local models</div><div class="ai-model-list ai-local-model-list">\${models.filter(m=>m.local||m.protocol==='local-transformers').map(m=>{
+  const active=m.id===registry.settings.activeModelId;
+  const loaded=!!localManager?.isLoaded?.(m.id);
+  const removable=!m.builtInLocal;
+  return '<div class="ai-local-model-row '+(active?'active':'')+'"><div class="ai-model-main"><strong>'+escapeHtml(m.name)+'</strong><span>'+escapeHtml(m.model)+'</span></div><button data-local-use="'+escapeHtml(m.id)+'">'+(active&&loaded?'Active':'Load')+'</button><button data-local-edit="'+escapeHtml(m.id)+'">Edit</button>'+(removable?'<button data-local-remove="'+escapeHtml(m.id)+'">×</button>':'')+'</div>';
+}).join('')}</div>
+<div class="ai-local-model-editor" data-local-editor hidden><h3 data-local-editor-title>Add local model</h3><label>Name<input data-local-name placeholder="Qwen3 4B Instruct · Local"></label><label>Model ID<div class="ai-model-input-row"><input data-local-model placeholder="onnx-community/owner-model-ONNX"><button type="button" data-browse-local-models>Browse</button></div></label><div class="ai-local-editor-status" data-local-editor-status></div><div class="ai-add-actions"><button type="button" data-cancel-local>Cancel</button><button type="button" data-save-local>Save model</button></div></div>
+</div><div class="ai-model-actions"><button class="ai-settings-add" data-add>+ Add remote model</button><button class="ai-settings-add" data-add-local>+ Add local model</button></div><button class="ai-settings-add" data-add>+ Add remote model</button><button class="ai-settings-add" data-add-local>+ Add local model</button></div><div class="ai-local-load-status" data-local-settings-status hidden><div data-local-settings-text></div><div class="ai-local-progress"><span data-local-settings-progress></span></div></div><div class="ai-add-model" hidden><label>Provider<select data-provider>${Object.entries(providers).filter(([id])=>id!=='local').map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>API format<select data-format>${Object.entries(aiRoot.AI_PROTOCOLS||{}).map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>Name<input data-name placeholder="My model"></label><label>Endpoint<input data-endpoint placeholder="https://api.example.com/v1"></label><label>Model ID <div class="ai-model-input-row"><input data-model placeholder="model-name"><button type="button" data-browse-models>Browse models</button></div></label><label>API key <input data-key type="password" placeholder="Enter your provider key"></label><label class="ai-check"><input data-remember type="checkbox"> Remember API key on this device</label><label class="ai-check"><input data-tools type="checkbox" checked> Supports native tool calling</label><label class="ai-check"><input data-thinking type="checkbox" checked> Supports reasoning</label><div class="ai-add-hint" data-protocol-hint>Select a provider to fill in its API format and endpoint. You can override the endpoint for compatible services.</div><div class="ai-add-actions"><button data-cancel-model>Cancel</button><button data-save-model>Save model</button></div></div><div class="ai-hf-account"><div class="ai-section-title">Hugging Face</div><label>Your API key<input data-hf-global-key type="password" placeholder="hf_..."></label><label class="ai-check"><input data-hf-global-remember type="checkbox"> Remember your key on this device</label><div class="ai-add-hint">Used for Hugging Face models that do not have their own key. Add a key here or on an individual model.</div></div></section><section><div class="ai-section-title">Permissions</div><div class="ai-permission-list">${Object.entries(permissions.all()).map(([k,v])=>`<label><span>${escapeHtml(TOOL_PERMISSION_LABELS[k]||k)}</span><select data-permission="${k}"><option value="always" ${v==='always'?'selected':''}>Always allow</option><option value="ask" ${v==='ask'?'selected':''}>Ask each time</option><option value="never" ${v==='never'?'selected':''}>Never allow</option></select></label>`).join('')}</div><button data-reset-permissions class="ai-settings-reset">Reset permissions</button></section></div><div class="ai-settings-note">Providers can fill in the API format and default endpoint automatically. Providers may expose either a live model list or a fixed set of known models.</div></div><div data-settings-panel="context" hidden><div class="ai-context-panel"><h3 class="ai-section-title">Model context &amp; instructions</h3><p class="ai-settings-note-inline">These are added to the built-in coding-assistant instructions. They persist on this device and apply to your AI chats.</p><label>Additional instructions<textarea data-custom-instructions placeholder="Example: Prefer small, focused changes. Explain tradeoffs briefly."></textarea></label><label>Agent-only instructions<textarea data-agent-instructions placeholder="Example: Before editing, inspect related files and run a targeted verification after each major change."></textarea></label><label class="ai-check"><input data-show-activity type="checkbox"> Show agent activity in chat</label><h3 class="ai-section-title">Request recovery</h3><label class="ai-check"><input data-retry-429 type="checkbox"> Automatically retry HTTP 429 rate limits</label><div class="ai-retry-grid"><label>Max 429 retries<input data-max-retries type="number" min="0" max="10"></label><label>Base delay (ms)<input data-base-delay type="number" min="250" max="30000" step="250"></label></div><label class="ai-check"><input data-retry-transport type="checkbox"> Retry transport/CORS failures</label><div class="ai-retry-grid"><label>Max transport retries<input data-max-transport-retries type="number" min="0" max="10"></label><label>Transport delay (ms)<input data-transport-delay type="number" min="250" max="30000" step="250"></label></div><p class="ai-settings-note-inline">HTTP responses such as 429 are handled separately from transport failures such as CORS or connection errors.</p><h3 class="ai-section-title">Tool-call recovery</h3><label class="ai-check"><input data-tool-recovery type="checkbox"> Retry supported tool-call parse failures</label><div class="ai-retry-grid"><label>Max recovery retries<input data-tool-recovery-retries type="number" min="0" max="10"></label><span></span></div><p class="ai-settings-note-inline">Providers can opt into a recovery strategy through their API adapter. The agent itself does not special-case providers.</p></div></div><div data-settings-panel="analytics" hidden><div class="ai-analytics-panel"><div class="ai-analytics-cards" data-analytics-cards></div><h3 class="ai-section-title">By model</h3><div data-analytics-models class="ai-analytics-models"></div><button data-reset-analytics class="ai-settings-reset">Reset analytics</button></div></div></div>`;
       modal.querySelector('.editor-modal-close').onclick=()=>modal.remove(); modal.onclick=e=>{if(e.target===modal)modal.remove();};
       const prefs=aiRoot.getAIPreferences?.()||{};
       const tabButtons=[...modal.querySelectorAll('[data-settings-tab]')], panels=[...modal.querySelectorAll('[data-settings-panel]')];
@@ -243,31 +246,36 @@
         }catch(err){alert(`Could not import AI settings: ${err?.message||err}`);}
         finally{importInput.value='';}
       };
-      modal.querySelectorAll('[data-use]').forEach(x=>x.onclick=async()=>{
-  const model=registry.settings.models.find(m=>m.id===x.dataset.use);
-  if(model?.local||model?.protocol==='local-transformers'){
-    modal.remove();
-    try{await useModel?.(model.id);}catch(e){alert(e?.message||String(e));}
-  }else{registry.setActive(x.dataset.use);editingId='';render();onChange?.();}
+      modal.querySelectorAll('[data-use]').forEach(x=>x.onclick=()=>{
+  registry.setActive(x.dataset.use);editingId='';render();onChange?.();
 });
       modal.querySelectorAll('[data-remove]').forEach(x=>x.onclick=()=>{registry.remove(x.dataset.remove);editingId='';render();onChange?.();});
       modal.querySelector('[data-add-local]').onclick=()=>openLocalModelBrowser();
-      function openLocalModelBrowser(){
+      const localEditor=modal.querySelector('[data-local-editor]');
+      const localNameInput=modal.querySelector('[data-local-name]');
+      const localModelInput=modal.querySelector('[data-local-model]');
+      const localEditorStatus=modal.querySelector('[data-local-editor-status]');
+      let editingLocalId='';
+      function openLocalModelEditor(model=null){
+        editingLocalId=model?.id||'';
+        localEditor.querySelector('[data-local-editor-title]').textContent=editingLocalId?'Edit local model':'Add local model';
+        localNameInput.value=model?.name||'';
+        localModelInput.value=model?.model||'';
+        localEditorStatus.textContent='';
+        localEditor.hidden=false;
+        localEditor.querySelector('[data-save-local]').textContent=editingLocalId?'Save changes':'Add model';
+        localEditor.scrollIntoView({block:'nearest',behavior:'smooth'});
+        if(!editingLocalId)localNameInput.focus();
+      }
+      function openLocalModelBrowser(onSelect){
         const browser=document.createElement('div');
         browser.className='editor-modal ai-hf-browser-modal';
-        browser.innerHTML='<div class="editor-modal-content ai-hf-browser-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>Hugging Face · Local Models</h2><p>Search models tagged for Transformers.js, then add one to this device.</p><div class="ai-hf-browser-toolbar"><input data-local-search placeholder="Search model IDs…"><button data-local-search-button>Search</button><button data-local-search-refresh>Refresh</button></div><div class="ai-local-add-row"><input data-local-model-id placeholder="Hugging Face model ID"><button data-local-add-id>Add ID</button></div><div class="ai-hf-browser-status" data-local-status>Loading models…</div><div class="ai-hf-browser-list" data-local-list></div></div>';
+        browser.innerHTML='<div class="editor-modal-content ai-hf-browser-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>Browse local models</h2><p>Choose a Hugging Face model supported by Transformers.js, or use a model ID directly.</p><div class="ai-hf-browser-toolbar"><input data-local-search placeholder="Search model IDs…"><button data-local-search-button>Search</button><button data-local-search-refresh>Refresh</button></div><div class="ai-local-add-row"><input data-local-model-id placeholder="Hugging Face model ID"><button data-local-use-id>Use ID</button></div><div class="ai-hf-browser-status" data-local-status>Loading models…</div><div class="ai-hf-browser-list" data-local-list></div></div>';
         document.body.appendChild(browser);requestAnimationFrame(()=>browser.classList.add('show'));
         const search=browser.querySelector('[data-local-search]'),status=browser.querySelector('[data-local-status]'),list=browser.querySelector('[data-local-list]'),idInput=browser.querySelector('[data-local-model-id]');
         let all=[];
         browser.querySelector('.editor-modal-close').onclick=()=>browser.remove();browser.onclick=e=>{if(e.target===browser)browser.remove();};
-        const addLocal=async(id,name,loadNow)=>{
-          const modelId=String(id||'').trim();if(!modelId){status.textContent='Enter a Hugging Face model ID first.';return;}
-          try{
-            const clean=registry.add({id:'local-'+modelId.replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'').toLowerCase(),name:name||('Local · '+modelId.split('/').pop()),model:modelId,protocol:'local-transformers',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true});
-            if(loadNow){browser.remove();modal.remove();await useModel?.(clean.id);return clean;}
-            render();status.textContent='Added '+clean.model+'. Load it from the model list when ready.';return clean;
-          }catch(e){status.textContent=e?.message||String(e);}
-        };
+        const choose=id=>{const modelId=String(id||'').trim();if(!modelId){status.textContent='Enter a Hugging Face model ID first.';return;}onSelect?.(modelId);browser.remove();};
         async function load(){
           status.textContent='Searching Hugging Face…';list.innerHTML='';
           try{
@@ -283,16 +291,57 @@
         }
         function renderList(){
           const q=search.value.trim().toLowerCase();
-          const rows=all.filter(m=>{const id=String(m?.id||'');if(!id)return false;return !q||id.toLowerCase().includes(q);}).slice(0,200);
+          const rows=all.filter(m=>{const id=String(m?.id||'');return id&&(!q||id.toLowerCase().includes(q));}).slice(0,200);
           status.textContent=rows.length+' compatible model'+(rows.length===1?'':'s')+' found';
-          list.innerHTML=rows.map(m=>'<div class="ai-hf-model-row"><div class="ai-model-main"><strong>'+escapeHtml(m.id)+'</strong><span>'+Number(m.downloads||0).toLocaleString()+' downloads · '+Number(m.likes||0).toLocaleString()+' likes</span></div><button data-local-add="'+escapeHtml(m.id)+'">Add</button><button data-local-add-load="'+escapeHtml(m.id)+'">Add &amp; Load</button></div>').join('');
-          list.querySelectorAll('[data-local-add]').forEach(b=>b.onclick=async()=>{await addLocal(b.dataset.localAdd,'Local · '+b.dataset.localAdd.split('/').pop(),false);renderList();});
-          list.querySelectorAll('[data-local-add-load]').forEach(b=>b.onclick=async()=>{try{await addLocal(b.dataset.localAdd,'Local · '+b.dataset.localAdd.split('/').pop(),true);}catch(e){status.textContent=e?.message||String(e);}});
+          list.innerHTML=rows.map(m=>'<div class="ai-hf-model-row"><div class="ai-model-main"><strong>'+escapeHtml(m.id)+'</strong><span>'+Number(m.downloads||0).toLocaleString()+' downloads · '+Number(m.likes||0).toLocaleString()+' likes</span></div><button data-local-select="'+escapeHtml(m.id)+'">Select</button></div>').join('');
+          list.querySelectorAll('[data-local-select]').forEach(b=>b.onclick=()=>choose(b.dataset.localSelect));
         }
         browser.querySelector('[data-local-search-button]').onclick=load;browser.querySelector('[data-local-search-refresh]').onclick=load;search.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();load();}};
-        browser.querySelector('[data-local-add-id]').onclick=async()=>{await addLocal(idInput.value,'',false);idInput.value='';};
+        browser.querySelector('[data-local-use-id]').onclick=()=>choose(idInput.value);
+        idInput.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();choose(idInput.value);}};
         load();
       }
+      modal.querySelector('[data-add-local]').onclick=()=>openLocalModelEditor();
+      modal.querySelector('[data-cancel-local]').onclick=()=>{editingLocalId='';localEditor.hidden=true;};
+      modal.querySelector('[data-browse-local-models]').onclick=()=>openLocalModelBrowser(id=>{
+        localModelInput.value=id;
+        if(!localNameInput.value.trim())localNameInput.value=id.split('/').pop()+' · Local';
+        localEditorStatus.textContent='';
+      });
+      modal.querySelector('[data-save-local]').onclick=()=>{
+        const name=localNameInput.value.trim(),modelId=localModelInput.value.trim();
+        if(!name||!modelId){localEditorStatus.textContent='Enter both a name and a model ID.';return;}
+        const isLocal=m=>m.local||m.protocol==='local-transformers';
+        const existing=registry.settings.models.find(m=>m.id===editingLocalId);
+        if(!editingLocalId&&registry.settings.models.some(m=>isLocal(m)&&m.model===modelId)){
+          localEditorStatus.textContent='That model is already in the list. Edit its existing entry instead.';return;
+        }
+        let id=editingLocalId;
+        if(!id){
+          const slug=modelId.replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'').toLowerCase()||'model';
+          id='local-'+slug;
+          if(registry.settings.models.some(m=>m.id===id))id+='-'+Math.random().toString(36).slice(2,7);
+        }
+        try{
+          registry.add({...existing,id,name,model:modelId,remoteModel:modelId,protocol:'local-transformers',kind:'local-transformers',endpoint:'',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true,builtInLocal:!!existing?.builtInLocal});
+          registry.save();
+          editingLocalId='';localEditor.hidden=true;render();onChange?.();
+        }catch(e){localEditorStatus.textContent=e?.message||String(e);}
+      };
+      modal.querySelectorAll('[data-local-edit]').forEach(button=>button.onclick=()=>{
+        const model=registry.settings.models.find(m=>m.id===button.dataset.localEdit);
+        if(model)openLocalModelEditor(model);
+      });
+      modal.querySelectorAll('[data-local-remove]').forEach(button=>button.onclick=()=>{
+        if(!confirm('Remove this local model from the list?'))return;
+        registry.remove(button.dataset.localRemove);render();onChange?.();
+      });
+      modal.querySelectorAll('[data-local-use]').forEach(button=>button.onclick=async()=>{
+        const model=registry.settings.models.find(m=>m.id===button.dataset.localUse);
+        if(!model)return;
+        if(model.id===registry.settings.activeModelId&&localManager?.isLoaded?.(model.id))return;
+        modal.remove();try{await useModel?.(model.id);}catch(e){alert(e?.message||String(e));}
+      });
       const form=modal.querySelector('.ai-add-model'),add=modal.querySelector('[data-add]'),providerInput=form.querySelector('[data-provider]'),formatInput=form.querySelector('[data-format]'),endpointInput=form.querySelector('[data-endpoint]'),nameInput=form.querySelector('[data-name]'),modelInput=form.querySelector('[data-model]'),keyInput=form.querySelector('[data-key]'),hint=form.querySelector('[data-protocol-hint]');
       const hfGlobalKey=modal.querySelector('[data-hf-global-key]'),hfGlobalRemember=modal.querySelector('[data-hf-global-remember]');
       hfGlobalKey.value=registry.getHuggingFaceApiKey?.()||''; hfGlobalRemember.checked=!!registry.settings.huggingFaceRememberKey;
