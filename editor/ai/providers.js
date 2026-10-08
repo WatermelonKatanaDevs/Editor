@@ -121,11 +121,11 @@
     save(){this.settings=saveModels(this.settings);return this.settings;}
     exportSettings(options={}){
       const preserveKeys=options.preserveKeys!==false;
-      return {version:1,activeModelId:this.settings.activeModelId,huggingFaceApiKey:preserveKeys?String(this.settings.huggingFaceApiKey||''):'',huggingFaceRememberKey:preserveKeys?!!this.settings.huggingFaceRememberKey:false,models:(this.settings.models||[]).filter(x=>x.id!==DEFAULT_MODEL.id).map(x=>{const model={...x}; if(preserveKeys) model.apiKey=String(x.apiKey||''); else {model.apiKey=''; model.rememberKey=false;} return model;})};
+      return {version:1,activeModelId:this.settings.activeModelId,huggingFaceApiKey:preserveKeys?String(this.settings.huggingFaceApiKey||''):'',huggingFaceRememberKey:preserveKeys?!!this.settings.huggingFaceRememberKey:false,models:(this.settings.models||[]).filter(x=>x.id!==DEFAULT_MODEL.id && !x.builtInLocal).map(x=>{const model={...x}; if(preserveKeys) model.apiKey=String(x.apiKey||''); else {model.apiKey=''; model.rememberKey=false;} return model;})};
     }
     importSettings(payload){
       if(!payload || typeof payload!=='object' || !Array.isArray(payload.models)) throw new Error('Invalid AI model settings JSON.');
-      const imported=payload.models.map(x=>cleanModel({...x,rememberKey:!!x.rememberKey || !!x.apiKey})).filter(x=>x.id && x.endpoint && x.protocol && x.model);
+      const imported=payload.models.map(x=>cleanModel({...x,rememberKey:!!x.rememberKey || !!x.apiKey})).filter(x=>x.id && x.protocol && x.model && (x.protocol==='local-transformers' || x.endpoint));
       const ids=new Set();
       for(const model of imported){ if(ids.has(model.id)) throw new Error(`Duplicate model ID: ${model.id}`); ids.add(model.id); }
       const active=String(payload.activeModelId||'');
