@@ -198,7 +198,7 @@
     let editingId='';
     const render=()=>{
       const models=registry.settings.models, providers=registry.providers();
-      modal.innerHTML=`<div class="editor-modal-content ai-settings-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>AI Settings</h2><p>Configure models, the extra instructions you give them, and usage behavior.</p><div class="ai-settings-tabs"><button data-settings-tab="models" class="active">Models</button><button data-settings-tab="context">Context</button><button data-settings-tab="analytics">Analytics</button></div><div data-settings-panel="models"><div class="ai-settings-columns"><section><div class="ai-section-title ai-settings-section-heading"><span>Models</span><span class="ai-settings-transfer"><button type="button" data-export-ai>Export JSON</button><button type="button" data-import-ai>Import JSON</button><input data-import-ai-file type="file" accept="application/json,.json" hidden></span></div><label class="ai-check ai-export-keys"><input data-preserve-ai-keys type="checkbox" checked> Preserve API keys in export</label><div class="ai-export-warning">API keys are written to the JSON file in plain text when enabled. Only share the exported file if you are comfortable sharing those keys.</div><div class="ai-model-list">${models.map(m=>{
+      modal.innerHTML=`<div class="editor-modal-content ai-settings-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>AI Settings</h2><p>Configure models, the extra instructions you give them, and usage behavior.</p><div class="ai-settings-tabs"><button data-settings-tab="models" class="active">Models</button><button data-settings-tab="context">Context</button><button data-settings-tab="analytics">Analytics</button></div><div data-settings-panel="models"><div class="ai-settings-columns"><section><div class="ai-section-title ai-settings-section-heading"><span>Models</span><span class="ai-settings-transfer"><button type="button" data-export-ai>Export JSON</button><button type="button" data-import-ai>Import JSON</button><button type="button" data-reset-models>Reset defaults</button><input data-import-ai-file type="file" accept="application/json,.json" hidden></span></div><label class="ai-check ai-export-keys"><input data-preserve-ai-keys type="checkbox" checked> Preserve API keys in export</label><div class="ai-export-warning">API keys are written to the JSON file in plain text when enabled. Only share the exported file if you are comfortable sharing those keys.</div><div class="ai-model-list">${models.map(m=>{
   const local=!!m.local||m.protocol==='local-transformers';
   const active=m.id===registry.settings.activeModelId;
   const loaded=local&&!!localManager?.isLoaded?.(m.id);
@@ -230,6 +230,20 @@
         if(preserveKeys) alert('AI settings exported. API keys are included in plain text in this JSON file. Do not share the exported file unless you intend to share those keys.');
       };
       const importInput=modal.querySelector('[data-import-ai-file]');
+      modal.querySelector('[data-reset-models]').onclick=async()=>{
+        const message='Restore the default AI model list? This will remove custom models and restore built-in models to their original names and model IDs. Your Hugging Face key, AI preferences, and permissions will be kept.';
+        if(!confirm(message))return;
+        try{
+          if(localManager?.isLoaded?.())await localManager.unload();
+          registry.resetDefaults();
+          editingId='';
+          editingLocalId='';
+          localEditor.hidden=true;
+          form.hidden=true;
+          render();
+          onChange?.();
+        }catch(e){alert('Could not reset AI models: '+(e?.message||String(e)));}
+      };
       modal.querySelector('[data-import-ai]').onclick=()=>importInput.click();
       importInput.onchange=async()=>{
         const file=importInput.files?.[0]; if(!file)return;
