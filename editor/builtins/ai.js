@@ -391,6 +391,7 @@
     const updateStatus = state.updateStatus;
     let currentGroup = null, currentTab = null;
     const registry=new aiRoot.ProviderRegistry();
+    const localManager=new aiRoot.LocalModelManager();
     const permissions=new aiRoot.PermissionManager();
     const chatStore=makeChatStore(state);
     let currentChatId='';
@@ -398,7 +399,41 @@
     let loadedProjectId=null;
     let agentMode=false, busy=false, controller=null, editingIndex=-1;
     const toolset=aiRoot.makeAITools({state,openFile:onOpen,onRefresh:()=>{state.fileManager?.refresh?.();updateStatus?.();},runConfigured,ensureNodeRuntime:()=>state.ensureNodeRuntime?.()});
-    const agent=new aiRoot.AIAgent({client:new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork),tools:toolset,permissions,requestPermission:permissionPrompt,extensionAPI:window.EditorExtensionAPI,emit:()=>{}});
+    const agent=new aiRoot.AIAgent({client:new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork,localManager),tools:toolset,permissions,requestPermission:permissionPrompt,extensionAPI:window.EditorExtensionAPI,emit:()=>{}});
+    async function activateModel(id){
+      const target=registry.settings.models.find(x=>x.id===id);
+      if(!target)throw new Error('AI model not found.');
+      const previous=registry.active();
+      registry.setActive(target.id);
+      try{
+        if(target.local||target.protocol==='local-transformers'){
+          if(!localManager.isLoaded(target.id))await localManager.load(target);
+        }else if(localManager.isLoaded()){
+          await localManager.unload();
+        }
+      }catch(e){
+        if(previous?.id&&previous.id!==target.id){
+          try{registry.setActive(previous.id);}catch(_){}
+        }
+        throw e;
+      }
+      return target;
+    }
+    function updateLocalStatusUI(info){
+      const tree=currentTab?._viewElement;
+      if(!tree)return;
+      const model=registry.active(),local=!!model?.local||model?.protocol==='local-transformers';
+      const loaded=local&&localManager.isLoaded(model.id);
+      const status=tree.querySelector('[data-local-status]'),text=tree.querySelector('[data-local-status-text]'),bar=tree.querySelector('[data-local-status-progress]'),button=tree.querySelector('[data-local-load]'),input=tree.querySelector('[data-input]'),send=tree.querySelector('[data-send]');
+      if(status){status.hidden=!local||(!info?.loading&&!loaded);}
+      if(text)text.textContent=info?.loading?(info.text||'Loading local model…'):(loaded?(info?.text||'Local model ready.'):'Local model is not loaded.');
+      if(bar)bar.style.width=(info?.loading?Math.max(0,Math.min(100,Number(info.progress)||0)):loaded?100:0)+'%';
+      if(button){button.disabled=!!info?.loading;button.textContent=info?.loading?'Loading…':loaded?'Loaded':'Load model';}
+      const needsLoad=local&&!loaded;
+      if(input){input.disabled=needsLoad||busy;input.placeholder=needsLoad?'Load the local model first…':'Ask anything about your project…';}
+      if(send)send.disabled=needsLoad||busy||!input?.value?.trim();
+    }
+    localManager.subscribe(updateLocalStatusUI);
     function syncChats() {
       const pid=state.projectId || 'global';
       if (loadedProjectId===pid && currentChatId) return;
@@ -510,17 +545,19 @@
         currentGroup.viewBody.appendChild(tree);
       }
       tree.style.display = '';
-      const model=registry.active(); const chats=chatStore.list(true); const current=currentChat();
-      if(!model.supportsTools) agentMode=false;
-      tree.innerHTML=`<div class="ai-panel-inner"><div class="ai-header"><div class="ai-header-left"><strong>AI Chat</strong><span class="ai-model-label">${escapeHtml(makeModelLabel(model,registry))}</span></div><div class="ai-header-right"><select class="ai-chat-select" data-chat-select ${busy?'disabled':''} title="Recent chats">${chats.map(c=>`<option value="${escapeHtml(c.id)}" ${c.id===currentChatId?'selected':''}>${escapeHtml(c.title)}</option>`).join('')}${!chats.length?'<option>No chats</option>':''}</select><div class="ai-head-actions"><button data-chat-manage ${busy?'disabled':''} title="Manage chats" aria-label="Manage chats">☰</button><button data-new ${busy?'disabled':''} title="New chat" aria-label="New chat">＋</button><button data-settings title="AI Settings" aria-label="AI Settings">⚙</button></div></div></div><div class="ai-chat" data-chat>${chatMessages.length ? '' : '<div class="ai-chat-disclaimer">Chats are saved inside this project. If this project is published or pushed to Git, saved chats may be visible to others.</div>'}</div><div class="ai-horde-status" data-status ${busy?'':'hidden'}>${busy?'Working…':''}</div><div class="ai-compose"><textarea data-input placeholder="Ask anything about your project…" rows="3"></textarea><div class="ai-compose-bar"><label class="ai-agent-toggle"><input data-agent type="checkbox" ${agentMode?'checked':''} ${model.supportsTools?'':'disabled'}> Agent mode${model.supportsTools?'':' (not supported by this model)'}</label><label class="ai-agent-steps">Steps <input data-agent-steps type="number" min="1" max="100" step="1" value="${Math.max(1,Math.min(100,Number(agent.maxSteps)||24))}" ${model.supportsTools?'':'disabled'}></label><button data-stop ${busy?'':'disabled'}>Stop</button><button class="primary" data-send ${busy?'disabled':''}>Send</button></div></div></div>`;
+      const model=registry.active(); const localModel=!!model?.local||model?.protocol==='local-transformers'; const localLoaded=!localModel||localManager.isLoaded(model.id); const chats=chatStore.list(true); const current=currentChat();
+      if(!model.supportsTools && !model.supportsAgentTools) agentMode=false;
+      tree.innerHTML=`<div class="ai-panel-inner"><div class="ai-header"><div class="ai-header-left"><strong>AI Chat</strong><span class="ai-model-label">${escapeHtml(makeModelLabel(model,registry,localManager))}</span></div><div class="ai-header-right"><select class="ai-chat-select" data-chat-select ${busy?'disabled':''} title="Recent chats">${chats.map(c=>`<option value="${escapeHtml(c.id)}" ${c.id===currentChatId?'selected':''}>${escapeHtml(c.title)}</option>`).join('')}${!chats.length?'<option>No chats</option>':''}</select><div class="ai-head-actions"><button data-chat-manage ${busy?'disabled':''} title="Manage chats" aria-label="Manage chats">☰</button><button data-new ${busy?'disabled':''} title="New chat" aria-label="New chat">＋</button><button data-settings title="AI Settings" aria-label="AI Settings">⚙</button></div><div class="ai-local-head-action">${localModel&&!localLoaded?'<button data-local-load>Load model</button>':''}</div></div></div><div class="ai-chat" data-chat>${chatMessages.length ? '' : '<div class="ai-chat-disclaimer">Chats are saved inside this project. If this project is published or pushed to Git, saved chats may be visible to others.</div>'}</div><div class="ai-horde-status" data-status ${busy?'':'hidden'}>${busy?'Working…':''}</div><div class="ai-local-status" data-local-status hidden><div data-local-status-text></div><div class="ai-local-progress"><span data-local-status-progress></span></div></div><div class="ai-compose"><textarea data-input placeholder="Ask anything about your project…" rows="3"></textarea><div class="ai-compose-bar"><label class="ai-agent-toggle"><input data-agent type="checkbox" ${agentMode?'checked':''} ${model.supportsTools||model.supportsAgentTools?'':'disabled'}> Agent mode${model.supportsTools||model.supportsAgentTools?'':' (not supported by this model)'}</label><label class="ai-agent-steps">Steps <input data-agent-steps type="number" min="1" max="100" step="1" value="${Math.max(1,Math.min(100,Number(agent.maxSteps)||24))}" ${model.supportsTools?'':'disabled'}></label><button data-stop ${busy?'':'disabled'}>Stop</button><button class="primary" data-send ${busy?'disabled':''}>Send</button></div></div></div>`;
       const chat=tree.querySelector('[data-chat]');
       for(let i=0;i<chatMessages.length;i++){const m=chatMessages[i];addMessage(chat,m.role,m.content,i,m);}
       tree.querySelector('[data-agent]').onchange=e=>{agentMode=e.target.checked;};
       const stepsInput=tree.querySelector('[data-agent-steps]');
       stepsInput.onchange=()=>{const n=Math.max(1,Math.min(100,Math.floor(Number(stepsInput.value)||24)));agent.maxSteps=n;stepsInput.value=n;};
-      tree.querySelector('[data-settings]').onclick=()=>settingsModal(registry,permissions,()=>{persist();render(g,t);},state.browserNetwork||window.__sharedBrowserNetwork);
+      tree.querySelector('[data-settings]').onclick=()=>settingsModal(registry,permissions,()=>{persist();render(g,t);},state.browserNetwork||window.__sharedBrowserNetwork,localManager,activateModel);
       tree.querySelector('[data-chat-select]').onchange=e=>switchChat(e.target.value);
       tree.querySelector('[data-chat-manage]').onclick=()=>chatManageModal();
+      tree.querySelector('[data-local-load]')?.addEventListener('click',async()=>{try{await activateModel(model.id);render(g,t);}catch(e){alert(e?.message||String(e));updateLocalStatusUI(localManager.status());}});
+      updateLocalStatusUI(localManager.status());
       tree.querySelector('[data-new]').onclick=()=>newChat();
       tree.querySelector('[data-stop]').onclick=()=>{controller?.abort();agent.client.cancel();busy=false;render(g,t);};
       const input=tree.querySelector('[data-input]'); const send=tree.querySelector('[data-send]');
