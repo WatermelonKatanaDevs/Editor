@@ -53,6 +53,7 @@
             <label class="setting-check"><input id="setting-browser-use-fallback" type="checkbox"><span>Use fallback proxy</span></label>
             <label class="setting-check"><input id="setting-browser-obscure-url" type="checkbox"><span>Obscure proxied URLs</span></label>
             <label class="setting-check"><input id="setting-browser-clear-devtools" type="checkbox"><span>Clear DevTools on page reload</span></label>
+            <label class="setting-check"><input id="setting-browser-log-xhr" type="checkbox"><span>Log XMLHttpRequests to Console</span></label>
             <label class="setting-check"><input id="setting-browser-autodownload" type="checkbox"><span>Automatically download browser downloads</span></label>
             <p class="editor-settings-note">Browser settings are shared with the Browser panel and its Settings dialog.</p>
           </div>
@@ -73,6 +74,7 @@
       const useFallback = $('setting-browser-use-fallback');
       const obscureURL = $('setting-browser-obscure-url');
       const clearDevTools = $('setting-browser-clear-devtools');
+      const logXHR = $('setting-browser-log-xhr');
       const autoDownload = $('setting-browser-autodownload');
 
       ignoreNodeModules.checked = state.behavior.ignoreNodeModules !== false;
@@ -119,6 +121,7 @@
         useFallback.checked = !!settings.useFallback;
         obscureURL.checked = !!settings.obscureURL;
         clearDevTools.checked = settings.clearDevToolsOnReload !== false;
+        logXHR.checked = !!settings.logXMLHttpRequests;
         autoDownload.checked = !!settings.autoDownload;
       }
 
@@ -133,6 +136,7 @@
       useFallback.onchange = () => writeBrowserSettings({useFallback: useFallback.checked});
       obscureURL.onchange = () => writeBrowserSettings({obscureURL: obscureURL.checked});
       clearDevTools.onchange = () => writeBrowserSettings({clearDevToolsOnReload: clearDevTools.checked});
+      logXHR.onchange = () => writeBrowserSettings({logXMLHttpRequests: logXHR.checked});
       autoDownload.onchange = () => writeBrowserSettings({autoDownload: autoDownload.checked});
 
       renderBrowserSettings();
