@@ -114,7 +114,8 @@ window.__editorInitPromise = (async function () {
       obscureURL: true,
       defaultTab: 'https://example.com',
       clearDevToolsOnReload: true,
-      autoDownload: false
+      autoDownload: false,
+      logXMLHttpRequests: false
     },
     behavior: {
       autoSaveOnRun: false,
@@ -386,6 +387,7 @@ window.__editorInitPromise = (async function () {
     out.obscureURL = !!out.obscureURL;
     out.clearDevToolsOnReload = !!out.clearDevToolsOnReload;
     out.autoDownload = !!out.autoDownload;
+    out.logXMLHttpRequests = !!out.logXMLHttpRequests;
     return out;
   }
   function loadBrowserSettings() {
