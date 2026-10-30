@@ -86,13 +86,14 @@ class Network extends EventHandler {
   async socket(url,baseOrigin,protocols,filter) {
     const absoluteUrl = resolveNetworkURL(url,baseOrigin);
     this.dispatchEvent('socketstart',absoluteUrl,protocols);
+    const endpoints = this.endpoints.filter(endp => !endp?.__browserDefaultFallback).concat(this.endpoints.filter(endp => endp?.__browserDefaultFallback));
     const response = await this.searchEndpoints(async function(endp) {
       endp.dispatchEvent('handlesocket',absoluteUrl,protocols);
       var response = await endp.handleSocket(absoluteUrl,protocols);
       if (!response) return null;
       endp.dispatchEvent('returnsocket',response,absoluteUrl,protocols);
       return response;
-    }, filter || (r => true));
+    }, filter || (r => true), endpoints);
     this.dispatchEvent('socketend',response,absoluteUrl,protocols);
     return response;
   }
@@ -142,14 +143,13 @@ class Network extends EventHandler {
       rootfolder: endpoint?.rootfolder || null
     }));
   }
-  async searchEndpoints(callback, filter) {
+  async searchEndpoints(callback, filter, endpointList = this.endpoints) {
     await wait(1);
-    const endpoints = this.endpoints;
     var responseError = null;
     var lastResponse = null;
     var lastError = null;
-    for (var i = 0; i < endpoints.length; i++) {
-      var endp = endpoints[i];
+    for (var i = 0; i < endpointList.length; i++) {
+      var endp = endpointList[i];
       if (endp?.enabled == false) continue;
       try {
         var response = await callback.call(this, endp);
