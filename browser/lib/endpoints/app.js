@@ -3389,10 +3389,7 @@
           else body = String(request.body);
         }
         
-        let requestPath = urlObj.pathname + urlObj.search;
-        if (pathPrefix !== '/' && (requestPath === pathPrefix || requestPath.startsWith(pathPrefix + '/'))) {
-          requestPath = requestPath.slice(pathPrefix.length) || '/';
-        }
+        const requestPath = urlObj.pathname + urlObj.search;
         const req = new polyfills.http.IncomingMessage(requestPath, method, headers, body);
 
         // When Express handles the response and calls res.end(), resolve the fetch Promise
