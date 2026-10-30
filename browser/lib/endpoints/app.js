@@ -3468,24 +3468,21 @@
             data: bytes || String(data)
           });
 
-          if (typeof mockBackend._onServerData === 'function') {
-            // Real WebSocket `message` delivery is asynchronous. Do not call
-            // the browser callback inline from serverSocket.write(). Engine.IO
-            // installs its probe response listener immediately AFTER sending
-            // `2probe`, so synchronous delivery loses the `3probe` packet.
-            const serverData = bytes || data;
-            setTimeout(() => {
-              if (typeof mockBackend._onServerData !== 'function') return;
+          // Real WebSocket `message` delivery is asynchronous. Forward the data
+          // across the Worker boundary even though the browser callback lives on
+          // the separate bridge object, not on this Worker-side mockBackend.
+          const serverData = bytes || data;
+          setTimeout(() => {
+            postSocketEvent(mockBackend, 'data', serverData);
+            if (typeof mockBackend._onServerData === 'function') {
               try {
-                postSocketEvent(mockBackend, 'data', serverData);
                 mockBackend._onServerData(serverData);
               } catch (err) {
                 console.error('[VirtualWS v17] BROWSER SERVER DATA CALLBACK THREW', err && err.stack || err);
                 setTimeout(() => { throw err; }, 0);
               }
-            }, 0);
-          } else {
-          }
+            }
+          }, 0);
         },
 
         closeClient: function(code = 1000, reason = "") {
