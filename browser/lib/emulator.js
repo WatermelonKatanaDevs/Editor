@@ -2280,7 +2280,9 @@
                 response = null;
               }
 
-              if (response instanceof OriginalWebSocket) {
+              // Network sockets may come from a parent iframe, so instanceof is not reliable across realms.
+              const isRealWebSocket = response && typeof response.send === 'function' && typeof response.close === 'function' && typeof response.readyState === 'number';
+              if (isRealWebSocket) {
                 this._setupReal(response);
               } else if (response && typeof response.onClientMessage === 'function') {
                 this._setupMock(response);
