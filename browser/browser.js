@@ -691,6 +691,7 @@ function showToast(message, type = 'info') {
 }
 
 function openModal(id) {
+  if (id === 'settings-modal') updateSettings();
   document.getElementById(id).classList.add('active');
   if (id === 'history-modal') renderHistoryLog();
 }
