@@ -192,6 +192,7 @@ try {
 loadEditorBrowserState();
 subscribeEditorBrowserState();
 if (!appSettings.primaryProxy) appSettings.primaryProxy = String(window.WorkerConfig?.proxy || '');
+browserNetwork.logXMLHttpRequests = !!appSettings.logXMLHttpRequests;
 
 function saveBrowserState() {
   const normalizedBookmarks = bookmarks.map(bookmark => ({
