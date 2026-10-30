@@ -2784,7 +2784,9 @@
 
               fetch(this._url, fetchOptions, 'xhr')
                 .then(async (res) => {
-                  try { console.warn("[XHR v20] FETCH RESPONSE", { method: this._method, url: this._url, status: res.status, ok: res.ok }); } catch (_) {}
+                  if (pageEmulator?.network?.logXMLHttpRequests) {
+                    try { console.warn("[XHR v20] FETCH RESPONSE", { method: this._method, url: this._url, status: res.status, ok: res.ok }); } catch (_) {}
+                  }
                   if (this._timeoutTimer) clearTimeout(this._timeoutTimer);
 
                   //if (res.redirected) alert(this._url);
@@ -2825,7 +2827,9 @@
                   }
 
                   this._changeState(XMLHttpRequestPolyfill.DONE);
-                  try { console.warn("[XHR v20] LOAD", { method: this._method, url: this._url, responseTextLength: typeof this.responseText === "string" ? this.responseText.length : -1 }); } catch (_) {}
+                  if (pageEmulator?.network?.logXMLHttpRequests) {
+                    try { console.warn("[XHR v20] LOAD", { method: this._method, url: this._url, responseTextLength: typeof this.responseText === "string" ? this.responseText.length : -1 }); } catch (_) {}
+                  }
                   this._dispatchEvent('load');
                   this._dispatchEvent('loadend');
                 })
@@ -2833,7 +2837,9 @@
                   if (this._timeoutTimer) clearTimeout(this._timeoutTimer);
                   if (err.name === 'AbortError') return; // Handled locally inside wrapper pipelines
 
-                  try { console.warn("[XHR v20] ERROR", { method: this._method, url: this._url, error: err && err.message || String(err) }); } catch (_) {}
+                  if (pageEmulator?.network?.logXMLHttpRequests) {
+                    try { console.warn("[XHR v20] ERROR", { method: this._method, url: this._url, error: err && err.message || String(err) }); } catch (_) {}
+                  }
                   this.status = 0;
                   this._changeState(XMLHttpRequestPolyfill.DONE);
                   this._dispatchEvent('error');
@@ -3658,6 +3664,11 @@
     if (!(network instanceof Network)) return network || new Network();
     var pageNetwork = new Network();
     pageNetwork.endpoints = network.endpoints;
+    Object.defineProperty(pageNetwork, 'logXMLHttpRequests', {
+      configurable: true,
+      get: () => !!network.logXMLHttpRequests,
+      set: value => { network.logXMLHttpRequests = !!value; }
+    });
     return pageNetwork;
   }
 
