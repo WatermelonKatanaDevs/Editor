@@ -16,6 +16,7 @@ let appSettings = {
   defaultTab: "https://example.com",
   clearDevToolsOnReload: true,
   autoDownload: false,
+  logXMLHttpRequests: false,
 };
 
 var browserNetwork = null;
@@ -75,6 +76,7 @@ function updateNetworkSettings() {
   fallbackProxyEndpoint.proxy = appSettings.fallbackProxy;
   fallbackProxyEndpoint.obscureURL = appSettings.obscureURL;
   fallbackProxyEndpoint.enabled = appSettings.useFallback;
+  browserNetwork.logXMLHttpRequests = !!appSettings.logXMLHttpRequests;
 }
 
 
@@ -2391,6 +2393,7 @@ function updateSettings() {
   document.getElementById('setting-obscure-url').checked = appSettings.obscureURL;
   document.getElementById('setting-clear-devtools-reload').checked = appSettings.clearDevToolsOnReload;
   document.getElementById('setting-autodownload').checked = appSettings.autoDownload;
+  document.getElementById('setting-log-xhr').checked = !!appSettings.logXMLHttpRequests;
   updateNetworkSettings();
 }
 
@@ -2403,6 +2406,7 @@ function saveSettings() {
   appSettings.obscureURL = document.getElementById('setting-obscure-url').checked;
   appSettings.clearDevToolsOnReload = document.getElementById('setting-clear-devtools-reload').checked;
   appSettings.autoDownload = document.getElementById('setting-autodownload').checked;
+  appSettings.logXMLHttpRequests = document.getElementById('setting-log-xhr').checked;
   try { setStorageItem('appSettings',appSettings); } catch (_) {}
   saveBrowserState();
   updateNetworkSettings();
