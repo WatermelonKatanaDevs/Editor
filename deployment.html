@@ -384,7 +384,7 @@ window.__deploymentNetworkReady = (async function() {
     }
 
     const domain = deploymentOrigin;
-    const runtimePath = initialTargetUrl.pathname || '/';
+    const runtimePath = pathParts(runConfig.path || '/').pathname || '/';
 
     let peerEndpoint = null;
     if (usePeerServer) {

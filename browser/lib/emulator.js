@@ -2056,7 +2056,7 @@
               e.preventDefault();
               e.stopPropagation();
               sendEvent('open', resolved, !isCmdOrCtrl && !isMiddleClick);
-            } else if (parentWindow && parentWindow.navigateToInTab) {
+            } else if (pageEmulator?.eventInterceptors?.navigate?.length) {
               const anchor = e.target.closest('a');
               if (!anchor || !anchor.href) return;
               if (anchor.getAttribute('download')) return (async function() {
