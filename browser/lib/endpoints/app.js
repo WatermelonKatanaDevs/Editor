@@ -4105,6 +4105,103 @@
   
     'use strict';
   
+    // Safari's JavaScriptCore does not implement V8's structured CallSite API.
+    // Node packages such as depd rely on Error.captureStackTrace returning
+    // CallSite objects when Error.prepareStackTrace is set.
+    (function forceV8ErrorPolyfillForWorker() {
+      var supportsV8StackAPI = false;
+      if (typeof Error.captureStackTrace === 'function') {
+        var testObject = {};
+        var originalPrepareStackTrace = Error.prepareStackTrace;
+        Error.prepareStackTrace = function() { return ['mock-frame']; };
+        try {
+          Error.captureStackTrace(testObject);
+          supportsV8StackAPI = Array.isArray(testObject.stack) && testObject.stack[0] === 'mock-frame';
+        } catch (_) {}
+        Error.prepareStackTrace = originalPrepareStackTrace;
+      }
+      if (supportsV8StackAPI) return;
+
+      Error.stackTraceLimit = Error.stackTraceLimit || 10;
+      Error.prepareStackTrace = Error.prepareStackTrace || null;
+
+      function parseSafariStackToCallSites(stackString, constructorOpt) {
+        var lines = String(stackString || '').split('\\n');
+        var frames = [];
+        var skipFrames = !!constructorOpt;
+
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i].trim();
+          if (!line) continue;
+
+          var atIndex = line.indexOf('@');
+          var functionName = atIndex > -1 ? line.substring(0, atIndex) : '';
+          var urlAndCoords = atIndex > -1 ? line.substring(atIndex + 1) : line;
+          var lastColon = urlAndCoords.lastIndexOf(':');
+          var secondToLastColon = urlAndCoords.lastIndexOf(':', lastColon - 1);
+          var fileName = urlAndCoords;
+          var lineNumber = null;
+          var columnNumber = null;
+
+          if (secondToLastColon > -1 && lastColon > -1) {
+            fileName = urlAndCoords.substring(0, secondToLastColon);
+            lineNumber = parseInt(urlAndCoords.substring(secondToLastColon + 1, lastColon), 10);
+            columnNumber = parseInt(urlAndCoords.substring(lastColon + 1), 10);
+          }
+
+          if (constructorOpt && skipFrames) {
+            if (functionName === constructorOpt.name) skipFrames = false;
+            continue;
+          }
+
+          frames.push({
+            getFileName: function() { return fileName; },
+            getScriptNameOrSourceURL: function() { return fileName; },
+            getLineNumber: function() { return lineNumber; },
+            getColumnNumber: function() { return columnNumber; },
+            getFunctionName: function() { return functionName || null; },
+            getFunction: function() { return null; },
+            getMethodName: function() { return functionName || null; },
+            getTypeName: function() { return null; },
+            getThis: function() { return undefined; },
+            getEvalOrigin: function() { return undefined; },
+            isToplevel: function() { return !functionName; },
+            isEval: function() { return false; },
+            isNative: function() { return false; },
+            isConstructor: function() { return false; },
+            isAsync: function() { return false; },
+            isPromiseAll: function() { return false; },
+            getPromiseIndex: function() { return null; },
+            toString: function() {
+              var location = fileName || '<anonymous>';
+              if (lineNumber != null) location += ':' + lineNumber;
+              if (columnNumber != null) location += ':' + columnNumber;
+              return (functionName ? functionName + ' (' + location + ')' : location);
+            }
+          });
+        }
+
+        return (constructorOpt || frames.length < 2) ? frames : frames.slice(2);
+      }
+
+      Error.captureStackTrace = function(targetObject, constructorOpt) {
+        var rawStack = new Error().stack || '';
+        Object.defineProperty(targetObject, 'stack', {
+          configurable: true,
+          enumerable: true,
+          get: function() {
+            if (typeof Error.prepareStackTrace === 'function') {
+              var callSites = parseSafariStackToCallSites(rawStack, constructorOpt);
+              if (callSites.length > Error.stackTraceLimit) callSites = callSites.slice(0, Error.stackTraceLimit);
+              return Error.prepareStackTrace(targetObject, callSites);
+            }
+            return rawStack;
+          }
+        });
+      };
+    })();
+
+  
     let runtime = null;
     let nextHostRequestId = 1;
     const hostRequests = new Map();
