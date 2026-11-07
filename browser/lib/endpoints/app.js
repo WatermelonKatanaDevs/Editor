@@ -4126,7 +4126,7 @@
       Error.prepareStackTrace = Error.prepareStackTrace || null;
 
       function parseSafariStackToCallSites(stackString, constructorOpt) {
-        var lines = String(stackString || '').split('\\n');
+        var lines = String(stackString || '').split('\n');
         var frames = [];
         var skipFrames = !!constructorOpt;
 
