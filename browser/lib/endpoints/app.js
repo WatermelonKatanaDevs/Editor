@@ -4135,13 +4135,13 @@
           if (!line) continue;
 
           var atIndex = line.indexOf('@');
-          var functionName = atIndex > -1 ? line.substring(0, atIndex) : '';
-          var urlAndCoords = atIndex > -1 ? line.substring(atIndex + 1) : line;
+          let functionName = atIndex > -1 ? line.substring(0, atIndex) : '';
+          let urlAndCoords = atIndex > -1 ? line.substring(atIndex + 1) : line;
           var lastColon = urlAndCoords.lastIndexOf(':');
           var secondToLastColon = urlAndCoords.lastIndexOf(':', lastColon - 1);
-          var fileName = urlAndCoords;
-          var lineNumber = null;
-          var columnNumber = null;
+          let fileName = urlAndCoords;
+          let lineNumber = null;
+          let columnNumber = null;
 
           if (secondToLastColon > -1 && lastColon > -1) {
             fileName = urlAndCoords.substring(0, secondToLastColon);
