@@ -215,6 +215,12 @@
       const staged = changes.filter(change => change.staged);
       const unstaged = changes.filter(change => change.unstaged);
       const hasPendingPush = !!connectedRemote && !!localGitPushStatus?.ahead;
+      const remoteFetchMatches = !!connectedRemote && !!localGitPushStatus?.lastFetch && localGitPushStatus?.lastFetchBranch === String(connectedRemote.branch || 'main');
+      const remoteFetchStatus = !connectedRemote ? '' : !remoteFetchMatches
+        ? 'Remote not checked yet'
+        : localGitPushStatus.lastPush && localGitPushStatus.lastFetch !== localGitPushStatus.lastPush
+          ? 'Remote has moved since the last push'
+          : 'Remote head checked: ' + localGitPushStatus.lastFetch.slice(0, 7);
       const commitDisabled = commitBusy || (connectedRemote ? (!staged.length && !hasPendingPush) : !staged.length);
       const commitLabel = connectedRemote ? (hasPendingPush && !staged.length ? 'Push' : 'Commit & Push') : 'Commit';
       const renderChange = (change, area) => {
@@ -230,12 +236,13 @@
         '<div class="source-control-head"><div class="activity-sidebar-title">Source Control</div><button data-refresh title="Refresh">↻</button></div>' +
         '<section class="source-control-section"><div class="source-control-section-title">Local Repository</div>' +
         (hasRepository
-          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span>') + '</div><div class="source-control-local-branch"><select data-local-branch aria-label="Switch branch"></select><button type="button" data-local-branch-create' + (localGitRepository.head ? '' : ' disabled') + '>New Branch</button><button type="button" data-local-branch-delete' + (!localGitRepository.head ? ' disabled' : '') + '>Delete</button></div>'
+          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span><span class="source-control-local-remote-status">' + esc(remoteFetchStatus) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span>') + '</div><div class="source-control-local-branch"><select data-local-branch aria-label="Switch branch"></select><button type="button" data-local-branch-create' + (localGitRepository.head ? '' : ' disabled') + '>New Branch</button><button type="button" data-local-branch-delete' + (!localGitRepository.head ? ' disabled' : '') + '>Delete</button></div>'
           : persistent
             ? '<div class="source-control-local-hint">This folder is not being tracked by Git yet.</div><button type="button" class="source-control-create-repo" data-local-init>Initialize Repository</button>'
             : '<div class="source-control-local-hint">Local Git requires a folder opened directly from your computer. Open a folder to keep commits in its <code>.git</code> directory.</div>') +
         '</section>' +
         (hasRepository ? '<section class="source-control-section"><div class="source-control-section-title">Tags</div><div class="source-control-local-tags" data-local-tags><span class="source-control-local-hint">Loading tags…</span></div><button type="button" data-local-tag-create' + (!localGitRepository.head ? ' disabled' : '') + '>Create Tag</button></section>' : '') +
+        (hasRepository && connectedRemote ? '<section class="source-control-section"><button type="button" class="source-control-local-fetch" data-local-fetch title="Check the latest remote commit SHA without changing workspace files">Check Remote</button></section>' : '') +
         (!connectedRemote && hasRepository && github?.isSignedIn?.() ? '<section class="source-control-section"><button type="button" class="source-control-create-repo" data-local-publish>Publish to GitHub</button></section>' : '') +
         (hasRepository
           ? '<section class="source-control-section"><div class="source-control-section-title">Changes</div>' +
@@ -258,6 +265,10 @@
       });
       void loadLocalBranches();
       void loadLocalTags();
+      tree.querySelector('[data-local-fetch]')?.addEventListener('click', () => {
+        const remoteBranch = String(state.gitRemote?.branch || localGitRepository?.branch || 'main');
+        void runLocalGitAction(['fetch', 'origin', remoteBranch], 'Checked the latest origin/' + remoteBranch + ' commit.');
+      });
       tree.querySelector('[data-local-tag-create]')?.addEventListener('click', () => {
         const name = window.prompt('Tag name (for example, v1.0.0)');
         if (!name || !name.trim()) return;
