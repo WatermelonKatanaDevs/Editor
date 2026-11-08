@@ -78,22 +78,22 @@
       builtins: spec.builtins,
       tokenizer: {
         root: [
-          [/^\\s*#\\s*[a-zA-Z_][\\w]*/, 'keyword.directive'],
-          [/\\/\\*.*\\*\\//, 'comment'],
-          [/\\/\\*/, 'comment', '@comment'],
-          [/\\/\\/.*$/, 'comment'],
-          [/"([^"\\\\]|\\\\.)*"/, 'string'],
-          [/'([^'\\\\]|\\\\.)*'/, 'string'],
-          [/[a-zA-Z_][\\w]*/, { cases: { '@keywords': 'keyword', '@types': 'type', '@builtins': 'predefined', '@default': 'identifier' } }],
+          [/^\s*#\s*[a-zA-Z_][\w]*/, 'keyword.directive'],
+          [/\/\*.*\*\//, 'comment'],
+          [/\/\*/, 'comment', '@comment'],
+          [/\/\/.*$/, 'comment'],
+          [/"([^"\\]|\\.)*"/, 'string'],
+          [/'([^'\\]|\\.)*'/, 'string'],
+          [/[a-zA-Z_][\w]*/, { cases: { '@keywords': 'keyword', '@types': 'type', '@builtins': 'predefined', '@default': 'identifier' } }],
           [/0[xX][0-9a-fA-F]+[uUlL]*/, 'number.hex'],
-          [/(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?[fFuUlL]*/, 'number'],
-          [/[{}()\\[\\]]/, '@brackets'],
+          [/(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fFuUlL]*/, 'number'],
+          [/[{}()\[\]]/, '@brackets'],
           [/[;,.]/, 'delimiter'],
-          [/[<>!=~?:&|+\\-*\\/%^]+/, 'operator']
+          [/[<>!=~?:&|+\-*\/%^]+/, 'operator']
         ],
         comment: [
           [/[^*/]+/, 'comment'],
-          [/\\*\\//, 'comment', '@pop'],
+          [/\*\//, 'comment', '@pop'],
           [/./, 'comment']
         ]
       }
