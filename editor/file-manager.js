@@ -4,6 +4,12 @@
     js: 'text/javascript', mjs: 'text/javascript', cjs: 'text/javascript',
     json: 'application/json', map: 'application/json', xml: 'application/xml',
     txt: 'text/plain', md: 'text/markdown', csv: 'text/csv',
+    jst: 'text/x-jst', ejs: 'text/x-ejs',
+    c: 'text/x-c', h: 'text/x-c', cc: 'text/x-c++',
+    gyp: 'text/x-python', gypi: 'text/x-python', yml: 'text/yaml',
+    sh: 'text/x-shellscript', coffee: 'text/x-coffeescript',
+    patch: 'text/x-diff', bnf: 'text/x-bnf',
+    bin: 'application/octet-stream', node: 'application/octet-stream', lock: 'text/plain',
     png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
     webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
     mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', glsl: 'text/x-hlsl',
@@ -13,8 +19,13 @@
     eot: 'application/vnd.ms-fontobject', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', tff: 'font/ttf', otf: 'font/otf', ttc: 'font/collection', otc: 'font/collection', dfont: 'font/dfont'
   });
   function editorFileMimeType(name) {
-    const ext = String(name || '').split('.').pop().toLowerCase();
-    return EDITOR_FILE_MIME_TYPES[ext] || '';
+    const base = String(name || '').split('/').pop();
+    const lower = base.toLowerCase();
+    if (lower === 'readme') return 'text/markdown';
+    if (['license', 'licence', 'authors', 'author'].includes(lower)) return 'text/plain';
+    if (lower === 'makefile' || lower === 'gnumakefile') return 'text/x-makefile';
+    if (lower === 'cakefile') return 'text/x-coffeescript';
+    return EDITOR_FILE_MIME_TYPES[lower.split('.').pop()] || '';
   }
   class FileManager {
     constructor(options = {}) {
