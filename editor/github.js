@@ -349,6 +349,32 @@
     const branches = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=100`);
     return Array.isArray(branches) ? branches.map(x => x.name).filter(Boolean) : [];
   }
+  async function getRemoteHead(owner, repo, branch) {
+    const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+    try {
+      const ref = await publicRequest(`${repoPath}/git/ref/heads/${branchPath(branch)}`);
+      const commitSha = ref?.object?.sha || null;
+      if (!commitSha || ref?.object?.type !== 'commit') throw new Error('GitHub did not return a commit for origin/' + branch + '.');
+      return {commitSha:String(commitSha)};
+    } catch (e) {
+      if (e?.status === 409 || e?.status === 404) return {commitSha:null, empty:true};
+      throw e;
+    }
+  }
+  async function getRemoteCommitState(owner, repo, commitSha) {
+    const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+    const commit = await publicRequest(`${repoPath}/git/commits/${encodeURIComponent(commitSha)}`);
+    const treeSha = commit?.tree?.sha;
+    if (!treeSha) throw new Error('GitHub did not return a tree for commit ' + commitSha + '.');
+    const tree = await publicRequest(`${repoPath}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`);
+    return {
+      commitSha:String(commit?.sha || commitSha),
+      commit,
+      treeSha:String(treeSha),
+      tree:Array.isArray(tree?.tree) ? tree.tree : [],
+      truncated:!!tree?.truncated
+    };
+  }
   async function getRemoteState(owner, repo, branch) {
     const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
     try {
@@ -811,7 +837,7 @@
     return Promise.all(byParent.get('') || []);
   }
 
-  async function commitAndPush({owner, repo, branch, message, fs, compareTree = null, pathPrefix = '', excludePaths = [], gitlinks = [], removedGitlinks = [], _attempt = 0}) {
+  async function commitAndPush({owner, repo, branch, message, fs, compareTree = null, pathPrefix = '', excludePaths = [], gitlinks = [], removedGitlinks = [], changesOverride = null, expectedRemoteSha = null, parentsOverride = null, _attempt = 0}) {
     message = String(message || '').trim();
     if (!message) throw new Error('Enter a commit message.');
     let remote = null;
@@ -822,7 +848,8 @@
     }
     if (remote?.unavailable) throw new Error('GitHub is still initializing this repository. Please try again in a moment.');
     if (remote?.truncated) throw new Error('GitHub truncated this repository tree. Source Control cannot safely compare or commit a partial tree; narrow the repository contents or sync a smaller repository first.');
-    const changes = await compareWorkingTree(fs, compareTree || remote.tree, {pathPrefix, excludePaths});
+    if (expectedRemoteSha !== null && String(remote.commitSha || '') !== String(expectedRemoteSha || '')) throw new Error('The GitHub branch changed before the push could be completed. Fetch and reconcile the remote changes before retrying.');
+    const changes = Array.isArray(changesOverride) ? changesOverride : await compareWorkingTree(fs, compareTree || remote.tree, {pathPrefix, excludePaths});
     const remoteGitlinks = new Map((remote.tree || []).filter(entry => entry?.mode === '160000' || entry?.type === 'commit').map(entry => [entry.path, entry.sha]));
     const updatedGitlinks = (gitlinks || []).filter(link => link?.path && link?.sha && remoteGitlinks.get(link.path) !== link.sha);
     const deletedGitlinks = [...new Set((removedGitlinks || []).map(path => String(path || '').replace(/^\/+|\/+$/g, '')).filter(path => path && remoteGitlinks.has(path)))];
@@ -850,7 +877,10 @@
       if (remote.treeSha) treeBody.base_tree = remote.treeSha;
       const tree = await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/trees', {method:'POST', body:JSON.stringify(treeBody)});
       const commitBody = {message, tree:tree.sha};
-      if (remote.commitSha) commitBody.parents = [remote.commitSha];
+      if (Array.isArray(parentsOverride)) {
+        if (!parentsOverride.length || parentsOverride.length > 2 || parentsOverride.some(parent => !/^[0-9a-f]{40}$/i.test(String(parent || '')))) throw new Error('The supplied merge parents are invalid.');
+        commitBody.parents = [...parentsOverride];
+      } else if (remote.commitSha) commitBody.parents = [remote.commitSha];
       const commit = await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/commits', {method:'POST', body:JSON.stringify(commitBody)});
       const refPath = '/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/refs/heads/' + branchPath(branch);
       try {
@@ -863,9 +893,10 @@
         // A 422 here normally means the branch moved after we read its
         // remote SHA. Rebuild the commit once from the latest branch state;
         // never force-push over the intervening commit.
+        if (e?.status === 422 && expectedRemoteSha !== null) throw new Error('The GitHub branch moved while pushing. Your local commit is safe; fetch and reconcile the remote changes before retrying.');
         if (e?.status === 422 && _attempt < 8) {
           await new Promise(resolve => setTimeout(resolve, 500 + _attempt * 500));
-          return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, _attempt:_attempt + 1});
+          return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, changesOverride, expectedRemoteSha, parentsOverride, _attempt:_attempt + 1});
         }
         throw e;
       }
@@ -877,10 +908,11 @@
       // with a bounded backoff before surfacing the error.
       if ((e?.status === 404 || e?.status === 409) && _attempt < 8) {
         await new Promise(resolve => setTimeout(resolve, Math.min(1000 + _attempt * 1000, 5000)));
-        return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, _attempt:_attempt + 1});
+        return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, changesOverride, expectedRemoteSha, parentsOverride, _attempt:_attempt + 1});
       }
       if (e?.status !== 403) throw e;
       if (updatedGitlinks.length || deletedGitlinks.length) throw new Error('GitHub rejected the Git-data write for a commit containing submodule references. The GraphQL fallback cannot create or remove gitlinks; check your repository permissions and try again.');
+      if (Array.isArray(parentsOverride)) throw new Error('GitHub rejected the Git-data merge commit write. The GraphQL fallback cannot preserve multiple commit parents; check repository permissions and retry.');
       const commitSha = await createGraphQLCommit(owner, repo, branch, message, allChanges, remote.commitSha);
       return {changed:true, changes:allChanges, commitSha};
     }
@@ -993,6 +1025,8 @@
   root.downloadArchive = downloadArchive;
   root.listBranches = listBranches;
   root.getRemoteState = getRemoteState;
+  root.getRemoteHead = getRemoteHead;
+  root.getRemoteCommitState = getRemoteCommitState;
   root.getCommitState = getCommitState;
   root.readBlob = readBlob;
   root.listCommits = listCommits;

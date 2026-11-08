@@ -4317,6 +4317,26 @@
 
     globalThis.NPM = WorkerNPMProxy;
 
+    class WorkerGitProxy {
+      constructor(options = {}) {
+        this.rootfolder = String(options.rootfolder || getRuntimeRootFolder());
+      }
+
+      async run(args) {
+        return await rpc('git.run', {
+          args: Array.from(args || []),
+          rootfolder: this.rootfolder,
+          cwd: nodeEmulator.cwd || '/'
+        });
+      }
+    }
+
+    function getGitManager() {
+      if (!nodeEmulator.git) nodeEmulator.git = new WorkerGitProxy({rootfolder:getRuntimeRootFolder()});
+      else nodeEmulator.git.rootfolder = getRuntimeRootFolder();
+      return nodeEmulator.git;
+    }
+
     function splitTerminalCommand(command) {
       return WorkerNPMProxy.splitCommand(command);
     }
@@ -4391,7 +4411,7 @@
         return entries;
       } else if (bin === "which") {
         const name = args[0];
-        const supported = new Set(['pwd','cd','cat','echo','printf','true','false','whoami','hostname','env','which','ls','dir','node','npm']);
+        const supported = new Set(['pwd','cd','cat','echo','printf','true','false','whoami','hostname','env','which','ls','dir','node','npm','git']);
         if (!name || !supported.has(name)) {
           console.logText(`${name || ''}: not found`);
           return null;
@@ -4476,8 +4496,17 @@
           console.error(`npm ERR! ${e.message || e}`);
           throw e;
         }
+      } else if (bin === "git") {
+        try {
+          const result = await getGitManager().run(args);
+          if (result?.output) console.logText(result.output);
+          return result?.value ?? result;
+        } catch (e) {
+          console.error(`fatal: ${e.message || e}`);
+          throw e;
+        }
       } else {
-        const error = new Error(`Command not found: ${bin}. The virtual terminal is not a real OS shell; supported commands are pwd, cd, cat, echo, printf, true, false, whoami, hostname, env, which, ls/dir, node, and npm.`);
+        const error = new Error(`Command not found: ${bin}. The virtual terminal is not a real OS shell; supported commands are pwd, cd, cat, echo, printf, true, false, whoami, hostname, env, which, ls/dir, node, npm, and git.`);
         console.error(error.message);
         throw error;
       }
@@ -4961,6 +4990,7 @@
       this._socketBridges = new Map();
       this._serverState = new Map();
       this.npm = null;
+      this.git = null;
       this._destroyed = false;
       this._capabilityToken = (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') ? globalThis.crypto.randomUUID() : `${Math.random().toString(36).slice(2)}.${Date.now()}.${Math.random()}`;
       this.contextReady = this._initialize();
@@ -5179,6 +5209,13 @@
         this.dispatchEvent('filesystemchange');
         return result;
       }
+      if (method === 'git.run') {
+        const git = this._getGitManager();
+        const result = await git.runSerialized(payload?.args || [], {cwd:payload?.cwd || '/'});
+        await this.syncFilesystem();
+        this.dispatchEvent('filesystemchange');
+        return result;
+      }
       throw new Error(`Unknown host request: ${method}`);
     }
 
@@ -5203,6 +5240,14 @@
         });
       } else this.npm.rootfolder = runtimeRoot;
       return this.npm;
+    }
+
+    _getGitManager() {
+      const GitClass = globalThis.LocalGitService || globalThis.parent?.LocalGitService;
+      if (!GitClass) throw new Error('Local Git support has not loaded.');
+      const runtimeRoot = String(this.rootfolder || '').replace(/^\/+|\/+$/g, '');
+      if (!this.git) this.git = new GitClass(this.filesystem, {rootfolder:runtimeRoot});
+      return this.git;
     }
 
     async _handleNetworkRequest(request, type) {

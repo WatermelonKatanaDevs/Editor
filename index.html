@@ -2,6 +2,8 @@
 <script>window.__workersConfigReady=fetch(new URL('workers.json',location.href),{cache:'no-store'}).then(async r=>{if(!r.ok)throw new Error('Failed to load workers.json ('+r.status+')');const c=await r.json();if(!c||typeof c!=='object')throw new Error('Invalid workers.json');window.WorkerConfig=c;return c;}).catch(e=>{console.error(e);window.WorkerConfig={proxy:'',fallbackProxy:false,github:''};return window.WorkerConfig;});</script>
 <script src="browser/external/jszip.js"></script>
 <script src="browser/lib/filesystem.js"></script>
+<script src="editor/lib/isomorphic-git.js"></script>
+<script src="browser/lib/git.js"></script>
 <script src="browser/lib/network.js"></script>
 <script src="browser/lib/emulator.js"></script>
 <script src="browser/lib/npm.js"></script>
