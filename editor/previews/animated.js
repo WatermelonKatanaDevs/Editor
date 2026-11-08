@@ -794,8 +794,8 @@
             saveCopyButton, downloadAnimationButton, saveFrameButton, downloadFrameButton,
             saveFramesButton, downloadZipButton]
             .forEach(control => { control.disabled = !!value; });
-          saveOriginalButton.disabled = !!value || /\\.avif$/i.test(String(ctx.file.name || ''));
-          if (saveOriginalButton.disabled && /\\.avif$/i.test(String(ctx.file.name || ''))) {
+          saveOriginalButton.disabled = !!value || /\.avif$/i.test(String(ctx.file.name || ''));
+          if (saveOriginalButton.disabled && /\.avif$/i.test(String(ctx.file.name || ''))) {
             saveOriginalButton.title = 'AVIF can be opened in supported browsers, but AVIF export is not available.';
           }
         }
@@ -1043,6 +1043,7 @@
         downloadFrameButton.onclick = downloadSelectedFrame;
         saveFramesButton.onclick = saveAllFrames;
         downloadZipButton.onclick = downloadFramesZip;
+        setBusy(false);
 
         root.addEventListener('dragover', event => {
           if (event.dataTransfer?.types?.includes('application/x-wk-animation-frame')) return;
