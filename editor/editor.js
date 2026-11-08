@@ -579,7 +579,7 @@ window.__editorInitPromise = (async function () {
     const meta = readEditorJson(EDITOR_PROJECT_PATH);
     if (meta?.id && String(meta.id).trim()) state.projectId = String(meta.id).trim();
     if (meta?.gitRemote?.provider === 'github' && meta.gitRemote.owner && meta.gitRemote.repo) {
-      state.gitRemote = {provider:'github', owner:String(meta.gitRemote.owner), repo:String(meta.gitRemote.repo), branch:String(meta.gitRemote.branch || 'main')};
+      state.gitRemote = {provider:'github', owner:String(meta.gitRemote.owner), repo:String(meta.gitRemote.repo), branch:String(meta.gitRemote.branch || 'main'), revision:String(meta.gitRemote.revision || '')};
     }
     if (meta?.name && String(meta.name).trim()) {
       state.projectName = String(meta.name).trim();
@@ -796,7 +796,8 @@ window.__editorInitPromise = (async function () {
         provider: 'github',
         owner: String(state.gitRemote.owner || ''),
         repo: String(state.gitRemote.repo || ''),
-        branch: String(state.gitRemote.branch || 'main')
+        branch: String(state.gitRemote.branch || 'main'),
+        revision: String(state.gitRemote.revision || '')
       } : existing.gitRemote ?? null),
       gitSubmodules: extra.gitSubmodules ?? (Array.isArray(state.gitSubmodules) ? state.gitSubmodules : existing.gitSubmodules || [])
     };
@@ -2108,9 +2109,10 @@ window.__editorInitPromise = (async function () {
     loadEditorConfig();
     state.runConfig = new EditorRunConfig(state);
     loadProjectMetadata();
-    // URL/project metadata can describe the original GitHub source, but a
-    // detached remix workspace must not inherit that repository.
+    // URL/project metadata can describe the original GitHub source, but the
+    // source selected for this import is authoritative for the opened workspace.
     if (options.projectId) state.projectId = String(options.projectId);
+    if (options.gitRemote?.provider === 'github') state.gitRemote = {...(state.gitRemote || {}), ...options.gitRemote};
     if (options.gitEnabled === false) state.gitRemote = null;
     state.projectOwner = options.projectOwner !== false;
     state.gitEnabled = options.gitEnabled !== false;
@@ -2567,7 +2569,7 @@ window.__editorInitPromise = (async function () {
         const name = info.name || github.repo;
         let file = new File([blob], name + '.zip', {type:'application/zip'});
         file = await flattenProjectZip(file);
-        return {file, name, source:`github:${github.owner}/${github.repo}@${ref}`, gitRemote:{provider:'github',owner:github.owner,repo:github.repo,branch}, gitCommitSha:remoteState.commitSha || ref, projectId:`github:${github.owner}/${github.repo}@${branch}`};
+        return {file, name, source:`github:${github.owner}/${github.repo}@${ref}`, gitRemote:{provider:'github',owner:github.owner,repo:github.repo,branch,revision:ref}, gitCommitSha:remoteState.commitSha || ref, projectId:`github:${github.owner}/${github.repo}@${branch}`};
       } catch (e) {
         if (e?.status !== 404 && e?.status !== 401) throw e;
       }
@@ -2751,7 +2753,7 @@ window.__editorInitPromise = (async function () {
         owner:parsed.owner,
         repo:parsed.repo,
         branch,
-        revision:requestedRevision === 'latest' ? 'latest' : ref
+        revision:ref
       },
       gitSubmodules
     });
@@ -3429,6 +3431,8 @@ window.__editorInitPromise = (async function () {
   };
   state.loadGitSubmodules = async (owner, repo, commitSha, branch = 'main') => {
     state.gitSubmodules = await loadGithubSubmodules(state.fs, owner, repo, commitSha, branch);
+    if (state.gitRemote?.provider === 'github') state.gitRemote.revision = String(commitSha || '');
+    saveProjectMetadata();
     state.saveGitSubmodules();
     return state.gitSubmodules;
   };

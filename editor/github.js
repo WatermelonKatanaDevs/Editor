@@ -274,12 +274,14 @@
     if (token) headers.set('Authorization', `Bearer ${token}`);
     const init = {headers, credentials:'omit', cache:'no-store'};
     const network = window.__sharedBrowserNetwork || window.EditorAppState?.browserNetwork;
-    const response = network?.request ? await network.request(new Request(API + path, init), 'github-api', () => true) : await fetch(API + path, init);
+    const send = requestHeaders => network?.request ? network.request(new Request(API + path, {headers:requestHeaders,credentials:'omit',cache:'no-store'}), 'github-api', () => true) : fetch(API + path, {headers:requestHeaders,credentials:'omit',cache:'no-store'});
+    let response = await send(headers);
     if (!response) throw new Error('GitHub API request failed: no Network endpoint returned a response.');
     if (response.status === 401 && token) {
       clearStoredAuth();
       notify();
-      throw new Error('GitHub authentication expired. Sign in again from Profile.');
+      response = await send(new Headers({Accept:'application/vnd.github+json','X-GitHub-Api-Version':API_VERSION}));
+      if (!response) throw new Error('GitHub API request failed: no Network endpoint returned a response.');
     }
     const data = await response.json().catch(() => null);
     if (!response.ok) {
@@ -308,7 +310,13 @@
     const request = new Request(API + path, {headers, credentials:'omit'});
     const response = network?.request ? await network.request(request, 'github-archive', () => true) : await fetch(request);
     if (!response) throw new Error('GitHub archive download failed: no Network endpoint returned a response.');
-    if (response.status === 401) { clearStoredAuth(); notify(); throw new Error('GitHub authentication expired. Sign in again from Profile.'); }
+    if (response.status === 401) {
+      clearStoredAuth();
+      notify();
+      const error = new Error('GitHub authentication expired. Sign in again from Profile.');
+      error.status = 401;
+      throw error;
+    }
     if (!response.ok) {
       const data = await response.json().catch(() => null);
       const error = new Error(data?.message || `GitHub archive download failed (${response.status}).`);
@@ -438,8 +446,10 @@
     const state = await getCommitState(owner, repo, commitSha);
     if (state.truncated) throw new Error(`GitHub truncated the commit tree for ${owner}/${repo}@${String(commitSha).slice(0, 7)}. Submodules cannot be loaded safely from a truncated tree.`);
     const links = (state.gitTree || []).filter(entry => entry.mode === '160000' || entry.type === 'commit');
-    if (!links.length) return [];
     const modulesEntry = (state.gitTree || []).find(entry => entry.path === '.gitmodules' && entry.type === 'blob');
+    if (!links.length && !modulesEntry) return [];
+    if (state.truncated) throw new Error(`GitHub truncated the commit tree for ${owner}/${repo}@${String(commitSha).slice(0, 7)}. Submodules cannot be loaded safely from a truncated tree.`);
+    if (!links.length) return [];
     if (!modulesEntry?.sha) throw new Error(`Commit ${String(commitSha).slice(0, 7)} contains submodules but has no .gitmodules file.`);
     const text = new TextDecoder().decode(await readBlob(owner, repo, modulesEntry.sha));
     const configs = parseGitmodules(text);
@@ -747,7 +757,7 @@
         if (String(module.url || '') !== String(config.url || '') || String(module.configuredBranch || '') !== String(config.branch || '')) {
           throw new Error(`Submodule settings for ${config.path} changed. URL and branch changes must be handled by a dedicated submodule update before committing.`);
         }
-        if (!fs?.existsSync?.(module.path)) throw new Error(`Submodule directory ${module.path} is missing. Restore it before committing.`);
+        if (!fs?.isDirectorySync?.(module.path)) throw new Error(`Submodule directory ${module.path} is missing. Restore it before committing.`);
       }
     }
     return true;
@@ -867,10 +877,11 @@
       byParent.get(key).push(module);
     }
 
-    async function commitModule(module) {
+    async function commitModule(module, parentBranch = branch || 'main') {
       const children = byParent.get(String(module.path || '')) || [];
       const childResults = [];
-      for (const child of children) childResults.push({module:child, sha:await commitModule(child)});
+      const targetBranch = module.configuredBranch === '.' ? parentBranch : module.branch || 'main';
+      for (const child of children) childResults.push({module:child, sha:await commitModule(child, targetBranch)});
       const baselineSha = String(module.pendingCommitSha || module.commitSha || '');
       if (!baselineSha) throw new Error(`Submodule ${module.path} has no pinned commit SHA.`);
       const base = await getCommitState(module.owner, module.repo, baselineSha);
@@ -881,7 +892,7 @@
       const result = await commitAndPush({
         owner:module.owner,
         repo:module.repo,
-        branch:module.branch || 'main',
+        branch:targetBranch,
         message,
         fs,
         compareTree:base.tree,
@@ -896,7 +907,7 @@
     const roots = byParent.get('') || [];
     const updatedRoots = [];
     for (const module of roots) {
-      const sha = await commitModule(module);
+      const sha = await commitModule(module, branch || 'main');
       if (sha && sha !== String(module.commitSha || '')) updatedRoots.push({path:module.path, sha});
     }
 

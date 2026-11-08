@@ -461,6 +461,8 @@
           showStatus('Nothing to commit.');
           return;
         }
+        if (state.gitRemote?.provider === 'github') state.gitRemote.revision = result.commitSha;
+        state.saveProjectMetadata?.();
         state.saveGitSubmodules?.();
         tree.querySelector('[data-commit-message]').value = '';
         showStatus(`Committed ${result.commitSha.slice(0, 7)} and pushed to ${selected.branch || 'main'}.`);
