@@ -1,5 +1,5 @@
 (function () {
-  const textMimes = ['application/json','application/javascript','application/typescript','application/xml','model/gltf+json'];
+  const textMimes = ['application/json','application/manifest+json','application/javascript','application/typescript','application/xml','model/gltf+json'];
   function match(file) {
     const mime = String(file.mime || '');
     return mime.startsWith('text/') || textMimes.includes(mime) || mime === 'image/svg+xml' || String(file.name || '').toLowerCase().endsWith('.obj');
@@ -7,13 +7,38 @@
   function language(path) {
     const ext = String(path || '').split('/').pop().split('.').pop().toLowerCase();
     return ({
-      js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',jsx:'javascript',json:'json',
+      js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',jsx:'javascript',json:'json',webmanifest:'json',
       html:'html',htm:'html',css:'css',scss:'scss',less:'less',md:'markdown',xml:'xml',yaml:'yaml',yml:'yaml',
       py:'python',pyw:'python',java:'java',kt:'kotlin',c:'c',h:'c',cpp:'cpp',cc:'cpp',cxx:'cpp',hpp:'cpp',
-      sh:'shell',bash:'shell',sql:'sql',ini:'ini',toml:'ini',svg:'html',gltf:'json',frag:'cpp',vert:'cpp',
-      hlsl:'cpp',fx:'cpp',wgsl:'plaintext'
+      sh:'shell',bash:'shell',sql:'sql',ini:'ini',toml:'ini',svg:'html',gltf:'json',frag:'cpp',vert:'cpp',glsl:'cpp',
+      hlsl:'cpp',fx:'cpp',wgsl:'wgsl'
     })[ext] || 'plaintext';
   }
+  let wgslLanguagePromise = null;
+  async function ensureWGSL(monaco) {
+    if (wgslLanguagePromise) return wgslLanguagePromise;
+    wgslLanguagePromise = new Promise((resolve, reject) => {
+      const amdRequire = window.require || (typeof require === 'function' ? require : null);
+      if (!amdRequire) return reject(new Error('Monaco language loader is unavailable'));
+      amdRequire(['vs/basic-languages/wgsl/wgsl'], module => {
+        try {
+          if (!monaco.languages.getLanguages().some(language => language.id === 'wgsl')) {
+            monaco.languages.register({ id: 'wgsl', extensions: ['.wgsl'], aliases: ['WGSL', 'WebGPU Shading Language'] });
+          }
+          monaco.languages.setLanguageConfiguration('wgsl', module.conf);
+          monaco.languages.setMonarchTokensProvider('wgsl', module.language);
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      }, reject);
+    }).catch(error => {
+      wgslLanguagePromise = null;
+      throw error;
+    });
+    return wgslLanguagePromise;
+  }
+
   function frame() {
     return new Promise(resolve => requestAnimationFrame(() => resolve()));
   }
@@ -67,7 +92,15 @@
           const currentText = ctx.readText();
           if (model.getValue() !== currentText) model.setValue(currentText);
 
-          const languageId = language(ctx.file.path);
+          let languageId = language(ctx.file.path);
+          if (languageId === 'wgsl') {
+            try {
+              await ensureWGSL(monaco);
+            } catch (error) {
+              console.warn('WGSL language registration failed; using C-like highlighting:', error);
+              languageId = 'cpp';
+            }
+          }
           // Set the language explicitly both before and after editor creation.
           // The second pass covers startup races where a language contribution
           // registers after editor.main has initialized.
