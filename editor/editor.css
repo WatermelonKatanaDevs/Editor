@@ -605,3 +605,21 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .editor-binary-bytes{color:#d7e5ed}
 .editor-binary-ascii{color:#a5c99d}
 .editor-binary-empty{padding:10px;color:var(--editor-muted-2)}
+
+/* Git submodule management in Source Control. */
+.source-control-submodule-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.source-control-submodule-heading>button,.source-control-submodule-actions button,.source-control-submodule-form-actions button{border:1px solid var(--editor-border);border-radius:4px;background:var(--editor-surface);color:var(--editor-text-secondary);font:inherit;font-size:10px;padding:5px 8px;cursor:pointer}
+.source-control-submodule-heading>button:hover,.source-control-submodule-actions button:hover,.source-control-submodule-form-actions button:hover{background:var(--editor-hover);color:var(--editor-text)}
+.source-control-submodule-actions{display:flex;align-items:center;gap:4px;margin-left:auto}
+.source-control-submodule-actions button{padding:4px 6px;font-size:9px}
+.source-control-submodule-form{display:flex;flex-direction:column;gap:9px;margin-top:10px;padding:10px;border:1px solid var(--editor-border);border-radius:5px;background:var(--editor-surface)}
+.source-control-submodule-form[hidden]{display:none}
+.source-control-submodule-form label{display:flex;flex:1;flex-direction:column;gap:4px;min-width:0;color:var(--editor-muted);font-size:10px}
+.source-control-submodule-form input,.source-control-submodule-form select{box-sizing:border-box;width:100%;min-width:0;height:31px;padding:5px 7px;border:1px solid var(--editor-border);border-radius:4px;background:var(--editor-surface-2);color:var(--editor-text-secondary);font:inherit;font-size:11px;outline:none}
+.source-control-submodule-form input:focus,.source-control-submodule-form select:focus{border-color:var(--editor-accent)}
+.source-control-submodule-form-row{display:flex;gap:8px}
+.source-control-submodule-form-actions{display:flex;justify-content:flex-end;gap:6px}
+.source-control-submodule-form-actions button.primary{border-color:var(--editor-accent);background:var(--editor-accent);color:white}
+.source-control-submodule-info{min-width:0;display:flex;flex-direction:column}
+.source-control-submodule-info strong{overflow-wrap:anywhere}
+@media(max-width:420px){.source-control-submodule-form-row{flex-direction:column}.source-control-submodule-actions{flex-wrap:wrap}}

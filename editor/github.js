@@ -743,20 +743,17 @@
     return data;
   }
   function validateSubmoduleConfiguration(fs, modules = []) {
-    const parents = new Set(['', ...(modules || []).map(module => String(module.path || ''))]);
+    const active = (modules || []).filter(module => !module?.removed);
+    const parents = new Set(['', ...active.map(module => String(module.path || ''))]);
     for (const parentPath of parents) {
       const configPath = parentPath ? parentPath + '/.gitmodules' : '.gitmodules';
       const configs = fs?.existsSync?.(configPath) ? parseGitmodules(fs.readFileSync(configPath, 'utf8')) : [];
-      const children = (modules || []).filter(module => String(module.parentPath || '') === parentPath);
-      if (configs.length !== children.length) {
-        throw new Error(`Submodule configuration changed at ${parentPath || 'the repository root'}. Adding, removing, or renaming submodules is not supported yet; reload the repository to restore its original submodule layout.`);
-      }
+      const children = active.filter(module => String(module.parentPath || '') === parentPath);
+      if (configs.length !== children.length) throw new Error(`Submodule configuration at ${parentPath || 'the repository root'} does not match the loaded submodule layout. Refresh Source Control and check .gitmodules before committing.`);
       for (const config of configs) {
         const module = children.find(child => String(child.path || '').slice(parentPath ? parentPath.length + 1 : 0) === config.path);
-        if (!module) throw new Error(`Submodule path ${config.path} changed at ${parentPath || 'the repository root'}. Reload the repository before committing.`);
-        if (String(module.url || '') !== String(config.url || '') || String(module.configuredBranch || '') !== String(config.branch || '')) {
-          throw new Error(`Submodule settings for ${config.path} changed. URL and branch changes must be handled by a dedicated submodule update before committing.`);
-        }
+        if (!module) throw new Error(`Submodule path ${config.path} does not match a loaded gitlink at ${parentPath || 'the repository root'}.`);
+        if (String(module.url || '') !== String(config.url || '') || String(module.configuredBranch || '') !== String(config.branch || '')) throw new Error(`Submodule settings for ${config.path} do not match .gitmodules. Update the submodule through Source Control before committing.`);
         if (!fs?.isDirectorySync?.(module.path)) throw new Error(`Submodule directory ${module.path} is missing. Restore it before committing.`);
       }
     }
@@ -767,6 +764,7 @@
     validateSubmoduleConfiguration(fs, modules);
     const byParent = new Map();
     for (const module of modules || []) {
+      if (module?.removed) continue;
       const key = String(module.parentPath || '');
       if (!byParent.has(key)) byParent.set(key, []);
       byParent.get(key).push(module);
@@ -788,12 +786,12 @@
         const info = await getRepository(module.owner, module.repo);
         canPush = info?.permissions?.push !== false;
       } catch (_) {}
-      return {...module, changes, children:childResults, canPush, dirty:!!changes.length || childResults.some(child => child.dirty) || !!module.pendingCommitSha};
+      return {...module, changes, children:childResults, canPush, dirty:!!changes.length || childResults.some(child => child.dirty) || !!module.pendingCommitSha || !!module.added || !!module.previousPath};
     }
     return Promise.all(byParent.get('') || []);
   }
 
-  async function commitAndPush({owner, repo, branch, message, fs, compareTree = null, pathPrefix = '', excludePaths = [], gitlinks = [], _attempt = 0}) {
+  async function commitAndPush({owner, repo, branch, message, fs, compareTree = null, pathPrefix = '', excludePaths = [], gitlinks = [], removedGitlinks = [], _attempt = 0}) {
     message = String(message || '').trim();
     if (!message) throw new Error('Enter a commit message.');
     let remote = null;
@@ -806,7 +804,8 @@
     const changes = await compareWorkingTree(fs, compareTree || remote.tree, {pathPrefix, excludePaths});
     const remoteGitlinks = new Map((remote.tree || []).filter(entry => entry?.mode === '160000' || entry?.type === 'commit').map(entry => [entry.path, entry.sha]));
     const updatedGitlinks = (gitlinks || []).filter(link => link?.path && link?.sha && remoteGitlinks.get(link.path) !== link.sha);
-    const allChanges = [...changes, ...updatedGitlinks.map(link => ({path:link.path,type:'gitlink',mode:'160000',sha:link.sha}))];
+    const deletedGitlinks = [...new Set((removedGitlinks || []).map(path => String(path || '').replace(/^\/+|\/+$/g, '')).filter(path => path && remoteGitlinks.has(path)))];
+    const allChanges = [...changes, ...updatedGitlinks.map(link => ({path:link.path,type:'gitlink',mode:'160000',sha:link.sha})), ...deletedGitlinks.map(path => ({path,type:'gitlink-deleted',mode:'160000',sha:null}))];
     if (!allChanges.length) return {changed:false, changes:[], commitSha:remote.commitSha};
     if (remote.empty) {
       // GitHub requires an empty repository to be bootstrapped through the
@@ -824,8 +823,8 @@
       return {changed:true, changes:allChanges, commitSha, initialized:true};
     }
     try {
-      const blobs = await withConcurrency(allChanges.filter(x => x.type !== 'deleted' && x.type !== 'gitlink'), 4, async change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:(await createBlob(owner, repo, change.data)).sha}));
-      const treeEntries = [...blobs, ...updatedGitlinks.map(change => ({path:change.path, mode:'160000', type:'commit', sha:change.sha})), ...allChanges.filter(x => x.type === 'deleted').map(change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:null}))];
+      const blobs = await withConcurrency(allChanges.filter(x => x.type !== 'deleted' && x.type !== 'gitlink' && x.type !== 'gitlink-deleted'), 4, async change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:(await createBlob(owner, repo, change.data)).sha}));
+      const treeEntries = [...blobs, ...updatedGitlinks.map(change => ({path:change.path, mode:'160000', type:'commit', sha:change.sha})), ...deletedGitlinks.map(path => ({path, mode:'160000', type:'commit', sha:null})), ...allChanges.filter(x => x.type === 'deleted').map(change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:null}))];
       const treeBody = {tree:treeEntries};
       if (remote.treeSha) treeBody.base_tree = remote.treeSha;
       const tree = await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/trees', {method:'POST', body:JSON.stringify(treeBody)});
@@ -845,7 +844,7 @@
         // never force-push over the intervening commit.
         if (e?.status === 422 && _attempt < 8) {
           await new Promise(resolve => setTimeout(resolve, 500 + _attempt * 500));
-          return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, _attempt:_attempt + 1});
+          return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, _attempt:_attempt + 1});
         }
         throw e;
       }
@@ -857,10 +856,10 @@
       // with a bounded backoff before surfacing the error.
       if ((e?.status === 404 || e?.status === 409) && _attempt < 8) {
         await new Promise(resolve => setTimeout(resolve, Math.min(1000 + _attempt * 1000, 5000)));
-        return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, _attempt:_attempt + 1});
+        return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, _attempt:_attempt + 1});
       }
       if (e?.status !== 403) throw e;
-      if (updatedGitlinks.length) throw new Error('GitHub rejected the Git-data write for a commit containing submodule references. The GraphQL fallback cannot create gitlinks; check your repository permissions and try again.');
+      if (updatedGitlinks.length || deletedGitlinks.length) throw new Error('GitHub rejected the Git-data write for a commit containing submodule references. The GraphQL fallback cannot create or remove gitlinks; check your repository permissions and try again.');
       const commitSha = await createGraphQLCommit(owner, repo, branch, message, allChanges, remote.commitSha);
       return {changed:true, changes:allChanges, commitSha};
     }
@@ -878,16 +877,22 @@
     }
 
     async function commitModule(module, parentBranch = branch || 'main') {
-      const children = byParent.get(String(module.path || '')) || [];
-      const childResults = [];
+      const entries = byParent.get(String(module.path || '')) || [];
+      const children = entries.filter(child => !child.removed);
+      const removedChildren = entries.filter(child => child.removed);
       const targetBranch = module.configuredBranch === '.' ? parentBranch : module.branch || 'main';
+      const childResults = [];
       for (const child of children) childResults.push({module:child, sha:await commitModule(child, targetBranch)});
       const baselineSha = String(module.pendingCommitSha || module.commitSha || '');
       if (!baselineSha) throw new Error(`Submodule ${module.path} has no pinned commit SHA.`);
       const base = await getCommitState(module.owner, module.repo, baselineSha);
       const childGitlinks = childResults
-        .filter(item => item.sha && item.sha !== String(item.module.commitSha || ''))
+        .filter(item => item.sha && (item.sha !== String(item.module.commitSha || '') || item.module.added || item.module.previousPath))
         .map(item => ({path:String(item.module.path || '').slice(String(module.path || '').length + 1), sha:item.sha}));
+      const removedChildPaths = [
+        ...removedChildren.map(child => String(child.path || '').slice(String(module.path || '').length + 1)),
+        ...children.filter(child => child.previousPath).map(child => String(child.previousPath).slice(String(module.path || '').length + 1))
+      ].filter(Boolean);
       const excludedChildren = children.map(child => String(child.path || '').slice(String(module.path || '').length + 1));
       const result = await commitAndPush({
         owner:module.owner,
@@ -898,18 +903,24 @@
         compareTree:base.tree,
         pathPrefix:module.path,
         excludePaths:excludedChildren,
-        gitlinks:childGitlinks
+        gitlinks:childGitlinks,
+        removedGitlinks:removedChildPaths
       });
       if (result.changed) module.pendingCommitSha = result.commitSha;
       return String(module.pendingCommitSha || module.commitSha || '');
     }
 
-    const roots = byParent.get('') || [];
+    const roots = (byParent.get('') || []).filter(module => !module.removed);
+    const removedRoots = (byParent.get('') || []).filter(module => module.removed);
     const updatedRoots = [];
     for (const module of roots) {
       const sha = await commitModule(module, branch || 'main');
-      if (sha && sha !== String(module.commitSha || '')) updatedRoots.push({path:module.path, sha});
+      if (sha && (sha !== String(module.commitSha || '') || module.added || module.previousPath)) updatedRoots.push({path:module.path, sha});
     }
+    const removedRootPaths = [
+      ...removedRoots.map(module => module.path),
+      ...roots.filter(module => module.previousPath).map(module => module.previousPath)
+    ].filter(Boolean);
 
     const result = await commitAndPush({
       owner,
@@ -918,16 +929,19 @@
       message,
       fs,
       excludePaths:roots.map(module => module.path),
-      gitlinks:updatedRoots
+      gitlinks:updatedRoots,
+      removedGitlinks:removedRootPaths
     });
 
-    // Pending SHAs survive a failed parent push and are promoted only after success.
     for (const module of modules) {
       if (module.pendingCommitSha) {
         module.commitSha = module.pendingCommitSha;
         module.pendingCommitSha = null;
       }
+      module.added = false;
+      module.previousPath = null;
     }
+    for (let i = modules.length - 1; i >= 0; i--) if (modules[i].removed) modules.splice(i, 1);
     return {...result, submodules:modules};
   }
   root.init = init;

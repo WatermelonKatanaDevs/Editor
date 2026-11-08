@@ -2508,7 +2508,7 @@ window.__editorInitPromise = (async function () {
     return files.length;
   }
 
-  async function loadGithubSubmodules(fs, owner, repo, commitSha, rootBranch = 'main') {
+  async function loadGithubSubmodules(fs, owner, repo, commitSha, rootBranch = 'main', options = {}) {
     const github = window.GitHubService;
     if (!github?.listSubmodules || !commitSha) return [];
     const modules = [];
@@ -2529,7 +2529,7 @@ window.__editorInitPromise = (async function () {
         module.branch = child.branch === '.' ? parentBranch : child.branch || String(info?.default_branch || 'main');
         if (!module.branch) module.branch = 'main';
         modules.push(module);
-        updateRemoteLoadProgress('Loading Git submodules…', null, `${module.owner}/${module.repo} · ${fullPath}`);
+        if (remoteLoadProgress) updateRemoteLoadProgress('Loading Git submodules…', null, `${module.owner}/${module.repo} · ${fullPath}`);
         clearGithubSubmodulePath(fs, fullPath);
         const archive = await downloadGithubSubmoduleArchive(module.owner, module.repo, module.commitSha);
         if (!archive?.size) throw new Error(`GitHub returned an empty archive for submodule ${fullPath}.`);
@@ -2538,8 +2538,263 @@ window.__editorInitPromise = (async function () {
       }
       visited.delete(identity);
     }
-    await load(owner, repo, commitSha, '', 0, String(rootBranch || 'main'));
+    await load(owner, repo, commitSha, String(options.prefix || ''), Number(options.depth) || 0, String(rootBranch || 'main'));
     return modules;
+  }
+
+
+  function splitGithubGitmodules(text) {
+    const preamble = [];
+    const sections = [];
+    let current = null;
+    for (const line of String(text || '').split(/\r?\n/)) {
+      const header = line.match(/^\s*\[submodule\s+"([^"]+)"\]\s*$/i);
+      if (header) {
+        current = {name:header[1], lines:[line]};
+        sections.push(current);
+      } else if (current) current.lines.push(line);
+      else preamble.push(line);
+    }
+    return {preamble, sections};
+  }
+
+  function githubGitmoduleValue(section, key) {
+    for (const line of section?.lines || []) {
+      const match = line.match(/^\s*([A-Za-z0-9.-]+)\s*=\s*(.*)$/);
+      if (match && match[1].toLowerCase() === key.toLowerCase()) {
+        let value = match[2].trim();
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+        return value;
+      }
+    }
+    return '';
+  }
+
+  function setGithubGitmoduleValue(section, key, value) {
+    const index = section.lines.findIndex(line => {
+      const match = line.match(/^\s*([A-Za-z0-9.-]+)\s*=/);
+      return match && match[1].toLowerCase() === key.toLowerCase();
+    });
+    if (value == null || value === '') {
+      if (index >= 0) section.lines.splice(index, 1);
+      return;
+    }
+    const encoded = JSON.stringify(String(value));
+    if (index >= 0) section.lines[index] = '\t' + key + ' = ' + encoded;
+    else section.lines.push('\t' + key + ' = ' + encoded);
+  }
+
+  function updateGithubGitmodules(fs, parentPath, options = {}) {
+    const configPath = parentPath ? String(parentPath).replace(/\/+$/, '') + '/.gitmodules' : '.gitmodules';
+    const raw = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
+    const parsed = splitGithubGitmodules(raw);
+    const pathOf = section => githubGitmoduleValue(section, 'path');
+    if (options.removePath) {
+      parsed.sections.splice(0, parsed.sections.length, ...parsed.sections.filter(section => pathOf(section) !== options.removePath));
+    } else {
+      let section = parsed.sections.find(item => pathOf(item) === String(options.oldPath || options.path || ''));
+      if (!section && options.oldPath) section = parsed.sections.find(item => pathOf(item) === options.oldPath);
+      if (!section) {
+        const name = String(options.name || options.path || 'submodule').replace(/"/g, '');
+        section = {name, lines:['[submodule "' + name + '"]']};
+        parsed.sections.push(section);
+      }
+      if (options.path != null) setGithubGitmoduleValue(section, 'path', options.path);
+      if (options.url != null) setGithubGitmoduleValue(section, 'url', options.url);
+      if (Object.prototype.hasOwnProperty.call(options, 'branch')) setGithubGitmoduleValue(section, 'branch', options.branch);
+    }
+    const output = [...parsed.preamble, ...parsed.sections.flatMap(section => section.lines)].join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (!parsed.sections.length && !output) {
+      if (fs.existsSync(configPath)) fs.deleteFileSync(configPath);
+      return configPath;
+    }
+    fs.writeFileSync(configPath, output ? output + '\n' : '');
+    return configPath;
+  }
+
+  function normalizeGithubSubmodulePath(value) {
+    const path = String(value || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    const parts = path.split('/');
+    if (!path || parts.some(part => !part || part === '.' || part === '..' || part.includes('"')) || path === '.git' || path.startsWith('.git/')) throw new Error('Enter a safe relative submodule path.');
+    return path;
+  }
+
+  function ensureGithubSubmoduleDirectory(fs, path) {
+    let current = '';
+    for (const part of String(path || '').split('/').filter(Boolean)) {
+      current = current ? current + '/' + part : part;
+      if (fs.isDirectorySync?.(current)) continue;
+      if (fs.existsSync?.(current)) throw new Error('A file already exists at ' + current + '.');
+      fs.mkdirSync(current);
+    }
+  }
+
+  function assertGithubSubmodulePathAvailable(fs, path, modules, ignorePath = '', parentPath = '') {
+    const clean = String(path || '');
+    const overlaps = other => other && other !== ignorePath && (other === clean || other.startsWith(clean + '/') || (clean.startsWith(other + '/') && !(parentPath && (other === parentPath || parentPath.startsWith(other + '/')))));
+    if ((modules || []).some(module => !module.removed && overlaps(String(module.path || '')))) throw new Error('Submodule path ' + clean + ' overlaps an existing submodule.');
+    for (const file of fs.listFilesSync?.() || []) {
+      const candidate = String(file).replace(/^\/+/, '');
+      if (candidate === clean || candidate.startsWith(clean + '/') || clean.startsWith(candidate + '/')) {
+        if (!ignorePath || !(candidate === ignorePath || candidate.startsWith(ignorePath + '/'))) throw new Error('Submodule path ' + clean + ' conflicts with workspace file ' + candidate + '.');
+      }
+    }
+    for (const dir of fs.listDirectoriesSync?.() || []) {
+      const candidate = String(dir).replace(/^\/+|\/+$/g, '');
+      if (candidate.startsWith(clean + '/')) throw new Error('Submodule path ' + clean + ' already contains another directory.');
+      if (candidate === clean && candidate !== ignorePath) throw new Error('Submodule directory ' + clean + ' already exists.');
+    }
+  }
+
+  function activeGithubSubmodule(path) {
+    return (state.gitSubmodules || []).find(module => !module.removed && String(module.path || '') === String(path || '')) || null;
+  }
+
+  async function addWorkspaceGitSubmodule({parentPath = '', path, url, branch = ''}) {
+    const github = window.GitHubService;
+    if (state.gitRemote?.provider !== 'github') throw new Error('Connect this workspace to a GitHub repository before adding submodules.');
+    parentPath = String(parentPath || '').replace(/^\/+|\/+$/g, '');
+    const parent = parentPath ? activeGithubSubmodule(parentPath) : null;
+    if (parentPath && !parent) throw new Error('Parent submodule ' + parentPath + ' is not loaded.');
+    const parentOwner = parent?.owner || state.gitRemote.owner;
+    const parentRepo = parent?.repo || state.gitRemote.repo;
+    const parentBranch = parent?.branch || state.gitRemote.branch || 'main';
+    const relativePath = normalizeGithubSubmodulePath(path);
+    const fullPath = [parentPath, relativePath].filter(Boolean).join('/');
+    assertGithubSubmodulePathAvailable(state.fs, fullPath, state.gitSubmodules || [], '', parentPath);
+    const remote = github.resolveGitHubRepositoryUrl(url, parentOwner, parentRepo);
+    const info = await github.getRepository(remote.owner, remote.repo);
+    const configuredBranch = String(branch || '').trim() === '.' ? '.' : String(branch || info?.default_branch || 'main').trim();
+    const targetBranch = configuredBranch === '.' ? parentBranch : configuredBranch;
+    const remoteState = await github.getRemoteState(remote.owner, remote.repo, targetBranch);
+    if (!remoteState.commitSha) throw new Error('Repository ' + remote.owner + '/' + remote.repo + ' has no commit on branch ' + targetBranch + '.');
+    const archive = await downloadGithubSubmoduleArchive(remote.owner, remote.repo, remoteState.commitSha);
+    if (!archive?.size) throw new Error('GitHub returned an empty archive for ' + remote.owner + '/' + remote.repo + '.');
+    clearGithubSubmodulePath(state.fs, fullPath);
+    try {
+      await extractGithubSubmoduleArchive(state.fs, archive, fullPath);
+      const descendants = await loadGithubSubmodules(state.fs, remote.owner, remote.repo, remoteState.commitSha, targetBranch, {prefix:fullPath, depth:parentPath ? 2 : 1});
+      const module = {
+        name:relativePath,
+        path:fullPath,
+        parentPath,
+        url:String(url).trim(),
+        owner:remote.owner,
+        repo:remote.repo,
+        branch:targetBranch,
+        configuredBranch,
+        commitSha:remoteState.commitSha,
+        mode:'160000',
+        added:true,
+        pendingCommitSha:null
+      };
+      const configPath = updateGithubGitmodules(state.fs, parentPath, {name:module.name,path:relativePath,url:module.url,branch:configuredBranch});
+      state.gitSubmodules = [...(state.gitSubmodules || []), module, ...descendants];
+      state.markDirty?.(configPath);
+      state.saveGitSubmodules?.();
+      state.fileManager?.refresh?.();
+      return module;
+    } catch (error) {
+      clearGithubSubmodulePath(state.fs, fullPath);
+      throw error;
+    }
+  }
+
+  function removeWorkspaceGitSubmodule(path) {
+    const module = activeGithubSubmodule(path);
+    if (!module) throw new Error('Select a loaded submodule to remove.');
+    const descendants = (state.gitSubmodules || []).filter(item => item.path === module.path || String(item.path || '').startsWith(module.path + '/'));
+    const relativePath = String(module.path).slice(module.parentPath ? module.parentPath.length + 1 : 0);
+    const configPath = updateGithubGitmodules(state.fs, module.parentPath || '', {removePath:relativePath});
+    clearGithubSubmodulePath(state.fs, module.path);
+    const removedPaths = new Set(descendants.map(item => item.path));
+    state.gitSubmodules = (state.gitSubmodules || []).map(item => removedPaths.has(item.path) ? {...item, removed:true} : item);
+    state.markDirty?.(configPath);
+    state.saveGitSubmodules?.();
+    state.fileManager?.refresh?.();
+    return true;
+  }
+
+  function renameWorkspaceGitSubmodule(path, nextPath) {
+    const module = activeGithubSubmodule(path);
+    if (!module) throw new Error('Select a loaded submodule to rename.');
+    const relativePath = normalizeGithubSubmodulePath(nextPath);
+    const parentPath = String(module.parentPath || '');
+    const oldFullPath = module.path;
+    const newFullPath = [parentPath, relativePath].filter(Boolean).join('/');
+    if (newFullPath === oldFullPath) return module;
+    if (newFullPath.startsWith(oldFullPath + '/') || oldFullPath.startsWith(newFullPath + '/')) throw new Error('A submodule cannot be renamed inside or above its own directory.');
+    assertGithubSubmodulePathAvailable(state.fs, newFullPath, state.gitSubmodules || [], oldFullPath, parentPath);
+    const files = (state.fs.listFilesSync?.() || []).map(file => String(file).replace(/^\/+/, '')).filter(file => file === oldFullPath || file.startsWith(oldFullPath + '/'));
+    const copies = files.map(file => ({path:newFullPath + file.slice(oldFullPath.length), data:state.fs.readFileSync(file, 'binary')}));
+    for (const item of copies) {
+      const split = item.path.split('/');
+      ensureGithubSubmoduleDirectory(state.fs, split.slice(0, -1).join('/'));
+      state.fs.writeFileSync(item.path, item.data);
+    }
+    const oldRelativePath = oldFullPath.slice(parentPath ? parentPath.length + 1 : 0);
+    const configPath = updateGithubGitmodules(state.fs, parentPath, {oldPath:oldRelativePath,path:relativePath,url:module.url,branch:module.configuredBranch});
+    clearGithubSubmodulePath(state.fs, oldFullPath);
+    state.gitSubmodules = (state.gitSubmodules || []).map(item => {
+      const updated = {...item};
+      if (item.path === oldFullPath) {
+        updated.path = newFullPath;
+        updated.previousPath = oldFullPath;
+      } else if (String(item.path || '').startsWith(oldFullPath + '/')) updated.path = newFullPath + String(item.path).slice(oldFullPath.length);
+      if (item.parentPath === oldFullPath) updated.parentPath = newFullPath;
+      else if (String(item.parentPath || '').startsWith(oldFullPath + '/')) updated.parentPath = newFullPath + String(item.parentPath).slice(oldFullPath.length);
+      return updated;
+    });
+    state.markDirty?.(configPath);
+    state.saveGitSubmodules?.();
+    state.fileManager?.refresh?.();
+    return activeGithubSubmodule(newFullPath);
+  }
+
+  async function updateWorkspaceGitSubmodule({path, url, branch}) {
+    const github = window.GitHubService;
+    const module = activeGithubSubmodule(path);
+    if (!module) throw new Error('Select a loaded submodule to update.');
+    const nextUrl = String(url || module.url).trim();
+    const remote = github.resolveGitHubRepositoryUrl(nextUrl, module.owner, module.repo);
+    const info = await github.getRepository(remote.owner, remote.repo);
+    const sameRepository = remote.owner.toLowerCase() === String(module.owner).toLowerCase() && remote.repo.toLowerCase() === String(module.repo).toLowerCase();
+    let requestedBranch = String(branch == null ? '' : branch).trim();
+    if (!requestedBranch) requestedBranch = sameRepository ? String(module.configuredBranch || module.branch || info?.default_branch || 'main') : String(info?.default_branch || 'main');
+    const configuredBranch = requestedBranch === '.' ? '.' : requestedBranch;
+    const parent = module.parentPath ? activeGithubSubmodule(module.parentPath) : null;
+    const targetBranch = configuredBranch === '.' ? (parent?.branch || state.gitRemote?.branch || 'main') : configuredBranch;
+    const remoteState = await github.getRemoteState(remote.owner, remote.repo, targetBranch);
+    if (!remoteState.commitSha) throw new Error('Repository ' + remote.owner + '/' + remote.repo + ' has no commit on branch ' + targetBranch + '.');
+    const archive = await downloadGithubSubmoduleArchive(remote.owner, remote.repo, remoteState.commitSha);
+    if (!archive?.size) throw new Error('GitHub returned an empty archive for ' + remote.owner + '/' + remote.repo + '.');
+    const descendants = (state.gitSubmodules || []).filter(item => String(item.path || '').startsWith(module.path + '/'));
+    clearGithubSubmodulePath(state.fs, module.path);
+    try {
+      await extractGithubSubmoduleArchive(state.fs, archive, module.path);
+      const newDescendants = await loadGithubSubmodules(state.fs, remote.owner, remote.repo, remoteState.commitSha, targetBranch, {prefix:module.path, depth:module.parentPath ? 2 : 1});
+      const oldRelativePath = String(module.path).slice(module.parentPath ? module.parentPath.length + 1 : 0);
+      const configPath = updateGithubGitmodules(state.fs, module.parentPath || '', {oldPath:oldRelativePath,path:oldRelativePath,url:nextUrl,branch:configuredBranch});
+      state.gitSubmodules = (state.gitSubmodules || []).filter(item => !descendants.includes(item)).map(item => item.path === module.path ? {
+        ...item,
+        url:nextUrl,
+        owner:remote.owner,
+        repo:remote.repo,
+        branch:targetBranch,
+        configuredBranch,
+        commitSha:remoteState.commitSha,
+        pendingCommitSha:null,
+        added:true
+      } : item);
+      state.gitSubmodules.push(...newDescendants);
+      state.markDirty?.(configPath);
+      state.saveGitSubmodules?.();
+      state.fileManager?.refresh?.();
+      return activeGithubSubmodule(module.path);
+    } catch (error) {
+      clearGithubSubmodulePath(state.fs, module.path);
+      throw error;
+    }
   }
 
   async function fetchRemoteProject(url) {
@@ -3442,6 +3697,10 @@ window.__editorInitPromise = (async function () {
     state.saveGitSubmodules();
     return state.gitSubmodules;
   };
+  state.addGitSubmodule = addWorkspaceGitSubmodule;
+  state.removeGitSubmodule = removeWorkspaceGitSubmodule;
+  state.renameGitSubmodule = renameWorkspaceGitSubmodule;
+  state.updateGitSubmodule = updateWorkspaceGitSubmodule;
   state.saveEditorConfig = saveEditorConfig;
   state.markDirty = markDirty;
   state.updateStatus = updateStatus;

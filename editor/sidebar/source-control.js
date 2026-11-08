@@ -71,8 +71,10 @@
           <div class="source-control-select-row"><select data-repo ${repos.length ? '' : 'disabled'}><option value="">${repos.length ? 'Select repository…' : 'Loading repositories…'}</option>${repos.map(r => `<option value="${esc(r.fullName)}" ${r.fullName === `${selected.owner}/${selected.repo}` ? 'selected' : ''}>${esc(r.fullName)}${r.private ? ' · private' : ''}</option>`).join('')}</select><button data-repo-refresh title="Refresh repositories">↻</button></div>
           <div class="source-control-select-row"><select data-branch ${branches.length ? '' : 'disabled'}><option value="">${branches.length ? 'Select branch…' : (selected.repo ? 'Loading branches…' : 'Select repository first')}</option>${branches.map(branch => `<option value="${esc(branch)}" ${branch === selected.branch ? 'selected' : ''}>${esc(branch)}</option>`).join('')}</select><button data-branch-refresh title="Refresh branches">↻</button></div>
         </section>
-        ${selected.repo ? `<section class="source-control-section"><div class="source-control-section-title">Changes</div><div data-changes class="source-control-changes"><div class="source-control-loading">Checking working tree…</div></div>${(state.gitSubmodules || []).length ? `<div class="source-control-submodule-section"><div class="source-control-section-title">Submodules</div><div data-submodules class="source-control-submodules"><div class="source-control-loading">Checking submodules…</div></div></div>` : ''}<textarea data-commit-message placeholder="Commit message" rows="3"></textarea><button class="source-control-commit" data-commit disabled>Commit & Push</button><div data-status class="source-control-status"></div></section><section class="source-control-section"><div class="source-control-section-title">History</div><div data-history class="source-control-history"><div class="source-control-loading">Loading commits…</div></div></section>` : `<div class="source-control-empty"><strong>Select a repository</strong><span>Once a repository is selected, the editor compares this workspace against the selected branch.</span></div>`}
+        ${selected.repo ? `<section class="source-control-section"><div class="source-control-section-title">Changes</div><div data-changes class="source-control-changes"><div class="source-control-loading">Checking working tree…</div></div><div class="source-control-submodule-section"><div class="source-control-submodule-heading"><div class="source-control-section-title">Submodules</div><button type="button" data-submodule-add>Add</button></div><div data-submodules class="source-control-submodules"><div class="source-control-loading">Checking submodules…</div></div><div class="source-control-submodule-form" data-submodule-form hidden><label>GitHub repository URL<input data-submodule-url type="text" placeholder="https://github.com/owner/repository" spellcheck="false"></label><div class="source-control-submodule-form-row"><label>Path<input data-submodule-path type="text" placeholder="vendor/repository" spellcheck="false"></label><label>Parent<select data-submodule-parent><option value="">Workspace root</option></select></label></div><label>Branch<input data-submodule-branch type="text" placeholder="Default branch, or . to follow parent"></label><div class="source-control-submodule-form-actions"><button type="button" data-submodule-cancel>Cancel</button><button type="button" data-submodule-confirm class="primary">Add Submodule</button></div></div></div><textarea data-commit-message placeholder="Commit message" rows="3"></textarea><button class="source-control-commit" data-commit disabled>Commit & Push</button><div data-status class="source-control-status"></div></section><section class="source-control-section"><div class="source-control-section-title">History</div><div data-history class="source-control-history"><div class="source-control-loading">Loading commits…</div></div></section>` : `<div class="source-control-empty"><strong>Select a repository</strong><span>Once a repository is selected, the editor compares this workspace against the selected branch.</span></div>`}
       </div>`;
+      const parentSelect = tree.querySelector('[data-submodule-parent]');
+      if (parentSelect) parentSelect.innerHTML = '<option value="">Workspace root</option>' + (state.gitSubmodules || []).filter(module => !module.removed).map(module => '<option value="' + esc(module.path) + '">' + esc(module.path) + '</option>').join('');
       tree.querySelector('[data-refresh]')?.addEventListener('click', () => refresh());
       const createLocalButton = tree.querySelector('[data-create-local-repo]');
       const createPanel = tree.querySelector('[data-create-panel]');
@@ -169,6 +171,31 @@
         saveConfig(); state.runDebugRefresh?.(); void refreshStatus(); void loadHistory();
       });
       tree.querySelector('[data-commit]')?.addEventListener('click', () => void commit());
+      const submoduleForm = tree.querySelector('[data-submodule-form]');
+      tree.querySelector('[data-submodule-add]')?.addEventListener('click', () => {
+        submoduleForm.hidden = !submoduleForm.hidden;
+        if (!submoduleForm.hidden) submoduleForm.querySelector('[data-submodule-url]')?.focus();
+      });
+      submoduleForm?.querySelector('[data-submodule-cancel]')?.addEventListener('click', () => { submoduleForm.hidden = true; });
+      submoduleForm?.querySelector('[data-submodule-confirm]')?.addEventListener('click', async () => {
+        const url = submoduleForm.querySelector('[data-submodule-url]')?.value.trim();
+        const path = submoduleForm.querySelector('[data-submodule-path]')?.value.trim();
+        const parentPath = submoduleForm.querySelector('[data-submodule-parent]')?.value || '';
+        const branch = submoduleForm.querySelector('[data-submodule-branch]')?.value.trim() || '';
+        const button = submoduleForm.querySelector('[data-submodule-confirm]');
+        if (!url || !path) { showStatus('Enter a repository URL and submodule path.', true); return; }
+        button.disabled = true;
+        button.textContent = 'Downloading…';
+        try {
+          const module = await state.addGitSubmodule({url, path, parentPath, branch});
+          showStatus('Added ' + module.path + '. Review the changes and commit to push the gitlink.');
+          renderShell();
+          await refreshStatus();
+        } catch (error) { showStatus(error.message || String(error), true); }
+        finally {
+          if (button.isConnected) { button.disabled = false; button.textContent = 'Add Submodule'; }
+        }
+      });
     }
     async function loadRepositories(force = false) {
       if (!github.isSignedIn()) return;
@@ -236,7 +263,7 @@
           showStatus('GitHub is still initializing this repository…');
           return;
         }
-        const submoduleRoots = (state.gitSubmodules || []).filter(module => !module.parentPath);
+        const submoduleRoots = (state.gitSubmodules || []).filter(module => !module.removed && !module.parentPath);
         const changes = await github.compareWorkingTree(state.fs, remote.tree, {excludePaths:submoduleRoots.map(module => module.path)});
         const submoduleStatuses = await github.getSubmoduleStatuses(state.fs, state.gitSubmodules || []);
         if (token !== statusToken) return;
@@ -250,9 +277,58 @@
         const collectSubmodules = items => (items || []).forEach(module => { allSubmodules.push(module); collectSubmodules(module.children); });
         collectSubmodules(submoduleStatuses);
         const submoduleDirty = allSubmodules.some(module => module.dirty);
-        const submoduleBlocked = allSubmodules.some(module => module.dirty && !module.canPush);
+        const submoduleBlocked = allSubmodules.some(module => !module.canPush && (!!module.changes?.length || (module.children || []).some(child => child.dirty)));
         const submoduleElement = tree.querySelector('[data-submodules]');
-        if (submoduleElement) submoduleElement.innerHTML = submoduleStatuses.length ? renderSubmodules(submoduleStatuses) : '<div class="source-control-clean">No submodules</div>';
+        if (submoduleElement) {
+          submoduleElement.innerHTML = submoduleStatuses.length ? renderSubmodules(submoduleStatuses) : '<div class="source-control-clean">No submodules</div>';
+          submoduleElement.querySelectorAll('.source-control-submodule').forEach(row => {
+            const path = row.querySelector('strong')?.textContent || '';
+            if (!path) return;
+            const actions = document.createElement('div');
+            actions.className = 'source-control-submodule-actions';
+            for (const [action, label] of [['rename','Rename'],['update','Update'],['remove','Remove']]) {
+              const button = document.createElement('button');
+              button.type = 'button';
+              button.textContent = label;
+              button.dataset.submoduleAction = action;
+              button.dataset.submodulePath = path;
+              actions.appendChild(button);
+            }
+            row.appendChild(actions);
+          });
+          submoduleElement.querySelectorAll('[data-submodule-action]').forEach(button => button.addEventListener('click', async () => {
+            const action = button.dataset.submoduleAction;
+            const path = button.dataset.submodulePath;
+            const module = (state.gitSubmodules || []).find(item => !item.removed && item.path === path);
+            if (!module) return;
+            button.disabled = true;
+            try {
+              if (action === 'remove') {
+                if (!window.confirm('Remove submodule "' + path + '" and discard its local contents? This is staged locally until you commit.')) return;
+                state.removeGitSubmodule(path);
+                showStatus('Removed ' + path + '. Commit to remove its gitlink from GitHub.');
+              } else if (action === 'rename') {
+                const prefix = module.parentPath ? module.parentPath + '/' : '';
+                const current = module.path.slice(prefix.length);
+                const nextPath = window.prompt('New submodule path (relative to its parent)', current);
+                if (nextPath == null || !nextPath.trim()) return;
+                state.renameGitSubmodule(path, nextPath.trim());
+                showStatus('Renamed ' + path + '. Commit to update its gitlink path.');
+              } else if (action === 'update') {
+                const url = window.prompt('GitHub repository URL', module.url || 'https://github.com/' + module.owner + '/' + module.repo);
+                if (url == null || !url.trim()) return;
+                const branch = window.prompt('Branch (blank keeps the current/default branch; use . to follow parent)', module.configuredBranch || module.branch || '');
+                if (branch == null) return;
+                if (!window.confirm('Updating replaces the submodule contents at the selected revision and discards local edits inside it. Continue?')) return;
+                await state.updateGitSubmodule({path, url:url.trim(), branch});
+                showStatus('Updated ' + path + '. Commit to push the new pinned revision.');
+              }
+              renderShell();
+              await refreshStatus();
+            } catch (error) { showStatus(error.message || String(error), true); }
+            finally { if (button.isConnected) button.disabled = false; }
+          }));
+        }
 
         const showHidden = !!state.behavior?.showHiddenFolders;
         const visibleChanges = [];
