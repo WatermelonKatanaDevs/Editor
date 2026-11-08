@@ -192,137 +192,176 @@
       return {meshes,vertices:Math.round(vertices),triangles:Math.round(triangles),materials:materials.size,textures:textures.size,bones,skinned};
     }
     function renderInspector(obj,animations){
+      const materialEntries=new Map();
+      const addMaterial=(material,mesh)=>{
+        if(!material)return;
+        const key=material.uuid||material.id||material.name||('material-'+materialEntries.size);
+        if(!materialEntries.has(key))materialEntries.set(key,{material,meshes:new Set()});
+        if(mesh?.name)materialEntries.get(key).meshes.add(mesh.name);
+      };
+      const visit=node=>{
+        if(!node)return;
+        if(node.material)for(const material of (Array.isArray(node.material)?node.material:[node.material]))addMaterial(material,node);
+        for(const child of node.children||[])visit(child);
+      };
+      try{if(typeof obj?.traverse==='function')obj.traverse(node=>{if(node.material)for(const material of (Array.isArray(node.material)?node.material:[node.material]))addMaterial(material,node);});else visit(obj);}catch(error){console.warn('[3D Viewer] Could not traverse mesh materials:',error);visit(obj);}
+      const sourceMaterials=modelInfo?.assetMaterials||[];
       side.replaceChildren();
       const tabs=element('div','editor-3d-side-tabs');
-      const sceneTab=element('button','active','Scene');const animTab=element('button','','Animation');const materialTab=element('button','','Materials');
+      const sceneTab=element('button','active','Scene');
+      const animTab=element('button','','Animation');
+      const materialTab=element('button','','Materials ('+(materialEntries.size||sourceMaterials.length)+')');
       tabs.append(sceneTab,animTab,materialTab);
       const content=element('div','editor-3d-side-content');
       side.append(tabs,content);
       const switchTab=which=>{
-        [sceneTab,animTab,materialTab].forEach((b,i)=>b.classList.toggle('active',i===which));
+        [sceneTab,animTab,materialTab].forEach((button,index)=>button.classList.toggle('active',index===which));
         content.replaceChildren();
-        if(which===0){
-          const s=statsFor(obj);
-          const stats=element('div','editor-3d-stats');
-          for(const [k,v] of Object.entries({Meshes:s.meshes,Vertices:s.vertices.toLocaleString(),Triangles:s.triangles.toLocaleString(),Materials:s.materials,Textures:s.textures,'Skinned meshes':s.skinned,Bones:s.bones,Animations:animations.length}))stats.append(element('div','',k+': '+v));
-          const tree=element('div','editor-3d-object-tree');
-          const addNode=(node,parent,depth=0)=>{
-            const line=element('button','editor-3d-tree-node',((node.isMesh?'◈ ':node.isBone?'♧ ':'▸ ')+(node.name||node.type)));
-            line.style.paddingLeft=(8+depth*12)+'px';line.title=node.type+' · '+node.name;
-            line.addEventListener('click',()=>{selectedRoot=node;node.updateWorldMatrix(true,false);const p=new THREE.Vector3();node.getWorldPosition(p);controls.target.copy(p);controls.update();});
-            parent.appendChild(line);
-            for(const child of node.children||[])addNode(child,parent,depth+1);
-          };
-          addNode(obj,tree);content.append(stats,element('h4','','Scene hierarchy'),tree);
-        }else if(which===1){
-          if(!animations.length){content.append(element('p','editor-3d-empty','This model has no embedded animation clips.'));return;}
-          const label=element('label','','Animation clip');
-          animationSelect=element('select','editor-3d-select');
-          animations.forEach((clip,i)=>{const option=element('option','',clip.name||('Animation '+(i+1)));option.value=String(i);animationSelect.appendChild(option);});
-          playButton=element('button','','▶ Play');
-          const loop=element('select','editor-3d-select');
-          [['repeat','Loop'],['once','Play once'],['pingpong','Ping-pong']].forEach(([v,l])=>{const o=element('option','',l);o.value=v;loop.appendChild(o);});
-          const row=element('div','editor-3d-control-row');row.append(playButton,loop);
-          const seek=element('input');seek.type='range';seek.min='0';seek.max='1';seek.step='.001';seek.value='0';seek.className='editor-3d-range';timeSlider=seek;
-          timeLabel=element('span','editor-3d-time','0.00s');
-          const seekRow=element('div','editor-3d-control-row');seekRow.append(seek,timeLabel);
-          const speed=element('input');speed.type='range';speed.min='.1';speed.max='3';speed.step='.1';speed.value='1';speed.className='editor-3d-range';
-          const speedLabel=element('span','','Speed 1×');
-          speed.addEventListener('input',()=>{if(mixer)mixer.timeScale=+speed.value;speedLabel.textContent='Speed '+speed.value+'×';});
-          animationSelect.addEventListener('change',()=>playClip(+animationSelect.value,loop.value));
-          loop.addEventListener('change',()=>playClip(+animationSelect.value,loop.value));
-          playButton.addEventListener('click',()=>{if(!activeAction)return;if(activeAction.paused){activeAction.paused=false;activeAction.play();playButton.textContent='Ⅱ Pause';}else{activeAction.paused=true;playButton.textContent='▶ Play';}});
-          seek.addEventListener('input',()=>{if(mixer&&activeAction){const clip=animations[+animationSelect.value];activeAction.time=+seek.value*clip.duration;mixer.update(0);timeLabel.textContent=activeAction.time.toFixed(2)+'s';}});
-          content.append(label,animationSelect,row,element('label','','Timeline'),seekRow,element('label','','Playback speed'),speed,speedLabel);
-          playClip(0,loop.value);
-        }else{
-          const mats=new Map();
-          obj.traverse(o=>{if(o.material)for(const m of Array.isArray(o.material)?o.material:[o.material])if(m)mats.set(m.uuid,m);});
-          if(!mats.size){content.append(element('p','editor-3d-empty','No materials found.'));return;}
-          const sourceOf=texture=>texture?.image||texture?.source?.data||null;
-          const describeTexture=(texture,channel)=>{
-            const source=sourceOf(texture);
-            const width=source?.width||source?.videoWidth||source?.naturalWidth||0;
-            const height=source?.height||source?.videoHeight||source?.naturalHeight||0;
-            const colorSpace=texture?.colorSpace===THREE.SRGBColorSpace?'sRGB color':'linear / data';
-            const dims=width&&height?(width+' × '+height+' px'):'image dimensions unavailable';
-            return channel+' · '+dims+' · '+colorSpace;
-          };
-          const addMapRow=(card,label,texture,channel)=>{
-            const row=element('div','editor-3d-map-row'+(texture?'':' is-empty'));
-            const thumb=element('canvas','editor-3d-map-thumb');
-            thumb.width=48;thumb.height=48;
-            const thumbContext=thumb.getContext('2d');
-            if(thumbContext){
-              thumbContext.fillStyle='#252a31';thumbContext.fillRect(0,0,48,48);
+        try{
+          if(which===0){
+            const stats=statsFor(obj);
+            const statsBox=element('div','editor-3d-stats');
+            for(const [key,value] of Object.entries({Meshes:stats.meshes,Vertices:stats.vertices.toLocaleString(),Triangles:stats.triangles.toLocaleString(),Materials:stats.materials,Textures:stats.textures,'Skinned meshes':stats.skinned,Bones:stats.bones,Animations:animations.length}))statsBox.append(element('div','',key+': '+value));
+            const tree=element('div','editor-3d-object-tree');
+            const addNode=(node,parent,depth=0)=>{
+              const line=element('button','editor-3d-tree-node',((node.isMesh?'◈ ':node.isBone?'♧ ':'▸ ')+(node.name||node.type)));
+              line.style.paddingLeft=(8+depth*12)+'px';line.title=node.type+' · '+node.name;
+              line.addEventListener('click',()=>{selectedRoot=node;node.updateWorldMatrix(true,false);const point=new THREE.Vector3();node.getWorldPosition(point);controls.target.copy(point);controls.update();});
+              parent.appendChild(line);
+              for(const child of node.children||[])addNode(child,parent,depth+1);
+            };
+            addNode(obj,tree);content.append(statsBox,element('h4','','Scene hierarchy'),tree);
+          }else if(which===1){
+            if(!animations.length){content.append(element('p','editor-3d-empty','This model has no embedded animation clips.'));return;}
+            const label=element('label','','Animation clip');
+            animationSelect=element('select','editor-3d-select');
+            animations.forEach((clip,index)=>{const option=element('option','',clip.name||('Animation '+(index+1)));option.value=String(index);animationSelect.appendChild(option);});
+            playButton=element('button','','▶ Play');
+            const loop=element('select','editor-3d-select');
+            [['repeat','Loop'],['once','Play once'],['pingpong','Ping-pong']].forEach(([value,labelText])=>{const option=element('option','',labelText);option.value=value;loop.appendChild(option);});
+            const row=element('div','editor-3d-control-row');row.append(playButton,loop);
+            const seek=element('input');seek.type='range';seek.min='0';seek.max='1';seek.step='.001';seek.value='0';seek.className='editor-3d-range';timeSlider=seek;
+            timeLabel=element('span','editor-3d-time','0.00s');
+            const seekRow=element('div','editor-3d-control-row');seekRow.append(seek,timeLabel);
+            const speed=element('input');speed.type='range';speed.min='.1';speed.max='3';speed.step='.1';speed.value='1';speed.className='editor-3d-range';
+            const speedLabel=element('span','','Speed 1×');
+            speed.addEventListener('input',()=>{if(mixer)mixer.timeScale=+speed.value;speedLabel.textContent='Speed '+speed.value+'×';});
+            animationSelect.addEventListener('change',()=>playClip(+animationSelect.value,loop.value));
+            loop.addEventListener('change',()=>playClip(+animationSelect.value,loop.value));
+            playButton.addEventListener('click',()=>{if(!activeAction)return;if(activeAction.paused){activeAction.paused=false;activeAction.play();playButton.textContent='Ⅱ Pause';}else{activeAction.paused=true;playButton.textContent='▶ Play';}});
+            seek.addEventListener('input',()=>{if(mixer&&activeAction){const clip=animations[+animationSelect.value];activeAction.time=+seek.value*clip.duration;mixer.update(0);timeLabel.textContent=activeAction.time.toFixed(2)+'s';}});
+            content.append(label,animationSelect,row,element('label','','Timeline'),seekRow,element('label','','Playback speed'),speed,speedLabel);
+            playClip(0,loop.value);
+          }else{
+            const sourceOf=texture=>texture?.image||texture?.source?.data||null;
+            const textureName=(texture,fallback)=>{
+              if(!texture)return fallback||'';
+              return texture.name||texture.userData?.name||texture.source?.data?.name||fallback||'Embedded texture';
+            };
+            const makeThumbnail=(texture)=>{
+              const thumb=element('canvas','editor-3d-map-thumb');thumb.width=64;thumb.height=64;
+              const context=thumb.getContext('2d');
+              if(!context)return thumb;
+              context.fillStyle='#252a31';context.fillRect(0,0,64,64);
               const source=sourceOf(texture);
               try{
-                if(source&&((source.width||source.videoWidth||source.naturalWidth)>0)){
-                  const w=source.width||source.videoWidth||source.naturalWidth;
-                  const h=source.height||source.videoHeight||source.naturalHeight;
-                  const scale=Math.min(44/w,44/h);
-                  const dw=Math.max(1,w*scale),dh=Math.max(1,h*scale);
-                  thumbContext.drawImage(source,(48-dw)/2,(48-dh)/2,dw,dh);
+                const width=source?.width||source?.videoWidth||source?.naturalWidth||0;
+                const height=source?.height||source?.videoHeight||source?.naturalHeight||0;
+                if(source&&width>0&&height>0){
+                  const scale=Math.min(58/width,58/height),drawWidth=Math.max(1,width*scale),drawHeight=Math.max(1,height*scale);
+                  context.drawImage(source,(64-drawWidth)/2,(64-drawHeight)/2,drawWidth,drawHeight);
                 }else{
-                  thumbContext.fillStyle='#8994a1';thumbContext.font='9px sans-serif';thumbContext.textAlign='center';thumbContext.fillText(texture?'IMAGE':'NONE',24,27);
+                  context.fillStyle='#b7c3d2';context.font='10px sans-serif';context.textAlign='center';context.fillText(texture?'Texture':'No map',32,35);
                 }
-              }catch(_){
-                thumbContext.fillStyle='#8994a1';thumbContext.font='9px sans-serif';thumbContext.textAlign='center';thumbContext.fillText('MAP',24,27);
+              }catch(error){
+                context.fillStyle='#b7c3d2';context.font='10px sans-serif';context.textAlign='center';context.fillText('Texture',32,35);
               }
+              return thumb;
+            };
+            const addTextureRow=(card,slot)=>{
+              const texture=slot.texture||null;
+              const row=element('div','editor-3d-map-row'+(texture?'':' is-empty'));
+              const thumb=makeThumbnail(texture);
+              const details=element('div','editor-3d-map-details');
+              const name=element('strong','',slot.label);
+              const textureLabel=textureName(texture,slot.sourceName||'Texture not loaded');
+              const source=sourceOf(texture);
+              const width=source?.width||source?.videoWidth||source?.naturalWidth||0;
+              const height=source?.height||source?.videoHeight||source?.naturalHeight||0;
+              const dimensions=width&&height?' · '+width+' × '+height+'px':'';
+              const meta=element('small','',texture?(textureLabel+dimensions+' · '+(slot.channel||'Texture')):(slot.sourceName||'Texture reference found but image could not be loaded'));
+              if(texture){name.title=textureLabel;meta.title=texture.uuid||textureLabel;}
+              details.append(name,meta);row.append(thumb,details);card.appendChild(row);
+            };
+            const addFactor=(card,material,label,property,fallback)=>{
+              if(!material||!(property in material))return;
+              const control=element('input');control.type='range';control.min='0';control.max='1';control.step='.01';control.value=String(material[property]??fallback);
+              const value=element('span','editor-3d-factor-value',Number(control.value).toFixed(2));
+              control.addEventListener('input',()=>{material[property]=+control.value;value.textContent=Number(control.value).toFixed(2);});
+              const row=element('label','editor-3d-factor-row',label);row.append(control,value);card.appendChild(row);
+            };
+            const appendMaterialCard=(material,users,index,rawFallback)=>{
+              const card=element('div','editor-3d-material');
+              const materialName=material?.name||rawFallback?.name||('Material '+(index+1));
+              card.append(element('strong','',materialName),element('small','',material?.type||rawFallback?.type||'glTF material'));
+              if(users?.size){
+                const usedBy=element('small','editor-3d-material-users','Used by: '+[...users].join(', '));
+                card.appendChild(usedBy);
+              }
+              if(material?.color){
+                const color=element('input');color.type='color';color.value='#'+(material.color.getHexString?.()||'ffffff');
+                color.addEventListener('input',()=>material.color.set(color.value));
+                const row=element('label','editor-3d-color-row','Base color factor');row.appendChild(color);card.appendChild(row);
+              }else if(rawFallback?.baseColorFactor){
+                const swatch=element('span','editor-3d-factor-value',rawFallback.baseColorFactor.map(value=>Number(value).toFixed(2)).join(', '));
+                const row=element('div','editor-3d-color-row','Base color factor');row.appendChild(swatch);card.appendChild(row);
+              }
+              addFactor(card,material,'Roughness factor','roughness',1);
+              addFactor(card,material,'Metalness factor','metalness',1);
+              const slots=[];
+              if(material){
+                const push=(label,texture,channel)=>{if(texture)slots.push({label,texture,channel});};
+                push('Base color map',material.map,'RGB / sRGB');
+                if(material.metalnessMap&&material.metalnessMap===material.roughnessMap)push('Metallic / roughness map (packed)',material.metalnessMap,'Blue = metalness · Green = roughness');
+                else{push('Metalness map',material.metalnessMap,'Blue channel');push('Roughness map',material.roughnessMap,'Green channel');}
+                push('Normal map',material.normalMap,'Tangent-space RGB');
+                push('Ambient occlusion map',material.aoMap,'Red channel');
+                push('Emissive map',material.emissiveMap,'RGB / sRGB');
+                push('Alpha map',material.alphaMap,'Green channel');
+                push('Bump map',material.bumpMap,'Height');
+                push('Displacement map',material.displacementMap,'Height');
+                push('Light map',material.lightMap,'RGB lighting');
+                push('Environment map',material.envMap,'Image-based lighting');
+                push('Specular map',material.specularMap,'Specular');
+              }
+              if(!slots.length&&rawFallback?.maps)slots.push(...rawFallback.maps);
+              card.appendChild(element('div','editor-3d-maps-title','Textures used ('+slots.length+')'));
+              if(slots.length){for(const slot of slots)addTextureRow(card,slot);}
+              else card.appendChild(element('p','editor-3d-empty','This material has no assigned texture maps.'));
+              content.appendChild(card);
+            };
+            let index=0;
+            for(const entry of materialEntries.values())appendMaterialCard(entry.material,entry.meshes,index++,null);
+            if(!materialEntries.size&&sourceMaterials.length){
+              for(const raw of sourceMaterials)appendMaterialCard(null,new Set(),index++,raw);
             }
-            const details=element('div','editor-3d-map-details');
-            const title=element('strong','',label);
-            const meta=element('small','',texture?describeTexture(texture,channel):'No texture assigned');
-            if(texture){title.title=texture.name||'Embedded / referenced texture';meta.title=texture.uuid||'';}
-            details.append(title,meta);
-            row.append(thumb,details);
-            card.appendChild(row);
-          };
-          const addFactor=(card,label,property,fallback)=>{
-            if(!(property in m))return;
-            const control=element('input');control.type='range';control.min='0';control.max='1';control.step='.01';control.value=String(m[property]??fallback);
-            control.addEventListener('input',()=>{m[property]=+control.value;});
-            const row=element('label','editor-3d-factor-row',label);
-            const value=element('span','editor-3d-factor-value',Number(control.value).toFixed(2));
-            control.addEventListener('input',()=>{value.textContent=Number(control.value).toFixed(2);});
-            row.append(control,value);card.appendChild(row);
-          };
-          let materialIndex=0;
-          for(const m of mats.values()){
-            materialIndex++;
-            const card=element('div','editor-3d-material');
-            card.append(element('strong','',m.name||('Material '+materialIndex)),element('small','',m.type));
-            if(m.color){
-              const color=element('input');color.type='color';color.value='#'+(m.color?.getHexString?.()||'ffffff');
-              color.addEventListener('input',()=>{m.color.set(color.value);});
-              const row=element('label','editor-3d-color-row','Base color factor');row.appendChild(color);card.appendChild(row);
+            if(!index){
+              const message=element('div','editor-3d-material-empty');
+              message.append(element('strong','','No material objects were attached to the loaded meshes.'));
+              message.append(element('p','','The model may use vertex colors, geometry-only data, or a format whose loader did not expose material assignments.'));
+              content.appendChild(message);
             }
-            addFactor(card,'Roughness factor','roughness',1);
-            addFactor(card,'Metalness factor','metalness',1);
-            const mapsTitle=element('div','editor-3d-maps-title','Texture maps');
-            card.appendChild(mapsTitle);
-            const packed=m.metalnessMap&&m.roughnessMap&&m.metalnessMap===m.roughnessMap;
-            if(packed){
-              addMapRow(card,'Metalness + roughness (packed)',m.metalnessMap,'Blue channel = metalness · Green channel = roughness');
-            }else{
-              addMapRow(card,'Metalness map',m.metalnessMap,'Blue channel');
-              addMapRow(card,'Roughness map',m.roughnessMap,'Green channel');
-            }
-            addMapRow(card,'Base color map',m.map,'RGB / sRGB');
-            addMapRow(card,'Normal map',m.normalMap,'Tangent-space RGB');
-            addMapRow(card,'Ambient occlusion map',m.aoMap,'Red channel');
-            addMapRow(card,'Emissive map',m.emissiveMap,'RGB / sRGB');
-            addMapRow(card,'Alpha map',m.alphaMap,'Green channel');
-            addMapRow(card,'Bump map',m.bumpMap,'Height');
-            addMapRow(card,'Displacement map',m.displacementMap,'Height');
-            addMapRow(card,'Light map',m.lightMap,'RGB lighting');
-            if(m.envMap)addMapRow(card,'Material environment map',m.envMap,'Image-based lighting');
-            content.appendChild(card);
+            content.append(element('p','editor-3d-material-note','Each material lists only the textures actually assigned to it. Packed glTF metallic/roughness textures use blue for metalness and green for roughness.'));
           }
-          content.append(element('p','editor-3d-material-note','PBR maps are preserved from the model. For packed metallic/roughness textures, blue controls metalness and green controls roughness. Map previews are thumbnails; rendering uses the original full-resolution textures.'));
+        }catch(error){
+          console.error('[3D Viewer] Inspector tab failed:',error);
+          content.append(element('div','editor-3d-material-empty','Could not display this panel: '+(error?.message||String(error))));
         }
       };
-      sceneTab.addEventListener('click',()=>switchTab(0));animTab.addEventListener('click',()=>switchTab(1));materialTab.addEventListener('click',()=>switchTab(2));switchTab(0);
+      sceneTab.addEventListener('click',()=>switchTab(0));
+      animTab.addEventListener('click',()=>switchTab(1));
+      materialTab.addEventListener('click',()=>switchTab(2));
+      switchTab(0);
     }
     function playClip(index,mode){
       if(!mixer||!modelInfo?.animations?.[index])return;
@@ -340,7 +379,7 @@
     async function parseModel(name,data,opts={}){
       const ext=name.split('.').pop().toLowerCase(), manager=setupManager(), bytes=bytesOf(data);
       const text=()=>new TextDecoder().decode(bytes);
-      let object=null,animations=[];
+      let object=null,animations=[],assetMaterials=[];
       const url=objectURLs.get(name);
       if(ext==='gltf'||ext==='glb'){
         const loader=new THREE.GLTFLoader(manager);
@@ -350,6 +389,31 @@
         loader.setDRACOLoader(dracoLoader);loader.setKTX2Loader(ktx2Loader);loader.setMeshoptDecoder(THREE.MeshoptDecoder);
         const gltf=await loader.parseAsync(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),'');
         object=gltf.scene||gltf.scenes?.[0];animations=gltf.animations||[];
+        const json=gltf.parser?.json||{};
+        const textureDefinitions=json.textures||[];
+        const imageDefinitions=json.images||[];
+        const resolvedTextures=await Promise.all(textureDefinitions.map((item,index)=>gltf.parser.getDependency('texture',index).catch(()=>null)));
+        const describeGltfSlot=(label,info,channel)=>{
+          if(!info||!Number.isInteger(info.index))return null;
+          const definition=textureDefinitions[info.index]||{};
+          const image=imageDefinitions[definition.source]||{};
+          const texture=resolvedTextures[info.index]||null;
+          const sourceName=image.name||image.uri||definition.name||('Embedded image '+(definition.source??info.index));
+          return {label,texture,channel,sourceName,index:info.index};
+        };
+        assetMaterials=(json.materials||[]).map((material,index)=>{
+          const pbr=material.pbrMetallicRoughness||{};
+          const maps=[
+            describeGltfSlot('Base color map',pbr.baseColorTexture,'RGB / sRGB'),
+            describeGltfSlot('Metallic / roughness map',pbr.metallicRoughnessTexture,'Blue = metalness · Green = roughness'),
+            describeGltfSlot('Normal map',material.normalTexture,'Tangent-space RGB'),
+            describeGltfSlot('Ambient occlusion map',material.occlusionTexture,'Red channel'),
+            describeGltfSlot('Emissive map',material.emissiveTexture,'RGB / sRGB')
+          ].filter(Boolean);
+          return {name:material.name||('Material '+(index+1)),type:'glTF material',
+            baseColorFactor:pbr.baseColorFactor||[1,1,1,1],
+            roughnessFactor:pbr.roughnessFactor??1,metalnessFactor:pbr.metallicFactor??1,maps};
+        });
       }else if(ext==='fbx'){const result=new THREE.FBXLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength), '');object=result;animations=result.animations||[];}
       else if(ext==='obj'){
         const mtlEntry=[...modelFiles.entries()].find(([k])=>k.toLowerCase()===name.replace(/\.obj$/i,'.mtl').toLowerCase()||k.split('/').pop().toLowerCase()===name.split('/').pop().replace(/\.obj$/i,'.mtl').toLowerCase());
@@ -371,7 +435,7 @@
       else if(ext==='md2'){const geometry=new THREE.MD2Loader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));object=addPrimitiveGeometry(geometry,'MD2 model',new THREE.MeshStandardMaterial({color:0xb9c7d8,morphTargets:true}));}
       else if(ext==='bvh'){const result=new THREE.BVHLoader().parse(text());object=result.skeleton.bones[0];animations=result.clip?[result.clip]:[];}
       if(!object)throw new Error('No loader is available for .' + ext + ' files.');
-      return {object,animations};
+      return {object,animations,assetMaterials};
     }
     async function loadModel(name,data){
       activeModelPath=name;
