@@ -393,10 +393,9 @@
           else paths.push(arg);
         }
         if (unsupported) throw new Error('git ' + operation + ' ' + unsupported + ' is not implemented yet.');
-        if (operation === 'reset' && paths.length === 1 && paths[0] === 'HEAD') paths.length = 0;
+        if (operation === 'reset' && paths[0] === 'HEAD') paths.shift();
         if (operation === 'reset' && paths.length === 0 && !all) all = true;
         if (operation === 'restore' && paths.length === 0) throw new Error('git restore: specify one or more paths.');
-        if (operation === 'reset' && paths.length === 1 && paths[0] !== 'HEAD') throw new Error('git reset: resetting to a commit is not implemented yet.');
         const repository = await this._repository(cwd);
         const rows = await this._selectChanges(repository, cwd, paths, {all});
         if (staged) await this._unstage(repository, rows);
