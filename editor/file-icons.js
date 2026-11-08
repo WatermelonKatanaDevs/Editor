@@ -47,6 +47,7 @@
       'obj': 'model/obj',
       'fbx': 'model/x-fbx',
       'glb': 'model/gltf-binary',
+      'stl': 'model/stl', 'dae': 'model/vnd.collada+xml', 'wrl': 'model/vrml', 'vrml': 'model/vrml', '3mf': 'model/3mf', 'usdz': 'model/vnd.usdz+zip',
       'gltf': 'model/gltf+json',
       'wasm': 'application/wasm',
       'mtl': 'text/plain',
