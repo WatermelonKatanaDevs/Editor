@@ -52,30 +52,42 @@
     if (!modulesPromise) modulesPromise = (async()=>{
       installImportMap();
       const THREE = await import(CDN+'/build/three.module.js');
-      const [controls,gltf,obj,mtl,fbx,stl,ply,collada,tds,threeMF,amf,vrml,usd,vtk,pcd,xyz,gcode,md2,bvh,draco,ktx2,meshopt] = await Promise.all([
-        import(CDN+'/examples/jsm/controls/OrbitControls.js'),
-        import(CDN+'/examples/jsm/loaders/GLTFLoader.js'),
-        import(CDN+'/examples/jsm/loaders/OBJLoader.js'),
-        import(CDN+'/examples/jsm/loaders/MTLLoader.js'),
-        import(CDN+'/examples/jsm/loaders/FBXLoader.js'),
-        import(CDN+'/examples/jsm/loaders/STLLoader.js'),
-        import(CDN+'/examples/jsm/loaders/PLYLoader.js'),
-        import(CDN+'/examples/jsm/loaders/ColladaLoader.js'),
-        import(CDN+'/examples/jsm/loaders/TDSLoader.js'),
-        import(CDN+'/examples/jsm/loaders/3MFLoader.js'),
-        import(CDN+'/examples/jsm/loaders/AMFLoader.js'),
-        import(CDN+'/examples/jsm/loaders/VRMLLoader.js'),
-        import(CDN+'/examples/jsm/loaders/USDLoader.js'),
-        import(CDN+'/examples/jsm/loaders/VTKLoader.js'),
-        import(CDN+'/examples/jsm/loaders/PCDLoader.js'),
-        import(CDN+'/examples/jsm/loaders/XYZLoader.js'),
-        import(CDN+'/examples/jsm/loaders/GCodeLoader.js'),
-        import(CDN+'/examples/jsm/loaders/MD2Loader.js'),
-        import(CDN+'/examples/jsm/loaders/BVHLoader.js'),
-        import(CDN+'/examples/jsm/loaders/DRACOLoader.js'),
-        import(CDN+'/examples/jsm/loaders/KTX2Loader.js'),
-        import(CDN+'/examples/jsm/libs/meshopt_decoder.module.js')
-      ]);
+      // The VRML add-on bundles Chevrotain, whose nested UMD regexp-to-ast
+      // module otherwise mistakes Monaco's global AMD define() for its own
+      // module loader. Temporarily hide AMD while resolving the Three add-ons.
+      const amdDefine = window.define;
+      const amdFlag = amdDefine && amdDefine.amd;
+      let loaded;
+      try {
+        if (amdDefine && amdFlag) amdDefine.amd = undefined;
+        loaded = await Promise.all([
+          import(CDN+'/examples/jsm/controls/OrbitControls.js'),
+          import(CDN+'/examples/jsm/loaders/GLTFLoader.js'),
+          import(CDN+'/examples/jsm/loaders/OBJLoader.js'),
+          import(CDN+'/examples/jsm/loaders/MTLLoader.js'),
+          import(CDN+'/examples/jsm/loaders/FBXLoader.js'),
+          import(CDN+'/examples/jsm/loaders/STLLoader.js'),
+          import(CDN+'/examples/jsm/loaders/PLYLoader.js'),
+          import(CDN+'/examples/jsm/loaders/ColladaLoader.js'),
+          import(CDN+'/examples/jsm/loaders/TDSLoader.js'),
+          import(CDN+'/examples/jsm/loaders/3MFLoader.js'),
+          import(CDN+'/examples/jsm/loaders/AMFLoader.js'),
+          import(CDN+'/examples/jsm/loaders/VRMLLoader.js'),
+          import(CDN+'/examples/jsm/loaders/USDLoader.js'),
+          import(CDN+'/examples/jsm/loaders/VTKLoader.js'),
+          import(CDN+'/examples/jsm/loaders/PCDLoader.js'),
+          import(CDN+'/examples/jsm/loaders/XYZLoader.js'),
+          import(CDN+'/examples/jsm/loaders/GCodeLoader.js'),
+          import(CDN+'/examples/jsm/loaders/MD2Loader.js'),
+          import(CDN+'/examples/jsm/loaders/BVHLoader.js'),
+          import(CDN+'/examples/jsm/loaders/DRACOLoader.js'),
+          import(CDN+'/examples/jsm/loaders/KTX2Loader.js'),
+          import(CDN+'/examples/jsm/libs/meshopt_decoder.module.js')
+        ]);
+      } finally {
+        if (amdDefine && amdFlag) amdDefine.amd = amdFlag;
+      }
+      const [controls,gltf,obj,mtl,fbx,stl,ply,collada,tds,threeMF,amf,vrml,usd,vtk,pcd,xyz,gcode,md2,bvh,draco,ktx2,meshopt] = loaded;
       return {THREE,OrbitControls:controls.OrbitControls,GLTFLoader:gltf.GLTFLoader,OBJLoader:obj.OBJLoader,MTLLoader:mtl.MTLLoader,FBXLoader:fbx.FBXLoader,STLLoader:stl.STLLoader,PLYLoader:ply.PLYLoader,ColladaLoader:collada.ColladaLoader,TDSLoader:tds.TDSLoader,ThreeMFLoader:threeMF.ThreeMFLoader,AMFLoader:amf.AMFLoader,VRMLLoader:vrml.VRMLLoader,USDLoader:usd.USDLoader,VTKLoader:vtk.VTKLoader,PCDLoader:pcd.PCDLoader,XYZLoader:xyz.XYZLoader,GCodeLoader:gcode.GCodeLoader,MD2Loader:md2.MD2Loader,BVHLoader:bvh.BVHLoader,DRACOLoader:draco.DRACOLoader,KTX2Loader:ktx2.KTX2Loader,MeshoptDecoder:meshopt.MeshoptDecoder};
     })();
     return modulesPromise;
