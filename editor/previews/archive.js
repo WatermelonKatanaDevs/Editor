@@ -174,7 +174,7 @@
     const views = manager.getViews(file).filter(view => {
       const label = String(view.label || '').toLowerCase();
       const id = String(view.id || '').toLowerCase();
-      return (label.includes('preview') || id.endsWith('-preview') || id === 'ico-preview' || id === 'audio-player' || id === 'audio-raw' || id === 'wasm-inspect') &&
+      return (label.includes('preview') || id.endsWith('-preview') || id === 'ico-preview' || id === 'audio-player' || id === 'audio-raw' || id === 'wasm-inspect' || id === 'model-3d-viewer') &&
         !id.includes('piskel');
     });
     if (!views.length) return null;
@@ -238,6 +238,78 @@
     showMessage(viewer, 'No preview is available for this file type. Drag it out of the archive to copy the original file.');
   }
 
+  function inspectModelPackage(fs) {
+    const cache = fs?.provider?.cache;
+    if (!cache?.keys) return null;
+    const paths = [...cache.keys()].map(String);
+    const candidates = paths.filter(path => /\.(?:gltf|glb)$/i.test(path));
+    if (!candidates.length) return null;
+
+    const normalizeReference = (modelPath, uri) => {
+      let decoded = String(uri || '').split(/[?#]/)[0];
+      try { decoded = decodeURIComponent(decoded); } catch (_) {}
+      decoded = decoded.replace(/\\/g, '/');
+      const base = modelPath.includes('/') ? modelPath.slice(0, modelPath.lastIndexOf('/') + 1) : '';
+      const pieces = (decoded.startsWith('/') ? decoded.replace(/^\/+/, '') : base + decoded).split('/');
+      const result = [];
+      for (const piece of pieces) {
+        if (!piece || piece === '.') continue;
+        if (piece === '..') result.pop();
+        else result.push(piece);
+      }
+      return result.join('/');
+    };
+    const pathLookup = new Map(paths.map(path => [path.toLowerCase(), path]));
+    const assetExtension = /\.(?:bin|png|jpe?g|webp|avif|ktx2?|hdr|exr|tif|tiff|dds|basis)$/i;
+    const modelResults = candidates.map(modelPath => {
+      const modelBytes = fs.readFileSync(modelPath, 'binary');
+      const ext = modelPath.split('.').pop().toLowerCase();
+      const related = paths.filter(path => path !== modelPath);
+      let refs = [], parseError = null;
+      if (ext === 'gltf') {
+        try {
+          const json = JSON.parse(new TextDecoder().decode(modelBytes));
+          const uris = [
+            ...(json.buffers || []).map(item => item?.uri),
+            ...(json.images || []).map(item => item?.uri)
+          ].filter(uri => typeof uri === 'string' && !/^(?:data:|https?:|blob:)/i.test(uri));
+          refs = [...new Set(uris.map(uri => normalizeReference(modelPath, uri)))];
+        } catch (error) {
+          parseError = error?.message || 'The glTF JSON could not be parsed.';
+        }
+      } else {
+        const bytes = modelBytes instanceof Uint8Array ? modelBytes : new Uint8Array(modelBytes || []);
+        if (bytes.length < 4 || String.fromCharCode(...bytes.subarray(0, 4)) !== 'glTF') {
+          parseError = 'The .glb file does not have a valid glTF binary header.';
+        }
+      }
+      const resolvedRefs = refs.map(path => pathLookup.get(path.toLowerCase())).filter(Boolean);
+      const unresolvedRefs = refs.filter(path => !pathLookup.has(path.toLowerCase()));
+      const unrelated = related.filter(path => !refs.some(ref => ref.toLowerCase() === path.toLowerCase()) && !assetExtension.test(path));
+      const dedicatedGLB = ext === 'glb' && related.length <= 12 && unrelated.length === 0;
+      const dedicatedGLTF = ext === 'gltf' && related.length === 0;
+      const dependencyPackage = ext === 'gltf' && refs.length > 0 && unresolvedRefs.length === 0 && unrelated.length === 0;
+      const isPackage = !parseError && (dedicatedGLB || dedicatedGLTF || dependencyPackage);
+      return {
+        path: modelPath,
+        isPackage,
+        kind: isPackage ? '3D model package' : 'Archive containing a 3D model',
+        referencedAssets: resolvedRefs.length,
+        externalReferences: refs.length,
+        unresolvedReferences: unresolvedRefs,
+        unrelatedFiles: unrelated,
+        fileCount: paths.length,
+        parseError
+      };
+    });
+    modelResults.sort((left, right) =>
+      Number(right.isPackage) - Number(left.isPackage) ||
+      right.referencedAssets - left.referencedAssets ||
+      Number(left.path.includes('/')) - Number(right.path.includes('/'))
+    );
+    return modelResults[0];
+  }
+
   window.EditorPreviewProviders = window.EditorPreviewProviders || [];
   window.EditorPreviewProviders.push({
     id: 'archive',
@@ -249,9 +321,9 @@
     },
     views: [{
       id: 'archive-preview',
-      label: 'Preview',
+      label: 'Archive Preview',
       default: true,
-      priority: 130,
+      priority: 180,
       async create(ctx) {
         const shell = document.createElement('section');
         shell.className = 'editor-archive-preview';
@@ -296,11 +368,13 @@
         ctx.host.appendChild(shell);
 
         let archiveFileSystem = null;
+        let modelPackage = null;
         let innerManager = null;
         const innerTab = {};
         ctx.addCleanup(() => {
           if (innerManager) innerManager.dispose(innerTab);
         });
+
 
         try {
           const binary = ctx.readBinary();
@@ -315,6 +389,38 @@
           for (const directory of loaded.directories || []) entries.push({ path: directory, directory: true });
           for (const file of loaded.files || []) entries.push({ path: file.path, directory: false, data: file.data });
           archiveFileSystem = makeArchiveFileSystem(entries);
+          modelPackage = inspectModelPackage(archiveFileSystem);
+          if (modelPackage) {
+            archiveTitle.textContent = ctx.file.name + (modelPackage.isPackage ? ' · 3D model package' : ' · contains a model');
+            const virtualState = Object.create(ctx.state || null);
+            virtualState.fs = archiveFileSystem;
+            const modelPath = modelPackage.path;
+            ctx.manager?.registerFileView?.(ctx.file, {
+              id: 'archive-3d-viewer',
+              label: '3D Viewer',
+              default: false,
+              priority: 170,
+              async create(viewContext) {
+                const factory = window.Editor3DModelPreview?.create;
+                if (typeof factory !== 'function') throw new Error('The 3D viewer is not available.');
+                const modelName = modelPath.split('/').pop();
+                const modelContext = {
+                  ...viewContext,
+                  state: virtualState,
+                  file: {
+                    ...viewContext.file,
+                    path: modelPath,
+                    name: modelName,
+                    mime: EditorInferMime(modelPath)
+                  },
+                  readText: path => archiveFileSystem.readFileSync(path || modelPath, 'utf8') || '',
+                  readBinary: path => archiveFileSystem.readFileSync(path || modelPath, 'binary'),
+                  exists: path => !!archiveFileSystem.existsSync(path || modelPath)
+                };
+                await factory(modelContext);
+              }
+            });
+          }
           const fileCount = archiveFileSystem.listFilesSync().length;
           const folderCount = archiveFileSystem.listDirectoriesSync().length;
           const totalBytes = [...archiveFileSystem.provider.cache.values()].reduce((sum, data) => sum + data.byteLength, 0);
@@ -335,7 +441,129 @@
           fileManager.setFileSystem(archiveFileSystem);
           fileManager.render();
           innerManager = createReadOnlyPreviewManager(archiveFileSystem);
+
+          // Let archive entries (including whole folders and multi-selection)
+          // be dragged directly into the real workspace Explorer. The archive
+          // remains read-only: dropping always copies bytes into the workspace.
+          const workspaceState = ctx.state;
+          const workspaceTree = document.getElementById('tree');
+          const dragType = 'application/x-watermelonkatana-archive-items';
+
+          const selectedArchivePaths = node => {
+            const selected = [...(fileManager.selectedNodes || [])]
+              .filter(path => fileManager.nodeByPath.has(path));
+            if (!selected.includes(node.path)) return [node.path];
+            // Remove descendants when their parent folder is already selected.
+            return selected.filter(path => !selected.some(parent =>
+              parent !== path && path.startsWith(parent + '/') &&
+              fileManager.nodeByPath.get(parent)?.isDir
+            ));
+          };
+
+          tree.addEventListener('dragstart', event => {
+            const row = event.target.closest('li[data-path]');
+            const node = row && fileManager.nodeByPath.get(row.dataset.path);
+            if (!node || !event.dataTransfer) return;
+            const paths = selectedArchivePaths(node);
+            event.dataTransfer.setData(dragType, JSON.stringify(paths));
+            event.dataTransfer.setData('text/plain', paths.map(path => path.split('/').pop()).join(', '));
+            event.dataTransfer.effectAllowed = 'copy';
+            row.classList.add('archive-dragging');
+            event.dataTransfer.setDragImage(row, 12, 12);
+          });
+          tree.addEventListener('dragend', () => {
+            tree.querySelectorAll('.archive-dragging').forEach(row => row.classList.remove('archive-dragging'));
+          });
+          tree.querySelectorAll('li[data-path]').forEach(row => {
+            row.draggable = true;
+            row.addEventListener('dragstart', () => row.classList.add('archive-dragging'));
+          });
+
+          const destinationForDrop = event => {
+            const row = event.target.closest('#tree li[data-path]');
+            const target = row && workspaceState.fileManager?.nodeByPath?.get(row.dataset.path);
+            if (!target) return '';
+            return target.isDir ? target.path : target.path.slice(0, Math.max(0, target.path.lastIndexOf('/')));
+          };
+          const handleArchiveDrop = async event => {
+            const raw = event.dataTransfer?.getData(dragType);
+            if (!raw) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            let paths;
+            try { paths = JSON.parse(raw); } catch (_) { return; }
+            if (!Array.isArray(paths) || !workspaceState.fs?.writeFileSync) return;
+
+            const base = destinationForDrop(event);
+            const writes = [];
+            const directoriesToCreate = new Set();
+            for (const sourcePath of paths) {
+              const sourceNode = fileManager.nodeByPath.get(sourcePath);
+              if (!sourceNode) continue;
+              const prefix = sourceNode.isDir ? sourcePath + '/' : null;
+              const destinationRoot = [base, sourceNode.isDir ? sourceNode.name : '']
+                .filter(Boolean).join('/');
+              if (sourceNode.isDir) {
+                for (const directory of archiveFileSystem.directories) {
+                  if (directory === sourcePath || directory.startsWith(prefix)) {
+                    const relativeDirectory = directory === sourcePath ? '' : directory.slice(prefix.length);
+                    const destinationDirectory = [destinationRoot, relativeDirectory].filter(Boolean).join('/');
+                    if (destinationDirectory) directoriesToCreate.add(destinationDirectory);
+                  }
+                }
+              }
+              const filesToCopy = sourceNode.isDir
+                ? [...archiveFileSystem.provider.cache.keys()].filter(path => path.startsWith(prefix))
+                : [sourcePath];
+              for (const archivePath of filesToCopy) {
+                const relative = sourceNode.isDir
+                  ? archivePath.slice(prefix.length)
+                  : sourceNode.name;
+                const destination = [destinationRoot, relative].filter(Boolean).join('/');
+                const bytes = archiveFileSystem.provider.cache.get(archivePath);
+                if (bytes) writes.push({ path: destination, bytes });
+              }
+            }
+            if (!writes.length && !directoriesToCreate.size) return;
+            const collisions = writes.filter(item => workspaceState.fs.existsSync?.(item.path));
+            if (collisions.length && !confirm('Replace ' + collisions.length + ' existing file' +
+              (collisions.length === 1 ? '' : 's') + ' in the workspace?')) return;
+
+            for (const directory of [...directoriesToCreate].sort((a, b) => a.length - b.length)) {
+              workspaceState.fs.mkdirSync?.(directory);
+            }
+            for (const item of writes) {
+              const slash = item.path.lastIndexOf('/');
+              if (slash > 0) workspaceState.fs.mkdirSync?.(item.path.slice(0, slash));
+              workspaceState.fs.writeFileSync(item.path, item.bytes);
+              workspaceState.markDirty?.(item.path);
+            }
+            workspaceState.fileManager?.refresh?.();
+            workspaceState.updateStatus?.();
+            workspaceTree?.dispatchEvent(new CustomEvent('archive-files-copied', {
+              bubbles: true, detail: { paths: writes.map(item => item.path) }
+            }));
+            archiveStatus.textContent = 'Copied ' + writes.length + ' file' +
+              (writes.length === 1 ? '' : 's') + ' into workspace';
+          };
+
+          if (workspaceTree) {
+            workspaceTree.addEventListener('dragover', event => {
+              if (!event.dataTransfer?.types?.includes(dragType)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = 'copy';
+            }, true);
+            workspaceTree.addEventListener('drop', handleArchiveDrop, true);
+          }
+          ctx.addCleanup(() => {
+            if (workspaceTree) {
+              workspaceTree.removeEventListener('drop', handleArchiveDrop, true);
+            }
+          });
           if (!fileCount) showMessage(viewer, 'This archive does not contain any visible files.');
+          if (modelPackage) archiveStatus.textContent += ' · model available in 3D Viewer tab';
         } catch (error) {
           if (ctx.isCurrent()) {
             archiveStatus.textContent = 'Could not open archive';

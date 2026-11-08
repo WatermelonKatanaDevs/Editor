@@ -17,11 +17,18 @@
       'json': 'application/json',
       'map': 'application/json',
       'webmanifest': 'application/manifest+json',
+      'csv': 'text/csv',
+      'tsv': 'text/tab-separated-values',
+      'pdf': 'application/pdf',
+      'db': 'application/vnd.sqlite3',
+      'sqlite': 'application/vnd.sqlite3',
+      'sqlite3': 'application/vnd.sqlite3',
       'html': 'text/html',
       'ejs': 'text/x-ejs',
       'jst': 'text/x-jst',
       'css': 'text/css',
       'png': 'image/png',
+      'apng': 'image/apng',
       'jpg': 'image/jpeg',
       'jpeg': 'image/jpeg',
       'gif': 'image/gif',
@@ -40,6 +47,7 @@
       'obj': 'model/obj',
       'fbx': 'model/x-fbx',
       'glb': 'model/gltf-binary',
+      'stl': 'model/stl', 'ply': 'application/octet-stream', 'dae': 'model/vnd.collada+xml', '3ds': 'application/octet-stream', '3mf': 'model/3mf', 'amf': 'application/x-amf', 'wrl': 'model/vrml', 'vrml': 'model/vrml', 'usd': 'model/vnd.usd', 'usda': 'model/vnd.usd', 'usdc': 'model/vnd.usd', 'usdz': 'model/vnd.usdz+zip', 'vtk': 'application/octet-stream', 'pcd': 'application/octet-stream', 'xyz': 'text/plain', 'gcode': 'text/plain', 'md2': 'application/octet-stream', 'bvh': 'text/plain',
       'gltf': 'model/gltf+json',
       'wasm': 'application/wasm',
       'mtl': 'text/plain',
@@ -104,6 +112,7 @@
     if (lowerName === 'makefile' || lowerName === 'gnumakefile') return badgeIcon('MAKE', '#526b58', '#ffffff', 10);
     if (lowerName === 'cakefile') return badgeIcon('☕', '#795548', '#fff4e8', 19);
     if (ext === 'map') return badgeIcon('MAP', '#546e7a', '#ffffff', 10);
+    if (['db', 'sqlite', 'sqlite3'].includes(ext)) return badgeIcon('SQL', '#405b69', '#e8f4f8', 12);
     if (ext === 'bin') return badgeIcon('0101', '#455a64', '#e1f5fe', 11);
     if (ext === 'node') return badgeIcon('N', '#397b45', '#ffffff', 21);
     if (ext === 'c' || ext === 'h') return badgeIcon('C', '#1769aa', '#ffffff', 21);
@@ -113,12 +122,12 @@
     if (ext === 'sh' || ext === 'bash') return badgeIcon('>_', '#263b2d', '#a8e6b2', 13);
     const deviconByExtension = {
       py:'python',pyw:'python',java:'java',c:'c',h:'c',cpp:'cpp',cc:'cpp',cxx:'cpp',hpp:'cpp',hxx:'cpp',
-      cs:'csharp',csx:'csharp',rs:'rust',rb:'ruby',rake:'ruby',php:'php',html:'html5',htm:'html5',xhtml:'html5',xml:'xml',
+      cs:'csharp',csx:'csharp',rs:'rust',rb:'ruby',rake:'ruby',php:'php',xml:'xml',
       go:'go',kt:'kotlin',kts:'kotlin',swift:'swift',dart:'dart',lua:'lua',pl:'perl',pm:'perl',r:'r',scala:'scala'
     };
     const devicon = deviconByExtension[ext];
-    if (devicon) return '<img src="editor/assets/file-icons/' + devicon + '.svg" alt="" width="24" height="24" style="width:24px;height:24px;display:block;object-fit:contain">';
-    if (ext === 'zip') return badgeIcon('ZIP', '#bd8b32', '#fff7dc', 12);
+    if (devicon) return '<img src="editor/assets/file-icons/' + devicon + '.svg" alt="" width="16" height="16" style="width:16px;height:16px;display:inline-block;object-fit:contain;vertical-align:-2px;padding-right:2px">';
+    if (ext == 'zip') return '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M14 17h-2v-2h-2v-2h2v2h2m0-6h-2v2h2v2h-2v-2h-2V9h2V7h-2V5h2v2h2m5-4H5c-1.11 0-2 .89-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5c0-1.11-.89-2-2-2z" fill="#afb42b"/></svg>';
     if (ext === '7z') return badgeIcon('7Z', '#557a9b', '#ffffff', 17);
     if (ext === 'gz' || ext === 'tgz') return badgeIcon('GZ', '#557a9b', '#ffffff', 17);
     if (ext === 'tar') return badgeIcon('TAR', '#8b6a43', '#fff4df', 12);
@@ -140,6 +149,7 @@
     if (['frag', 'vert', 'hlsl', 'glsl', 'fx'].includes(ext)) {
       return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="m11 7-8 9 8 9M21 7l8 9-8 9" fill="none" stroke="#e28b57" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="m18.5 4-5 24" stroke="#f4bb72" stroke-width="2.2" stroke-linecap="round"/><circle cx="16" cy="16" r="2" fill="#ffe1a8"/></svg>';
     }
+    if (ext === 'ico') return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 32 32"><defs><linearGradient id="a" x1="-66.775" y1="-171.703" x2="-66.775" y2="-171.817" gradientTransform="matrix(240, 0, 0, -240, 16042, -41206)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ec790f"/><stop offset="1" stop-color="#f51032"/></linearGradient></defs><title>file_type_favicon</title><rect x="2" y="2" width="28" height="28" rx="1.75" ry="1.75" style="fill:url(#a)"/><polygon points="16 22.625 9.511 26.033 10.75 18.815 5.5 13.704 12.755 12.65 16 6.083 19.245 12.65 26.5 13.704 21.25 18.815 22.489 26.033 16 22.625" style="fill:#fff"/></svg>';
     var mime = inferMime(name);
     switch (mime) {
       case 'text/plain':
@@ -152,6 +162,7 @@
         return '<svg clip-rule="evenodd" fill-rule="evenodd" stroke-linejoin="round" stroke-miterlimit="1.414" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg"><path d="M46 46v408h408V46H46zm310.02 198.17v.006c3.912.012 8.359.213 11.703.576 13.619 1.473 24.225 7.349 33.248 18.416 4.493 5.513 6.03 7.925 5.703 8.957-.211.666-3.294 2.874-13.096 9.38-9.629 6.393-12.73 8.308-13.45 8.308-.731 0-2.253-1.566-4.446-4.573-4.225-5.789-8.538-8.431-15.205-9.312-7.17-.95-13.602 1.31-16.752 5.888-2.693 3.912-3.1 10.206-.96 14.78 2.48 5.297 6.968 8.226 24.167 15.767 19.836 8.698 29.888 14.651 37.209 22.04 7.884 7.956 11.878 17.142 13.105 30.136.599 6.334-.133 13.84-1.945 19.943-4.445 14.961-16.44 25.916-34.02 31.072-4.86 1.425-9.382 2.276-13.855 2.604-6.829.503-16.603.226-22.486-.63-14.884-2.169-31.686-10.83-40.064-20.65-4.113-4.821-9.364-12.755-9.364-14.15 0-.674.334-1.057 1.656-1.897 3.922-2.492 26.394-15.338 26.83-15.338.264 0 1.438 1.383 2.608 3.074 2.651 3.828 9.17 10.407 12.484 12.602 2.707 1.793 6.169 3.232 10.279 4.271 2.354.587 3.6.692 8.736.692 5.248-.002 6.324-.09 8.672-.721 6.21-1.671 11.057-5.13 13.111-9.354.9-1.825.918-2.053.918-6.48v-4.59l-1.104-2.19c-2.673-5.306-8.433-8.947-26.645-16.835-8.365-3.624-18.61-8.733-22.61-11.275-9.129-5.801-15.456-12.433-19.608-20.551-4.13-8.073-4.745-11.078-4.755-23.217-.01-9.503-.026-9.386 1.941-15.451 1.785-5.504 5.439-11.652 9.473-15.94 8.05-8.557 19.813-14.057 32.406-15.151 1.61-.153 3.768-.212 6.115-.205zm-108.36 1.877h.004c24.253.012 38.156.096 38.379.236.42.26.473 2.371.473 15.842v15.541l-24.201.088-24.201.088v68.713c0 37.793-.077 68.938-.182 69.213-.171.463-2.033.498-17.78.498h-17.587l-.182-.71c-.117-.39-.203-31.537-.205-69.214l-.006-68.504-24.2-.086-24.202-.088v-15.357c0-12.18.084-15.442.409-15.766.333-.343 12.684-.431 65.902-.484 10.26-.01 19.495-.015 27.58-.01z" fill="#0288d1"/></svg>';
       case 'application/json':
         return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><title>file_type_json</title><path d="M4.014,14.976a2.51,2.51,0,0,0,1.567-.518A2.377,2.377,0,0,0,6.386,13.1,15.261,15.261,0,0,0,6.6,10.156q.012-2.085.075-2.747a5.236,5.236,0,0,1,.418-1.686,3.025,3.025,0,0,1,.755-1.018A3.046,3.046,0,0,1,9,4.125,6.762,6.762,0,0,1,10.544,4h.7V5.96h-.387a2.338,2.338,0,0,0-1.723.468A3.4,3.4,0,0,0,8.709,8.52a36.054,36.054,0,0,1-.137,4.133,4.734,4.734,0,0,1-.768,2.06A4.567,4.567,0,0,1,6.1,16a3.809,3.809,0,0,1,1.992,1.754,8.861,8.861,0,0,1,.618,3.865q0,2.435.05,2.9A1.755,1.755,0,0,0,9.264,25.7a2.639,2.639,0,0,0,1.592.337h.387V28h-.7a5.655,5.655,0,0,1-1.773-.2,2.97,2.97,0,0,1-1.324-.93,3.353,3.353,0,0,1-.681-1.63A24.175,24.175,0,0,1,6.6,22.006,16.469,16.469,0,0,0,6.386,18.9a2.408,2.408,0,0,0-.805-1.361,2.489,2.489,0,0,0-1.567-.524Z" style="fill:#f5de19"/><path d="M27.986,17.011a2.489,2.489,0,0,0-1.567.524,2.408,2.408,0,0,0-.805,1.361,16.469,16.469,0,0,0-.212,3.109,24.175,24.175,0,0,1-.169,3.234,3.353,3.353,0,0,1-.681,1.63,2.97,2.97,0,0,1-1.324.93,5.655,5.655,0,0,1-1.773.2h-.7V26.04h.387a2.639,2.639,0,0,0,1.592-.337,1.755,1.755,0,0,0,.506-1.186q.05-.462.05-2.9a8.861,8.861,0,0,1,.618-3.865A3.809,3.809,0,0,1,25.9,16a4.567,4.567,0,0,1-1.7-1.286,4.734,4.734,0,0,1-.768-2.06,36.054,36.054,0,0,1-.137-4.133,3.4,3.4,0,0,0-.425-2.092,2.338,2.338,0,0,0-1.723-.468h-.387V4h.7A6.762,6.762,0,0,1,23,4.125a3.046,3.046,0,0,1,1.149.581,3.025,3.025,0,0,1,.755,1.018,5.236,5.236,0,0,1,.418,1.686q.062.662.075,2.747a15.261,15.261,0,0,0,.212,2.947,2.377,2.377,0,0,0,.805,1.355,2.51,2.51,0,0,0,1.567.518Z" style="fill:#f5de19"/></svg>';
+      case 'application/xhtml+xml':
       case 'text/html':
         return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><title>file_type_html</title><polygon points="5.902 27.201 3.655 2 28.345 2 26.095 27.197 15.985 30 5.902 27.201" style="fill:#e44f26"/><polygon points="16 27.858 24.17 25.593 26.092 4.061 16 4.061 16 27.858" style="fill:#f1662a"/><polygon points="16 13.407 11.91 13.407 11.628 10.242 16 10.242 16 7.151 15.989 7.151 8.25 7.151 8.324 7.981 9.083 16.498 16 16.498 16 13.407" style="fill:#ebebeb"/><polygon points="16 21.434 15.986 21.438 12.544 20.509 12.324 18.044 10.651 18.044 9.221 18.044 9.654 22.896 15.986 24.654 16 24.65 16 21.434" style="fill:#ebebeb"/><polygon points="15.989 13.407 15.989 16.498 19.795 16.498 19.437 20.507 15.989 21.437 15.989 24.653 22.326 22.896 22.372 22.374 23.098 14.237 23.174 13.407 22.341 13.407 15.989 13.407" style="fill:#fff"/><polygon points="15.989 7.151 15.989 9.071 15.989 10.235 15.989 10.242 23.445 10.242 23.445 10.242 23.455 10.242 23.517 9.548 23.658 7.981 23.732 7.151 15.989 7.151" style="fill:#fff"/></svg>';
       case 'text/css':

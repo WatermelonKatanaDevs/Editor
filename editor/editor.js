@@ -122,7 +122,7 @@ window.__editorInitPromise = (async function () {
       autoClearTerminal: false,
       confirmBeforeReplace: true,
       confirmBeforeDelete: true,
-      showHiddenFolders: false,
+      dimHiddenFolders: true,
       ignoreNodeModules: true,
       hideBrowserBar: true
     }
@@ -1344,6 +1344,15 @@ window.__editorInitPromise = (async function () {
     return groups;
   }
 
+  window.addEventListener('editor-preview-views-changed', event => {
+    const fileId = String(event.detail?.fileId || '');
+    if (!fileId) return;
+    for (const group of getAllWorkbenchGroups()) {
+      const tab = group.tabs?.find(item => item.id === fileId);
+      if (tab && group.active === tab.id) renderViewBar(group, tab);
+    }
+  });
+
   function openFile(path, target) {
     path = normalize(path);
     if (!state.fs?.existsSync(path)) return;
@@ -1554,6 +1563,12 @@ window.__editorInitPromise = (async function () {
   
   
   
+  // Source Control uses the shared editor state, so expose the diff-tab opener there.
+  state.openDiffTab = options => {
+    const g = Workbench.getActiveGroup?.() || state.workbench?.getActiveGroup?.() || state.workbench?.getFirstLeaf?.();
+    return g ? openBuiltin('source-control-diff', g, options || {}) : null;
+  };
+
   function loadBehaviorSettings() {
     try {
       const v = JSON.parse(localStorage.getItem('editor.behaviorSettings') || 'null');
@@ -2210,7 +2225,7 @@ window.__editorInitPromise = (async function () {
     }
     getBuiltin('environment')?.load();
     state.fileManager.setFileSystem(fs);
-    state.fileManager.setShowHiddenFolders?.(state.behavior.showHiddenFolders);
+    state.fileManager.setDimHiddenFolders?.(state.behavior.dimHiddenFolders);
     state.fileManager.refresh();
     state.runConfig.detect();
     state.sidebarController?.syncSourceControlActivity?.();

@@ -607,6 +607,21 @@
     }
   }
 
+  function gitDataToBytes(value) {
+    if (value instanceof Uint8Array) return value;
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    // The in-memory workspace filesystem's "binary" read mode returns a
+    // binary string in some implementations. Uint8Array(string) is empty.
+    if (typeof value === 'string') {
+      const bytes = new Uint8Array(value.length);
+      for (let i = 0; i < value.length; i++) bytes[i] = value.charCodeAt(i) & 255;
+      return bytes;
+    }
+    if (Array.isArray(value)) return Uint8Array.from(value);
+    return new Uint8Array(value || []);
+  }
+
   async function compareWorkingTree(fs, remoteTree, options = {}) {
     if (!fs) throw new Error('No workspace filesystem is open.');
     const prefix = String(options.pathPrefix || '').replace(/^\/+|\/+$/g, '');
@@ -614,20 +629,25 @@
     const inExcludedPath = path => excluded.some(excludedPath => path === excludedPath || path.startsWith(excludedPath + '/'));
     const rules = readGitIgnore(fs, prefix);
     const ignoreNodeModules = isNodeModulesIgnoredBySetting(fs);
+    // Keep both the repository-relative Git path and the actual workspace
+    // path. For submodules pathPrefix is stripped for Git comparisons, but
+    // filesystem reads must still use the prefixed workspace path.
     const localPaths = fs.listFilesSync()
-      .map(path => String(path).replace(/^\/+/, ''))
-      .filter(path => path && (!prefix || path.startsWith(prefix + '/')))
-      .map(path => prefix ? path.slice(prefix.length + 1) : path)
-      .filter(path => path && !ignoredPath(path) && !inExcludedPath(path) && !(ignoreNodeModules && isNodeModulesPath(path)));
+      .map(rawPath => String(rawPath).replace(/^\/+/, ''))
+      .filter(fsPath => fsPath && (!prefix || fsPath.startsWith(prefix + '/')))
+      .map(fsPath => ({fsPath, path:prefix ? fsPath.slice(prefix.length + 1) : fsPath}))
+      .filter(item => item.path && !ignoredPath(item.path) && !inExcludedPath(item.path) && !(ignoreNodeModules && isNodeModulesPath(item.path)));
     const remoteFiles = new Map();
     for (const entry of remoteTree || []) {
       if (entry?.type === 'blob' && entry.path && !ignoredPath(entry.path) && !inExcludedPath(entry.path) && !(ignoreNodeModules && isNodeModulesPath(entry.path))) remoteFiles.set(entry.path, entry);
     }
 
     const changes = [];
-    for (const path of localPaths) {
-      const data = fs.readFileSync(path, 'binary');
-      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || []);
+    for (const item of localPaths) {
+      const {path, fsPath} = item;
+      const data = fs.readFileSync(fsPath, 'binary');
+      if (data == null) throw new Error(`Workspace file could not be read while comparing: ${fsPath}`);
+      const bytes = gitDataToBytes(data);
       const sha = await gitBlobSha(bytes);
       const remote = remoteFiles.get(path);
 
@@ -637,8 +657,8 @@
       const ignoreDecision = gitIgnoreDecision(path, rules);
       if (!remote && ignoreDecision === true) continue;
 
-      if (!remote) changes.push({path, type:'added', sha, data:bytes});
-      else if (remote.sha !== sha) changes.push({path, type:'modified', sha, data:bytes, mode:remote.mode || '100644'});
+      if (!remote) changes.push({path, fsPath, type:'added', sha, data:bytes});
+      else if (remote.sha !== sha) changes.push({path, fsPath, type:'modified', sha, data:bytes, mode:remote.mode || '100644'});
       remoteFiles.delete(path);
     }
     for (const [path, entry] of remoteFiles) changes.push({path, type:'deleted', sha:null, mode:entry.mode || '100644'});
@@ -827,6 +847,7 @@
       await new Promise(resolve => setTimeout(resolve, 500 + attempt * 500));
     }
     if (remote?.unavailable) throw new Error('GitHub is still initializing this repository. Please try again in a moment.');
+    if (remote?.truncated) throw new Error('GitHub truncated this repository tree. Source Control cannot safely compare or commit a partial tree; narrow the repository contents or sync a smaller repository first.');
     if (expectedRemoteSha !== null && String(remote.commitSha || '') !== String(expectedRemoteSha || '')) throw new Error('The GitHub branch changed before the push could be completed. Fetch and reconcile the remote changes before retrying.');
     const changes = Array.isArray(changesOverride) ? changesOverride : await compareWorkingTree(fs, compareTree || remote.tree, {pathPrefix, excludePaths});
     const remoteGitlinks = new Map((remote.tree || []).filter(entry => entry?.mode === '160000' || entry?.type === 'commit').map(entry => [entry.path, entry.sha]));

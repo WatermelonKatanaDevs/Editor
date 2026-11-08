@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Web Editor</title><link rel="stylesheet" href="editor/editor.css">
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Web Editor</title><link rel="stylesheet" href="editor/editor.css"><script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/","fflate":"https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js"}}</script>
 <script>window.__workersConfigReady=fetch(new URL('workers.json',location.href),{cache:'no-store'}).then(async r=>{if(!r.ok)throw new Error('Failed to load workers.json ('+r.status+')');const c=await r.json();if(!c||typeof c!=='object')throw new Error('Invalid workers.json');window.WorkerConfig=c;return c;}).catch(e=>{console.error(e);window.WorkerConfig={proxy:'',fallbackProxy:false,github:''};return window.WorkerConfig;});</script>
 <script src="browser/external/jszip.js"></script>
 <script src="browser/lib/filesystem.js"></script>
@@ -21,12 +21,17 @@
 <script src="editor/previews/binary.js"></script>
 <script src="editor/previews/font.js"></script>
 <script src="editor/previews/obj.js"></script>
+<script src="editor/previews/model3d.js"></script>
 <script src="editor/previews/markdown.js"></script>
+<script src="editor/previews/csv.js"></script>
+<script src="editor/previews/pdf.js"></script>
 <script src="editor/previews/html.js"></script>
 <script src="editor/previews/audio-tags.js"></script>
 <script src="editor/previews/image.js"></script>
 <script src="editor/previews/audio.js"></script>
 <script src="editor/previews/video.js"></script>
+<script src="editor/previews/sqlite.js"></script>
+<script src="editor/previews/animated.js"></script>
 <script src="editor/previews/monaco.js"></script>
 <script src="editor/previews/raw.js"></script>
 <script src="editor/previews/piskel.js"></script>

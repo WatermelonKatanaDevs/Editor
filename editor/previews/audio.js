@@ -91,6 +91,7 @@
   function applyArtworkAccent(root, image) {
     const reset = () => {
       root.style.removeProperty('--audio-cover-accent');
+      root.style.removeProperty('--audio-cover-secondary');
       root.style.removeProperty('--audio-cover-glow');
       root.style.removeProperty('--audio-cover-accent-ink');
     };
@@ -106,43 +107,86 @@
       }
       try {
         const canvas = document.createElement('canvas');
-        canvas.width = 40;
-        canvas.height = 40;
+        canvas.width = 64;
+        canvas.height = 64;
         const context = canvas.getContext('2d', { willReadFrequently: true });
         if (!context) return;
         context.drawImage(image, 0, 0, canvas.width, canvas.height);
         const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-        const bins = Array.from({ length: 36 }, () => ({ weight: 0, x: 0, y: 0 }));
+        const bins = Array.from({ length: 36 }, () => ({
+          weight: 0, x: 0, y: 0, saturation: 0, lightness: 0, count: 0
+        }));
         for (let i = 0; i < pixels.length; i += 4) {
+          const alpha = pixels[i + 3] / 255;
+          if (alpha < 0.45) continue;
           const r = pixels[i] / 255, g = pixels[i + 1] / 255, b = pixels[i + 2] / 255;
           const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
-          if (!delta) continue;
+          if (max < 0.075 || delta < 0.025) continue;
           const saturation = max ? delta / max : 0;
-          if (saturation < 0.2 || max < 0.14 || max > 0.97) continue;
+          // Ignore genuinely neutral highlights, not bright saturated colors.
+          // The previous max > 0.97 cutoff discarded vivid yellow/cyan artwork,
+          // allowing a smaller green object to become the chosen accent.
+          if (saturation < 0.14 || (max > 0.985 && saturation < 0.23)) continue;
           let hue;
           if (max === r) hue = 60 * (((g - b) / delta) % 6);
           else if (max === g) hue = 60 * ((b - r) / delta + 2);
           else hue = 60 * ((r - g) / delta + 4);
           if (hue < 0) hue += 360;
-          const weight = saturation * Math.max(0.2, 1 - Math.abs(max - 0.58));
+          const weight = alpha * (0.72 + Math.min(1, saturation) * 0.28);
           const bin = bins[Math.floor(hue / 10) % 36];
           const radians = hue * Math.PI / 180;
           bin.weight += weight;
           bin.x += Math.cos(radians) * weight;
           bin.y += Math.sin(radians) * weight;
+          bin.saturation += saturation * weight;
+          bin.lightness += ((max + min) / 2) * weight;
+          bin.count++;
         }
-        let best = null;
-        for (const bin of bins) if (!best || bin.weight > best.weight) best = bin;
-        if (!best || best.weight < 0.5) {
+
+        const hueOf = bin => {
+          let hue = Math.atan2(bin.y, bin.x) * 180 / Math.PI;
+          return hue < 0 ? hue + 360 : hue;
+        };
+        const hueDistance = (a, b) => {
+          const delta = Math.abs(a - b) % 360;
+          return Math.min(delta, 360 - delta);
+        };
+        const scoreAt = index => {
+          const previous = bins[(index + 35) % 36];
+          const current = bins[index];
+          const next = bins[(index + 1) % 36];
+          return current.weight + (previous.weight + next.weight) * 0.35;
+        };
+        const candidates = bins.map((bin, index) => ({
+          bin, hue: hueOf(bin), score: scoreAt(index)
+        })).filter(candidate => candidate.bin.weight > 0);
+        candidates.sort((a, b) => b.score - a.score);
+        const primary = candidates[0];
+        if (!primary || primary.score < 1.25) {
           reset();
           return;
         }
-        let hue = Math.atan2(best.y, best.x) * 180 / Math.PI;
-        if (hue < 0) hue += 360;
-        const accent = 'hsl(' + Math.round(hue) + ' 68% 58%)';
-        root.style.setProperty('--audio-cover-accent', accent);
-        root.style.setProperty('--audio-cover-glow', 'hsl(' + Math.round(hue) + ' 48% 27%)');
-        root.style.setProperty('--audio-cover-accent-ink', 'hsl(' + Math.round(hue) + ' 24% 10%)');
+        const secondary = candidates.find(candidate =>
+          hueDistance(candidate.hue, primary.hue) >= 28 &&
+          candidate.score >= Math.max(1.1, primary.score * 0.16)
+        );
+        const toColor = (candidate, fallback) => {
+          if (!candidate) return fallback;
+          const bin = candidate.bin;
+          const saturation = Math.max(48, Math.min(84, (bin.saturation / bin.weight) * 100));
+          const lightness = Math.max(40, Math.min(68, (bin.lightness / bin.weight) * 100));
+          return 'hsl(' + Math.round(candidate.hue) + ' ' + Math.round(saturation) + '% ' + Math.round(lightness) + '%)';
+        };
+        const primaryColor = toColor(primary);
+        // If artwork is effectively monochrome, use a lighter tint of its
+        // actual dominant hue instead of inventing a different hue.
+        const secondaryColor = toColor(secondary) ||
+          'hsl(' + Math.round((primary.hue + 12) % 360) + ' 42% 70%)';
+        const primaryHue = Math.round(primary.hue);
+        root.style.setProperty('--audio-cover-accent', primaryColor);
+        root.style.setProperty('--audio-cover-secondary', secondaryColor);
+        root.style.setProperty('--audio-cover-glow', 'hsl(' + primaryHue + ' 42% 22%)');
+        root.style.setProperty('--audio-cover-accent-ink', 'hsl(' + primaryHue + ' 28% 11%)');
       } catch (_) {
         // Tainted or unsupported image formats should leave the default theme intact.
         reset();

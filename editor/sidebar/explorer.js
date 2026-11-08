@@ -11,7 +11,7 @@
       onDelete,
       onChange: () => { state.markDirty?.(); updateStatus(); },
       projectName: () => state.projectName,
-      showHiddenFolders: state.behavior.showHiddenFolders,
+      showHiddenFiles: state.behavior.showHiddenFiles,
       canContextMenu: () => state.sidebar === 'explorer'
     });
     state.fileManager = manager;
@@ -27,7 +27,7 @@
       },
       setFileSystem(fs) {
         manager.setFileSystem(fs);
-        manager.setShowHiddenFolders?.(state.behavior.showHiddenFolders);
+        manager.setShowHiddenFiles?.(state.behavior.showHiddenFiles);
         manager.refresh();
       },
       hideContextMenu() { manager.hideContextMenu(); },

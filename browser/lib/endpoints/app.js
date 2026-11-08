@@ -3656,44 +3656,11 @@
         'module',
         '__filename',
         '__dirname',
-        'process',
         'global',
         'console',
         cached.rawSource
       );
 
-      const simulatedProcess = {
-        env: typeof ENV_SETTINGS !== 'undefined' ? ENV_SETTINGS : { DEBUG: '*' },
-        type: 'renderer',
-        pid: 1,
-        platform: 'browser',
-        cwd: () => nodeEmulator.cwd || '/',
-        chdir: (path) => {
-          const raw = String(path ?? '.');
-          const base = nodeEmulator.cwd || '/';
-          const target = normalizeNodePath(raw.startsWith('/') ? raw : `${base}/${raw}`);
-          if (!directoryExists(target)) throw new Error(`chdir: no such directory: ${path}`);
-          const previous = nodeEmulator.cwd || '/';
-          nodeEmulator.previousCwd = previous;
-          nodeEmulator.cwd = target;
-          if (typeof ENV_SETTINGS !== 'undefined') {
-            ENV_SETTINGS.OLDPWD = previous;
-            ENV_SETTINGS.PWD = target;
-          }
-          if (nodeEmulator.npm) nodeEmulator.npm.rootfolder = getRuntimeRootFolder();
-        },
-        nextTick: (cb, ...args) => setTimeout(() => cb(...args), 0),
-        on: () => {},
-        addListener: () => {},
-        once: () => {},
-        removeListener: () => {},
-        off: () => {},
-        emit: () => {},
-        listeners: () => [],
-        stdout: { write: () => {} },
-        stderr: { write: () => {} }
-      };
-      //if (!simulatedProcess.env.DEBUG) simulatedProcess.env.DEBUG = '*';
 
       const safeConsole = {
         log: function(...args) {
@@ -3721,7 +3688,6 @@
           cached.moduleObj,
           resolvedPath,
           dirname(resolvedPath),
-          simulatedProcess,
           globalThis,
           safeConsole
         );

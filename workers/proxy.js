@@ -196,22 +196,50 @@ export default {
       "x-real-ip"
     ].forEach(h => newHeaders.delete(h));
 
-    if (!newHeaders.has("user-agent")) {
-      newHeaders.set(
-        "user-agent",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-        "AppleWebKit/537.36 (KHTML, like Gecko) " +
-        "Chrome/141.0.0.0 Safari/537.36"
-      );
+    // A page cannot reliably set the forbidden User-Agent header in Fetch.
+    // The editor carries its selected identity in this ordinary header.
+    // Apply it here before making the upstream request.
+    const emulatedUserAgent = newHeaders.get("x-wk-emulated-user-agent");
+    newHeaders.delete("x-wk-emulated-user-agent");
+
+    const isMobileEmulation =
+      typeof emulatedUserAgent === "string" &&
+      emulatedUserAgent.length <= 512 &&
+      /\b(?:Android|iPhone|iPad|iPod|Mobile)\b/i.test(emulatedUserAgent);
+
+    if (isMobileEmulation) {
+      newHeaders.set("user-agent", emulatedUserAgent);
+
+      // Do not mix the host browser's desktop Client Hints into a mobile UA.
+      // Chromium Android receives a matching mobile hint set; iOS Safari
+      // does not advertise Chromium Client Hints.
+      for (const name of Array.from(newHeaders.keys())) {
+        if (name.toLowerCase().startsWith("sec-ch-ua")) {
+          newHeaders.delete(name);
+        }
+      }
+
+      const isAndroid = emulatedUserAgent.includes("Android");
+      const isChromium = emulatedUserAgent.includes("Chrome/");
+      if (isAndroid && isChromium) {
+        const platformVersion = emulatedUserAgent.includes("Android 14")
+          ? "14.0.0"
+          : emulatedUserAgent.includes("Android 10")
+            ? "10.0.0"
+            : "14.0.0";
+
+        newHeaders.set("sec-ch-ua", '"Chromium";v="120", "Google Chrome";v="120", "Not_A Brand";v="99"');
+        newHeaders.set("sec-ch-ua-mobile", "?1");
+        newHeaders.set("sec-ch-ua-platform", '"Android"');
+        newHeaders.set("sec-ch-ua-platform-version", '"' + platformVersion + '"');
+        if (emulatedUserAgent.includes("Pixel 7")) {
+          newHeaders.set("sec-ch-ua-model", '"Pixel 7"');
+        }
+      }
     }
 
-
-    // ========================================================
-    // 5. USER AGENT
-    // ========================================================
-
+    // Use a desktop default only when no emulation identity was supplied.
     if (!newHeaders.has("user-agent")) {
-
       newHeaders.set(
         "user-agent",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +

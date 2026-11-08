@@ -3,7 +3,7 @@
     html: 'text/html', htm: 'text/html', css: 'text/css',
     js: 'text/javascript', mjs: 'text/javascript', cjs: 'text/javascript',
     json: 'application/json', map: 'application/json', xml: 'application/xml',
-    txt: 'text/plain', md: 'text/markdown', csv: 'text/csv',
+    txt: 'text/plain', md: 'text/markdown', tsv: 'text/tab-separated-values',
     jst: 'text/x-jst', ejs: 'text/x-ejs',
     c: 'text/x-c', h: 'text/x-c', cc: 'text/x-c++',
     py: 'text/x-python', pyw: 'text/x-python', gyp: 'text/x-python', gypi: 'text/x-python',
@@ -16,12 +16,12 @@
     sh: 'text/x-shellscript', bash: 'text/x-shellscript', coffee: 'text/x-coffeescript',
     patch: 'text/x-diff', bnf: 'text/x-bnf',
     bin: 'application/octet-stream', node: 'application/octet-stream', lock: 'text/plain',
-    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    png: 'image/png', apng: 'image/apng', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
     webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
     mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', glsl: 'text/x-hlsl',
     mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
-    pdf: 'application/pdf', zip: 'application/zip', '7z': 'application/x-7z-compressed', gz: 'application/gzip', tgz: 'application/gzip', tar: 'application/x-tar', rar: 'application/vnd.rar', wasm: 'application/wasm', webmanifest: 'application/manifest+json',
-    gltf: 'model/gltf+json', glb: 'model/gltf-binary',
+    pdf: 'application/pdf', db: 'application/vnd.sqlite3', sqlite: 'application/vnd.sqlite3', sqlite3: 'application/vnd.sqlite3', zip: 'application/zip', '7z': 'application/x-7z-compressed', gz: 'application/gzip', tgz: 'application/gzip', tar: 'application/x-tar', rar: 'application/vnd.rar', wasm: 'application/wasm', webmanifest: 'application/manifest+json',
+    gltf: 'model/gltf+json', glb: 'model/gltf-binary', fbx: 'model/x-fbx', obj: 'model/obj', stl: 'model/stl', ply: 'application/octet-stream', dae: 'model/vnd.collada+xml', '3ds': 'application/octet-stream', '3mf': 'model/3mf', amf: 'application/x-amf', wrl: 'model/vrml', vrml: 'model/vrml', usd: 'model/vnd.usd', usda: 'model/vnd.usd', usdc: 'model/vnd.usd', usdz: 'model/vnd.usdz+zip', vtk: 'application/octet-stream', pcd: 'application/octet-stream', xyz: 'text/plain', gcode: 'text/plain', md2: 'application/octet-stream', bvh: 'text/plain',
     eot: 'application/vnd.ms-fontobject', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', tff: 'font/ttf', otf: 'font/otf', ttc: 'font/collection', otc: 'font/collection', dfont: 'font/dfont'
   });
   function editorFileMimeType(name) {
@@ -44,7 +44,7 @@
       this.onChange = options.onChange || (() => {});
       this.onMove = options.onMove || (() => {});
       this.onDelete = options.onDelete || (() => {});
-      this.showHiddenFolders = !!options.showHiddenFolders;
+      this.showHiddenFiles = !!options.showHiddenFiles;
       this.readOnly = !!options.readOnly;
       this.canContextMenu = options.canContextMenu || (() => true);
       this.selectedNode = null;
@@ -100,13 +100,12 @@
       this.collapsedPaths.clear();
       this.buildTree();
     }
-    setShowHiddenFolders(value) {
-      this.showHiddenFolders = !!value;
-      this.buildTree();
+    setShowHiddenFiles(value) {
+      this.showHiddenFiles = !!value;
       this.render();
     }
     isHiddenPath(path) {
-      return this.normalize(path).split('/').some(part => part.startsWith('.'));
+      return this.basename(path).startsWith('.');
     }
     setProjectName(name) {
       this.projectName = name || (() => 'Workspace');
@@ -155,6 +154,7 @@
           name,
           path,
           isDir: true,
+          hidden: this.isHiddenPath(path),
           children: []
         };
         parent.children.push(node);
@@ -169,6 +169,7 @@
           name,
           path,
           isDir: false,
+          hidden: this.isHiddenPath(path),
           mime: EditorInferMime(name)
         };
         parent.children.push(node);
@@ -176,7 +177,6 @@
         this.nodeByID.set(node.id, node);
       };
       for (const raw of this.fs.listFilesSync().map(p => this.normalize(p)).filter(Boolean)) {
-        if (!this.showHiddenFolders && this.isHiddenPath(raw)) continue;
         const parts = raw.split('/');
         let parent = this.root, current = '';
         for (let i = 0; i < parts.length; i++) {
@@ -186,7 +186,6 @@
         }
       }
       for (const raw of (this.fs.listDirectoriesSync?.() || []).map(p => this.normalize(p)).filter(Boolean)) {
-        if (!this.showHiddenFolders && this.isHiddenPath(raw)) continue;
         const parts = raw.split('/');
         let parent = this.root, current = '';
         for (const part of parts) {
@@ -295,9 +294,11 @@
     renderNode(node) {
       const ul = document.createElement('ul');
       for (const child of node.children) {
+        if (child.hidden && !this.showHiddenFiles) continue;
         const li = document.createElement('li');
         li.dataset.path = child.path;
         li.innerHTML = EditorRenderIcon(child.name, child.isDir);
+        if (child.hidden) li.classList.add('hidden-file');
         if (child.isDir) {
           const arrow = document.createElement('span');
           arrow.textContent = '▼';
@@ -315,7 +316,10 @@
           };
           li.prepend(arrow);
         }
-        li.appendChild(document.createTextNode(child.name + (child.isDir ? '/' : '')));
+        const label = document.createElement('span');
+        label.className = 'file-tree-label';
+        label.textContent = child.name + (child.isDir ? '/' : '');
+        li.appendChild(label);
         if (this.selectedNodes.has(child.path)) li.classList.add('selected-file');
         li.onclick = e => {
           e.stopPropagation();
