@@ -300,7 +300,7 @@
         modelRoot=result.object;modelInfo=result;scene.add(modelRoot);
         if(result.animations?.length){mixer=new THREE.AnimationMixer(modelRoot);}
         if(modelRoot.traverse)modelRoot.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;if(o.material){for(const m of Array.isArray(o.material)?o.material:[o.material])if(m){m.side=THREE.DoubleSide;m.needsUpdate=true;}}}});
-        if(modelRoot&&(showAxes||modelRoot.isBone)){skeletonHelper=new THREE.SkeletonHelper(modelRoot);skeletonHelper.visible=showAxes||!!modelRoot.isBone;scene.add(skeletonHelper);}
+        if(modelRoot&&(showAxes||modelRoot.isBone||statsFor(modelRoot).skinned>0||statsFor(modelRoot).bones>0)){skeletonHelper=new THREE.SkeletonHelper(modelRoot);skeletonHelper.visible=showAxes||!!modelRoot.isBone;scene.add(skeletonHelper);}
         fitObject(modelRoot);renderInspector(modelRoot,result.animations||[]);
         const s=statsFor(modelRoot);status(name+' · '+s.meshes+' meshes · '+s.vertices.toLocaleString()+' vertices · '+(result.animations?.length||0)+' animations');
         overlay.style.display='none';
@@ -380,7 +380,7 @@
       ui.fitBtn.addEventListener('click',()=>modelRoot&&fitObject(modelRoot));
       ui.resetBtn.addEventListener('click',()=>{controls.reset();if(modelRoot)fitObject(modelRoot);});
       ui.gridBtn.addEventListener('click',()=>{showGrid=!showGrid;grid.visible=showGrid;ui.gridBtn.classList.toggle('active',showGrid);});
-      ui.axesBtn.addEventListener('click',()=>{showAxes=!showAxes;axes.visible=showAxes;ui.axesBtn.classList.toggle('active',showAxes);});
+      ui.axesBtn.addEventListener('click',()=>{showAxes=!showAxes;axes.visible=showAxes;if(skeletonHelper)skeletonHelper.visible=showAxes||!!modelRoot?.isBone;ui.axesBtn.classList.toggle('active',showAxes);});
       ui.wireBtn.addEventListener('click',()=>{wireframe=!wireframe;if(modelRoot)modelRoot.traverse(o=>{if(o.material)for(const m of Array.isArray(o.material)?o.material:[o.material])m.wireframe=wireframe;});ui.wireBtn.classList.toggle('active',wireframe);});
       ui.bgBtn.addEventListener('click',()=>{background=background===0x202124?0xeeeeee:background===0xeeeeee?0x090b10:0x202124;scene.background.setHex(background);});
       ui.drop.addEventListener('dragover',e=>{e.preventDefault();ui.drop.classList.add('dragover');});
