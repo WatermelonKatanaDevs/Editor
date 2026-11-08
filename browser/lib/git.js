@@ -74,6 +74,8 @@
       const parent = relative.includes('/') ? relative.slice(0, relative.lastIndexOf('/')) : '';
       if (parent) this.filesystem.mkdirSync(parent);
       const encoding = typeof options === 'string' ? options : options?.encoding;
+      const flag = typeof options === 'object' ? options?.flag : '';
+      if (flag && String(flag).includes('x') && (this.filesystem.existsSync(relative) || this.filesystem.isDirectorySync(relative))) throw gitFsError('EEXIST', normalized);
       if (typeof data === 'string' && encoding !== 'buffer') this.filesystem.writeFileSync(relative, data);
       else {
         let bytes;
