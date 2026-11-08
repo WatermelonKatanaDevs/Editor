@@ -6,15 +6,15 @@
     txt: 'text/plain', md: 'text/markdown', csv: 'text/csv',
     jst: 'text/x-jst', ejs: 'text/x-ejs',
     c: 'text/x-c', h: 'text/x-c', cc: 'text/x-c++',
-    gyp: 'text/x-python', gypi: 'text/x-python', yml: 'text/yaml',
-    sh: 'text/x-shellscript', coffee: 'text/x-coffeescript',
+    py: 'text/x-python', pyw: 'text/x-python', gyp: 'text/x-python', gypi: 'text/x-python', yml: 'text/yaml',
+    sh: 'text/x-shellscript', bash: 'text/x-shellscript', coffee: 'text/x-coffeescript',
     patch: 'text/x-diff', bnf: 'text/x-bnf',
     bin: 'application/octet-stream', node: 'application/octet-stream', lock: 'text/plain',
     png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
     webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
     mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', glsl: 'text/x-hlsl',
     mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
-    pdf: 'application/pdf', zip: 'application/zip', wasm: 'application/wasm', webmanifest: 'application/manifest+json',
+    pdf: 'application/pdf', zip: 'application/zip', '7z': 'application/x-7z-compressed', gz: 'application/gzip', tgz: 'application/gzip', tar: 'application/x-tar', rar: 'application/vnd.rar', wasm: 'application/wasm', webmanifest: 'application/manifest+json',
     gltf: 'model/gltf+json', glb: 'model/gltf-binary',
     eot: 'application/vnd.ms-fontobject', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', tff: 'font/ttf', otf: 'font/otf', ttc: 'font/collection', otc: 'font/collection', dfont: 'font/dfont'
   });
