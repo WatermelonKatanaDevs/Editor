@@ -763,6 +763,55 @@
       };
     }
 
+    async mergeFastForward(cwd = '/', targetRef = null) {
+      if (!targetRef) throw new Error('git merge --ff-only: specify a branch or remote-tracking ref.');
+      const status = await this.status(cwd);
+      if (!status.branch || !status.head) throw new Error('Cannot merge while HEAD is detached or the current branch has no commits.');
+      if (!status.clean) throw new Error('Cannot merge with staged, unstaged, or untracked changes. Commit or stash them first.');
+      const repository = await this._repository(cwd);
+      const target = String(targetRef);
+      const targetOid = await this.git.resolveRef({fs:this.fs, dir:repository.dir, ref:target});
+      if (targetOid === status.head) return {output:'Already up to date.', value:{changed:false, head:status.head, branch:status.branch}};
+      if (typeof this.git.findMergeBase !== 'function' || typeof this.git.merge !== 'function' || typeof this.git.checkout !== 'function') throw new Error('The installed Git engine does not expose the required merge operations.');
+      const bases = await this.git.findMergeBase({fs:this.fs, dir:repository.dir, oids:[status.head, targetOid]});
+      if (!Array.isArray(bases) || bases.length === 0) throw new Error('The current branch and ' + target + ' do not share a fetched merge base. Fetch more history, or initialize this workspace from a real Git commit before merging. No local files or branch refs were changed.');
+      if (bases.length !== 1) throw new Error('This merge has multiple merge bases, which the current Git engine cannot resolve safely.');
+      await this.git.checkout({fs:this.fs, dir:repository.dir, ref:target, noUpdateHead:true, dryRun:true, force:false});
+      const result = await this.git.merge({
+        fs:this.fs,
+        dir:repository.dir,
+        ours:status.branch,
+        theirs:target,
+        fastForward:true,
+        fastForwardOnly:true,
+        abortOnConflict:true
+      });
+      if (result.fastForward) await this.git.checkout({fs:this.fs, dir:repository.dir, ref:'HEAD', force:false});
+      const updated = await this.status(cwd);
+      if (!updated.clean) throw new Error('The branch ref was updated, but the working tree did not finish checking out cleanly. Inspect Git status before continuing.');
+      const newHead = updated.head || status.head;
+      if (result.alreadyMerged) return {output:'Already up to date. ' + status.branch + ' already contains ' + target + '.', value:{changed:false, head:newHead, branch:status.branch}};
+      return {output:'Fast-forwarded ' + status.branch + ' to ' + target + ' (' + String(newHead).slice(0, 7) + ').', value:{changed:!!result.fastForward, head:newHead, previousHead:status.head, branch:status.branch, target}};
+    }
+
+    async pull(cwd = '/', remoteName = 'origin', branchName = null, maxCommits = 20) {
+      if (remoteName !== 'origin') throw new Error('git pull currently supports only the origin remote.');
+      const before = await this.status(cwd);
+      if (!before.branch || !before.head) throw new Error('Cannot pull while HEAD is detached or the current branch has no commits.');
+      if (!before.clean) throw new Error('Cannot pull with staged, unstaged, or untracked changes. Commit or stash them first.');
+      const repository = await this._repository(cwd);
+      const configuredMerge = await this._readConfig(repository, 'branch.' + before.branch + '.merge');
+      const targetBranch = String(branchName || configuredMerge || before.branch).replace(/^refs\/heads\//, '');
+      if (!targetBranch || targetBranch.includes('..') || targetBranch.startsWith('/') || targetBranch.endsWith('/')) throw new Error('git pull: invalid remote branch name.');
+      const fetched = await this.fetch(cwd, remoteName, targetBranch, maxCommits);
+      if (!fetched.value?.commitSha) throw new Error('Cannot pull because origin/' + targetBranch + ' is empty or does not exist.');
+      const merged = await this.mergeFastForward(cwd, 'refs/remotes/' + remoteName + '/' + targetBranch);
+      return {
+        output:fetched.output + '\n' + merged.output,
+        value:{branch:targetBranch, fetched:fetched.value, merged:merged.value}
+      };
+    }
+
     async push(cwd = '/', remoteName = 'origin', branchName = null) {
       if (remoteName !== 'origin') throw new Error('Only the origin remote is supported for GitHub pushes.');
       const repository = await this._repository(cwd);
@@ -1147,13 +1196,39 @@
         if (depth < 1 || depth > 100) throw new Error('git fetch: --deepen must be from 1 to 100.');
         return await this.fetch(cwd, positional[0] || 'origin', positional[1] || null, depth);
       }
+      if (operation === 'merge') {
+        const args = command.slice(1);
+        if (args[0] !== '--ff-only') throw new Error('Only safe fast-forward merges are supported. Use: git merge --ff-only <branch>.');
+        if (args.length !== 2) throw new Error('git merge --ff-only: specify exactly one branch or remote-tracking ref.');
+        return await this.mergeFastForward(cwd, args[1]);
+      }
+      if (operation === 'pull') {
+        const args = command.slice(1);
+        const positional = [];
+        let depth = 20;
+        for (let i = 0; i < args.length; i++) {
+          const arg = args[i];
+          if (arg === '--ff-only') continue;
+          if (arg === '--deepen') {
+            depth = Number(args[++i]);
+            if (!Number.isInteger(depth)) throw new Error('git pull: --deepen requires a whole number from 1 to 100.');
+          } else if (arg.startsWith('--deepen=')) {
+            depth = Number(arg.slice(9));
+            if (!Number.isInteger(depth)) throw new Error('git pull: --deepen requires a whole number from 1 to 100.');
+          } else if (arg.startsWith('-')) throw new Error('git pull: only --ff-only and --deepen are supported.');
+          else positional.push(arg);
+        }
+        if (positional.length > 2) throw new Error('git pull: specify at most one remote and one branch.');
+        if (depth < 1 || depth > 100) throw new Error('git pull: --deepen must be from 1 to 100.');
+        return await this.pull(cwd, positional[0] || 'origin', positional[1] || null, depth);
+      }
       if (operation === 'push') {
         const args = command.slice(1);
         if (args.length > 2) throw new Error('git push: specify at most one remote and one branch.');
         if (args.some(arg => arg.startsWith('-'))) throw new Error('git push: force, tags, and other options are not supported.');
         return await this.push(cwd, args[0] || 'origin', args[1] || null);
       }
-      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, branch, switch, checkout, tag (lightweight), remote, fetch (GitHub objects, --deepen N), push, rev-parse.', value:null};
+      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, branch, switch, checkout, tag (lightweight), remote, fetch (GitHub objects, --deepen N), merge (--ff-only), pull (--ff-only, --deepen N), push, rev-parse.', value:null};
       throw new Error('git: command not implemented yet: ' + operation);
     }
 
