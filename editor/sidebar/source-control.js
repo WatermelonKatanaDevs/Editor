@@ -366,6 +366,11 @@
         if (args[0] === 'pull') await loadLocalHistory();
         showStatus((args[0] === 'fetch' || args[0] === 'pull') && result?.output ? result.output : message);
       } catch (error) {
+        if (args[0] === 'fetch' || args[0] === 'pull') {
+          state.markDirty?.('.git');
+          await refreshLocalStatus();
+          if (args[0] === 'pull') await loadLocalHistory();
+        }
         showStatus(error.message || String(error), true);
       }
     }
