@@ -1554,6 +1554,12 @@ window.__editorInitPromise = (async function () {
   
   
   
+  // Source Control uses the shared editor state, so expose the diff-tab opener there.
+  state.openDiffTab = options => {
+    const g = Workbench.getActiveGroup?.() || state.workbench?.getActiveGroup?.() || state.workbench?.getFirstLeaf?.();
+    return g ? openBuiltin('source-control-diff', g, options || {}) : null;
+  };
+
   function loadBehaviorSettings() {
     try {
       const v = JSON.parse(localStorage.getItem('editor.behaviorSettings') || 'null');
