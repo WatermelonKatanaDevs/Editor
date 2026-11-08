@@ -353,9 +353,40 @@
       const historyEl = tree.querySelector('[data-local-history]');
       if (!historyEl || !localGitRepository?.isRepository) return;
       try {
-        const result = await getLocalGit().runSerialized(['log', '--max-count', '20'], {cwd:'/'});
+        const service = getLocalGit();
+        const result = await service.runSerialized(['log', '--max-count', '20'], {cwd:'/'});
         if (token !== historyToken) return;
         const commits = result.value || [];
+        const remote = state.gitRemote?.provider === 'github' ? state.gitRemote : null;
+        if (remote && github?.listCommits) {
+          const pushState = await service.pushStatus('/');
+          const unpushed = [];
+          for (const entry of commits) {
+            if (entry.oid === pushState.lastPushedLocal) break;
+            unpushed.push(entry);
+          }
+          let remoteCommits = [];
+          let remoteError = null;
+          try {
+            remoteCommits = await github.listCommits(remote.owner, remote.repo, remote.branch || 'main', 20);
+          } catch (error) {
+            remoteError = error;
+          }
+          if (token !== historyToken) return;
+          const localHtml = unpushed.map(entry => {
+            const commit = entry.commit || {};
+            const message = String(commit.message || '(no message)').trim().split('\n')[0];
+            const author = commit.author?.name || 'Unknown';
+            const date = commit.author?.timestamp ? new Date(commit.author.timestamp * 1000).toLocaleString() : '';
+            return '<button type="button" class="source-control-commit-row" data-local-commit-sha="' + esc(entry.oid) + '"><div><strong>' + esc(message) + '</strong><span>Local · not pushed · ' + esc(author) + ' · ' + esc(date) + '</span></div><code>' + esc(entry.oid.slice(0, 7)) + '</code></button>';
+          }).join('');
+          const remoteHtml = remoteCommits.map(commit => '<button type="button" class="source-control-commit-row" data-remote-commit-sha="' + esc(commit.sha) + '"><div><strong>' + esc(commit.message || '(no message)') + '</strong><span>' + esc(commit.author || 'Unknown') + ' · ' + (commit.date ? new Date(commit.date).toLocaleString() : '') + '</span></div><code>' + esc(commit.sha.slice(0, 7)) + '</code></button>').join('');
+          const html = localHtml + remoteHtml;
+          historyEl.innerHTML = html || (remoteError ? '<div class="source-control-error">' + esc(remoteError.message || String(remoteError)) + '</div>' : '<div class="source-control-empty-inline">No commits yet.</div>');
+          historyEl.querySelectorAll('[data-local-commit-sha]').forEach(button => button.addEventListener('click', () => void openLocalCommit(button.dataset.localCommitSha)));
+          historyEl.querySelectorAll('[data-remote-commit-sha]').forEach(button => button.addEventListener('click', () => void openCommitRestore(button.dataset.remoteCommitSha)));
+          return;
+        }
         historyEl.innerHTML = commits.length ? commits.map(entry => {
           const commit = entry.commit || {};
           const message = String(commit.message || '(no message)').trim().split('\n')[0];
