@@ -290,7 +290,7 @@
       });
     });
 
-    doc.querySelectorAll('script:not([src])').forEach(script => {
+    doc.querySelectorAll('script:not([src]):not([data-wk-device-emulation])').forEach(script => {
       if (script.textContent && !script.textContent.includes('__executeCode')) {
         const rawScript = script.textContent;
         script.setAttribute('data-raw-script', rawScript);
@@ -3301,6 +3301,86 @@
           get(target, prop) {
             if (prop === Symbol.unscopables) return undefined;
             if (prop === 'location') return virtualLocation;
+
+            // Device emulation is shared by the browser shell through the
+            // PageEmulator object. Reading these through the window proxy keeps
+            // navigator/screen values live when the device is rotated.
+            const getDeviceEmulation = () => {
+              let current = pageEmulator;
+              const seen = new Set();
+              while (current && !seen.has(current)) {
+                seen.add(current);
+                if (current.deviceEmulation?.enabled) return current.deviceEmulation;
+                current = current.parent && current.parent !== false ? current.parent : null;
+              }
+              return null;
+            };
+            if (prop === 'navigator' || prop === 'screen' || prop === 'devicePixelRatio' || prop === 'orientation') {
+              const emulation = getDeviceEmulation();
+              if (emulation) {
+                const width = Math.max(200, Math.round(Number(emulation.width) || 390));
+                const height = Math.max(240, Math.round(Number(emulation.height) || 844));
+                const landscape = width >= height;
+                if (prop === 'devicePixelRatio') return Number(emulation.deviceScaleFactor) || 1;
+                if (prop === 'orientation') return landscape ? 90 : 0;
+                if (prop === 'navigator') {
+                  const nativeNavigator = Reflect.get(window, 'navigator', window);
+                  const ios = emulation.platform === 'ios';
+                  const uaData = ios ? undefined : {
+                    brands: [{brand:'Chromium',version:'120'},{brand:'Google Chrome',version:'120'}],
+                    mobile: true,
+                    platform: 'Android',
+                    getHighEntropyValues: async function() {
+                      return {
+                        architecture: '', bitness: '',
+                        model: emulation.deviceId === 'pixel-7' ? 'Pixel 7' : '',
+                        platform: 'Android', platformVersion: '14.0.0',
+                        uaFullVersion: '120.0.0.0',
+                        fullVersionList: this.brands, mobile: true
+                      };
+                    }
+                  };
+                  return new Proxy(nativeNavigator, {
+                    get(target, key) {
+                      if (key === 'userAgent') return emulation.userAgent || (ios
+                        ? (emulation.deviceId === 'ipad-mini'
+                          ? 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+                          : 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1')
+                        : 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36');
+                      if (key === 'platform') return ios ? (emulation.deviceId === 'ipad-mini' ? 'iPad' : 'iPhone') : 'Linux armv8l';
+                      if (key === 'vendor') return ios ? 'Apple Computer, Inc.' : 'Google Inc.';
+                      if (key === 'maxTouchPoints') return 5;
+                      if (key === 'userAgentData') return uaData;
+                      const value = Reflect.get(target, key, target);
+                      return typeof value === 'function' ? value.bind(target) : value;
+                    }
+                  });
+                }
+                if (prop === 'screen') {
+                  const nativeScreen = Reflect.get(window, 'screen', window);
+                  return new Proxy(nativeScreen, {
+                    get(target, key) {
+                      if (key === 'width' || key === 'availWidth') return width;
+                      if (key === 'height' || key === 'availHeight') return height;
+                      if (key === 'orientation') {
+                        const orientation = Reflect.get(target, key, target);
+                        if (!orientation) return orientation;
+                        return new Proxy(orientation, {
+                          get(orientationTarget, orientationKey) {
+                            if (orientationKey === 'angle') return landscape ? 90 : 0;
+                            if (orientationKey === 'type') return landscape ? 'landscape-primary' : 'portrait-primary';
+                            const value = Reflect.get(orientationTarget, orientationKey, orientationTarget);
+                            return typeof value === 'function' ? value.bind(orientationTarget) : value;
+                          }
+                        });
+                      }
+                      const value = Reflect.get(target, key, target);
+                      return typeof value === 'function' ? value.bind(target) : value;
+                    }
+                  });
+                }
+              }
+            }
             if (prop === 'document') return documentProxy;
             if (['window','globalThis','self','frames'].includes(prop)) return windowProxy;
             if (prop === 'length') return (pageEmulator?.children || []).length;
