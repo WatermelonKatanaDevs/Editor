@@ -221,8 +221,8 @@
         : !localGitPushStatus.lastFetch
           ? 'Remote branch is empty'
           : localGitPushStatus.lastPush && localGitPushStatus.lastFetch !== localGitPushStatus.lastPush
-            ? 'Remote has moved since the last push'
-            : 'Remote head checked: ' + localGitPushStatus.lastFetch.slice(0, 7);
+            ? 'Fetched remote differs from last push'
+            : 'Fetched origin at ' + localGitPushStatus.lastFetch.slice(0, 7);
       const commitDisabled = commitBusy || (connectedRemote ? (!staged.length && !hasPendingPush) : !staged.length);
       const commitLabel = connectedRemote ? (hasPendingPush && !staged.length ? 'Push' : 'Commit & Push') : 'Commit';
       const renderChange = (change, area) => {
@@ -244,7 +244,7 @@
             : '<div class="source-control-local-hint">Local Git requires a folder opened directly from your computer. Open a folder to keep commits in its <code>.git</code> directory.</div>') +
         '</section>' +
         (hasRepository ? '<section class="source-control-section"><div class="source-control-section-title">Tags</div><div class="source-control-local-tags" data-local-tags><span class="source-control-local-hint">Loading tags…</span></div><button type="button" data-local-tag-create' + (!localGitRepository.head ? ' disabled' : '') + '>Create Tag</button></section>' : '') +
-        (hasRepository && connectedRemote ? '<section class="source-control-section"><button type="button" class="source-control-local-fetch" data-local-fetch title="Check the latest remote commit SHA without changing workspace files">Check Remote</button></section>' : '') +
+        (hasRepository && connectedRemote ? '<section class="source-control-section"><button type="button" class="source-control-local-fetch" data-local-fetch title="Download the remote commit and file objects without changing workspace files">Fetch</button></section>' : '') +
         (!connectedRemote && hasRepository && github?.isSignedIn?.() ? '<section class="source-control-section"><button type="button" class="source-control-create-repo" data-local-publish>Publish to GitHub</button></section>' : '') +
         (hasRepository
           ? '<section class="source-control-section"><div class="source-control-section-title">Changes</div>' +
