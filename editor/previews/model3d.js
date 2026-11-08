@@ -112,6 +112,7 @@
     let THREE,renderer,scene,camera,controls,modelRoot=null,mixer=null,clock=null,raf=0,resizeObserver=null;
     let grid=null,axes=null,skeletonHelper=null,wireframe=false,showGrid=true,showAxes=false,background=0x202124;
     let animationActions=[],activeAction=null,animationSelect=null,playButton=null,timeSlider=null,timeLabel=null;
+    const _fitPoint=new (window.THREE?.Vector3||Object)();
     let disposed=false,modelFiles=new Map(),objectURLs=new Map(),decoderLoaders=[],selectedRoot=null,modelInfo=null,activeModelPath=ctx.file.path;
     const cleanup=()=>{
       disposed=true;cancelAnimationFrame(raf);resizeObserver?.disconnect();controls?.dispose();renderer?.dispose();for(const loader of decoderLoaders)try{loader.dispose?.();}catch(_){}
@@ -157,7 +158,8 @@
     }
     function fitObject(obj){
       const box=new THREE.Box3().setFromObject(obj);
-      if(box.isEmpty())return;
+      if(box.isEmpty())obj.traverse?.(node=>{if(node.isBone){node.getWorldPosition(_fitPoint);box.expandByPoint(_fitPoint);}});
+      if(box.isEmpty()){controls.target.set(0,0,0);controls.update();return;}
       const size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());
       const max=Math.max(size.x,size.y,size.z)||1;
       controls.target.copy(center);
@@ -308,15 +310,18 @@
     }
     async function loadZip(file){
       if(typeof JSZip!=='function')throw new Error('ZIP support is not available.');
+      if(file.size>250*1024*1024)throw new Error('ZIP archive exceeds the 250 MB import limit.');
       const zip=await JSZip.loadAsync(file);
-      let count=0,primary=null;
+      let count=0,total=0,primary=null;
       for(const [path,entry] of Object.entries(zip.files)){
         if(entry.dir)continue;
+        if(++count>1500)throw new Error('ZIP contains more than 1,500 files.');
         const clean=pathJoin('',path);
         const ext=clean.split('.').pop().toLowerCase();
         if(!EXTENSIONS.test(clean)&&!/\.(?:png|jpe?g|webp|ktx2|hdr|exr|mtl|bin)$/i.test(clean))continue;
         const bytes=await entry.async('uint8array');
-        addResource(clean,bytes,MIME[ext]||'application/octet-stream');count++;
+        total+=bytes.byteLength;if(total>350*1024*1024)throw new Error('Expanded ZIP assets exceed the 350 MB import limit.');
+        addResource(clean,bytes,MIME[ext]||'application/octet-stream');
         if(!primary&&EXTENSIONS.test(clean))primary=clean;
       }
       if(!primary)throw new Error('No supported 3D model was found in this ZIP.');
