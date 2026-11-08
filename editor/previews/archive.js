@@ -239,46 +239,75 @@
   }
 
   function inspectModelPackage(fs) {
-    const paths = [...fs.provider.cache.keys()];
+    const cache = fs?.provider?.cache;
+    if (!cache?.keys) return null;
+    const paths = [...cache.keys()].map(String);
     const candidates = paths.filter(path => /\.(?:gltf|glb)$/i.test(path));
-    if (candidates.length !== 1) return null;
-    const modelPath = candidates[0];
-    const modelDir = modelPath.includes('/') ? modelPath.slice(0, modelPath.lastIndexOf('/')) : '';
-    const modelExt = modelPath.split('.').pop().toLowerCase();
-    const modelBytes = fs.readFileSync(modelPath, 'binary');
-    const related = paths.filter(path => path !== modelPath);
-    const assetExt = /\.(?:bin|png|jpe?g|webp|avif|ktx2|hdr|exr|tif|tiff|dds|basis|ktx)$/i;
-    let refs = [];
-    if (modelExt === 'gltf') {
-      try {
-        const json = JSON.parse(new TextDecoder().decode(modelBytes));
-        const uris = [...(json.buffers || []).map(item => item.uri), ...(json.images || []).map(item => item.uri)]
-          .filter(uri => typeof uri === 'string' && !/^(?:data:|https?:|blob:)/i.test(uri));
-        refs = uris.map(uri => {
-          let decoded = uri; try { decoded = decodeURIComponent(uri); } catch (_) {}
-          const parts = (modelDir ? modelDir + '/' : '').concat(decoded).replace(/\\/g, '/').split('/');
-          const clean = [];
-          for (const part of parts) { if (!part || part === '.') continue; if (part === '..') clean.pop(); else clean.push(part); }
-          return clean.join('/');
-        });
-      } catch (_) { return null; }
-    } else if (modelBytes?.length >= 20) {
-      const bytes = modelBytes instanceof Uint8Array ? modelBytes : new Uint8Array(modelBytes);
-      if (String.fromCharCode(...bytes.subarray(0,4)) !== 'glTF') return null;
-    }
-    const resolvedRefs = refs.filter(path => fs.provider.cache.has(path));
-    const allRefsResolve = refs.length > 0 && resolvedRefs.length === refs.length;
-    const samePackageFolder = related.every(path =>
-      (!modelDir || path.startsWith(modelDir + '/')) &&
-      (assetExt.test(path) || /\.(?:gltf|glb|json|txt|md|mtl)$/i.test(path))
+    if (!candidates.length) return null;
+
+    const normalizeReference = (modelPath, uri) => {
+      let decoded = String(uri || '').split(/[?#]/)[0];
+      try { decoded = decodeURIComponent(decoded); } catch (_) {}
+      decoded = decoded.replace(/\\/g, '/');
+      const base = modelPath.includes('/') ? modelPath.slice(0, modelPath.lastIndexOf('/') + 1) : '';
+      const pieces = (decoded.startsWith('/') ? decoded.replace(/^\/+/, '') : base + decoded).split('/');
+      const result = [];
+      for (const piece of pieces) {
+        if (!piece || piece === '.') continue;
+        if (piece === '..') result.pop();
+        else result.push(piece);
+      }
+      return result.join('/');
+    };
+    const pathLookup = new Map(paths.map(path => [path.toLowerCase(), path]));
+    const assetExtension = /\.(?:bin|png|jpe?g|webp|avif|ktx2?|hdr|exr|tif|tiff|dds|basis)$/i;
+    const modelResults = candidates.map(modelPath => {
+      const modelBytes = fs.readFileSync(modelPath, 'binary');
+      const ext = modelPath.split('.').pop().toLowerCase();
+      const related = paths.filter(path => path !== modelPath);
+      let refs = [], parseError = null;
+      if (ext === 'gltf') {
+        try {
+          const json = JSON.parse(new TextDecoder().decode(modelBytes));
+          const uris = [
+            ...(json.buffers || []).map(item => item?.uri),
+            ...(json.images || []).map(item => item?.uri)
+          ].filter(uri => typeof uri === 'string' && !/^(?:data:|https?:|blob:)/i.test(uri));
+          refs = [...new Set(uris.map(uri => normalizeReference(modelPath, uri)))];
+        } catch (error) {
+          parseError = error?.message || 'The glTF JSON could not be parsed.';
+        }
+      } else {
+        const bytes = modelBytes instanceof Uint8Array ? modelBytes : new Uint8Array(modelBytes || []);
+        if (bytes.length < 4 || String.fromCharCode(...bytes.subarray(0, 4)) !== 'glTF') {
+          parseError = 'The .glb file does not have a valid glTF binary header.';
+        }
+      }
+      const resolvedRefs = refs.map(path => pathLookup.get(path.toLowerCase())).filter(Boolean);
+      const unresolvedRefs = refs.filter(path => !pathLookup.has(path.toLowerCase()));
+      const unrelated = related.filter(path => !refs.some(ref => ref.toLowerCase() === path.toLowerCase()) && !assetExtension.test(path));
+      const dedicatedGLB = ext === 'glb' && related.length <= 12 && unrelated.length === 0;
+      const dedicatedGLTF = ext === 'gltf' && related.length === 0;
+      const dependencyPackage = ext === 'gltf' && refs.length > 0 && unresolvedRefs.length === 0 && unrelated.length === 0;
+      const isPackage = !parseError && (dedicatedGLB || dedicatedGLTF || dependencyPackage);
+      return {
+        path: modelPath,
+        isPackage,
+        kind: isPackage ? '3D model package' : 'Archive containing a 3D model',
+        referencedAssets: resolvedRefs.length,
+        externalReferences: refs.length,
+        unresolvedReferences: unresolvedRefs,
+        unrelatedFiles: unrelated,
+        fileCount: paths.length,
+        parseError
+      };
+    });
+    modelResults.sort((left, right) =>
+      Number(right.isPackage) - Number(left.isPackage) ||
+      right.referencedAssets - left.referencedAssets ||
+      Number(left.path.includes('/')) - Number(right.path.includes('/'))
     );
-    const dedicatedGLB = modelExt === 'glb' && related.length <= 8 && samePackageFolder;
-    const dedicatedGLTF = modelExt === 'gltf' && related.length === 0;
-    const dependencyPackage = modelExt === 'gltf' && allRefsResolve && resolvedRefs.length > 0 &&
-      related.every(path => refs.includes(path) || assetExt.test(path));
-    const isPackage = dedicatedGLB || dedicatedGLTF || dependencyPackage;
-    return { path:modelPath, isPackage, kind:isPackage?'3D model package':'Archive containing a 3D model',
-      referencedAssets:resolvedRefs.length, externalReferences:refs.length, fileCount:paths.length };
+    return modelResults[0];
   }
 
   window.EditorPreviewProviders = window.EditorPreviewProviders || [];
@@ -555,11 +584,13 @@
             }
           });
           if (!fileCount) showMessage(viewer, 'This archive does not contain any visible files.');
-          if (modelPackage?.isPackage) {
+          if (modelPackage?.isPackage || (modelPackage?.externalReferences > 0 && !modelPackage?.unresolvedReferences?.length && !modelPackage?.parseError)) {
             await showModelViewer();
             archiveStatus.textContent = '3D model package · '+modelPackage.referencedAssets+' referenced assets · '+fileCount+' files';
           } else if (modelPackage) {
-            archiveStatus.textContent = 'Archive · includes a glTF model ('+fileCount+' files)';
+            const unresolved = modelPackage.unresolvedReferences?.length || 0;
+            archiveStatus.textContent = 'Archive containing a 3D model · '+modelPackage.path+
+              (unresolved ? ' · '+unresolved+' external reference(s) not found' : '');
           }
         } catch (error) {
           if (ctx.isCurrent()) {
