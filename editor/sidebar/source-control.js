@@ -371,18 +371,21 @@
       commitBusy = true;
       button.disabled = true;
       button.textContent = 'Committing…';
+      let successMessage = '';
+      let errorMessage = '';
       try {
         const result = await getLocalGit().runSerialized(['commit', '-m', message], {cwd:'/'});
         tree.querySelector('[data-local-commit-message]').value = '';
-        showStatus(result.output || 'Commit created.');
-        await refreshLocalStatus();
+        successMessage = result.output || 'Commit created.';
         await loadLocalHistory();
       } catch (error) {
-        showStatus(error.message || String(error), true);
+        errorMessage = error.message || String(error);
       } finally {
         commitBusy = false;
         await refreshLocalStatus();
       }
+      if (errorMessage) showStatus(errorMessage, true);
+      else if (successMessage) showStatus(successMessage);
     }
 
     function renderShell() {
