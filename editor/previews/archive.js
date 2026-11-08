@@ -273,9 +273,10 @@
       (assetExt.test(path) || /\.(?:gltf|glb|json|txt|md|mtl)$/i.test(path))
     );
     const dedicatedGLB = modelExt === 'glb' && related.length <= 8 && samePackageFolder;
+    const dedicatedGLTF = modelExt === 'gltf' && related.length === 0;
     const dependencyPackage = modelExt === 'gltf' && allRefsResolve && resolvedRefs.length > 0 &&
       related.every(path => refs.includes(path) || assetExt.test(path));
-    const isPackage = dedicatedGLB || dependencyPackage;
+    const isPackage = dedicatedGLB || dedicatedGLTF || dependencyPackage;
     return { path:modelPath, isPackage, kind:isPackage?'3D model package':'Archive containing a 3D model',
       referencedAssets:resolvedRefs.length, externalReferences:refs.length, fileCount:paths.length };
   }
