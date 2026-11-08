@@ -639,7 +639,7 @@ window.__editorInitPromise = (async function () {
       name: state.projectName,
       pagePath: state.peerSettings.pagePath,
       deployment,
-      ...(state.gitRemote?.provider === 'github' && state.gitRemote.owner && state.gitRemote.repo ? {gitRemote: state.gitRemote} : {})
+      ...(state.gitRemote?.provider === 'github' && state.gitRemote.owner && state.gitRemote.repo ? {gitRemote:{provider:'github',owner:state.gitRemote.owner,repo:state.gitRemote.repo,branch:String(state.gitRemote.branch || 'main')}} : {})
     }, null, 2));
     state.fs.writeFileSync('/.editor/deployment.json', JSON.stringify({
       ...deployment,
@@ -2434,7 +2434,10 @@ window.__editorInitPromise = (async function () {
   }
   async function downloadGithubSubmoduleArchive(owner, repo, ref) {
     const github = window.GitHubService;
-    if (github?.isSignedIn?.()) return github.downloadArchive(owner, repo, ref);
+    if (github?.isSignedIn?.()) {
+      try { return await github.downloadArchive(owner, repo, ref); }
+      catch (error) { if (error?.status !== 401 && error?.status !== 404) throw error; }
+    }
     if (!state.browserNetwork?.request) throw new Error('Network is not initialized.');
     const codeload = `https://codeload.github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zip/${encodeURIComponent(ref).replace(/%2F/g, '/')}`;
     const response = await state.browserNetwork.request(codeload, location.origin, {}, 'project-import');
@@ -2553,13 +2556,16 @@ window.__editorInitPromise = (async function () {
         updateRemoteLoadProgress('Downloading project archive…', 5, 'GitHub');
         let blob;
         if (window.GitHubService.isSignedIn?.()) {
-          blob = await window.GitHubService.downloadArchive(github.owner, github.repo, ref, {
-            onProgress(received, total) {
-              const pct = total ? 5 + (received / total) * 50 : null;
-              updateRemoteLoadProgress('Downloading project archive…', pct, total ? `${formatProgressBytes(received)} / ${formatProgressBytes(total)}` : `${formatProgressBytes(received)} downloaded`);
-            }
-          });
-        } else {
+          try {
+            blob = await window.GitHubService.downloadArchive(github.owner, github.repo, ref, {
+              onProgress(received, total) {
+                const pct = total ? 5 + (received / total) * 50 : null;
+                updateRemoteLoadProgress('Downloading project archive…', pct, total ? `${formatProgressBytes(received)} / ${formatProgressBytes(total)}` : `${formatProgressBytes(received)} downloaded`);
+              }
+            });
+          } catch (error) { if (error?.status !== 401 && error?.status !== 404) throw error; }
+        }
+        if (!blob) {
           const codeload = `https://codeload.github.com/${encodeURIComponent(github.owner)}/${encodeURIComponent(github.repo)}/zip/${encodeURIComponent(ref).replace(/%2F/g, '/')}`;
           const response = await state.browserNetwork.request(codeload, location.origin, {}, 'project-import');
           if (!response?.ok) throw new Error(`GitHub archive download failed (${response?.status || 'no response'}).`);

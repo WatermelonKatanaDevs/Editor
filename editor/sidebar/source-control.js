@@ -240,10 +240,11 @@
         const changes = await github.compareWorkingTree(state.fs, remote.tree, {excludePaths:submoduleRoots.map(module => module.path)});
         const submoduleStatuses = await github.getSubmoduleStatuses(state.fs, state.gitSubmodules || []);
         if (token !== statusToken) return;
-        const renderSubmodules = (items, depth = 0) => (items || []).map(module => {
+        const renderSubmodules = (items, depth = 0, parentBranch = selected.branch || 'main') => (items || []).map(module => {
           const label = module.pendingCommitSha ? 'Pushed · parent pending' : module.dirty ? 'Modified' : 'Clean';
           const statusClass = module.pendingCommitSha ? 'pending' : module.dirty ? 'modified' : 'clean';
-          return `<div class="source-control-submodule ${statusClass}" style="padding-left:${Math.min(depth, 8) * 12}px"><span class="source-control-submodule-dot"></span><div><strong>${esc(module.path)}</strong><span>${esc(module.owner + '/' + module.repo)} · ${esc(module.branch || 'main')}</span></div><em>${label}</em></div>${renderSubmodules(module.children, depth + 1)}`;
+          const targetBranch = module.configuredBranch === '.' ? parentBranch : module.branch || 'main';
+          return `<div class="source-control-submodule ${statusClass}" style="padding-left:${Math.min(depth, 8) * 12}px"><span class="source-control-submodule-dot"></span><div><strong>${esc(module.path)}</strong><span>${esc(module.owner + '/' + module.repo)} · ${esc(targetBranch)}</span></div><em>${label}</em></div>${renderSubmodules(module.children, depth + 1, targetBranch)}`;
         }).join('');
         const allSubmodules = [];
         const collectSubmodules = items => (items || []).forEach(module => { allSubmodules.push(module); collectSubmodules(module.children); });
