@@ -696,6 +696,7 @@
         if (!commit) {
           if (downloadedCommits >= maxCommits) {
             stoppedAtDepth = true;
+            queue.unshift(item);
             break;
           }
           const result = await this._fetchRemoteCommitObjects(repository, owner, repo, oid, github);
