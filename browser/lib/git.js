@@ -283,7 +283,8 @@
       const additions = [];
       const removals = [];
       for (const row of rows) {
-        if (row[2] === 0 && row[1] !== 0) removals.push(row[0]);
+        if (row[2] === row[3]) continue;
+        if (row[2] === 0 && row[3] !== 0) removals.push(row[0]);
         else if (row[2] !== 0) additions.push(row[0]);
       }
       if (additions.length) await this.git.add({fs:this.fs, dir:repository.dir, filepath:additions});
