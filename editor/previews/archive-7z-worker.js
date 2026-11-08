@@ -35,7 +35,7 @@ function parseListing(output) {
   return records;
 }
 
-async function unpack(buffer) {
+async function unpack(buffer, extension) {
   if (typeof self.SevenZip !== 'function') throw new Error('The 7-Zip WebAssembly module could not be loaded.');
   postMessage({ type: 'progress', message: 'Starting 7-Zip…' });
 
@@ -50,12 +50,14 @@ async function unpack(buffer) {
   const FS = module.FS;
   FS.mkdir('/wk-archive');
   FS.mkdir('/wk-archive/out');
-  FS.writeFile('/wk-archive/input.7z', new Uint8Array(buffer));
+  const safeExtension = /^(?:7z|gz|tgz|tar|rar)$/i.test(String(extension || '')) ? String(extension).toLowerCase() : 'archive';
+  const inputPath = '/wk-archive/input.' + safeExtension;
+  FS.writeFile(inputPath, new Uint8Array(buffer));
 
   const listingOutput = [];
   module.print = line => listingOutput.push(String(line));
   module.printErr = line => listingOutput.push(String(line));
-  const listStatus = module.callMain(['l', '-slt', '/wk-archive/input.7z']);
+  const listStatus = module.callMain(['l', '-slt', inputPath]);
   if (listStatus !== 0) {
     throw new Error(listingOutput.join('\n').trim() || '7-Zip could not read this archive.');
   }
@@ -82,7 +84,7 @@ async function unpack(buffer) {
   postMessage({ type: 'progress', message: 'Extracting ' + declaredFiles + ' files…' });
   module.print = () => {};
   module.printErr = line => listingOutput.push(String(line));
-  const extractStatus = module.callMain(['x', '-y', '-bd', '-o/wk-archive/out', '/wk-archive/input.7z']);
+  const extractStatus = module.callMain(['x', '-y', '-bd', '-o/wk-archive/out', inputPath]);
   if (extractStatus !== 0) {
     const detail = listingOutput.slice(-8).join('\n').trim();
     throw new Error(detail || '7-Zip could not extract this archive.');
@@ -127,7 +129,7 @@ async function unpack(buffer) {
 
 self.onmessage = async event => {
   try {
-    await unpack(event.data?.buffer);
+    await unpack(event.data?.buffer, event.data?.extension);
   } catch (error) {
     postMessage({ type: 'error', message: error?.message || String(error) });
   }
