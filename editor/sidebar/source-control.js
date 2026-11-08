@@ -215,12 +215,14 @@
       const staged = changes.filter(change => change.staged);
       const unstaged = changes.filter(change => change.unstaged);
       const hasPendingPush = !!connectedRemote && !!localGitPushStatus?.ahead;
-      const remoteFetchMatches = !!connectedRemote && !!localGitPushStatus?.lastFetch && localGitPushStatus?.lastFetchBranch === String(connectedRemote.branch || 'main');
+      const remoteFetchMatches = !!connectedRemote && !!localGitPushStatus?.lastFetchAt && localGitPushStatus?.lastFetchBranch === String(connectedRemote.branch || 'main');
       const remoteFetchStatus = !connectedRemote ? '' : !remoteFetchMatches
         ? 'Remote not checked yet'
-        : localGitPushStatus.lastPush && localGitPushStatus.lastFetch !== localGitPushStatus.lastPush
-          ? 'Remote has moved since the last push'
-          : 'Remote head checked: ' + localGitPushStatus.lastFetch.slice(0, 7);
+        : !localGitPushStatus.lastFetch
+          ? 'Remote branch is empty'
+          : localGitPushStatus.lastPush && localGitPushStatus.lastFetch !== localGitPushStatus.lastPush
+            ? 'Remote has moved since the last push'
+            : 'Remote head checked: ' + localGitPushStatus.lastFetch.slice(0, 7);
       const commitDisabled = commitBusy || (connectedRemote ? (!staged.length && !hasPendingPush) : !staged.length);
       const commitLabel = connectedRemote ? (hasPendingPush && !staged.length ? 'Push' : 'Commit & Push') : 'Commit';
       const renderChange = (change, area) => {
