@@ -230,7 +230,7 @@
         '<div class="source-control-head"><div class="activity-sidebar-title">Source Control</div><button data-refresh title="Refresh">↻</button></div>' +
         '<section class="source-control-section"><div class="source-control-section-title">Local Repository</div>' +
         (hasRepository
-          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span>') + '</div><div class="source-control-local-branch"><select data-local-branch aria-label="Switch branch"></select><button type="button" data-local-branch-create' + (localGitRepository.head ? '' : ' disabled') + '>New Branch</button><button type="button" data-local-branch-delete' + (!localGitRepository.head || !localGitRepository.branch || localGitRepository.branch === 'main' ? ' disabled' : '') + '>Delete</button></div>'
+          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span>') + '</div><div class="source-control-local-branch"><select data-local-branch aria-label="Switch branch"></select><button type="button" data-local-branch-create' + (localGitRepository.head ? '' : ' disabled') + '>New Branch</button><button type="button" data-local-branch-delete' + (!localGitRepository.head ? ' disabled' : '') + '>Delete</button></div>'
           : persistent
             ? '<div class="source-control-local-hint">This folder is not being tracked by Git yet.</div><button type="button" class="source-control-create-repo" data-local-init>Initialize Repository</button>'
             : '<div class="source-control-local-hint">Local Git requires a folder opened directly from your computer. Open a folder to keep commits in its <code>.git</code> directory.</div>') +
@@ -257,9 +257,9 @@
       });
       void loadLocalBranches();
       tree.querySelector('[data-local-branch-delete]')?.addEventListener('click', () => {
-        const branch = localGitRepository?.branch;
-        if (!branch || branch === 'main' || !window.confirm('Delete the local branch "' + branch + '"? Only fully merged branches can be deleted.')) return;
-        void runLocalGitAction(['branch', '-d', branch], 'Deleted branch ' + branch + '.');
+        const branch = window.prompt('Name of local branch to delete');
+        if (!branch || !branch.trim() || !window.confirm('Delete the local branch "' + branch.trim() + '"? Only fully merged branches can be deleted.')) return;
+        void runLocalGitAction(['branch', '-d', branch.trim()], 'Deleted branch ' + branch.trim() + '.');
       });
       tree.querySelector('[data-local-init]')?.addEventListener('click', async event => {
         const button = event.currentTarget;
