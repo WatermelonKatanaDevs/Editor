@@ -206,12 +206,12 @@
       const persistent = !!state.fs?.isPersistentDirectory;
       const hasRepository = !!localGitRepository?.isRepository;
       const connectedRemote = state.gitRemote?.provider === 'github' ? state.gitRemote : null;
-      const hasPendingPush = !!connectedRemote && !!localGitPushStatus?.ahead;
-      const commitDisabled = commitBusy || (connectedRemote ? (!staged.length && !hasPendingPush) : !staged.length);
-      const commitLabel = connectedRemote ? (hasPendingPush && !staged.length ? 'Push' : 'Commit & Push') : 'Commit';
       const changes = localGitStatus?.changes || [];
       const staged = changes.filter(change => change.staged);
       const unstaged = changes.filter(change => change.unstaged);
+      const hasPendingPush = !!connectedRemote && !!localGitPushStatus?.ahead;
+      const commitDisabled = commitBusy || (connectedRemote ? (!staged.length && !hasPendingPush) : !staged.length);
+      const commitLabel = connectedRemote ? (hasPendingPush && !staged.length ? 'Push' : 'Commit & Push') : 'Commit';
       const renderChange = (change, area) => {
         const type = area === 'staged'
           ? (change.head === 0 ? 'added' : change.stage === 0 ? 'deleted' : 'modified')
