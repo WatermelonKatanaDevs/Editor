@@ -5,7 +5,13 @@
   function createInstance(element, options, emitter) {
     options=options||{};
     var uiRoot=element;
-    function getUIElement(id){ return uiRoot ? uiRoot.querySelector('#'+CSS.escape(String(id))) : null; }
+    function getUIElement(id){
+      var selector = '#'+CSS.escape(String(id));
+      // The device toolbar is mounted directly in #viewport-container, outside
+      // the DevTools panel root. Fall back to the document so its controls can
+      // be bound and synchronized just like the in-panel controls.
+      return (uiRoot && uiRoot.querySelector(selector)) || document.getElementById(String(id)) || null;
+    }
     function getUIQuerySelector(selector){ return uiRoot ? uiRoot.querySelector(selector) : null; }
     function getUIQuerySelectorAll(selector){ return uiRoot ? uiRoot.querySelectorAll(selector) : []; }
   var activePage = null;
