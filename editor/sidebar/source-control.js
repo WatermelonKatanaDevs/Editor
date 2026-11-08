@@ -28,7 +28,7 @@
         if (disposed || !host.isConnected) return wrap;
         const oldText = decode(oldBytes);
         const newText = data.type === 'deleted' ? '' : decode(data.newBytes || new Uint8Array());
-        if (oldText.includes('\\0') || newText.includes('\\0')) throw new Error('This file appears to be binary and cannot be shown as a text diff.');
+        if (oldText.includes('\0') || newText.includes('\0')) throw new Error('This file appears to be binary and cannot be shown as a text diff.');
         const language = window.EditorMonacoLanguage?.(data.path) || 'plaintext';
         const base = 'inmemory://watermelonkatana-diff/' + encodeURIComponent(data.path || 'file') + '-' + Math.random().toString(36).slice(2);
         originalModel = monaco.editor.createModel(oldText, language, monaco.Uri.parse(base + '.original'));
