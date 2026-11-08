@@ -127,7 +127,7 @@
     };
     const devicon = deviconByExtension[ext];
     if (devicon) return '<img src="editor/assets/file-icons/' + devicon + '.svg" alt="" width="16" height="16" style="width:16px;height:16px;display:inline-block;object-fit:contain;vertical-align:-2px;padding-right:2px">';
-    if (ext === 'zip') return badgeIcon('ZIP', '#bd8b32', '#fff7dc', 12);
+    if (ext == 'zip') return '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M14 17h-2v-2h-2v-2h2v2h2m0-6h-2v2h2v2h-2v-2h-2V9h2V7h-2V5h2v2h2m5-4H5c-1.11 0-2 .89-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5c0-1.11-.89-2-2-2z" fill="#afb42b"/></svg>';
     if (ext === '7z') return badgeIcon('7Z', '#557a9b', '#ffffff', 17);
     if (ext === 'gz' || ext === 'tgz') return badgeIcon('GZ', '#557a9b', '#ffffff', 17);
     if (ext === 'tar') return badgeIcon('TAR', '#8b6a43', '#fff4df', 12);
