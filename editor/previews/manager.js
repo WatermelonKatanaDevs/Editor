@@ -3,11 +3,23 @@
     constructor(state) {
       this.state = state;
       this.providers = [];
+      this.fileViews = new Map();
     }
     register(provider) {
       if (!provider || typeof provider.match !== 'function' || !Array.isArray(provider.views)) return provider;
       this.providers.push(provider);
       return provider;
+    }
+    registerFileView(file, view) {
+      if (!file?.id || !view?.id || typeof view.create !== 'function') return false;
+      const key = String(file.id);
+      const views = this.fileViews.get(key) || [];
+      const index = views.findIndex(item => item.id === view.id);
+      if (index >= 0) views[index] = view;
+      else views.push(view);
+      this.fileViews.set(key, views);
+      window.dispatchEvent(new CustomEvent('editor-preview-views-changed', { detail: { fileId: key } }));
+      return true;
     }
     getViews(file) {
       const views = [];
@@ -24,6 +36,9 @@
           }
           views.push({ ...view, provider });
         }
+      }
+      for (const view of this.fileViews.get(String(file?.id || '')) || []) {
+        if (view && view.id && typeof view.create === 'function') views.push({ ...view, provider: { id: 'file-dynamic' } });
       }
       return views.filter((view, i, all) => all.findIndex(x => x.id === view.id) === i)
         .sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0));
@@ -147,6 +162,7 @@
     dispose(file, id = null) {
       if (!file) return;
       const instances = file._previewInstances;
+      if (id == null && file.id != null) this.fileViews.delete(String(file.id));
       if (!instances) return;
 
       const disposeInstance = (key, instance) => {
