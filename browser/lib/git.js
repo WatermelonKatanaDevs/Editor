@@ -182,6 +182,140 @@
     }
   }
 
+
+  function myersDiff(oldLines, newLines) {
+    const n = oldLines.length;
+    const m = newLines.length;
+    const max = n + m;
+    const trace = [];
+    let v = new Map([[1, 0]]);
+    for (let d = 0; d <= max; d++) {
+      trace.push(new Map(v));
+      for (let k = -d; k <= d; k += 2) {
+        const left = v.has(k - 1) ? v.get(k - 1) : -Infinity;
+        const right = v.has(k + 1) ? v.get(k + 1) : -Infinity;
+        let x = k === -d || (k !== d && left < right) ? (v.get(k + 1) || 0) : (v.get(k - 1) || 0) + 1;
+        let y = x - k;
+        while (x < n && y < m && oldLines[x] === newLines[y]) {
+          x++;
+          y++;
+        }
+        v.set(k, x);
+        if (x >= n && y >= m) {
+          let backX = n;
+          let backY = m;
+          const edits = [];
+          for (let depth = trace.length - 1; depth >= 0; depth--) {
+            const previous = trace[depth];
+            const diagonal = backX - backY;
+            const previousLeft = previous.has(diagonal - 1) ? previous.get(diagonal - 1) : -Infinity;
+            const previousRight = previous.has(diagonal + 1) ? previous.get(diagonal + 1) : -Infinity;
+            const previousDiagonal = diagonal === -depth || (diagonal !== depth && previousLeft < previousRight) ? diagonal + 1 : diagonal - 1;
+            const previousX = previous.get(previousDiagonal) || 0;
+            const previousY = previousX - previousDiagonal;
+            while (backX > previousX && backY > previousY) {
+              edits.push({type:' ', line:oldLines[backX - 1]});
+              backX--;
+              backY--;
+            }
+            if (depth > 0) {
+              if (backX === previousX) {
+                edits.push({type:'+', line:newLines[backY - 1]});
+                backY--;
+              } else {
+                edits.push({type:'-', line:oldLines[backX - 1]});
+                backX--;
+              }
+            }
+          }
+          return edits.reverse();
+        }
+      }
+    }
+    return [];
+  }
+
+  function splitDiffText(text) {
+    if (text === '') return [];
+    const lines = text.split('\n');
+    if (text.endsWith('\n')) lines.pop();
+    return lines;
+  }
+
+  function formatUnifiedDiff(path, before, after) {
+    const oldBytes = before?.bytes || null;
+    const newBytes = after?.bytes || null;
+    const oldMode = before?.mode || null;
+    const newMode = after?.mode || null;
+    const oldTextBytes = oldBytes || new Uint8Array();
+    const newTextBytes = newBytes || new Uint8Array();
+    const bytesEqual = oldBytes && newBytes && oldBytes.length === newBytes.length && oldBytes.every((value, index) => value === newBytes[index]);
+    if (bytesEqual && oldMode === newMode) return '';
+    const lines = ['diff --git a/' + path + ' b/' + path];
+    const modeText = mode => Number(mode || 0o100644).toString(8).padStart(6, '0');
+    if (!oldBytes) lines.push('new file mode ' + modeText(newMode));
+    else if (!newBytes) lines.push('deleted file mode ' + modeText(oldMode));
+    else if (oldMode !== newMode) lines.push('old mode ' + modeText(oldMode), 'new mode ' + modeText(newMode));
+    const hasNul = bytes => bytes.some(value => value === 0);
+    if (hasNul(oldTextBytes) || hasNul(newTextBytes)) {
+      lines.push('Binary files ' + (oldBytes ? 'a/' + path : '/dev/null') + ' and ' + (newBytes ? 'b/' + path : '/dev/null') + ' differ');
+      return lines.join('\n');
+    }
+    let oldText;
+    let newText;
+    try {
+      oldText = oldBytes ? new TextDecoder('utf-8', {fatal:true}).decode(oldBytes) : '';
+      newText = newBytes ? new TextDecoder('utf-8', {fatal:true}).decode(newBytes) : '';
+    } catch (_) {
+      lines.push('Binary files ' + (oldBytes ? 'a/' + path : '/dev/null') + ' and ' + (newBytes ? 'b/' + path : '/dev/null') + ' differ');
+      return lines.join('\n');
+    }
+    const oldLines = splitDiffText(oldText);
+    const newLines = splitDiffText(newText);
+    const edits = myersDiff(oldLines, newLines);
+    if (!edits.some(edit => edit.type !== ' ')) return lines.join('\n');
+    lines.push('--- ' + (oldBytes ? 'a/' + path : '/dev/null'));
+    lines.push('+++ ' + (newBytes ? 'b/' + path : '/dev/null'));
+    const changed = [];
+    for (let i = 0; i < edits.length; i++) if (edits[i].type !== ' ') changed.push(i);
+    const ranges = [];
+    for (const index of changed) {
+      const start = Math.max(0, index - 3);
+      const end = Math.min(edits.length, index + 4);
+      const previous = ranges[ranges.length - 1];
+      if (previous && start <= previous.end) previous.end = Math.max(previous.end, end);
+      else ranges.push({start, end});
+    }
+    let oldFinalIndex = 0;
+    let newFinalIndex = 0;
+    for (const range of ranges) {
+      const oldBefore = edits.slice(0, range.start).filter(edit => edit.type !== '+').length;
+      const newBefore = edits.slice(0, range.start).filter(edit => edit.type !== '-').length;
+      const chunk = edits.slice(range.start, range.end);
+      const oldCount = chunk.filter(edit => edit.type !== '+').length;
+      const newCount = chunk.filter(edit => edit.type !== '-').length;
+      const oldStart = oldBefore + (oldCount ? 1 : 0);
+      const newStart = newBefore + (newCount ? 1 : 0);
+      lines.push('@@ -' + oldStart + ',' + oldCount + ' +' + newStart + ',' + newCount + ' @@');
+      let oldIndex = oldBefore;
+      let newIndex = newBefore;
+      for (const edit of chunk) {
+        lines.push(edit.type + edit.line);
+        if (edit.type !== '+') {
+          oldIndex++;
+          if (!oldText.endsWith('\n') && oldIndex === oldLines.length) lines.push('\\ No newline at end of file');
+        }
+        if (edit.type !== '-') {
+          newIndex++;
+          if (!newText.endsWith('\n') && newIndex === newLines.length) lines.push('\\ No newline at end of file');
+        }
+      }
+      oldFinalIndex = oldIndex;
+      newFinalIndex = newIndex;
+    }
+    return lines.join('\n');
+  }
+
   class LocalGitService {
     constructor(filesystem, options = {}) {
       const library = window.git?.default || window.git;
@@ -304,6 +438,57 @@
       }
       if (remove.length) await this.git.remove({fs:this.fs, dir:repository.dir, filepath:remove});
       return count;
+    }
+
+
+    async _emptyTree(repository) {
+      if (!this.emptyTrees) this.emptyTrees = new Map();
+      if (!this.emptyTrees.has(repository.root)) {
+        const oid = await this.git.writeTree({fs:this.fs, dir:repository.dir, tree:[]});
+        this.emptyTrees.set(repository.root, oid);
+      }
+      return this.emptyTrees.get(repository.root);
+    }
+
+    async _walkDiff(repository, walkers, options = {}) {
+      const required = options.requiredIndices || [];
+      const pathspecs = options.pathspecs || [];
+      const results = await this.git.walk({
+        fs:this.fs,
+        dir:repository.dir,
+        trees:walkers,
+        map:async (filepath, entries) => {
+          const types = await Promise.all(entries.map(async entry => entry ? await entry.type() : null));
+          if (!types.includes('blob')) return undefined;
+          if (required.some(index => types[index] !== 'blob')) return undefined;
+          if (pathspecs.length && !pathspecs.some(path => path === '.' || filepath === path || filepath.startsWith(path + '/'))) return undefined;
+          const read = async (entry, index) => {
+            if (!entry || types[index] !== 'blob') return {bytes:null, mode:null};
+            const mode = await entry.mode();
+            if (options.stageIndices?.includes(index)) {
+              const oid = await entry.oid();
+              const result = await this.git.readBlob({fs:this.fs, dir:repository.dir, oid});
+              return {bytes:new Uint8Array(result.blob), mode};
+            }
+            const content = await entry.content();
+            return {bytes:content == null ? new Uint8Array() : new Uint8Array(content), mode};
+          };
+          const contents = [];
+          for (let i = 0; i < entries.length; i++) contents.push(await read(entries[i], i));
+          return {path:filepath, contents};
+        }
+      });
+      return (results || []).filter(result => result && result.path && result.path !== '.');
+    }
+
+    async _diffOutput(repository, walkers, options = {}) {
+      const files = await this._walkDiff(repository, walkers, options);
+      const patches = [];
+      for (const file of files) {
+        const patch = formatUnifiedDiff(file.path, file.contents[options.leftIndex || 0], file.contents[options.rightIndex ?? 1]);
+        if (patch) patches.push(patch);
+      }
+      return patches.join('\n');
     }
 
     async _readConfig(repository, path) {
