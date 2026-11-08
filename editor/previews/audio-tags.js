@@ -125,15 +125,26 @@
     };
   }
 
+  function deUnsynchronize(bytes) {
+    const output = new Uint8Array(bytes.length);
+    let length = 0;
+    for (let i = 0; i < bytes.length; i++) {
+      output[length++] = bytes[i];
+      if (bytes[i] === 0xff && bytes[i + 1] === 0) i++;
+    }
+    return output.subarray(0, length);
+  }
+
   function parseID3(bytes, offset = 0) {
     if (offset + 10 > bytes.length || bytes[offset] !== 0x49 || bytes[offset + 1] !== 0x44 || bytes[offset + 2] !== 0x33) return null;
     const major = bytes[offset + 3];
     if (major !== 2 && major !== 3 && major !== 4) return null;
-    const tagSize = readSynchsafe(bytes, offset + 6);
-    const tagEnd = offset + 10 + tagSize;
-    if (tagEnd > bytes.length) return null;
     const flags = bytes[offset + 5];
-    let body = bytes.subarray(offset + 10, tagEnd);
+    const tagSize = readSynchsafe(bytes, offset + 6);
+    const bodyEnd = offset + 10 + tagSize;
+    const tagEnd = bodyEnd + (major === 4 && (flags & 0x10) ? 10 : 0);
+    if (bodyEnd > bytes.length || tagEnd > bytes.length) return null;
+    let body = bytes.subarray(offset + 10, bodyEnd);
     if (flags & 0x40) {
       if (major === 3) {
         if (body.length < 4) return null;
@@ -145,16 +156,6 @@
         body = body.subarray(extendedSize);
       }
     }
-    if (flags & 0x80) {
-      const decoded = new Uint8Array(body.length);
-      let count = 0;
-      for (let i = 0; i < body.length; i++) {
-        decoded[count++] = body[i];
-        if (body[i] === 0xff && body[i + 1] === 0) i++;
-      }
-      body = decoded.subarray(0, count);
-    }
-
     const frames = [];
     const tags = {};
     let picture = null;
@@ -173,9 +174,11 @@
       const dataStart = cursor + headerSize;
       const dataEnd = dataStart + size;
       if (dataEnd > body.length) break;
-      const data = body.subarray(dataStart, dataEnd);
+      const formatFlags = major === 2 ? 0 : body[cursor + 9];
+      const rawData = body.subarray(dataStart, dataEnd);
+      const data = ((flags & 0x80) || (formatFlags & 0x02)) ? deUnsynchronize(rawData) : rawData;
       const normalizedId = major === 2 ? ({ TT2: 'TIT2', TP1: 'TPE1', TAL: 'TALB', TP2: 'TPE2', TCO: 'TCON', TRK: 'TRCK', TYE: 'TYER', PIC: 'APIC' }[id] || id) : id;
-      const frame = { id: normalizedId, data: new Uint8Array(data), originalId: id };
+      const frame = { id: normalizedId, data: new Uint8Array(data), originalId: id, flags: formatFlags };
       frames.push(frame);
       const field = FRAME_FIELDS[normalizedId] || (normalizedId === 'TYER' ? 'year' : null);
       if (field) tags[field] = decodeTextFrame(normalizedId, data);
@@ -316,7 +319,7 @@
     const frames = [];
     const replacedIds = new Set(['TIT2', 'TPE1', 'TALB', 'TPE2', 'TCON', 'TDRC', 'TYER', 'TRCK', 'TPOS', 'TCOM', 'COMM']);
     for (const frame of priorFrames || []) {
-      if (!/^[A-Z0-9]{4}$/.test(frame.id) || replacedIds.has(frame.id)) continue;
+      if (!/^[A-Z0-9]{4}$/.test(frame.id) || replacedIds.has(frame.id) || (frame.flags && frame.flags !== 0x02)) continue;
       if (frame.id === 'APIC' && replacePicture) continue;
       frames.push(encodeFrame(frame.id, frame.data));
     }
