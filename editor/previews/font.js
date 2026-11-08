@@ -14,6 +14,41 @@
     if (text != null) node.textContent = text;
     return node;
   }
+
+  function extractEotFont(value) {
+    const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+    if (bytes.length < 84) throw new Error('This EOT file is too short to contain a valid font header.');
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const eotSize = view.getUint32(0, true);
+    const fontDataSize = view.getUint32(4, true);
+    const version = view.getUint32(8, true);
+    const flags = view.getUint32(12, true);
+    if (![0x00010000, 0x00020001, 0x00020002].includes(version)) {
+      throw new Error('This EOT version is not supported by the font preview.');
+    }
+    if (view.getUint16(34, true) !== 0x504c) {
+      throw new Error('The EOT header has an invalid magic number.');
+    }
+    if (eotSize > bytes.length || eotSize < 84 || !fontDataSize || fontDataSize > eotSize) {
+      throw new Error('The EOT header contains invalid font data bounds.');
+    }
+    if (flags & 0x00000004) {
+      throw new Error('This EOT uses MicroType Express compression, which this preview cannot decompress. Convert it to WOFF2, WOFF, TTF, or OTF to preview it.');
+    }
+    const start = eotSize - fontDataSize;
+    if (start < 82 || start >= eotSize) throw new Error('The EOT font payload is outside the file bounds.');
+    const fontBytes = bytes.slice(start, eotSize);
+    if (flags & 0x10000000) {
+      for (let index = 0; index < fontBytes.length; index++) fontBytes[index] ^= 0x50;
+    }
+    const signature = Array.from(fontBytes.subarray(0, 4), byte => String.fromCharCode(byte)).join('');
+    let mime;
+    if (signature === 'OTTO' || signature === 'typ1') mime = 'font/otf';
+    else if (signature === 'ttcf') mime = 'font/collection';
+    else if (signature === 'true' || (fontBytes[0] === 0 && fontBytes[1] === 1 && fontBytes[2] === 0 && fontBytes[3] === 0)) mime = 'font/ttf';
+    else throw new Error('The EOT payload is not a recognized TrueType or OpenType font.');
+    return { bytes: fontBytes, mime };
+  }
   async function makePreview(ctx) {
     const extension = extensionOf(ctx.file);
     const family = 'WKFontPreview_' + Math.random().toString(36).slice(2);
@@ -80,7 +115,14 @@
     try {
       const bytes = ctx.readBinary();
       if (!bytes || !bytes.byteLength) throw new Error('The font file is empty or could not be read.');
-      objectURL = URL.createObjectURL(new Blob([bytes], { type: MIME_TYPES[extension] || 'application/octet-stream' }));
+      let fontBytes = bytes;
+      let fontMime = MIME_TYPES[extension] || 'application/octet-stream';
+      if (extension === 'eot') {
+        const extracted = extractEotFont(bytes);
+        fontBytes = extracted.bytes;
+        fontMime = extracted.mime;
+      }
+      objectURL = URL.createObjectURL(new Blob([fontBytes], { type: fontMime }));
       if (typeof FontFace !== 'function' || !document.fonts) throw new Error('This browser does not support loading local font files into a preview.');
       const face = new FontFace(family, 'url("' + objectURL + '")');
       loadedFace = await face.load();
@@ -96,9 +138,7 @@
     } catch (error) {
       if (disposed || !ctx.isCurrent()) return;
       status.classList.add('is-error');
-      status.textContent = extension === 'eot'
-        ? 'This browser cannot load legacy EOT fonts. The specimen is shown in a fallback font; convert the file to WOFF2, WOFF, TTF, or OTF to preview it here.'
-        : (error?.message || 'The browser could not load this font. The specimen is shown in a fallback font.');
+      status.textContent = error?.message || 'The browser could not load this font. The specimen is shown in a fallback font.';
     }
   }
   window.EditorPreviewProviders = window.EditorPreviewProviders || [];
