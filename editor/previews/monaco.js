@@ -168,6 +168,7 @@
             [/^\t.*$/, 'string.shell'],
             [/^\s*(?:include|-include|sinclude|define|endef|export|unexport|override|private|ifdef|ifndef|ifeq|ifneq|else|endif|vpath)\b/, 'keyword'],
             [/\$\([^)]+\)|\$\{[^}]+\}|\$\$|\$[A-Za-z@<^?]/, 'variable'],
+            [/^[A-Za-z_][A-Za-z0-9_.-]*(?=\s*(?:::=|:=|\?=|\+=|!=|=))/, 'variable'],
             [/^[^#\s][^:=]*?(?=\s*::?)/, 'type.identifier'],
             [/::?=?|[?+!]?:=/, 'operator'],
             [/\\$/, 'operator']
@@ -182,17 +183,20 @@
       id: 'diff', extensions: ['.diff', '.patch'], aliases: ['Diff', 'Patch'],
       configuration: { comments: { lineComment: '#' }, brackets: [] },
       tokenizer: {
-        root: [
-          [/^diff --git.*$/, 'meta'],
-          [/^index .*$/, 'comment'],
-          [/^--- .*$/, 'markup.deleted'],
-          [/^\+\+\+ .*$/, 'markup.inserted'],
-          [/^@@.*@@.*$/, 'keyword'],
-          [/^\+.*$/, 'markup.inserted'],
-          [/^-.*$/, 'markup.deleted'],
-          [/^!.*$/, 'keyword'],
-          [/^\\ No newline.*$/, 'comment']
-        ]
+        defaultToken: '',
+        tokenizer: {
+          root: [
+            [/^diff --git.*$/, 'meta'],
+            [/^index .*$/, 'comment'],
+            [/^--- .*$/, 'markup.deleted'],
+            [/^\+\+\+ .*$/, 'markup.inserted'],
+            [/^@@.*@@.*$/, 'keyword'],
+            [/^\+.*$/, 'markup.inserted'],
+            [/^-.*$/, 'markup.deleted'],
+            [/^!.*$/, 'keyword'],
+            [/^\\ No newline.*$/, 'comment']
+          ]
+        }
       }
     });
   }
