@@ -361,6 +361,16 @@
     fileInput.accept = 'image/*';
     fileInput.className = 'editor-audio-cover-input';
     fileInput.multiple = true;
+    coverFrame.setAttribute('role', 'button');
+    coverFrame.setAttribute('tabindex', '0');
+    coverFrame.setAttribute('aria-label', 'Choose album cover image');
+    coverFrame.title = 'Click or drop an image to set the album cover';
+    coverFrame.addEventListener('click', () => fileInput.click());
+    coverFrame.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      fileInput.click();
+    });
 
     const convertCoverToPng = async (file, bytes, sourceMime) => {
       const source = new Blob([bytes], { type: sourceMime });
