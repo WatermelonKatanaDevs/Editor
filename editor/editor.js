@@ -2131,6 +2131,42 @@ window.__editorInitPromise = (async function () {
       await service.runSerialized(['config', 'remote.origin.lastPushedLocal', lastPushedLocal], {cwd:'/'});
       await service.runSerialized(['config', 'remote.origin.lastPush', lastPush], {cwd:'/'});
     }
+
+    // Imports created a synthetic baseline commit so Source Control could work
+    // immediately. Replace that synthetic tip with the real GitHub commit only
+    // when the imported tree is identical and no local work has been added.
+    // This preserves the working tree/index while giving the project real Git ancestry.
+    if (detected.isRepository && detected.branch === branch && detected.head) {
+      try {
+        const clean = await service.status('/');
+        if (clean.clean) {
+          const localCommit = await service.git.readCommit({fs:service.fs, dir:repository.dir, oid:detected.head});
+          const commit = localCommit.commit;
+          const isSyntheticBaseline = String(commit.message || '').trim() === 'GitHub workspace baseline' && !(commit.parent || []).length;
+          if (isSyntheticBaseline && typeof window.GitHubService.getRemoteState === 'function') {
+            const remoteState = await window.GitHubService.getRemoteState(remote.owner, remote.repo, branch);
+            const sameTree = !!remoteState.commitSha && !remoteState.truncated && String(commit.tree || '') === String(remoteState.treeSha || '');
+            if (sameTree) {
+              const fetched = await service.fetch('/', 'origin', branch, 20);
+              const fetchedSha = String(fetched.value?.commitSha || '');
+              const remoteRef = 'refs/remotes/origin/' + branch;
+              const trackedSha = await service.git.resolveRef({fs:service.fs, dir:repository.dir, ref:remoteRef});
+              if (fetchedSha && fetchedSha === String(remoteState.commitSha) && trackedSha === fetchedSha) {
+                const remoteCommit = await service.git.readCommit({fs:service.fs, dir:repository.dir, oid:fetchedSha});
+                if (String(remoteCommit.commit.tree || '') !== String(commit.tree || '')) throw new Error('The fetched GitHub commit tree no longer matches the imported baseline.');
+                await service.git.writeRef({fs:service.fs, dir:repository.dir, ref:'refs/heads/' + branch, value:fetchedSha, force:true});
+                await service.git.setConfig({fs:service.fs, dir:repository.dir, path:'remote.origin.lastPushedLocal', value:fetchedSha});
+                await service.git.setConfig({fs:service.fs, dir:repository.dir, path:'remote.origin.lastPush', value:fetchedSha});
+                await service.adapter.flush();
+                detected = await service.detect('/');
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Could not align the imported GitHub workspace baseline with its remote commit:', error);
+      }
+    }
     await fs.flush?.();
   }
 
