@@ -791,9 +791,13 @@
 
         function setBusy(value) {
           [addButton, blankButton, duplicateButton, previousButton, nextButton, removeButton,
-            saveCopyButton, saveOriginalButton, downloadAnimationButton, saveFrameButton, downloadFrameButton,
+            saveCopyButton, downloadAnimationButton, saveFrameButton, downloadFrameButton,
             saveFramesButton, downloadZipButton]
             .forEach(control => { control.disabled = !!value; });
+          saveOriginalButton.disabled = !!value || /\\.avif$/i.test(String(ctx.file.name || ''));
+          if (saveOriginalButton.disabled && /\\.avif$/i.test(String(ctx.file.name || ''))) {
+            saveOriginalButton.title = 'AVIF can be opened in supported browsers, but AVIF export is not available.';
+          }
         }
 
         function moveSelected(direction) {
@@ -1091,8 +1095,14 @@
             duration: Math.max(10, Math.min(60000, Number(frame.duration) || 100)),
             source: 'Original'
           }));
-          currentLoopCount = Number(decoded.loopCount) || 0;
-          loop.value = String([0,1,2,3,5].includes(currentLoopCount) ? currentLoopCount : 0);
+          currentLoopCount = Math.max(0, Number(decoded.loopCount) || 0);
+          if (![0, 1, 2, 3, 5].includes(currentLoopCount)) {
+            const customLoop = document.createElement('option');
+            customLoop.value = String(currentLoopCount);
+            customLoop.textContent = currentLoopCount + ' times';
+            loop.appendChild(customLoop);
+          }
+          loop.value = String(currentLoopCount);
           refresh();
           say('Loaded ' + frames.length + ' frame' + (frames.length === 1 ? '' : 's') + ' from ' + ctx.file.name + '.');
         } catch (error) {
