@@ -112,9 +112,9 @@
     let THREE,renderer,scene,camera,controls,modelRoot=null,mixer=null,clock=null,raf=0,resizeObserver=null;
     let grid=null,axes=null,skeletonHelper=null,wireframe=false,showGrid=true,showAxes=false,background=0x202124;
     let animationActions=[],activeAction=null,animationSelect=null,playButton=null,timeSlider=null,timeLabel=null;
-    let disposed=false,modelFiles=new Map(),objectURLs=new Map(),selectedRoot=null,modelInfo=null,activeModelPath=ctx.file.path;
+    let disposed=false,modelFiles=new Map(),objectURLs=new Map(),decoderLoaders=[],selectedRoot=null,modelInfo=null,activeModelPath=ctx.file.path;
     const cleanup=()=>{
-      disposed=true;cancelAnimationFrame(raf);resizeObserver?.disconnect();controls?.dispose();renderer?.dispose();
+      disposed=true;cancelAnimationFrame(raf);resizeObserver?.disconnect();controls?.dispose();renderer?.dispose();for(const loader of decoderLoaders)try{loader.dispose?.();}catch(_){}
       for(const url of objectURLs.values())URL.revokeObjectURL(url);
       objectURLs.clear();
       if(renderer?.domElement?.parentNode)renderer.domElement.remove();
@@ -264,8 +264,9 @@
         const loader=new THREE.GLTFLoader(manager);
         const dracoLoader=new THREE.DRACOLoader(manager).setDecoderPath(CDN+'/examples/jsm/libs/draco/');
         const ktx2Loader=new THREE.KTX2Loader(manager).setTranscoderPath(CDN+'/examples/jsm/libs/basis/').detectSupport(renderer);
+        decoderLoaders.push(dracoLoader,ktx2Loader);
         loader.setDRACOLoader(dracoLoader);loader.setKTX2Loader(ktx2Loader);loader.setMeshoptDecoder(THREE.MeshoptDecoder);
-        const gltf=await loader.parseAsync(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),url?url.substring(0,url.lastIndexOf('/')+1):'');
+        const gltf=await loader.parseAsync(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),'');
         object=gltf.scene||gltf.scenes?.[0];animations=gltf.animations||[];
       }else if(ext==='fbx'){const result=new THREE.FBXLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength), '');object=result;animations=result.animations||[];}
       else if(ext==='obj'){
@@ -356,7 +357,7 @@
       const width=Math.max(320,ui.canvasHost.clientWidth||800),height=Math.max(240,ui.canvasHost.clientHeight||520);
       renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false,powerPreference:'high-performance'});
       renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));renderer.setSize(width,height,false);
-      renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1;
+      renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
       scene=new THREE.Scene();scene.background=new THREE.Color(background);
       camera=new THREE.PerspectiveCamera(45,width/height,.01,10000);camera.position.set(3,2,4);
       controls=new THREE.OrbitControls(camera,canvas);controls.enableDamping=true;controls.dampingFactor=.075;controls.screenSpacePanning=true;
@@ -385,8 +386,6 @@
       ui.drop.addEventListener('dragover',e=>{e.preventDefault();ui.drop.classList.add('dragover');});
       ui.drop.addEventListener('dragleave',()=>ui.drop.classList.remove('dragover'));
       ui.drop.addEventListener('drop',e=>{e.preventDefault();ui.drop.classList.remove('dragover');if(e.dataTransfer?.files?.length)addFiles(e.dataTransfer.files).catch(err=>{overlay.style.display='flex';overlay.textContent=err.message;});});
-      canvas.addEventListener('dragover',e=>{if(e.dataTransfer?.files?.length)e.preventDefault();});
-      canvas.addEventListener('drop',e=>{if(e.dataTransfer?.files?.length){e.preventDefault();addFiles(e.dataTransfer.files).catch(err=>status(err.message));}});
       const handleWorkspaceDrop=async e=>{
         const raw=e.dataTransfer?.getData('application/x-file-manager-paths');
         if(!raw)return;
