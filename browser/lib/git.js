@@ -595,7 +595,7 @@
         const childrenByPath = new Map();
         for (const entry of entries) {
           const path = String(entry?.path || '');
-          if (!path || path.startsWith('/') || path.includes('\\') || path.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('GitHub returned an invalid path in its remote Git tree.');
+          if (!path || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('GitHub returned an invalid path in its remote Git tree.');
           const validModes = entry.type === 'tree' ? ['040000'] : entry.type === 'commit' ? ['160000'] : ['100644', '100755', '120000'];
           if (!validModes.includes(String(entry.mode))) throw new Error('GitHub returned an unsupported Git mode at ' + path + '.');
           const slash = path.lastIndexOf('/');
@@ -707,12 +707,12 @@
       if (head === tracking.lastPushedLocal) return {output:'Everything up-to-date', value:{changed:false, head}};
       const {entry, changes} = await this._getCommitChanges(repository, head);
       const parent = entry.commit.parent?.[0] || '';
-      if (parent !== tracking.lastPushedLocal) throw new Error('Your local branch has multiple unpushed commits or its history diverged. Push one commit at a time; fetching and rebasing are not implemented yet.');
+      if (parent !== tracking.lastPushedLocal) throw new Error('Your local branch has multiple unpushed commits or its history diverged. Fetch is available, but merging and rebasing are not implemented yet.');
       if (!window.GitHubService?.isSignedIn?.()) throw new Error('Sign in to GitHub before pushing this repository.');
       if (typeof window.GitHubService.commitAndPush !== 'function' || typeof window.GitHubService.getRemoteState !== 'function') throw new Error('GitHub push support has not loaded.');
       const remoteBranch = branchName || branch;
       const remote = await window.GitHubService.getRemoteState(owner, repo, remoteBranch);
-      if (String(remote.commitSha || '') !== tracking.lastPush) throw new Error('The GitHub branch has changed since your last push. Fetching and merging remote commits is not implemented yet, so this push was stopped to avoid overwriting remote work.');
+      if (String(remote.commitSha || '') !== tracking.lastPush) throw new Error('The GitHub branch has changed since your last push. Fetch the remote first; merging or rebasing those changes is not implemented yet, so this push was stopped to avoid overwriting remote work.');
       if (!changes.length) throw new Error('The local commit contains no file changes to push.');
       const result = await window.GitHubService.commitAndPush({
         owner,
