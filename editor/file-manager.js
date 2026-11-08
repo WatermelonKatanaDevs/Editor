@@ -44,7 +44,7 @@
       this.onChange = options.onChange || (() => {});
       this.onMove = options.onMove || (() => {});
       this.onDelete = options.onDelete || (() => {});
-      this.showHiddenFolders = !!options.showHiddenFolders;
+      this.dimHiddenFolders = options.dimHiddenFolders !== false;
       this.readOnly = !!options.readOnly;
       this.canContextMenu = options.canContextMenu || (() => true);
       this.selectedNode = null;
@@ -100,9 +100,8 @@
       this.collapsedPaths.clear();
       this.buildTree();
     }
-    setShowHiddenFolders(value) {
-      this.showHiddenFolders = !!value;
-      this.buildTree();
+    setDimHiddenFolders(value) {
+      this.dimHiddenFolders = !!value;
       this.render();
     }
     isHiddenPath(path) {
@@ -155,6 +154,7 @@
           name,
           path,
           isDir: true,
+          hidden: this.isHiddenPath(path),
           children: []
         };
         parent.children.push(node);
@@ -169,6 +169,7 @@
           name,
           path,
           isDir: false,
+          hidden: this.isHiddenPath(path),
           mime: EditorInferMime(name)
         };
         parent.children.push(node);
@@ -176,7 +177,6 @@
         this.nodeByID.set(node.id, node);
       };
       for (const raw of this.fs.listFilesSync().map(p => this.normalize(p)).filter(Boolean)) {
-        if (!this.showHiddenFolders && this.isHiddenPath(raw)) continue;
         const parts = raw.split('/');
         let parent = this.root, current = '';
         for (let i = 0; i < parts.length; i++) {
@@ -186,7 +186,6 @@
         }
       }
       for (const raw of (this.fs.listDirectoriesSync?.() || []).map(p => this.normalize(p)).filter(Boolean)) {
-        if (!this.showHiddenFolders && this.isHiddenPath(raw)) continue;
         const parts = raw.split('/');
         let parent = this.root, current = '';
         for (const part of parts) {
@@ -298,6 +297,7 @@
         const li = document.createElement('li');
         li.dataset.path = child.path;
         li.innerHTML = EditorRenderIcon(child.name, child.isDir);
+        if (child.hidden && this.dimHiddenFolders) li.classList.add('hidden-file');
         if (child.isDir) {
           const arrow = document.createElement('span');
           arrow.textContent = '▼';
@@ -315,7 +315,10 @@
           };
           li.prepend(arrow);
         }
-        li.appendChild(document.createTextNode(child.name + (child.isDir ? '/' : '')));
+        const label = document.createElement('span');
+        label.className = 'file-tree-label';
+        label.textContent = child.name + (child.isDir ? '/' : '');
+        li.appendChild(label);
         if (this.selectedNodes.has(child.path)) li.classList.add('selected-file');
         li.onclick = e => {
           e.stopPropagation();
