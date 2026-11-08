@@ -105,7 +105,7 @@
       this.render();
     }
     isHiddenPath(path) {
-      return this.normalize(path).split('/').some(part => part.startsWith('.'));
+      return this.basename(path).startsWith('.');
     }
     setProjectName(name) {
       this.projectName = name || (() => 'Workspace');
