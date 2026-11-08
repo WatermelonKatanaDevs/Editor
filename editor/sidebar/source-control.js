@@ -254,6 +254,7 @@
           const permission = await state.fs.requestPermission?.();
           if (permission && permission !== 'granted') throw new Error('Write permission is required to create the .git directory in this folder.');
           localGitRepository = await getLocalGit().init('/', 'main');
+          state.markDirty?.('.git');
           await state.fs.flush?.();
           localGitStatus = {changes:[], clean:true};
           renderLocalShell();
@@ -280,6 +281,7 @@
     async function runLocalGitAction(args, message) {
       try {
         await getLocalGit().runSerialized(args, {cwd:'/'});
+        state.markDirty?.('.git');
         await refreshLocalStatus();
         showStatus(message);
       } catch (error) {
@@ -485,6 +487,7 @@
           if (!message) throw new Error('Enter a commit message.');
           const result = await service.runSerialized(['commit', '-m', message], {cwd:'/'});
           localCommitCreated = true;
+          state.markDirty?.('.git');
           if (tree.querySelector('[data-local-commit-message]')) tree.querySelector('[data-local-commit-message]').value = '';
           successMessage = result.output || 'Commit created.';
         } else if (!connectedRemote || !localGitPushStatus?.ahead) {
@@ -492,6 +495,7 @@
         }
         if (connectedRemote) {
           const pushed = await service.runSerialized(['push'], {cwd:'/'});
+          state.markDirty?.('.git');
           if (pushed.value?.commitSha) {
             state.gitRemote.revision = pushed.value.commitSha;
             state.saveProjectMetadata?.();
