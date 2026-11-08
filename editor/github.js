@@ -603,19 +603,24 @@
     const inExcludedPath = path => excluded.some(excludedPath => path === excludedPath || path.startsWith(excludedPath + '/'));
     const rules = readGitIgnore(fs, prefix);
     const ignoreNodeModules = isNodeModulesIgnoredBySetting(fs);
+    // Keep both the repository-relative Git path and the actual workspace
+    // path. For submodules pathPrefix is stripped for Git comparisons, but
+    // filesystem reads must still use the prefixed workspace path.
     const localPaths = fs.listFilesSync()
-      .map(path => String(path).replace(/^\/+/, ''))
-      .filter(path => path && (!prefix || path.startsWith(prefix + '/')))
-      .map(path => prefix ? path.slice(prefix.length + 1) : path)
-      .filter(path => path && !ignoredPath(path) && !inExcludedPath(path) && !(ignoreNodeModules && isNodeModulesPath(path)));
+      .map(rawPath => String(rawPath).replace(/^\\/+/, ''))
+      .filter(fsPath => fsPath && (!prefix || fsPath.startsWith(prefix + '/')))
+      .map(fsPath => ({fsPath, path:prefix ? fsPath.slice(prefix.length + 1) : fsPath}))
+      .filter(item => item.path && !ignoredPath(item.path) && !inExcludedPath(item.path) && !(ignoreNodeModules && isNodeModulesPath(item.path)));
     const remoteFiles = new Map();
     for (const entry of remoteTree || []) {
       if (entry?.type === 'blob' && entry.path && !ignoredPath(entry.path) && !inExcludedPath(entry.path) && !(ignoreNodeModules && isNodeModulesPath(entry.path))) remoteFiles.set(entry.path, entry);
     }
 
     const changes = [];
-    for (const path of localPaths) {
-      const data = fs.readFileSync(path, 'binary');
+    for (const item of localPaths) {
+      const {path, fsPath} = item;
+      const data = fs.readFileSync(fsPath, 'binary');
+      if (data == null) throw new Error(`Workspace file could not be read while comparing: ${fsPath}`);
       const bytes = gitDataToBytes(data);
       const sha = await gitBlobSha(bytes);
       const remote = remoteFiles.get(path);
@@ -626,8 +631,8 @@
       const ignoreDecision = gitIgnoreDecision(path, rules);
       if (!remote && ignoreDecision === true) continue;
 
-      if (!remote) changes.push({path, type:'added', sha, data:bytes});
-      else if (remote.sha !== sha) changes.push({path, type:'modified', sha, data:bytes, mode:remote.mode || '100644'});
+      if (!remote) changes.push({path, fsPath, type:'added', sha, data:bytes});
+      else if (remote.sha !== sha) changes.push({path, fsPath, type:'modified', sha, data:bytes, mode:remote.mode || '100644'});
       remoteFiles.delete(path);
     }
     for (const [path, entry] of remoteFiles) changes.push({path, type:'deleted', sha:null, mode:entry.mode || '100644'});
