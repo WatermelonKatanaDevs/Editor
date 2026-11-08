@@ -177,7 +177,7 @@
       const formatFlags = major === 2 ? 0 : body[cursor + 9];
       const rawData = body.subarray(dataStart, dataEnd);
       const data = ((flags & 0x80) || (formatFlags & 0x02)) ? deUnsynchronize(rawData) : rawData;
-      const normalizedId = major === 2 ? ({ TT2: 'TIT2', TP1: 'TPE1', TAL: 'TALB', TP2: 'TPE2', TCO: 'TCON', TRK: 'TRCK', TYE: 'TYER', PIC: 'APIC' }[id] || id) : id;
+      const normalizedId = major === 2 ? ({ TT2: 'TIT2', TP1: 'TPE1', TAL: 'TALB', TP2: 'TPE2', TCO: 'TCON', TRK: 'TRCK', TYE: 'TYER', PIC: 'APIC', ULT: 'USLT' }[id] || id) : id;
       const frame = { id: normalizedId, data: new Uint8Array(data), originalId: id, flags: formatFlags };
       frames.push(frame);
       const field = FRAME_FIELDS[normalizedId] || (normalizedId === 'TYER' ? 'year' : normalizedId === 'USLT' ? 'lyrics' : null);
