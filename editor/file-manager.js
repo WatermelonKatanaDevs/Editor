@@ -218,7 +218,7 @@
         if (e.target.closest?.('li[data-path]')) return;
         e.preventDefault();
         rootList.classList.add('draghover');
-        e.dataTransfer.dropEffect = 'move';
+        e.dataTransfer.dropEffect = e.dataTransfer.types.includes('application/x-wk-editor-files') ? 'copy' : 'move';
       };
       rootList.ondragleave = e => {
         if (!rootList.contains(e.relatedTarget)) rootList.classList.remove('draghover');
@@ -256,7 +256,7 @@
         const li = e.target.closest?.('li[data-path]');
         li?.classList.add('draghover');
         container.classList.add('draghover');
-        e.dataTransfer.dropEffect = e.dataTransfer.types.includes('application/x-proxy-download') || e.dataTransfer.files?.length ? 'copy' : 'move';
+        e.dataTransfer.dropEffect = e.dataTransfer.types.includes('application/x-wk-editor-files') || e.dataTransfer.types.includes('application/x-proxy-download') || e.dataTransfer.files?.length ? 'copy' : 'move';
       };
       container.ondragleave = e => {
         const related = e.relatedTarget;
