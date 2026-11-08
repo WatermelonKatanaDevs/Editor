@@ -7,7 +7,7 @@
     mtl:'text/plain',stl:'model/stl',ply:'application/octet-stream',dae:'model/vnd.collada+xml',
     '3ds':'application/octet-stream','3mf':'model/3mf',amf:'application/x-amf',wrl:'model/vrml',
     vrml:'model/vrml',usd:'model/vnd.usd',usda:'model/vnd.usd',usdc:'model/vnd.usd',usdz:'model/vnd.usdz+zip',vtk:'application/octet-stream',pcd:'application/octet-stream',
-    xyz:'text/plain',gcode:'text/plain',md2:'application/octet-stream',bvh:'text/plain'
+    xyz:'text/plain',gcode:'text/plain',md2:'application/octet-stream',bvh:'text/plain',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',avif:'image/avif',ktx2:'image/ktx2',hdr:'image/vnd.radiance',exr:'image/x-exr',bin:'application/octet-stream'
   };
   const element = (tag, cls, value) => {
     const n = document.createElement(tag);
@@ -252,7 +252,7 @@
       if(timeSlider){timeSlider.value='0';timeSlider.max='1';}
     }
     function addPrimitiveGeometry(geometry,name,material){
-      const mesh=new THREE.Mesh(geometry,material||new THREE.MeshStandardMaterial({color:0xb9c7d8,metalness:.1,roughness:.72}));
+      const mesh=new THREE.Mesh(geometry,material||new THREE.MeshStandardMaterial({color:0xb9c7d8,metalness:.1,roughness:.72,vertexColors:geometry.hasAttribute('color')}));
       mesh.name=name||'Model';return mesh;
     }
     async function parseModel(name,data,opts={}){
@@ -284,7 +284,7 @@
       else if(['usd','usda','usdc','usdz'].includes(ext)){object=new THREE.USDLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),'');}
       else if(ext==='vtk'){const geometry=new THREE.VTKLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));geometry.computeVertexNormals();object=addPrimitiveGeometry(geometry,'VTK model');}
       else if(ext==='pcd'){object=new THREE.PCDLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),'');}
-      else if(ext==='xyz'){const geometry=new THREE.XYZLoader(manager).parse(text());object=addPrimitiveGeometry(geometry,'Point cloud');}
+      else if(ext==='xyz'){const geometry=new THREE.XYZLoader(manager).parse(text());object=new THREE.Points(geometry,new THREE.PointsMaterial({size:.035,vertexColors:geometry.hasAttribute('color')}));object.name='Point cloud';}
       else if(ext==='gcode'){object=new THREE.GCodeLoader(manager).parse(text());}
       else if(ext==='md2'){const geometry=new THREE.MD2Loader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));object=addPrimitiveGeometry(geometry,'MD2 model',new THREE.MeshStandardMaterial({color:0xb9c7d8,morphTargets:true}));}
       else if(ext==='bvh'){const result=new THREE.BVHLoader().parse(text());object=result.skeleton.bones[0];animations=result.clip?[result.clip]:[];}
