@@ -361,6 +361,20 @@
       throw e;
     }
   }
+  async function getRemoteCommitState(owner, repo, commitSha) {
+    const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+    const commit = await publicRequest(`${repoPath}/git/commits/${encodeURIComponent(commitSha)}`);
+    const treeSha = commit?.tree?.sha;
+    if (!treeSha) throw new Error('GitHub did not return a tree for commit ' + commitSha + '.');
+    const tree = await publicRequest(`${repoPath}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`);
+    return {
+      commitSha:String(commit?.sha || commitSha),
+      commit,
+      treeSha:String(treeSha),
+      tree:Array.isArray(tree?.tree) ? tree.tree : [],
+      truncated:!!tree?.truncated
+    };
+  }
   async function getRemoteState(owner, repo, branch) {
     const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
     try {
@@ -987,6 +1001,7 @@
   root.listBranches = listBranches;
   root.getRemoteState = getRemoteState;
   root.getRemoteHead = getRemoteHead;
+  root.getRemoteCommitState = getRemoteCommitState;
   root.getCommitState = getCommitState;
   root.readBlob = readBlob;
   root.listCommits = listCommits;
