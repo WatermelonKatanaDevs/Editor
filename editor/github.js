@@ -821,6 +821,7 @@
       await new Promise(resolve => setTimeout(resolve, 500 + attempt * 500));
     }
     if (remote?.unavailable) throw new Error('GitHub is still initializing this repository. Please try again in a moment.');
+    if (remote?.truncated) throw new Error('GitHub truncated this repository tree. Source Control cannot safely compare or commit a partial tree; narrow the repository contents or sync a smaller repository first.');
     const changes = await compareWorkingTree(fs, compareTree || remote.tree, {pathPrefix, excludePaths});
     const remoteGitlinks = new Map((remote.tree || []).filter(entry => entry?.mode === '160000' || entry?.type === 'commit').map(entry => [entry.path, entry.sha]));
     const updatedGitlinks = (gitlinks || []).filter(link => link?.path && link?.sha && remoteGitlinks.get(link.path) !== link.sha);
