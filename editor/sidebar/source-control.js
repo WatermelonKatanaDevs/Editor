@@ -23,7 +23,23 @@
       try {
         const monaco = await ctx.state.ensureMonaco();
         if (disposed || !host.isConnected) return wrap;
-        const decode = bytes => new TextDecoder('utf-8', {fatal:false}).decode(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []));
+        // FileSystem implementations may return binary data as a byte array,
+        // an ArrayBuffer, or a binary string. Converting a binary string with
+        // new Uint8Array(string) silently produces zero bytes, which makes the
+        // diff look completely empty.
+        const toBytes = value => {
+          if (value instanceof Uint8Array) return value;
+          if (value instanceof ArrayBuffer) return new Uint8Array(value);
+          if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+          if (typeof value === 'string') {
+            const bytes = new Uint8Array(value.length);
+            for (let i = 0; i < value.length; i++) bytes[i] = value.charCodeAt(i) & 255;
+            return bytes;
+          }
+          if (Array.isArray(value)) return Uint8Array.from(value);
+          return new Uint8Array(value || []);
+        };
+        const decode = bytes => new TextDecoder('utf-8', {fatal:false}).decode(toBytes(bytes));
         const oldBytes = data.type === 'added' ? new Uint8Array() : data.oldSha ? await window.GitHubService.readBlob(data.owner, data.repo, data.oldSha) : new Uint8Array();
         if (disposed || !host.isConnected) return wrap;
         const oldText = decode(oldBytes);
@@ -463,7 +479,23 @@
           owner:selected.owner,
           repo:selected.repo,
           oldSha:oldEntry?.sha || null,
-          newBytes:change.data || new Uint8Array()
+          // Read the file again here and normalize the filesystem's binary
+          // representation instead of carrying compareWorkingTree's buffer
+          // through the Workbench tab object.
+          newBytes: (() => {
+            try {
+              const raw = state.fs.readFileSync(path, 'binary');
+              if (raw instanceof Uint8Array) return raw;
+              if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
+              if (ArrayBuffer.isView(raw)) return new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+              if (typeof raw === 'string') {
+                const bytes = new Uint8Array(raw.length);
+                for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i) & 255;
+                return bytes;
+              }
+              return new Uint8Array(raw || []);
+            } catch (_) { return change.data || new Uint8Array(); }
+          })()
         }
       });
       if (!tab) showStatus('Could not open the diff viewer.', true);
