@@ -28,7 +28,7 @@
             <h3>Workspace</h3>
             <label class="setting-check"><input id="setting-confirm-replace" type="checkbox"><span>Confirm before replacing the workspace</span></label>
             <label class="setting-check"><input id="setting-confirm-delete" type="checkbox"><span>Confirm before deleting files and folders</span></label>
-            <label class="setting-check"><input id="setting-show-hidden" type="checkbox"><span>Dim hidden files and folders</span></label>
+            <label class="setting-check"><input id="setting-show-hidden" type="checkbox"><span>Show hidden files and folders</span></label>
           </div>
           <div class="editor-settings-section">
             <h3>Git</h3>
@@ -87,7 +87,7 @@
       c.checked = !!state.behavior.autoClearTerminal;
       r.checked = !!state.behavior.confirmBeforeReplace;
       d.checked = !!state.behavior.confirmBeforeDelete;
-      h.checked = state.behavior.dimHiddenFolders !== false;
+      h.checked = !!state.behavior.showHiddenFiles;
       try { const stored = localStorage.getItem('node-editor.piskel.autoSave'); piskelAutoSave.checked = stored === null ? true : stored === 'true'; } catch (_) { piskelAutoSave.checked = true; }
       b.checked = !!state.behavior.hideBrowserBar;
 
@@ -96,8 +96,8 @@
       r.onchange = () => { state.behavior.confirmBeforeReplace = r.checked; saveBehaviorSettings(); };
       d.onchange = () => { state.behavior.confirmBeforeDelete = d.checked; saveBehaviorSettings(); };
       h.onchange = () => {
-        state.behavior.dimHiddenFolders = h.checked;
-        state.fileManager?.setDimHiddenFolders(h.checked);
+        state.behavior.showHiddenFiles = h.checked;
+        state.fileManager?.setShowHiddenFiles(h.checked);
         saveBehaviorSettings();
       };
       piskelAutoSave.onchange = () => {
