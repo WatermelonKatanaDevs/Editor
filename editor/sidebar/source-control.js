@@ -303,6 +303,9 @@
           try {
             const remote = service._parseGitHubRemote(localGitPushStatus.remoteUrl);
             state.gitRemote = {provider:'github', owner:remote.owner, repo:remote.repo, branch:localGitPushStatus.branch || 'main', revision:localGitPushStatus.lastPush || ''};
+            selected = {owner:remote.owner, repo:remote.repo, branch:localGitPushStatus.branch || 'main'};
+            selectionProjectId = String(state.projectId || 'workspace');
+            saveConfig();
             state.saveProjectMetadata?.();
           } catch (_) {}
         }
