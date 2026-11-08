@@ -321,7 +321,7 @@
     },
     views: [{
       id: 'archive-preview',
-      label: 'Preview',
+      label: 'Archive Preview',
       default: true,
       priority: 130,
       async create(ctx) {
@@ -335,12 +335,7 @@
         const archiveStatus = document.createElement('div');
         archiveStatus.className = 'editor-archive-status';
         archiveStatus.textContent = 'Opening archive…';
-        const modelButton = document.createElement('button');
-        modelButton.className = 'editor-archive-model-button';
-        modelButton.type = 'button';
-        modelButton.hidden = true;
-        modelButton.textContent = 'Open 3D model';
-        topbar.append(archiveTitle, archiveStatus, modelButton);
+        topbar.append(archiveTitle, archiveStatus);
 
         const workspace = document.createElement('div');
         workspace.className = 'editor-archive-workspace';
@@ -374,51 +369,12 @@
 
         let archiveFileSystem = null;
         let modelPackage = null;
-        let modelHost = null;
-        let modelOpened = false;
         let innerManager = null;
         const innerTab = {};
         ctx.addCleanup(() => {
           if (innerManager) innerManager.dispose(innerTab);
         });
-        const showArchiveBrowser = () => {
-          if (modelHost) modelHost.style.display = 'none';
-          viewer.style.display = '';
-          modelButton.textContent = modelPackage?.isPackage ? '3D Model Package' : 'Open embedded model';
-          modelButton.classList.remove('active');
-        };
-        const showModelViewer = async () => {
-          if (!modelPackage || !archiveFileSystem) return;
-          viewer.style.display = 'none';
-          if (!modelHost) {
-            modelHost = document.createElement('div');
-            modelHost.className = 'editor-archive-model-host';
-            shell.appendChild(modelHost);
-          }
-          modelHost.style.display = 'block';
-          modelButton.textContent = 'Browse archive';
-          modelButton.classList.add('active');
-          if (modelOpened) return;
-          modelOpened = true;
-          const virtualState = Object.create(ctx.state || null);
-          virtualState.fs = archiveFileSystem;
-          const modelContext = {
-            state: virtualState,
-            file: { id:'archive-model:'+modelPackage.path, path:modelPackage.path,
-              name:modelPackage.path.split('/').pop(), mime:EditorInferMime(modelPackage.path) },
-            host:modelHost,
-            readBinary:path=>archiveFileSystem.readFileSync(path || modelPackage.path,'binary'),
-            addCleanup:cleanup=>ctx.addCleanup(cleanup),
-            isCurrent:()=>ctx.isCurrent()
-          };
-          const factory = window.Editor3DModelPreview?.create;
-          if (typeof factory !== 'function') { modelHost.textContent='The 3D viewer is not available.'; return; }
-          await factory(modelContext);
-        };
-        modelButton.addEventListener('click', () => {
-          if (modelHost?.style.display === 'block') showArchiveBrowser();
-          else showModelViewer().catch(error => { modelHost.textContent='Could not open the model: '+(error?.message || error); });
-        });
+
 
         try {
           const binary = ctx.readBinary();
@@ -435,12 +391,35 @@
           archiveFileSystem = makeArchiveFileSystem(entries);
           modelPackage = inspectModelPackage(archiveFileSystem);
           if (modelPackage) {
-            modelButton.hidden = false;
-            modelButton.textContent = modelPackage.isPackage ? '3D Model Package' : 'Open embedded model';
             archiveTitle.textContent = ctx.file.name + (modelPackage.isPackage ? ' · 3D model package' : ' · contains a model');
-            modelButton.title = modelPackage.isPackage
-              ? 'This ZIP is structured as a 3D model package with resolvable model assets.'
-              : 'This archive contains a glTF file but also unrelated content, so it remains an archive.';
+            const virtualState = Object.create(ctx.state || null);
+            virtualState.fs = archiveFileSystem;
+            const modelPath = modelPackage.path;
+            ctx.manager?.registerFileView?.(ctx.file, {
+              id: 'archive-3d-viewer',
+              label: '3D Viewer',
+              default: false,
+              priority: 170,
+              async create(viewContext) {
+                const factory = window.Editor3DModelPreview?.create;
+                if (typeof factory !== 'function') throw new Error('The 3D viewer is not available.');
+                const modelName = modelPath.split('/').pop();
+                const modelContext = {
+                  ...viewContext,
+                  state: virtualState,
+                  file: {
+                    ...viewContext.file,
+                    path: modelPath,
+                    name: modelName,
+                    mime: EditorInferMime(modelPath)
+                  },
+                  readText: path => archiveFileSystem.readFileSync(path || modelPath, 'utf8') || '',
+                  readBinary: path => archiveFileSystem.readFileSync(path || modelPath, 'binary'),
+                  exists: path => !!archiveFileSystem.existsSync(path || modelPath)
+                };
+                await factory(modelContext);
+              }
+            });
           }
           const fileCount = archiveFileSystem.listFilesSync().length;
           const folderCount = archiveFileSystem.listDirectoriesSync().length;
@@ -584,14 +563,7 @@
             }
           });
           if (!fileCount) showMessage(viewer, 'This archive does not contain any visible files.');
-          if (modelPackage?.isPackage) {
-            await showModelViewer();
-            archiveStatus.textContent = '3D model package · '+modelPackage.referencedAssets+' referenced assets · '+fileCount+' files';
-          } else if (modelPackage) {
-            const unresolved = modelPackage.unresolvedReferences?.length || 0;
-            archiveStatus.textContent = 'Archive containing a 3D model · '+modelPackage.path+
-              (unresolved ? ' · '+unresolved+' external reference(s) not found' : '');
-          }
+          if (modelPackage) archiveStatus.textContent += ' · model available in 3D Viewer tab';
         } catch (error) {
           if (ctx.isCurrent()) {
             archiveStatus.textContent = 'Could not open archive';
