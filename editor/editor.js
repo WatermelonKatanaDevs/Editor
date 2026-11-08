@@ -3562,6 +3562,10 @@ window.__editorInitPromise = (async function () {
       scheduleWorkspaceLayoutSave,
       updateStatus,
       extensionAPI,
+      openDiffTab: options => {
+        const group = Workbench.getActiveGroup?.() || state.workbench?.getActiveGroup?.() || state.workbench?.getFirstLeaf?.();
+        return group ? openBuiltin('source-control-diff', group, options || {}) : null;
+      },
       onOpen: openFile,
       onMove,
       onDelete,
