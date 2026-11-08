@@ -25,7 +25,8 @@
           views.push({ ...view, provider });
         }
       }
-      return views.filter((view, i, all) => all.findIndex(x => x.id === view.id) === i);
+      return views.filter((view, i, all) => all.findIndex(x => x.id === view.id) === i)
+        .sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0));
     }
     getView(file, id) {
       return this.getViews(file).find(view => view.id === id) || null;
