@@ -934,27 +934,16 @@
         throw new Error('git remote: supported forms are -v, add origin, set-url origin, and get-url origin.');
       }
       if (operation === 'fetch') {
-        let remoteName = 'origin';
-        let branchName = null;
-        for (const arg of command.slice(1)) {
-          if (arg.startsWith('-')) throw new Error('git fetch: options are not supported yet.');
-          if (remoteName === 'origin') remoteName = arg;
-          else if (!branchName) branchName = arg;
-          else throw new Error('git fetch: too many arguments.');
-        }
-        return await this.fetch(cwd, remoteName, branchName);
+        const args = command.slice(1);
+        if (args.length > 2) throw new Error('git fetch: specify at most one remote and one branch.');
+        if (args.some(arg => arg.startsWith('-'))) throw new Error('git fetch: options are not supported yet.');
+        return await this.fetch(cwd, args[0] || 'origin', args[1] || null);
       }
       if (operation === 'push') {
-        let remoteName = 'origin';
-        let branchName = null;
-        for (const arg of command.slice(1)) {
-          if (arg.startsWith('-')) throw new Error('git push: force, tags, and other options are not supported.');
-          if (remoteName === 'origin') remoteName = arg;
-          else if (!branchName) branchName = arg;
-          else throw new Error('git push: too many arguments.');
-        }
-        const result = await this.push(cwd, remoteName, branchName);
-        return result;
+        const args = command.slice(1);
+        if (args.length > 2) throw new Error('git push: specify at most one remote and one branch.');
+        if (args.some(arg => arg.startsWith('-'))) throw new Error('git push: force, tags, and other options are not supported.');
+        return await this.push(cwd, args[0] || 'origin', args[1] || null);
       }
       if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, branch, switch, checkout, tag (lightweight), remote, fetch (remote head check), push, rev-parse.', value:null};
       throw new Error('git: command not implemented yet: ' + operation);
