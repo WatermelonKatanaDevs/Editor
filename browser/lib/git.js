@@ -510,7 +510,7 @@
       const remoteUrl = await this._readConfig(repository, 'remote.origin.url');
       const lastPushedLocal = await this._readConfig(repository, 'remote.origin.lastPushedLocal') || '';
       const lastPush = await this._readConfig(repository, 'remote.origin.lastPush') || '';
-      return {remoteUrl:remoteUrl ? String(remoteUrl) : null, branch, head, lastPushedLocal:String(lastPushedLocal), lastPush:String(lastPush), ahead:!!head && head !== String(lastPushedLocal)};
+      return {remoteUrl:remoteUrl ? String(remoteUrl) : null, branch, head, lastPushedLocal:String(lastPushedLocal), lastPush:String(lastPush), ahead:!!remoteUrl && !!head && head !== String(lastPushedLocal)};
     }
 
     _parseGitHubRemote(url) {
@@ -568,7 +568,7 @@
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPushedLocal', value:head});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPush', value:result.commitSha});
       await this.adapter.flush();
-      return {output:'To ' + remoteUrl + '\\n   ' + tracking.lastPush.slice(0, 7) + '..' + result.commitSha.slice(0, 7) + '  ' + branch + ' -> ' + branch, value:{...result, localHead:head}};
+      return {output:'To ' + remoteUrl + '\n   ' + tracking.lastPush.slice(0, 7) + '..' + result.commitSha.slice(0, 7) + '  ' + branch + ' -> ' + branch, value:{...result, localHead:head}};
     }
 
     async run(args = [], context = {}) {
@@ -803,7 +803,7 @@
         const subcommand = command[1] || '-v';
         if (subcommand === '-v' || subcommand === '--verbose') {
           const url = await this._readConfig(repository, 'remote.origin.url');
-          return {output:url ? 'origin\\t' + url + ' (fetch)\\norigin\\t' + url + ' (push)' : '', value:url ? [{name:'origin',url:String(url)}] : []};
+          return {output:url ? 'origin\t' + url + ' (fetch)\\norigin\\t' + url + ' (push)' : '', value:url ? [{name:'origin',url:String(url)}] : []};
         }
         if (subcommand === 'add') {
           const name = command[2];
