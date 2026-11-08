@@ -812,12 +812,18 @@
           const lines = branches.map(name => (name === current ? '* ' : '  ') + name);
           return {output:lines.join('\\n'), value:branches.map(name => ({name, current:name === current}))};
         }
-        if (args[0] === '-d' || args[0] === '-D' || args[0] === '--delete') {
+        if (args[0] === '-d' || args[0] === '--delete') {
           const name = args[1];
           if (!name || args.length > 2) throw new Error('git branch: specify one branch to delete.');
+          const current = await this.git.currentBranch({fs:this.fs, dir:repository.dir, fullname:false});
+          if (name === current) throw new Error('Cannot delete the currently checked out branch.');
+          const head = await this.git.resolveRef({fs:this.fs, dir:repository.dir, ref:'HEAD'});
+          const target = await this.git.resolveRef({fs:this.fs, dir:repository.dir, ref:'refs/heads/' + name});
+          if (!(await this.git.isDescendent({fs:this.fs, dir:repository.dir, oid:head, ancestor:target}))) throw new Error('Branch ' + name + ' is not fully merged. Force deletion is not supported yet.');
           await this.git.deleteBranch({fs:this.fs, dir:repository.dir, ref:name});
           return {output:'Deleted branch ' + name + '.', value:true};
         }
+        if (args[0] === '-D') throw new Error('git branch -D is not supported; unmerged branches are protected.');
         if (args.length !== 1 || args[0].startsWith('-')) throw new Error('git branch: supported forms are --list, <name>, and -d <name>.');
         await this.git.branch({fs:this.fs, dir:repository.dir, ref:args[0]});
         return {output:'Created branch ' + args[0] + '.', value:args[0]};
