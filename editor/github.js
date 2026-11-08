@@ -429,7 +429,7 @@
   function resolveGitHubRepositoryUrl(value, parentOwner, parentRepo) {
     let raw = String(value || '').trim();
     if (!raw) throw new Error('A submodule has an empty repository URL.');
-    raw = raw.replace(/^git@github\.com:/i, 'https://github.com/').replace(/^ssh:\/\/git@github\.com\//i, 'https://github.com/');
+    raw = raw.replace(/^git@github\.com:/i, 'https://github.com/').replace(/^ssh:\/\/git@github\.com\//i, 'https://github.com/').replace(/^git:\/\/github\.com\//i, 'https://github.com/');
     let url;
     try { url = new URL(raw, `https://github.com/${encodeURIComponent(parentOwner)}/${encodeURIComponent(parentRepo)}`); }
     catch (_) { throw new Error(`Invalid submodule repository URL: ${raw}`); }
@@ -821,7 +821,7 @@
         message,
         allChanges
       );
-      return {changed:true, changes, commitSha, initialized:true};
+      return {changed:true, changes:allChanges, commitSha, initialized:true};
     }
     try {
       const blobs = await withConcurrency(allChanges.filter(x => x.type !== 'deleted' && x.type !== 'gitlink'), 4, async change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:(await createBlob(owner, repo, change.data)).sha}));
