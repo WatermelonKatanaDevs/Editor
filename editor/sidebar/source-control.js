@@ -150,7 +150,11 @@
       }
       const hasRemoteSubmodules = state.gitRemote?.provider === 'github' && (state.gitSubmodules || []).some(module => !module.removed);
       localGitMode = !hasRemoteSubmodules && (!!localGitRepository?.isRepository || preferLocal || !github?.isSignedIn?.());
-      if (!localGitMode) syncSelection();
+      if (localGitMode && state.gitRemote?.provider === 'github') {
+        selected = {owner:String(state.gitRemote.owner || ''), repo:String(state.gitRemote.repo || ''), branch:String(state.gitRemote.branch || 'main')};
+        selectionProjectId = String(state.projectId || 'workspace');
+        saveConfig();
+      } else if (!localGitMode) syncSelection();
       renderShell();
       if (localGitMode) {
         if (localGitRepository?.isRepository) {
