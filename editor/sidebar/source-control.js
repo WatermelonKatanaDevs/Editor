@@ -447,6 +447,9 @@
         if (!pushed.changed) throw new Error('The GitHub repository was created, but there were no files to publish.');
         const head = (await service.detect('/')).head || '';
         state.gitRemote = {provider:'github', owner:String(owner), repo:String(repoName), branch:String(branch), revision:pushed.commitSha};
+        selected = {owner:String(owner), repo:String(repoName), branch:String(branch)};
+        selectionProjectId = String(state.projectId || 'workspace');
+        saveConfig();
         await service.runSerialized(['config', 'remote.origin.url', 'https://github.com/' + owner + '/' + repoName + '.git'], {cwd:'/'});
         await service.runSerialized(['config', 'branch.' + branch + '.remote', 'origin'], {cwd:'/'});
         await service.runSerialized(['config', 'branch.' + branch + '.merge', 'refs/heads/' + branch], {cwd:'/'});
