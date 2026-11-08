@@ -4,7 +4,7 @@
     const mime = String(file.mime || '');
     const base = String(file.name || file.path || '').split('/').pop().toLowerCase();
     const ext = base.includes('.') ? base.split('.').pop() : '';
-    if (['map', 'txt', 'lock'].includes(ext) ||
+    if (['txt', 'lock'].includes(ext) ||
       ['license', 'licence', 'authors', 'author'].includes(base)) return false;
     return mime.startsWith('text/') || textMimes.includes(mime) || mime === 'image/svg+xml' || String(file.name || '').toLowerCase().endsWith('.obj');
   }
@@ -15,7 +15,7 @@
     if (base === 'readme') return 'markdown';
     const ext = base.split('.').pop();
     return ({
-      js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',jsx:'javascript',json:'json',webmanifest:'json',
+      js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',jsx:'javascript',json:'json',map:'json',webmanifest:'json',
       html:'html',htm:'html',ejs:'html',jst:'html',css:'css',scss:'scss',less:'less',md:'markdown',xml:'xml',yaml:'yaml',yml:'yaml',
       py:'python',pyw:'python',gyp:'python',gypi:'python',java:'java',cs:'csharp',csx:'csharp',
       rs:'rust',rb:'ruby',rake:'ruby',php:'php',kt:'kotlin',kts:'kotlin',c:'c',h:'c',cpp:'cpp',cc:'cpp',cxx:'cpp',hpp:'cpp',hxx:'cpp',
