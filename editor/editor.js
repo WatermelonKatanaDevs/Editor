@@ -1344,6 +1344,15 @@ window.__editorInitPromise = (async function () {
     return groups;
   }
 
+  window.addEventListener('editor-preview-views-changed', event => {
+    const fileId = String(event.detail?.fileId || '');
+    if (!fileId) return;
+    for (const group of getAllWorkbenchGroups()) {
+      const tab = group.tabs?.find(item => item.id === fileId);
+      if (tab && group.active === tab.id) renderViewBar(group, tab);
+    }
+  });
+
   function openFile(path, target) {
     path = normalize(path);
     if (!state.fs?.existsSync(path)) return;
