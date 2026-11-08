@@ -108,7 +108,7 @@
     let THREE,renderer,scene,camera,controls,modelRoot=null,mixer=null,clock=null,raf=0,resizeObserver=null;
     let grid=null,axes=null,skeletonHelper=null,wireframe=false,showGrid=true,showAxes=false,background=0x202124;
     let animationActions=[],activeAction=null,animationSelect=null,playButton=null,timeSlider=null,timeLabel=null;
-    let disposed=false,modelFiles=new Map(),objectURLs=new Map(),selectedRoot=null,modelInfo=null;
+    let disposed=false,modelFiles=new Map(),objectURLs=new Map(),selectedRoot=null,modelInfo=null,activeModelPath=ctx.file.path;
     const cleanup=()=>{
       disposed=true;cancelAnimationFrame(raf);resizeObserver?.disconnect();controls?.dispose();renderer?.dispose();
       for(const url of objectURLs.values())URL.revokeObjectURL(url);
@@ -137,7 +137,7 @@
       let raw=String(requested||'').split(/[?#]/)[0];
       try{raw=decodeURIComponent(raw);}catch(_){}
       const clean=pathJoin('',raw);
-      const candidates=[clean,pathJoin(ctx.file.path.split('/').slice(0,-1).join('/'),clean),...([...modelFiles.keys()].filter(k=>k.endsWith('/'+clean)||k.split('/').pop()===clean))];
+      const candidates=[clean,pathJoin(activeModelPath.split('/').slice(0,-1).join('/'),clean),pathJoin(ctx.file.path.split('/').slice(0,-1).join('/'),clean),...([...modelFiles.keys()].filter(k=>k.endsWith('/'+clean)||k.split('/').pop()===clean))];
       for(const c of candidates)if(objectURLs.has(c))return objectURLs.get(c);
       const name=clean.split('/').pop();
       for(const [k,v] of modelFiles)if(k.split('/').pop()===name)return objectURLs.get(k);
@@ -284,6 +284,7 @@
       return {object,animations};
     }
     async function loadModel(name,data){
+      activeModelPath=name;
       overlay.style.display='flex';overlay.textContent='Loading '+name+'…';
       try{
         clearModel();
@@ -344,8 +345,7 @@
       }
     }
     try{
-      const mods=await loadModules();THREE=mods.THREE;
-      Object.assign(THREE,mods);
+      const mods=await loadModules();THREE={...mods.THREE,...mods};
       const width=Math.max(320,ui.canvasHost.clientWidth||800),height=Math.max(240,ui.canvasHost.clientHeight||520);
       renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false,powerPreference:'high-performance'});
       renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));renderer.setSize(width,height,false);
@@ -380,6 +380,25 @@
       ui.drop.addEventListener('drop',e=>{e.preventDefault();ui.drop.classList.remove('dragover');if(e.dataTransfer?.files?.length)addFiles(e.dataTransfer.files).catch(err=>{overlay.style.display='flex';overlay.textContent=err.message;});});
       canvas.addEventListener('dragover',e=>{if(e.dataTransfer?.files?.length)e.preventDefault();});
       canvas.addEventListener('drop',e=>{if(e.dataTransfer?.files?.length){e.preventDefault();addFiles(e.dataTransfer.files).catch(err=>status(err.message));}});
+      const handleWorkspaceDrop=async e=>{
+        const raw=e.dataTransfer?.getData('application/x-file-manager-paths');
+        if(!raw)return;
+        e.preventDefault();
+        let paths=[];try{paths=JSON.parse(raw);}catch(_){paths=[raw];}
+        let main=null;
+        for(const path of paths){
+          try{
+            const data=ctx.state.fs.readFileSync(path,'binary');
+            if(data==null)continue;
+            addResource(path,bytesOf(data),MIME[String(path).split('.').pop().toLowerCase()]);
+            if(!main&&EXTENSIONS.test(path))main=path;
+          }catch(_){}
+        }
+        if(main)await loadModel(main,modelFiles.get(main).data);
+        else status('Added '+paths.length+' workspace resource(s). Reload the model to apply new textures.');
+      };
+      ui.canvasHost.addEventListener('dragover',e=>{if(e.dataTransfer?.types?.includes('application/x-file-manager-paths')||e.dataTransfer?.files?.length)e.preventDefault();});
+      ui.canvasHost.addEventListener('drop',e=>handleWorkspaceDrop(e).catch(err=>status(err.message)));
       ui.drop.style.display='none';overlay.style.display='none';
       status('Ready · drag a texture or model into the viewer to add it');
     }catch(error){
