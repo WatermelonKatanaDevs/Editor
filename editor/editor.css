@@ -61,6 +61,23 @@ body { margin:0; font-family:sans-serif; background:var(--editor-bg); color:var(
     #sendBtn { background:var(--editor-surface); color:#0f0; border:none; padding:6px 12px; cursor:pointer; }
     #tree ul { list-style:none; padding-left:16px; margin:0; }
     #tree li { cursor:pointer; margin:2px 0; padding: 2px 4px; }
+    #tree li.hidden-file > svg,
+    #tree li.hidden-file > img,
+    #tree li.hidden-file > .arrow,
+    #tree li.hidden-file > .file-tree-label,
+    .archive-tree li.hidden-file > svg,
+    .archive-tree li.hidden-file > img,
+    .archive-tree li.hidden-file > .arrow,
+    .archive-tree li.hidden-file > .file-tree-label { opacity: .48; }
+    #tree li.hidden-file:hover > svg,
+    #tree li.hidden-file:hover > img,
+    #tree li.hidden-file:hover > .arrow,
+    #tree li.hidden-file:hover > .file-tree-label,
+    .archive-tree li.hidden-file:hover > svg,
+    .archive-tree li.hidden-file:hover > img,
+    .archive-tree li.hidden-file:hover > .arrow,
+    .archive-tree li.hidden-file:hover > .file-tree-label { opacity: .72; }
+
     #tree li.selected-file { background:#094771; color:#fff; }
     #tree li.selected-file:hover:not(:has(li:hover)) { background:#0e639c; }
     #tree li:hover:not(:has(li:hover)), li.draghover { background:var(--editor-border); }
