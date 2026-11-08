@@ -1435,6 +1435,122 @@
       })();
 
       /**
+       * vm (browser-compatible subset)
+       *
+       * ytdl-core uses vm.Script(code).runInNewContext({sig/ncode}) to
+       * execute YouTube's signature and throttling transforms. The worker
+       * cannot create a separate V8 isolate, so contexts are lightweight
+       * scoped objects rather than security boundaries.
+       */
+      polyfills.vm = (function() {
+        const module = { exports: {} };
+        const contexts = new WeakSet();
+        const blockedHostGlobals = new Set([
+          'process', 'require', 'module', 'exports', 'Buffer',
+          'fileSystem', 'nodeEmulator', 'network', 'polyfills',
+          'window', 'document', 'self'
+        ]);
+        const executeInContext = new Function('code', 'with (this) { return eval(code); }');
+
+        function normalizeOptions(options) {
+          return typeof options === 'string' ? {filename:options} : (options || {});
+        }
+
+        function createContext(sandbox = {}) {
+          if (sandbox == null || typeof sandbox !== 'object') {
+            throw new TypeError('The sandbox argument must be an object.');
+          }
+          if (contexts.has(sandbox)) return sandbox;
+          if (!Object.prototype.hasOwnProperty.call(sandbox, 'globalThis')) {
+            Object.defineProperty(sandbox, 'globalThis', {value:sandbox, writable:true, configurable:true});
+          }
+          if (!Object.prototype.hasOwnProperty.call(sandbox, 'global')) {
+            Object.defineProperty(sandbox, 'global', {value:sandbox, writable:true, configurable:true});
+          }
+          contexts.add(sandbox);
+          return sandbox;
+        }
+
+        function createScope(context) {
+          return new Proxy(context, {
+            has(target, key) {
+              return key !== Symbol.unscopables && key !== 'code';
+            },
+            get(target, key, receiver) {
+              if (key === Symbol.unscopables) return undefined;
+              if (Reflect.has(target, key)) return Reflect.get(target, key, receiver);
+              if (typeof key === 'string' && blockedHostGlobals.has(key)) return undefined;
+              return globalThis[key];
+            },
+            set(target, key, value) {
+              target[key] = value;
+              return true;
+            }
+          });
+        }
+
+        function withSourceURL(code, options) {
+          const filename = String(options?.filename || '').replace(/[\r\n]/g, '');
+          return filename ? String(code) + '\n//# sourceURL=' + filename : String(code);
+        }
+
+        function runInNewContext(code, sandbox = {}, options = {}) {
+          const context = createContext(sandbox);
+          return executeInContext.call(createScope(context), withSourceURL(code, normalizeOptions(options)));
+        }
+
+        function runInContext(code, context, options = {}) {
+          if (!context || !contexts.has(context)) {
+            throw new TypeError('The context argument must be a contextified object. Use vm.createContext() first.');
+          }
+          return executeInContext.call(createScope(context), withSourceURL(code, normalizeOptions(options)));
+        }
+
+        function runInThisContext(code, options = {}) {
+          return (0, eval)(withSourceURL(code, normalizeOptions(options)));
+        }
+
+        class Script {
+          constructor(code, options = {}) {
+            if (typeof code !== 'string' && !(code instanceof String)) {
+              throw new TypeError('The "code" argument must be of type string.');
+            }
+            this.code = String(code);
+            this.options = normalizeOptions(options);
+            // Compile at construction, like vm.Script, without executing it.
+            new Function(this.code);
+          }
+
+          runInNewContext(sandbox = {}, options = {}) {
+            return runInNewContext(this.code, sandbox, {...this.options, ...normalizeOptions(options)});
+          }
+
+          runInContext(context, options = {}) {
+            return runInContext(this.code, context, {...this.options, ...normalizeOptions(options)});
+          }
+
+          runInThisContext(options = {}) {
+            return runInThisContext(this.code, {...this.options, ...normalizeOptions(options)});
+          }
+
+          createCachedData() {
+            return new Uint8Array(0);
+          }
+        }
+
+        module.exports = {
+          Script,
+          createContext,
+          isContext: context => !!context && contexts.has(context),
+          runInNewContext,
+          runInContext,
+          runInThisContext,
+          createScript: (code, options) => new Script(code, options)
+        };
+        return module.exports;
+      })();
+
+      /**
        * url
        */
       polyfills.url = (function() {
