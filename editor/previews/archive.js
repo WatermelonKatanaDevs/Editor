@@ -584,7 +584,7 @@
             }
           });
           if (!fileCount) showMessage(viewer, 'This archive does not contain any visible files.');
-          if (modelPackage?.isPackage || (modelPackage?.externalReferences > 0 && !modelPackage?.unresolvedReferences?.length && !modelPackage?.parseError)) {
+          if (modelPackage?.isPackage) {
             await showModelViewer();
             archiveStatus.textContent = '3D model package · '+modelPackage.referencedAssets+' referenced assets · '+fileCount+' files';
           } else if (modelPackage) {
