@@ -881,13 +881,6 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .editor-hdr-panorama-toolbar span,.editor-hdr-panorama-toolbar button{pointer-events:auto;background:#10151dcc;border:1px solid #ffffff26;border-radius:5px;color:#e7edf4;padding:7px 10px;font-size:11px;backdrop-filter:blur(8px)}
 .editor-hdr-panorama-toolbar button{cursor:pointer}
 .editor-hdr-panorama-overlay{position:absolute;inset:0;display:grid;place-items:center;color:#cbd5e1;background:#080a0dcc;font-size:12px;pointer-events:none}
-.editor-archive-model-button{border:1px solid #526a82;border-radius:4px;background:#233548;color:#dcecff;padding:5px 9px;font-size:11px;cursor:pointer;white-space:nowrap}
-.editor-archive-model-button[hidden]{display:none}
-.editor-archive-model-button.active{background:#35516d;border-color:#78a9d8}
-.editor-archive-model-host{position:absolute;inset:38px 0 0 0;display:none;min-width:0;min-height:0;overflow:hidden;background:#111}
-.editor-archive-preview{position:relative}
-.editor-archive-model-host>.editor-3d-viewer{height:100%;min-height:0}
-.editor-archive-model-host .editor-3d-workspace{min-height:0}
 
 .editor-3d-material-users{display:block;color:#9eacbb;font-size:9px;line-height:1.4;overflow-wrap:anywhere}
 .editor-3d-material-empty{padding:10px;border:1px solid #454b55;border-radius:4px;background:#242a32;color:#c5cfda;font-size:10px;line-height:1.5}
@@ -897,8 +890,3 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .editor-3d-material .editor-3d-map-details strong{font-size:10px}
 .editor-3d-material .editor-3d-map-details small{font-size:9px;line-height:1.4}
 .editor-3d-side-tabs button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-/* Keep the embedded-model action visible in the archive header. */
-.editor-archive-topbar .editor-archive-title{flex:1 1 auto}
-.editor-archive-topbar .editor-archive-status{flex:0 1 auto;max-width:32%}
-.editor-archive-topbar .editor-archive-model-button{flex:0 0 auto;min-height:24px;padding:4px 8px;font-size:10px}
