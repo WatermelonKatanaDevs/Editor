@@ -4351,6 +4351,26 @@
 
     globalThis.NPM = WorkerNPMProxy;
 
+    class WorkerGitProxy {
+      constructor(options = {}) {
+        this.rootfolder = String(options.rootfolder || getRuntimeRootFolder());
+      }
+
+      async run(args) {
+        return await rpc('git.run', {
+          args: Array.from(args || []),
+          rootfolder: this.rootfolder,
+          cwd: nodeEmulator.cwd || '/'
+        });
+      }
+    }
+
+    function getGitManager() {
+      if (!nodeEmulator.git) nodeEmulator.git = new WorkerGitProxy({rootfolder:getRuntimeRootFolder()});
+      else nodeEmulator.git.rootfolder = getRuntimeRootFolder();
+      return nodeEmulator.git;
+    }
+
     function splitTerminalCommand(command) {
       return WorkerNPMProxy.splitCommand(command);
     }
@@ -4995,6 +5015,7 @@
       this._socketBridges = new Map();
       this._serverState = new Map();
       this.npm = null;
+      this.git = null;
       this._destroyed = false;
       this._capabilityToken = (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') ? globalThis.crypto.randomUUID() : `${Math.random().toString(36).slice(2)}.${Date.now()}.${Math.random()}`;
       this.contextReady = this._initialize();
@@ -5213,6 +5234,13 @@
         this.dispatchEvent('filesystemchange');
         return result;
       }
+      if (method === 'git.run') {
+        const git = this._getGitManager();
+        const result = await git.runSerialized(payload?.args || [], {cwd:payload?.cwd || '/'});
+        await this.syncFilesystem();
+        this.dispatchEvent('filesystemchange');
+        return result;
+      }
       throw new Error(`Unknown host request: ${method}`);
     }
 
@@ -5237,6 +5265,14 @@
         });
       } else this.npm.rootfolder = runtimeRoot;
       return this.npm;
+    }
+
+    _getGitManager() {
+      const GitClass = globalThis.LocalGitService || globalThis.parent?.LocalGitService;
+      if (!GitClass) throw new Error('Local Git support has not loaded.');
+      const runtimeRoot = String(this.rootfolder || '').replace(/^\/+|\/+$/g, '');
+      if (!this.git) this.git = new GitClass(this.filesystem, {rootfolder:runtimeRoot});
+      return this.git;
     }
 
     async _handleNetworkRequest(request, type) {
