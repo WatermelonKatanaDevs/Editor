@@ -47,12 +47,25 @@
     return value;
   }
 
-  function skipLimits(bytes, state) {
+  function readUleb64(bytes, state) {
+    let result = 0n;
+    let shift = 0n;
+    for (let i = 0; i < 10; i++) {
+      if (state.offset >= bytes.length) throw new Error('Unexpected end of WebAssembly section.');
+      const byte = bytes[state.offset++];
+      result |= BigInt(byte & 0x7f) << shift;
+      if (!(byte & 0x80)) return result;
+      shift += 7n;
+    }
+    throw new Error('Invalid WebAssembly 64-bit integer.');
+  }
+
+  function skipLimits(bytes, state, allow64 = false) {
     const flags = readUleb(bytes, state);
-    readUleb(bytes, state);
-    if (flags & 1) readUleb(bytes, state);
-    if (flags & 2) readUleb(bytes, state);
-    if (flags & 4) readUleb(bytes, state);
+    const readLimit = allow64 && (flags & 4) ? readUleb64 : readUleb;
+    readLimit(bytes, state);
+    if (flags & 1) readLimit(bytes, state);
+    // Flag 0x2 marks a shared memory; it does not add another limit value.
   }
 
   function parseImports(bytes, section) {
@@ -70,7 +83,7 @@
       else if (kind === 1) {
         detail.referenceType = bytes[state.offset++];
         skipLimits(bytes, state);
-      } else if (kind === 2) skipLimits(bytes, state);
+      } else if (kind === 2) skipLimits(bytes, state, true);
       else if (kind === 3) {
         detail.valueType = bytes[state.offset++];
         detail.mutable = !!bytes[state.offset++];
