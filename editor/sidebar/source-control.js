@@ -12,6 +12,7 @@
     let statusToken = 0;
     let historyToken = 0;
     let commitBusy = false;
+    let currentDiffState = null;
     let selectionProjectId = null;
     function esc(value) { return String(value ?? '').replace(/[&<>\"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\\':'&#39;'}[ch])); }
     function loadConfig() {
@@ -265,6 +266,7 @@
         }
         const submoduleRoots = (state.gitSubmodules || []).filter(module => !module.removed && !module.parentPath);
         const changes = await github.compareWorkingTree(state.fs, remote.tree, {excludePaths:submoduleRoots.map(module => module.path)});
+        currentDiffState = {remote, changes};
         const submoduleStatuses = await github.getSubmoduleStatuses(state.fs, state.gitSubmodules || []);
         if (token !== statusToken) return;
         const renderSubmodules = (items, depth = 0, parentBranch = selected.branch || 'main') => (items || []).map(module => {
@@ -343,9 +345,10 @@
         if (!showHidden && settingsChanged) visibleChanges.push({path:'.editor', type:'modified', settings:true});
         changesEl.innerHTML = visibleChanges.length ? visibleChanges.map(c => {
           if (c.settings) return `<div class="source-control-change"><span class="source-control-change-type source-modified">M</span><span>Settings changed</span></div>`;
-          return `<div class="source-control-change"><span class="source-control-change-type source-${c.type}">${c.type === 'modified' ? 'M' : c.type === 'added' ? 'A' : 'D'}</span><span>${esc(c.path)}</span></div>`;
+          return `<button type="button" class="source-control-change source-control-change-open" data-diff-path="${esc(c.path)}" title="View changes in ${esc(c.path)}"><span class="source-control-change-type source-${c.type}">${c.type === 'modified' ? 'M' : c.type === 'added' ? 'A' : 'D'}</span><span>${esc(c.path)}</span><span class="source-control-diff-indicator">Diff</span></button>`;
         }).join('') : '<div class="source-control-clean">No changes</div>';
         changesEl.dataset.count = String(changes.length);
+        changesEl.querySelectorAll('[data-diff-path]').forEach(row => row.addEventListener('click', () => openFileDiff(row.dataset.diffPath)));
         const button = tree.querySelector('[data-commit]');
         const isInitialCommit = !!remote.empty || !remote.commitSha;
         if (button) {
@@ -363,6 +366,80 @@
         changesEl.innerHTML = `<div class="source-control-error">${esc(e.message || String(e))}</div>`;
         const button = tree.querySelector('[data-commit]');
         if (button) button.disabled = true;
+      }
+    }
+
+    async function openFileDiff(path) {
+      const snapshot = currentDiffState;
+      if (!snapshot || !state.fs || !selected.repo) return;
+      const change = snapshot.changes.find(item => item.path === path);
+      if (!change) return;
+      const oldEntry = (snapshot.remote.tree || []).find(entry => entry.path === path && entry.type === 'blob');
+      const modal = document.createElement('div');
+      modal.className = 'source-control-diff-modal';
+      modal.innerHTML = `
+        <style>
+          .source-control-diff-modal{position:fixed;inset:0;z-index:10020;background:#000b;display:flex;align-items:center;justify-content:center;padding:22px;box-sizing:border-box}
+          .source-control-diff-dialog{width:min(1500px,100%);height:min(900px,100%);min-height:320px;background:var(--editor-bg,#111);border:1px solid var(--editor-border-strong,#555);border-radius:7px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 70px #0009}
+          .source-control-diff-head{height:42px;flex:none;display:flex;align-items:center;gap:12px;padding:0 14px;background:var(--editor-surface,#222);border-bottom:1px solid var(--editor-border,#333)}
+          .source-control-diff-head strong{font:13px/1.3 sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+          .source-control-diff-head span{font:11px sans-serif;color:var(--editor-muted,#aaa)}
+          .source-control-diff-close{background:transparent;border:0;color:var(--editor-text,#eee);font-size:22px;cursor:pointer;padding:2px 7px}
+          .source-control-diff-body{position:relative;flex:1;min-height:0}
+          .source-control-diff-editor{position:absolute;inset:0}
+          .source-control-diff-error{padding:18px;color:var(--editor-muted,#aaa);font:13px sans-serif}
+          .source-control-change-open{width:100%;text-align:left;color:inherit;font:inherit;cursor:pointer}
+          .source-control-change-open:hover{background:var(--editor-hover,#333)}
+          .source-control-diff-indicator{margin-left:auto;color:var(--editor-muted,#888);font-size:10px;opacity:0}
+          .source-control-change-open:hover .source-control-diff-indicator{opacity:1}
+        </style>
+        <div class="source-control-diff-dialog" role="dialog" aria-modal="true" aria-label="File diff">
+          <div class="source-control-diff-head"><strong>${esc(path)}</strong><span>${change.type === 'added' ? 'Added' : change.type === 'deleted' ? 'Deleted' : 'Modified'} · Read only</span><button type="button" class="source-control-diff-close" aria-label="Close">×</button></div>
+          <div class="source-control-diff-body"><div class="source-control-diff-editor"></div></div>
+        </div>`;
+      document.body.appendChild(modal);
+      const host = modal.querySelector('.source-control-diff-editor');
+      let diffEditor = null, originalModel = null, modifiedModel = null;
+      const close = () => {
+        try { diffEditor?.dispose(); } catch (_) {}
+        try { originalModel?.dispose(); } catch (_) {}
+        try { modifiedModel?.dispose(); } catch (_) {}
+        modal.remove();
+      };
+      modal.querySelector('.source-control-diff-close').addEventListener('click', close);
+      modal.addEventListener('click', event => { if (event.target === modal) close(); });
+      const onKey = event => { if (event.key === 'Escape' && modal.isConnected) { close(); document.removeEventListener('keydown', onKey); } };
+      document.addEventListener('keydown', onKey);
+      try {
+        const monaco = await state.ensureMonaco();
+        if (!modal.isConnected) return;
+        const decode = bytes => new TextDecoder('utf-8', {fatal:false}).decode(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []));
+        const oldText = change.type === 'added' ? '' : oldEntry?.sha ? decode(await github.readBlob(selected.owner, selected.repo, oldEntry.sha)) : '';
+        const newText = change.type === 'deleted' ? '' : decode(change.data || new Uint8Array());
+        if (oldText.includes('\0') || newText.includes('\0')) throw new Error('This file appears to be binary and cannot be shown as a text diff.');
+        const language = window.EditorMonacoLanguage?.(path) || 'plaintext';
+        const uri = monaco.Uri.parse('inmemory://watermelonkatana-diff/' + encodeURIComponent(path).replace(/%2F/g, '/'));
+        originalModel = monaco.editor.createModel(oldText, language, uri.with({path:uri.path + '.original'}));
+        modifiedModel = monaco.editor.createModel(newText, language, uri.with({path:uri.path + '.modified'}));
+        diffEditor = monaco.editor.createDiffEditor(host, {
+          theme:window.EditorTheme?.id || 'vs-dark',
+          readOnly:true,
+          originalEditable:false,
+          renderSideBySide:true,
+          automaticLayout:true,
+          minimap:{enabled:false},
+          scrollBeyondLastLine:false,
+          ignoreTrimWhitespace:false,
+          diffCodeLens:false,
+          renderOverviewRuler:true,
+          hideUnchangedRegions:{enabled:true,contextLineCount:3,minimumLineCount:5}
+        });
+        diffEditor.setModel({original:originalModel,modified:modifiedModel});
+        diffEditor.getOriginalEditor().updateOptions({readOnly:true,domReadOnly:true,wordWrap:'off',lineNumbers:'on'});
+        diffEditor.getModifiedEditor().updateOptions({readOnly:true,domReadOnly:true,wordWrap:'off',lineNumbers:'on'});
+        requestAnimationFrame(() => { try { diffEditor?.layout(); } catch (_) {} });
+      } catch (error) {
+        host.innerHTML = '<div class="source-control-diff-error">' + esc(error?.message || String(error)) + '</div>';
       }
     }
 
