@@ -335,6 +335,113 @@
           fileManager.setFileSystem(archiveFileSystem);
           fileManager.render();
           innerManager = createReadOnlyPreviewManager(archiveFileSystem);
+
+          // Let archive entries (including whole folders and multi-selection)
+          // be dragged directly into the real workspace Explorer. The archive
+          // remains read-only: dropping always copies bytes into the workspace.
+          const workspaceState = ctx.state;
+          const workspaceTree = document.getElementById('tree');
+          const dragType = 'application/x-watermelonkatana-archive-items';
+
+          const selectedArchivePaths = node => {
+            const selected = [...(fileManager.selectedNodes || [])]
+              .filter(path => fileManager.nodeByPath.has(path));
+            if (!selected.includes(node.path)) return [node.path];
+            // Remove descendants when their parent folder is already selected.
+            return selected.filter(path => !selected.some(parent =>
+              parent !== path && path.startsWith(parent + '/') &&
+              fileManager.nodeByPath.get(parent)?.isDir
+            ));
+          };
+
+          tree.addEventListener('dragstart', event => {
+            const row = event.target.closest('li[data-path]');
+            const node = row && fileManager.nodeByPath.get(row.dataset.path);
+            if (!node || !event.dataTransfer) return;
+            const paths = selectedArchivePaths(node);
+            event.dataTransfer.setData(dragType, JSON.stringify(paths));
+            event.dataTransfer.setData('text/plain', paths.map(path => path.split('/').pop()).join(', '));
+            event.dataTransfer.effectAllowed = 'copy';
+            row.classList.add('archive-dragging');
+            event.dataTransfer.setDragImage(row, 12, 12);
+          });
+          tree.addEventListener('dragend', () => {
+            tree.querySelectorAll('.archive-dragging').forEach(row => row.classList.remove('archive-dragging'));
+          });
+          tree.querySelectorAll('li[data-path]').forEach(row => {
+            row.draggable = true;
+            row.addEventListener('dragstart', () => row.classList.add('archive-dragging'));
+          });
+
+          const destinationForDrop = event => {
+            const row = event.target.closest('#tree li[data-path]');
+            const target = row && workspaceState.fileManager?.nodeByPath?.get(row.dataset.path);
+            if (!target) return '';
+            return target.isDir ? target.path : target.path.slice(0, Math.max(0, target.path.lastIndexOf('/')));
+          };
+          const handleArchiveDrop = async event => {
+            const raw = event.dataTransfer?.getData(dragType);
+            if (!raw) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            let paths;
+            try { paths = JSON.parse(raw); } catch (_) { return; }
+            if (!Array.isArray(paths) || !workspaceState.fs?.writeFileSync) return;
+
+            const base = destinationForDrop(event);
+            const writes = [];
+            for (const sourcePath of paths) {
+              const sourceNode = fileManager.nodeByPath.get(sourcePath);
+              if (!sourceNode) continue;
+              const prefix = sourceNode.isDir ? sourcePath + '/' : null;
+              const filesToCopy = sourceNode.isDir
+                ? [...archiveFileSystem.provider.cache.keys()].filter(path => path.startsWith(prefix))
+                : [sourcePath];
+              for (const archivePath of filesToCopy) {
+                const relative = sourceNode.isDir
+                  ? archivePath.slice(prefix.length)
+                  : sourceNode.name;
+                const destination = [base, sourceNode.isDir ? sourceNode.name : '', relative]
+                  .filter(Boolean).join('/');
+                const bytes = archiveFileSystem.provider.cache.get(archivePath);
+                if (bytes) writes.push({ path: destination, bytes });
+              }
+            }
+            if (!writes.length) return;
+            const collisions = writes.filter(item => workspaceState.fs.existsSync?.(item.path));
+            if (collisions.length && !confirm('Replace ' + collisions.length + ' existing file' +
+              (collisions.length === 1 ? '' : 's') + ' in the workspace?')) return;
+
+            for (const item of writes) {
+              const slash = item.path.lastIndexOf('/');
+              if (slash > 0) workspaceState.fs.mkdirSync?.(item.path.slice(0, slash));
+              workspaceState.fs.writeFileSync(item.path, item.bytes);
+              workspaceState.markDirty?.(item.path);
+            }
+            workspaceState.fileManager?.refresh?.();
+            workspaceState.updateStatus?.();
+            workspaceTree?.dispatchEvent(new CustomEvent('archive-files-copied', {
+              bubbles: true, detail: { paths: writes.map(item => item.path) }
+            }));
+            archiveStatus.textContent = 'Copied ' + writes.length + ' file' +
+              (writes.length === 1 ? '' : 's') + ' into workspace';
+          };
+
+          if (workspaceTree) {
+            workspaceTree.addEventListener('dragover', event => {
+              if (!event.dataTransfer?.types?.includes(dragType)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = 'copy';
+            }, true);
+            workspaceTree.addEventListener('drop', handleArchiveDrop, true);
+          }
+          ctx.addCleanup(() => {
+            if (workspaceTree) {
+              workspaceTree.removeEventListener('drop', handleArchiveDrop, true);
+            }
+          });
           if (!fileCount) showMessage(viewer, 'This archive does not contain any visible files.');
         } catch (error) {
           if (ctx.isCurrent()) {
