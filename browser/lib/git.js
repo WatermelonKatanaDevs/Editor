@@ -791,6 +791,11 @@
       if (!updated.clean) throw new Error('The branch ref was updated, but the working tree did not finish checking out cleanly. Inspect Git status before continuing.');
       const newHead = updated.head || status.head;
       if (result.alreadyMerged) return {output:'Already up to date. ' + status.branch + ' already contains ' + target + '.', value:{changed:false, head:newHead, branch:status.branch}};
+      if (result.fastForward && target.startsWith('refs/remotes/origin/')) {
+        await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPushedLocal', value:newHead});
+        await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPush', value:newHead});
+        await this.adapter.flush();
+      }
       return {output:'Fast-forwarded ' + status.branch + ' to ' + target + ' (' + String(newHead).slice(0, 7) + ').', value:{changed:!!result.fastForward, head:newHead, previousHead:status.head, branch:status.branch, target}};
     }
 
@@ -1241,7 +1246,9 @@
         try { await this.adapter.flush(); }
         catch (flushError) {
           if (!operationError) throw flushError;
-          operationError.message = String(operationError.message || operationError) + ' Git metadata also failed to flush: ' + String(flushError.message || flushError);
+          const error = operationError instanceof Error ? operationError : new Error(String(operationError));
+          error.message += ' Git metadata also failed to flush: ' + String(flushError.message || flushError);
+          operationError = error;
         }
         if (operationError) throw operationError;
         return result;
