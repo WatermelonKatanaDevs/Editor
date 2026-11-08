@@ -916,3 +916,7 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .source-control-diff-tab-editor>.monaco-editor,
 .source-control-diff-tab-editor .monaco-editor,
 .source-control-diff-tab-editor .overflow-guard{height:100%}
+
+/* Album artwork palette: primary drives the controls; secondary is restrained. */
+.editor-audio-card{border-color:color-mix(in srgb,var(--audio-cover-secondary,#ffffff) 18%,#ffffff16)}
+.editor-audio-tag{border-color:color-mix(in srgb,var(--audio-cover-secondary,#ffffff) 24%,#ffffff1a)}
