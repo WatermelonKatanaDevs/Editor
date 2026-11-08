@@ -19,8 +19,7 @@
     ICRD: 'year',
     ITRK: 'track',
     IGNR: 'genre',
-    ICMT: 'comment',
-    IENG: 'composer'
+    ICMT: 'comment'
   };
   const INFO_IDS = Object.fromEntries(Object.entries(INFO_FIELDS).map(([key, value]) => [value, key]));
   const encoder = new TextEncoder();
