@@ -567,7 +567,8 @@
         branch:remoteBranch,
         message:String(entry.commit.message || '').trim(),
         fs:this.filesystem,
-        changesOverride:changes
+        changesOverride:changes,
+        expectedRemoteSha:tracking.lastPush
       });
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPushedLocal', value:head});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPush', value:result.commitSha});
