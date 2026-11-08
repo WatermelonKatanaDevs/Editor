@@ -146,7 +146,8 @@
         worker.terminate();
         reject(new Error(event.message || 'The 7-Zip archive worker failed.'));
       };
-      worker.postMessage({ buffer }, [buffer]);
+      const extension = String(ctx.file.name || '').split('.').pop().toLowerCase();
+      worker.postMessage({ buffer, extension }, [buffer]);
     });
 
     if (!ctx.isCurrent()) return null;
@@ -243,8 +244,8 @@
     match(file) {
       const name = String(file.name || file.path || '');
       const mime = String(file.mime || '').toLowerCase();
-      return /\.(?:zip|7z)$/i.test(name) ||
-        ['application/zip', 'application/x-zip-compressed', 'application/x-7z-compressed', 'application/x-7z-compressed-tar'].includes(mime);
+      return /\.(?:zip|7z|gz|tgz|tar|rar)$/i.test(name) ||
+        ['application/zip', 'application/x-zip-compressed', 'application/x-7z-compressed', 'application/x-7z-compressed-tar', 'application/gzip', 'application/x-gzip', 'application/x-tar', 'application/vnd.rar', 'application/x-rar-compressed'].includes(mime);
     },
     views: [{
       id: 'archive-preview',
@@ -304,11 +305,10 @@
         try {
           const binary = ctx.readBinary();
           if (!binary || !binary.length) throw new Error('This archive is empty.');
-          const isSevenZip = /\.7z$/i.test(ctx.file.name) ||
-            ['application/x-7z-compressed', 'application/x-7z-compressed-tar'].includes(String(ctx.file.mime || '').toLowerCase());
-          const loaded = isSevenZip
-            ? await loadSevenZipArchive(ctx, binary, archiveStatus)
-            : await loadZipArchive(ctx, binary, archiveStatus);
+          const isZip = /\.zip$/i.test(ctx.file.name) || ['application/zip', 'application/x-zip-compressed'].includes(String(ctx.file.mime || '').toLowerCase());
+          const loaded = isZip
+            ? await loadZipArchive(ctx, binary, archiveStatus)
+            : await loadSevenZipArchive(ctx, binary, archiveStatus);
           if (!loaded || !ctx.isCurrent()) return;
 
           const entries = [];
