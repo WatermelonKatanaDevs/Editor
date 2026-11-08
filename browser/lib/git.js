@@ -595,6 +595,8 @@
         for (const entry of entries) {
           const path = String(entry?.path || '');
           if (!path || path.startsWith('/') || path.includes('\\') || path.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('GitHub returned an invalid path in its remote Git tree.');
+          const validModes = entry.type === 'tree' ? ['040000'] : entry.type === 'commit' ? ['160000'] : ['100644', '100755', '120000'];
+          if (!validModes.includes(String(entry.mode))) throw new Error('GitHub returned an unsupported Git mode at ' + path + '.');
           const slash = path.lastIndexOf('/');
           const parent = slash < 0 ? '' : path.slice(0, slash);
           if (parent && !treesByPath.has(parent)) throw new Error('The remote Git tree is incomplete at ' + parent + '.');
@@ -666,7 +668,8 @@
         if (writtenCommit !== sha) throw new Error('The remote commit could not be reconstructed byte-for-byte (expected ' + sha.slice(0, 7) + ', got ' + writtenCommit.slice(0, 7) + '). Its signature or metadata format may not be supported yet, so the remote ref was not changed.');
         const shallowPath = repository.root.replace(/\/+$/, '') + '/.git/shallow';
         let shallowText = '';
-        try { shallowText = await this.fs.promises.readFile(shallowPath, {encoding:'utf8'}); } catch (_) {}
+        try { shallowText = await this.fs.promises.readFile(shallowPath, {encoding:'utf8'}); }
+        catch (error) { if (error?.code !== 'ENOENT') throw error; }
         const shallow = new Set(String(shallowText || '').split(/\r?\n/).filter(Boolean));
         let missingParent = false;
         for (const parent of commitObject.parent) {
@@ -685,7 +688,7 @@
       const changed = !!previousHead && previousHead !== sha;
       const differsFromLastPush = !!lastPush && lastPush !== sha;
       return {
-        output:(alreadyFetched ? 'Already fetched' : 'Fetched') + ' origin/' + branch + ' at ' + sha.slice(0, 7) + (differsFromLastPush ? ' (different from the last pushed commit).' : '.') + (alreadyFetched ? '' : ' Downloaded ' + blobCount + ' blob(s) and ' + treeCount + ' tree(s); the working tree was not changed.'),
+        output:(alreadyFetched ? 'Already fetched' : 'Fetched') + ' origin/' + branch + ' at ' + sha.slice(0, 7) + (differsFromLastPush ? ' (different from the last pushed commit).' : '.') + (alreadyFetched ? '' : ' Downloaded ' + blobCount + ' blob(s) and ' + treeCount + ' tree(s), plus the tip commit. Older history may still need to be fetched; the working tree was not changed.'),
         value:{branch, commitSha:sha, changed, differsFromLastPush, downloadedObjects:!alreadyFetched, blobs:blobCount, trees:treeCount, commit:!alreadyFetched}
       };
     }
@@ -1066,7 +1069,7 @@
         if (args.some(arg => arg.startsWith('-'))) throw new Error('git push: force, tags, and other options are not supported.');
         return await this.push(cwd, args[0] || 'origin', args[1] || null);
       }
-      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, branch, switch, checkout, tag (lightweight), remote, fetch (remote head check), push, rev-parse.', value:null};
+      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, branch, switch, checkout, tag (lightweight), remote, fetch (GitHub objects), push, rev-parse.', value:null};
       throw new Error('git: command not implemented yet: ' + operation);
     }
 
