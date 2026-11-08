@@ -1,5 +1,6 @@
 (function () {
   const textMimes = ['application/json','application/manifest+json','application/javascript','application/typescript','application/xml','application/xhtml+xml','model/gltf+json'];
+  window.EditorMonacoLanguage = language;
   function match(file) {
     const mime = String(file.mime || '');
     const base = String(file.name || file.path || '').split('/').pop().toLowerCase();
