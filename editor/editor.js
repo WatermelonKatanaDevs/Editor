@@ -791,7 +791,8 @@ window.__editorInitPromise = (async function () {
       lastSavedAt: extra.lastSavedAt ?? state.lastSavedAt ?? existing.lastSavedAt ?? 0,
       lastCachedAt: extra.lastCachedAt ?? existing.lastCachedAt ?? 0,
       unsaved: extra.unsaved ?? state.dirty ?? false,
-      gitConnected: extra.gitConnected ?? (state.gitRemote?.provider === 'github') ?? existing.gitConnected ?? false,
+      gitConnected: extra.gitConnected ?? (state.gitRemote?.provider === 'github' ? true : existing.gitConnected ?? false),
+      localGitConnected: extra.localGitConnected ?? existing.localGitConnected ?? false,
       gitRemote: extra.gitRemote ?? (state.gitRemote?.provider === 'github' ? {
         provider: 'github',
         owner: String(state.gitRemote.owner || ''),
@@ -814,6 +815,79 @@ window.__editorInitPromise = (async function () {
   }
   function cacheRequest(id) {
     return new Request(new URL('./__editor_cache__/' + encodeURIComponent(id), location.href).href);
+  }
+
+  const LOCAL_FOLDER_DB = 'wk-editor-local-folders';
+  let localFolderDbPromise = null;
+  function openLocalFolderDb() {
+    if (!('indexedDB' in window)) return Promise.resolve(null);
+    if (!localFolderDbPromise) localFolderDbPromise = new Promise(resolve => {
+      const request = indexedDB.open(LOCAL_FOLDER_DB, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains('handles')) request.result.createObjectStore('handles');
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
+    });
+    return localFolderDbPromise;
+  }
+  async function storeLocalFolderHandle(id, handle) {
+    if (!id || !handle) return false;
+    const db = await openLocalFolderDb();
+    if (!db) return false;
+    return new Promise(resolve => {
+      try {
+        const transaction = db.transaction('handles', 'readwrite');
+        transaction.objectStore('handles').put(handle, String(id));
+        transaction.oncomplete = () => resolve(true);
+        transaction.onerror = transaction.onabort = () => resolve(false);
+      } catch (_) { resolve(false); }
+    });
+  }
+  async function getLocalFolderHandle(id) {
+    if (!id) return null;
+    const db = await openLocalFolderDb();
+    if (!db) return null;
+    return new Promise(resolve => {
+      try {
+        const request = db.transaction('handles', 'readonly').objectStore('handles').get(String(id));
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => resolve(null);
+      } catch (_) { resolve(null); }
+    });
+  }
+  async function deleteLocalFolderHandle(id) {
+    if (!id) return;
+    const db = await openLocalFolderDb();
+    if (!db) return;
+    try { db.transaction('handles', 'readwrite').objectStore('handles').delete(String(id)); } catch (_) {}
+  }
+  async function updateLocalGitConnection(fs = state.fs, id = state.projectId) {
+    if (!fs?.isPersistentDirectory || typeof window.LocalGitService !== 'function' || !id) return false;
+    let connected = false;
+    try { connected = !!(await new window.LocalGitService(fs).detect('/')).isRepository; } catch (_) {}
+    const record = recentProjects().find(item => item.id === id);
+    if (record) {
+      record.localGitConnected = connected;
+      writeRecentProjects(recentProjects().map(item => item.id === id ? record : item));
+    }
+    return connected;
+  }
+  async function loadRecentProject(record) {
+    const handle = await getLocalFolderHandle(record.id);
+    if (handle && typeof FileSystemDirectoryHandle !== 'undefined' && handle instanceof FileSystemDirectoryHandle) {
+      let permission = await handle.queryPermission?.({mode:'readwrite'});
+      if (permission !== 'granted' && typeof handle.requestPermission === 'function') permission = await handle.requestPermission({mode:'readwrite'});
+      if (permission === 'granted') {
+        const fs = await FileSystem.create(handle, {sync:true});
+        await replaceFileSystem(fs, record.name, true, {projectId:record.id});
+        await storeLocalFolderHandle(record.id, handle);
+        await updateLocalGitConnection(fs, record.id);
+        return true;
+      }
+    }
+    return await loadCachedRecent(record);
   }
   async function saveProjectCache(force = false) {
     if (!state.fs || !state.projectId || state.loading) return false;
@@ -2324,6 +2398,10 @@ window.__editorInitPromise = (async function () {
       const projectName = zipSource ? stripZipProjectName(name) : (name || 'Workspace');
       if (zipSource) updateRemoteLoadProgress('Starting workspace…', 97, projectName || 'Workspace');
       await replaceFileSystem(fs, projectName || 'Workspace', true);
+      if (directoryHandleSource) {
+        await storeLocalFolderHandle(state.projectId, filesystemSource);
+        await updateLocalGitConnection(fs, state.projectId);
+      }
       closeImportModal();
       if (zipSource && remoteLoadProgress) {
         updateRemoteLoadProgress('Local project ready', 100, 'Workspace loaded');
@@ -3437,10 +3515,13 @@ window.__editorInitPromise = (async function () {
         await cache.delete(cacheRequest(id));
       } catch (_) {}
     }
+    await deleteLocalFolderHandle(id);
     return !!record;
   }
   async function clearRecentProjectCache() {
+    const previousRecords = recentProjects();
     writeRecentProjects([]);
+    await Promise.all(previousRecords.map(record => deleteLocalFolderHandle(record.id)));
     try {
       for (const key of Object.keys(localStorage)) {
         if (key.startsWith(LAYOUT_KEY_PREFIX)) localStorage.removeItem(key);
@@ -3456,7 +3537,7 @@ window.__editorInitPromise = (async function () {
   function formatRecent(record) {
     const time = record.lastOpenedAt ? new Date(record.lastOpenedAt).toLocaleDateString([], {month:'short', day:'numeric'}) : '';
     const type = record.type === 'node' ? 'Node.js' : 'Static';
-    const git = record.gitConnected ? ' • Git connected' : '';
+    const git = record.gitConnected ? ' • GitHub connected' : record.localGitConnected ? ' • Local Git connected' : '';
     return `<strong>${escapeHTML(record.name)}</strong><span>${type}${time ? ' • ' + time : ''}${git}${record.unsaved ? ' • Unsaved' : ''}</span>`;
   }
   async function loadCachedRecent(record) {
@@ -3542,7 +3623,8 @@ window.__editorInitPromise = (async function () {
           if (!record) return;
           busy = true;
           button.disabled = true;
-          await loadCachedRecent(record);
+          const loaded = await loadRecentProject(record);
+          if (!loaded) busy = false;
           githubUnsubscribe?.(); modal.remove();
         };
       });
