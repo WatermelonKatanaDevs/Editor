@@ -41,7 +41,8 @@
     map.type = 'importmap';
     map.textContent = JSON.stringify({imports:{
       'three':CDN+'/build/three.module.js',
-      'three/addons/':CDN+'/examples/jsm/'
+      'three/addons/':CDN+'/examples/jsm/',
+      'fflate':'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js'
     }});
     document.head.appendChild(map);
     window.__editorThreeImportMap = true;
@@ -51,7 +52,7 @@
     if (!modulesPromise) modulesPromise = (async()=>{
       installImportMap();
       const THREE = await import(CDN+'/build/three.module.js');
-      const [controls,gltf,obj,mtl,fbx,stl,ply,collada,tds,threeMF,amf,vrml,usd,vtk,pcd,xyz,gcode,md2,bvh] = await Promise.all([
+      const [controls,gltf,obj,mtl,fbx,stl,ply,collada,tds,threeMF,amf,vrml,usd,vtk,pcd,xyz,gcode,md2,bvh,draco,ktx2,meshopt] = await Promise.all([
         import(CDN+'/examples/jsm/controls/OrbitControls.js'),
         import(CDN+'/examples/jsm/loaders/GLTFLoader.js'),
         import(CDN+'/examples/jsm/loaders/OBJLoader.js'),
@@ -70,9 +71,12 @@
         import(CDN+'/examples/jsm/loaders/XYZLoader.js'),
         import(CDN+'/examples/jsm/loaders/GCodeLoader.js'),
         import(CDN+'/examples/jsm/loaders/MD2Loader.js'),
-        import(CDN+'/examples/jsm/loaders/BVHLoader.js')
+        import(CDN+'/examples/jsm/loaders/BVHLoader.js'),
+        import(CDN+'/examples/jsm/loaders/DRACOLoader.js'),
+        import(CDN+'/examples/jsm/loaders/KTX2Loader.js'),
+        import(CDN+'/examples/jsm/libs/meshopt_decoder.module.js')
       ]);
-      return {THREE,OrbitControls:controls.OrbitControls,GLTFLoader:gltf.GLTFLoader,OBJLoader:obj.OBJLoader,MTLLoader:mtl.MTLLoader,FBXLoader:fbx.FBXLoader,STLLoader:stl.STLLoader,PLYLoader:ply.PLYLoader,ColladaLoader:collada.ColladaLoader,TDSLoader:tds.TDSLoader,ThreeMFLoader:threeMF.ThreeMFLoader,AMFLoader:amf.AMFLoader,VRMLLoader:vrml.VRMLLoader,USDLoader:usd.USDLoader,VTKLoader:vtk.VTKLoader,PCDLoader:pcd.PCDLoader,XYZLoader:xyz.XYZLoader,GCodeLoader:gcode.GCodeLoader,MD2Loader:md2.MD2Loader,BVHLoader:bvh.BVHLoader};
+      return {THREE,OrbitControls:controls.OrbitControls,GLTFLoader:gltf.GLTFLoader,OBJLoader:obj.OBJLoader,MTLLoader:mtl.MTLLoader,FBXLoader:fbx.FBXLoader,STLLoader:stl.STLLoader,PLYLoader:ply.PLYLoader,ColladaLoader:collada.ColladaLoader,TDSLoader:tds.TDSLoader,ThreeMFLoader:threeMF.ThreeMFLoader,AMFLoader:amf.AMFLoader,VRMLLoader:vrml.VRMLLoader,USDLoader:usd.USDLoader,VTKLoader:vtk.VTKLoader,PCDLoader:pcd.PCDLoader,XYZLoader:xyz.XYZLoader,GCodeLoader:gcode.GCodeLoader,MD2Loader:md2.MD2Loader,BVHLoader:bvh.BVHLoader,DRACOLoader:draco.DRACOLoader,KTX2Loader:ktx2.KTX2Loader,MeshoptDecoder:meshopt.MeshoptDecoder};
     })();
     return modulesPromise;
   }
@@ -258,6 +262,9 @@
       const url=objectURLs.get(name);
       if(ext==='gltf'||ext==='glb'){
         const loader=new THREE.GLTFLoader(manager);
+        const dracoLoader=new THREE.DRACOLoader(manager).setDecoderPath(CDN+'/examples/jsm/libs/draco/');
+        const ktx2Loader=new THREE.KTX2Loader(manager).setTranscoderPath(CDN+'/examples/jsm/libs/basis/').detectSupport(renderer);
+        loader.setDRACOLoader(dracoLoader);loader.setKTX2Loader(ktx2Loader);loader.setMeshoptDecoder(THREE.MeshoptDecoder);
         const gltf=await loader.parseAsync(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),url?url.substring(0,url.lastIndexOf('/')+1):'');
         object=gltf.scene||gltf.scenes?.[0];animations=gltf.animations||[];
       }else if(ext==='fbx'){const result=new THREE.FBXLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength), '');object=result;animations=result.animations||[];}
