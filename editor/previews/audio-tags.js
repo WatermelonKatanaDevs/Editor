@@ -241,6 +241,32 @@
     };
   }
 
+  const ID3V1_GENRES = [
+    'Blues','Classic Rock','Country','Dance','Disco','Funk','Grunge','Hip-Hop','Jazz','Metal','New Age','Oldies','Other','Pop','R&B','Rap','Reggae','Rock','Techno','Industrial','Alternative','Ska','Death Metal','Pranks','Soundtrack','Euro-Techno','Ambient','Trip-Hop','Vocal','Jazz+Funk','Fusion','Trance','Classical','Instrumental','Acid','House','Game','Sound Clip','Gospel','Noise','AlternRock','Bass','Soul','Punk','Space','Meditative','Instrumental Pop','Instrumental Rock','Ethnic','Gothic','Darkwave','Techno-Industrial','Electronic','Pop-Folk','Eurodance','Dream','Southern Rock','Comedy','Cult','Gangsta','Top 40','Christian Rap','Pop/Funk','Jungle','Native American','Cabaret','New Wave','Psychedelic','Rave','Showtunes','Trailer','Lo-Fi','Tribal','Acid Punk','Acid Jazz','Polka','Retro','Musical','Rock & Roll','Hard Rock'
+  ];
+
+  function parseID3v1(bytes) {
+    if (bytes.length < 128) return null;
+    const offset = bytes.length - 128;
+    if (String.fromCharCode(...bytes.subarray(offset, offset + 3)) !== 'TAG') return null;
+    const readField = (start, length) => decodeText(bytes.subarray(offset + start, offset + start + length), 0).replace(/\u0000+$/g, '').trim();
+    const tags = {
+      title: readField(3, 30),
+      artist: readField(33, 30),
+      album: readField(63, 30),
+      year: readField(93, 4),
+      comment: readField(97, 30)
+    };
+    if (bytes[offset + 125] === 0 && bytes[offset + 126] !== 0) {
+      tags.comment = readField(97, 28);
+      tags.track = String(bytes[offset + 126]);
+    }
+    const genre = bytes[offset + 127];
+    if (genre !== 255) tags.genre = ID3V1_GENRES[genre] || String(genre);
+    for (const key of Object.keys(tags)) if (!tags[key]) delete tags[key];
+    return tags;
+  }
+
   function read(value, kind) {
     const bytes = bytesOf(value);
     const isWav = kind === 'wav' || (bytes.length >= 12 && String.fromCharCode(...bytes.subarray(0, 4)) === 'RIFF');
@@ -249,6 +275,10 @@
       return { ...parsed, format: 'wav' };
     }
     const parsed = parseID3(bytes, 0) || { tags: {}, picture: null, frames: [], major: 4, end: 0 };
+    const legacy = parseID3v1(bytes);
+    if (legacy) {
+      for (const [key, value] of Object.entries(legacy)) if (!parsed.tags[key]) parsed.tags[key] = value;
+    }
     return { ...parsed, format: 'mp3' };
   }
 
@@ -318,7 +348,10 @@
     const bytes = bytesOf(value);
     const tag = buildID3(metadata, parsed.frames, picture, replacePicture);
     const audioOffset = parsed.end || 0;
-    const audio = bytes.subarray(audioOffset);
+    const hasID3v1 = bytes.length >= 128 &&
+      String.fromCharCode(...bytes.subarray(bytes.length - 128, bytes.length - 125)) === 'TAG';
+    const audioEnd = hasID3v1 ? bytes.length - 128 : bytes.length;
+    const audio = bytes.subarray(audioOffset, audioEnd);
     return joinBytes([tag, audio]);
   }
 
