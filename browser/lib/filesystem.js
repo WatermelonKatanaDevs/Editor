@@ -15,6 +15,10 @@
       this.provider.directories = this.directories;
     }
 
+    get isPersistentDirectory() {
+      return this.sourceMode === 1 && !!this.provider?.dirHandle;
+    }
+
     _normalize(path) {
       const parts = String(path ?? '').replace(/\\/g,'/').split('/').filter(Boolean);
       const out = [];
@@ -181,6 +185,17 @@
       return await this.provider.permissionState?.() || 'granted';
     }
 
+    async requestPermission() {
+      if (!this.canSave()) throw new Error('This workspace does not have a writable File System API source.');
+      if (typeof this.provider.requestPermission === 'function') return await this.provider.requestPermission();
+      return await this.permissionState();
+    }
+
+    async flush() {
+      if (typeof this.provider.flush === 'function') await this.provider.flush();
+      return true;
+    }
+
     async save() {
       if (!this.canSave()) throw new Error('This workspace does not have a writable File System API source.');
       return await this.provider.save();
@@ -225,6 +240,8 @@
       this.sync = sync;
       this.cache = new Map();
       this.directories = new Set(['']);
+      this.writeQueue = Promise.resolve();
+      this.writeErrors = [];
     }
     async init() {
       await this._readDir(this.dirHandle, '');
@@ -242,31 +259,42 @@
         }
       }
     }
+    _queuePersist(operation) {
+      const task = this.writeQueue.catch(() => {}).then(operation);
+      this.writeQueue = task.catch(error => { this.writeErrors.push(error); });
+      return task;
+    }
     write(path, binary, original) {
       this.cache.set(path, binary);
-      if (this.sync) {
-        this._persistFile(path, binary);
-      }
+      if (this.sync) this._queuePersist(() => this._persistFile(path, binary));
     }
     delete(path) {
       const deleted = this.cache.delete(path);
-      if (deleted && this.sync) {
-        this._persistDelete(path);
-      }
+      if (deleted && this.sync) this._queuePersist(() => this._persistDelete(path));
       return deleted;
     }
-    mkdir(path) { if (this.sync) this._persistDirectory(path); }
+    mkdir(path) { if (this.sync) this._queuePersist(() => this._persistDirectory(path)); }
     async _persistDirectory(path) {
       const parts = String(path).split('/').filter(Boolean);
       let curr = this.dirHandle;
       for (const part of parts) curr = await curr.getDirectoryHandle(part, { create: true });
     }
-    removeDirectory(path) { if (this.sync) this._persistRemoveDirectory(path); }
+    removeDirectory(path) { if (this.sync) this._queuePersist(() => this._persistRemoveDirectory(path)); }
     async _persistRemoveDirectory(path) {
       const parts = String(path).split('/').filter(Boolean);
       const name = parts.pop();
       let curr = this.dirHandle;
-      try { for (const p of parts) curr = await curr.getDirectoryHandle(p); await curr.removeEntry(name, { recursive: true }); } catch (e) {}
+      try {
+        for (const p of parts) curr = await curr.getDirectoryHandle(p);
+      } catch (error) {
+        if (error?.name === 'NotFoundError') return;
+        throw error;
+      }
+      try {
+        await curr.removeEntry(name, { recursive: true });
+      } catch (error) {
+        if (error?.name !== 'NotFoundError') throw error;
+      }
     }
     async _persistFile(path, binary) {
       const parts = path.split('/');
@@ -275,8 +303,13 @@
       for (const p of parts) curr = await curr.getDirectoryHandle(p, { create: true });
       const fh = await curr.getFileHandle(fileName, { create: true });
       const writable = await fh.createWritable();
-      await writable.write(binary);
-      await writable.close();
+      try {
+        await writable.write(binary);
+        await writable.close();
+      } catch (error) {
+        try { await writable.abort?.(); } catch (_) {}
+        throw error;
+      }
     }
     async _persistDelete(path) {
       const parts = path.split('/');
@@ -285,16 +318,31 @@
       try {
         for (const p of parts) curr = await curr.getDirectoryHandle(p);
         await curr.removeEntry(fileName);
-      } catch (e) {}
+      } catch (error) {
+        if (error?.name !== 'NotFoundError') throw error;
+      }
     }
     async permissionState() {
       if (typeof this.dirHandle?.queryPermission !== 'function') return 'granted';
       try { return await this.dirHandle.queryPermission({ mode: 'readwrite' }); } catch (_) { return 'denied'; }
     }
-    async save() {
-      for (const [path, binary] of this.cache) {
-        await this._persistFile(path, binary);
+    async requestPermission() {
+      if (typeof this.dirHandle?.requestPermission !== 'function') return await this.permissionState();
+      try { return await this.dirHandle.requestPermission({ mode: 'readwrite' }); } catch (_) { return 'denied'; }
+    }
+    async flush() {
+      await this.writeQueue;
+      if (this.writeErrors.length) {
+        const errors = this.writeErrors.splice(0);
+        const error = new Error('Unable to persist ' + errors.length + ' filesystem operation' + (errors.length === 1 ? '' : 's') + '. ' + (errors[0]?.message || errors[0]));
+        error.errors = errors;
+        throw error;
       }
+      return true;
+    }
+    async save() {
+      for (const [path, binary] of this.cache) this._queuePersist(() => this._persistFile(path, binary));
+      await this.flush();
       return null;
     }
     async exportZip() {
