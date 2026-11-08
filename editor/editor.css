@@ -587,3 +587,21 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .editor-font-status{padding:9px 11px;border:1px solid #477d59;border-radius:4px;background:#1b3827;color:#b9e3c4;font-size:11px;line-height:1.5}
 .editor-font-status.is-error{border-color:#855052;background:#402629;color:#f2c7c8}
 @media(max-width:620px){.editor-font-controls{align-items:stretch;flex-direction:column;gap:10px}.editor-font-sample-card{grid-template-columns:minmax(0,1fr)}}
+
+
+/* Generic binary and native-addon inspector */
+.editor-binary-preview{box-sizing:border-box;display:flex;flex-direction:column;gap:12px;width:100%;height:100%;min-height:0;overflow:auto;padding:clamp(14px,2.4vw,24px);background:var(--editor-surface-2);color:var(--editor-text-secondary);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.editor-binary-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--editor-divider)}
+.editor-binary-heading{min-width:0}
+.editor-binary-heading h2{margin:0 0 4px;color:var(--editor-text);font-size:17px;font-weight:650}
+.editor-binary-heading p{margin:0;color:var(--editor-muted-2);font-size:11px;overflow-wrap:anywhere}
+.editor-binary-format{flex:0 0 auto;padding:5px 8px;border:1px solid #506d83;border-radius:4px;background:#223746;color:#c8e7fa;font-size:10px;font-weight:700;letter-spacing:.1em}
+.editor-binary-stats{display:flex;flex-wrap:wrap;gap:8px}
+.editor-binary-stats span{padding:6px 9px;border:1px solid var(--editor-divider);border-radius:4px;background:var(--editor-surface);color:var(--editor-text-secondary);font-size:11px}
+.editor-binary-note{color:var(--editor-muted-2);font-size:11px;line-height:1.5}
+.editor-binary-hex{display:flex;flex-direction:column;min-width:640px;overflow:auto;padding:8px;border:1px solid var(--editor-divider);border-radius:5px;background:#101820;color:#d4e2eb;font:11px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace}
+.editor-binary-row{display:grid;grid-template-columns:76px minmax(390px,1fr) 150px;gap:12px;white-space:pre}
+.editor-binary-address{color:#6f91a5;user-select:none}
+.editor-binary-bytes{color:#d7e5ed}
+.editor-binary-ascii{color:#a5c99d}
+.editor-binary-empty{padding:10px;color:var(--editor-muted-2)}
