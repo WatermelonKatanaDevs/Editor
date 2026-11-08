@@ -880,14 +880,17 @@
       if (head === tracking.lastPushedLocal) return {output:'Everything up-to-date', value:{changed:false, head}};
       const {entry, changes} = await this._getCommitChanges(repository, head);
       const parents = entry.commit.parent || [];
-      if (parents.length > 1) throw new Error('This local merge commit is saved safely, but publishing merge commits to GitHub is not supported by the current snapshot-push flow yet.');
+      const isMergeCommit = parents.length === 2;
+      if (parents.length > 2) throw new Error('Git octopus merges cannot be published by the current GitHub integration.');
       const parent = parents[0] || '';
       if (parent !== tracking.lastPushedLocal) throw new Error('Your local branch has multiple unpushed commits or its history diverged. Fetch is available, but publishing that history is not supported yet.');
       if (!window.GitHubService?.isSignedIn?.()) throw new Error('Sign in to GitHub before pushing this repository.');
       if (typeof window.GitHubService.commitAndPush !== 'function' || typeof window.GitHubService.getRemoteState !== 'function') throw new Error('GitHub push support has not loaded.');
       const remoteBranch = branchName || branch;
+      const expectedRemoteSha = isMergeCommit ? tracking.lastFetch : tracking.lastPush;
+      if (isMergeCommit && (!expectedRemoteSha || parents[1] !== expectedRemoteSha)) throw new Error('This merge commit does not match the most recently fetched origin commit. Fetch again and create a new merge before pushing.');
       const remote = await window.GitHubService.getRemoteState(owner, repo, remoteBranch);
-      if (String(remote.commitSha || '') !== tracking.lastPush) throw new Error('The GitHub branch has changed since your last push. Fetch the remote first; merging or rebasing those changes is not implemented yet, so this push was stopped to avoid overwriting remote work.');
+      if (String(remote.commitSha || '') !== String(expectedRemoteSha || '')) throw new Error('The GitHub branch has changed since the local commit was based on it. Fetch and reconcile the remote changes before retrying.');
       if (!changes.length) throw new Error('The local commit contains no file changes to push.');
       const result = await window.GitHubService.commitAndPush({
         owner,
@@ -896,7 +899,8 @@
         message:String(entry.commit.message || '').trim(),
         fs:this.filesystem,
         changesOverride:changes,
-        expectedRemoteSha:tracking.lastPush
+        expectedRemoteSha,
+        parentsOverride:isMergeCommit ? [tracking.lastPush, tracking.lastFetch] : null
       });
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPushedLocal', value:head});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPush', value:result.commitSha});
