@@ -188,8 +188,11 @@
     const m = newLines.length;
     const max = n + m;
     const trace = [];
+    let visited = 0;
     let v = new Map([[1, 0]]);
     for (let d = 0; d <= max; d++) {
+      visited += d + 1;
+      if (visited > 2000000) return [...oldLines.map(line => ({type:'-', line})), ...newLines.map(line => ({type:'+', line}))];
       trace.push(new Map(v));
       for (let k = -d; k <= d; k += 2) {
         const left = v.has(k - 1) ? v.get(k - 1) : -Infinity;
