@@ -505,6 +505,7 @@
       console.error('[3D Viewer]',error);
     }
   }
+  window.Editor3DModelPreview = { create: createViewer };
   window.EditorPreviewProviders=window.EditorPreviewProviders||[];
   window.EditorPreviewProviders.push({
     id:'model-3d',
