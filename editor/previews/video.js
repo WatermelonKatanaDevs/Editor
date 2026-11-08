@@ -312,7 +312,7 @@
       },
       {
         id: 'video-native',
-        label: 'Native',
+        label: 'Raw',
         priority: 80,
         create: makeNative
       }
