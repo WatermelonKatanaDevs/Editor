@@ -518,8 +518,9 @@
       const lastFetchBranch = await this._readConfig(repository, 'remote.origin.lastFetchBranch') || '';
       const lastFetchAt = await this._readConfig(repository, 'remote.origin.lastFetchAt') || '';
       const lastFetchComplete = await this._readConfig(repository, 'remote.origin.lastFetchComplete') || '';
+      const lastFetchShallow = await this._readConfig(repository, 'remote.origin.lastFetchShallow') || '';
       const remoteUpdated = !!lastFetch && !!lastPush && String(lastFetchBranch) === String(branch) && String(lastFetch) !== String(lastPush);
-      return {remoteUrl:remoteUrl ? String(remoteUrl) : null, branch, head, lastPushedLocal:String(lastPushedLocal), lastPush:String(lastPush), lastFetch:String(lastFetch), lastFetchBranch:String(lastFetchBranch), lastFetchAt:String(lastFetchAt), lastFetchComplete:String(lastFetchComplete), remoteUpdated, ahead:!!remoteUrl && !!head && head !== String(lastPushedLocal)};
+      return {remoteUrl:remoteUrl ? String(remoteUrl) : null, branch, head, lastPushedLocal:String(lastPushedLocal), lastPush:String(lastPush), lastFetch:String(lastFetch), lastFetchBranch:String(lastFetchBranch), lastFetchAt:String(lastFetchAt), lastFetchComplete:String(lastFetchComplete), lastFetchShallow:String(lastFetchShallow), remoteUpdated, ahead:!!remoteUrl && !!head && head !== String(lastPushedLocal)};
     }
 
     _parseGitHubRemote(url) {
@@ -660,6 +661,7 @@
         try { await this.git.deleteRef({fs:this.fs, dir:repository.dir, ref}); } catch (_) {}
         await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetch', value:''});
         await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchComplete', value:''});
+        await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchShallow', value:'false'});
         await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchBranch', value:branch});
         await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchAt', value:new Date().toISOString()});
         await this.adapter.flush();
@@ -743,6 +745,7 @@
       await this.git.writeRef({fs:this.fs, dir:repository.dir, ref, value:sha, force:true});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetch', value:sha});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchComplete', value:sha});
+      await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchShallow', value:stoppedAtDepth ? 'true' : 'false'});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchBranch', value:branch});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchAt', value:new Date().toISOString()});
       await this.adapter.flush();
