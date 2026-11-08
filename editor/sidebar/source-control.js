@@ -40,6 +40,9 @@
           return new Uint8Array(value || []);
         };
         const decode = bytes => new TextDecoder('utf-8', {fatal:false}).decode(toBytes(bytes));
+        if (data.type === 'modified' && !data.oldSha) {
+          throw new Error('The previous GitHub version could not be matched to this file. Refresh Source Control and try again.');
+        }
         const oldBytes = data.type === 'added' ? new Uint8Array() : data.oldSha ? await window.GitHubService.readBlob(data.owner, data.repo, data.oldSha) : new Uint8Array();
         if (disposed || !host.isConnected) return wrap;
         const oldText = decode(oldBytes);
@@ -47,8 +50,8 @@
         // Workbench tabs are created asynchronously, and their payload should
         // not be the only source of truth for potentially large binary buffers.
         let workingBytes = data.newBytes || new Uint8Array();
-        if (data.type !== 'deleted' && ctx.state.fs?.readFileSync && data.path) {
-          try { workingBytes = toBytes(ctx.state.fs.readFileSync(data.path, 'binary')); } catch (_) {}
+        if (data.type !== 'deleted' && ctx.state.fs?.readFileSync && (data.fsPath || data.path)) {
+          try { workingBytes = toBytes(ctx.state.fs.readFileSync(data.fsPath || data.path, 'binary')); } catch (_) {}
         }
         const newText = data.type === 'deleted' ? '' : decode(workingBytes);
         if (data.type === 'modified' && !oldText.length && !newText.length) {
