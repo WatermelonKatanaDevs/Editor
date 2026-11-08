@@ -105,7 +105,7 @@
 (function() {
   const root = window.EditorSidebar = window.EditorSidebar || {};
   root.SourceControl = function(options) {
-    const {tree, state} = options;
+    const {tree, state, openDiffTab} = options;
     const github = window.GitHubService;
     const configKey = () => 'editor.github.project.' + encodeURIComponent(state.projectId || 'workspace');
     let repos = [];
@@ -319,13 +319,13 @@
             patch += '--- /dev/null\n+++ b/' + path;
             const lines = text === '' ? [] : text.split('\n');
             if (text.endsWith('\n')) lines.pop();
-            patch += lines.length ? '\n@@ -0,0 +' + lines.length + ' @@\n' + lines.map(line => '+' + line).join('\n') : '\n@@ -0,0 +0,0 @@';
+            patch += lines.length ? '\n@@ -0,0 +1,' + lines.length + ' @@\n' + lines.map(line => '+' + line).join('\n') : '\n@@ -0,0 +0,0 @@';
             if (text && !text.endsWith('\n')) patch += '\n\\ No newline at end of file';
           }
           outputs.push(patch);
         }
         const diffText = outputs.join('\n\n');
-        const tab = state.openDiffTab?.({title:'Diff: ' + path.split('/').pop(), diffData:{path, localDiffText:diffText || 'No text diff is available for this file.'}});
+        const tab = openDiffTab?.({title:'Diff: ' + path.split('/').pop(), diffData:{path, localDiffText:diffText || 'No text diff is available for this file.'}});
         if (!tab) showStatus('Could not open the diff viewer.', true);
       } catch (error) {
         showStatus(error.message || String(error), true);
@@ -356,7 +356,7 @@
     async function openLocalCommit(oid) {
       try {
         const result = await getLocalGit().runSerialized(['show', oid], {cwd:'/'});
-        const tab = state.openDiffTab?.({title:'Commit: ' + oid.slice(0, 7), diffData:{path:'Commit ' + oid.slice(0, 7), localDiffText:result.output}});
+        const tab = openDiffTab?.({title:'Commit: ' + oid.slice(0, 7), diffData:{path:'Commit ' + oid.slice(0, 7), localDiffText:result.output}});
         if (!tab) showStatus('Could not open the commit viewer.', true);
       } catch (error) {
         showStatus(error.message || String(error), true);
@@ -715,7 +715,7 @@
       const change = snapshot.changes.find(item => item.path === path);
       if (!change) return;
       const oldEntry = (snapshot.remote.tree || []).find(entry => entry.path === path && entry.type === 'blob');
-      const tab = state.openDiffTab?.({
+      const tab = openDiffTab?.({
         title:'Diff: ' + path.split('/').pop(),
         diffData:{
           path,
