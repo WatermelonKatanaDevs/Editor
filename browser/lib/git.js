@@ -517,8 +517,9 @@
       const lastFetch = await this._readConfig(repository, 'remote.origin.lastFetch') || '';
       const lastFetchBranch = await this._readConfig(repository, 'remote.origin.lastFetchBranch') || '';
       const lastFetchAt = await this._readConfig(repository, 'remote.origin.lastFetchAt') || '';
+      const lastFetchComplete = await this._readConfig(repository, 'remote.origin.lastFetchComplete') || '';
       const remoteUpdated = !!lastFetch && !!lastPush && String(lastFetchBranch) === String(branch) && String(lastFetch) !== String(lastPush);
-      return {remoteUrl:remoteUrl ? String(remoteUrl) : null, branch, head, lastPushedLocal:String(lastPushedLocal), lastPush:String(lastPush), lastFetch:String(lastFetch), lastFetchBranch:String(lastFetchBranch), lastFetchAt:String(lastFetchAt), remoteUpdated, ahead:!!remoteUrl && !!head && head !== String(lastPushedLocal)};
+      return {remoteUrl:remoteUrl ? String(remoteUrl) : null, branch, head, lastPushedLocal:String(lastPushedLocal), lastPush:String(lastPush), lastFetch:String(lastFetch), lastFetchBranch:String(lastFetchBranch), lastFetchAt:String(lastFetchAt), lastFetchComplete:String(lastFetchComplete), remoteUpdated, ahead:!!remoteUrl && !!head && head !== String(lastPushedLocal)};
     }
 
     _parseGitHubRemote(url) {
@@ -725,6 +726,7 @@
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPushedLocal', value:head});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPush', value:result.commitSha});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetch', value:result.commitSha});
+      await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchComplete', value:''});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchBranch', value:remoteBranch});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchAt', value:new Date().toISOString()});
       await this.adapter.flush();
