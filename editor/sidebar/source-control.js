@@ -7,108 +7,131 @@
       const data = tab.diffData || {};
       const wrap = document.createElement('div');
       wrap.className = 'source-control-diff-tab';
-      wrap.innerHTML = '<div class="source-control-diff-tab-head"><strong></strong><span>Read only</span></div><div class="source-control-diff-tab-editor"></div>';
-      wrap.querySelector('strong').textContent = data.path || 'File diff';
+      const head = document.createElement('div');
+      head.className = 'source-control-diff-tab-head';
+      const heading = document.createElement('strong');
+      heading.textContent = data.path || 'File diff';
+      const status = document.createElement('span');
+      status.textContent = 'Read only';
+      head.append(heading, status);
+      const host = document.createElement('div');
+      host.className = 'source-control-diff-tab-editor';
+      wrap.append(head, host);
       g.viewBody.appendChild(wrap);
-      const host = wrap.querySelector('.source-control-diff-tab-editor');
-      let diffEditor = null, originalModel = null, modifiedModel = null, resizeObserver = null, disposed = false;
-      const cleanup = () => {
-        disposed = true;
-        try { resizeObserver?.disconnect(); } catch (_) {}
-        try { diffEditor?.dispose(); } catch (_) {}
-        try { originalModel?.dispose(); } catch (_) {}
-        try { modifiedModel?.dispose(); } catch (_) {}
+
+      let disposed = false;
+      tab._diffCleanup = () => { disposed = true; };
+      const toBytes = value => {
+        if (value instanceof Uint8Array) return value;
+        if (value instanceof ArrayBuffer) return new Uint8Array(value);
+        if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+        if (typeof value === 'string') {
+          const bytes = new Uint8Array(value.length);
+          for (let i = 0; i < value.length; i++) bytes[i] = value.charCodeAt(i) & 255;
+          return bytes;
+        }
+        if (Array.isArray(value)) return Uint8Array.from(value);
+        return new Uint8Array(value || []);
       };
-      tab._diffCleanup = cleanup;
+      const decode = value => new TextDecoder('utf-8', {fatal:false}).decode(toBytes(value));
       try {
-        const monaco = await ctx.state.ensureMonaco();
-        if (disposed || !host.isConnected) return wrap;
-        // FileSystem implementations may return binary data as a byte array,
-        // an ArrayBuffer, or a binary string. Converting a binary string with
-        // new Uint8Array(string) silently produces zero bytes, which makes the
-        // diff look completely empty.
-        const toBytes = value => {
-          if (value instanceof Uint8Array) return value;
-          if (value instanceof ArrayBuffer) return new Uint8Array(value);
-          if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-          if (typeof value === 'string') {
-            const bytes = new Uint8Array(value.length);
-            for (let i = 0; i < value.length; i++) bytes[i] = value.charCodeAt(i) & 255;
-            return bytes;
-          }
-          if (Array.isArray(value)) return Uint8Array.from(value);
-          return new Uint8Array(value || []);
-        };
-        const decode = bytes => new TextDecoder('utf-8', {fatal:false}).decode(toBytes(bytes));
         if (data.type === 'modified' && !data.oldSha) {
           throw new Error('The previous GitHub version could not be matched to this file. Refresh Source Control and try again.');
         }
-        const oldBytes = data.type === 'added' ? new Uint8Array() : data.oldSha ? await window.GitHubService.readBlob(data.owner, data.repo, data.oldSha) : new Uint8Array();
+        const oldBytes = data.type === 'added'
+          ? new Uint8Array()
+          : data.oldSha
+            ? await window.GitHubService.readBlob(data.owner, data.repo, data.oldSha)
+            : new Uint8Array();
         if (disposed || !host.isConnected) return wrap;
-        const oldText = decode(oldBytes);
-        // Resolve the modified side from the live workspace at render time.
-        // Workbench tabs are created asynchronously, and their payload should
-        // not be the only source of truth for potentially large binary buffers.
+
         let workingBytes = data.newBytes || new Uint8Array();
         if (data.type !== 'deleted' && ctx.state.fs?.readFileSync && (data.fsPath || data.path)) {
-          try {
-            const liveBytes = ctx.state.fs.readFileSync(data.fsPath || data.path, 'binary');
-            if (liveBytes != null) workingBytes = toBytes(liveBytes);
-          } catch (_) {}
+          const liveBytes = ctx.state.fs.readFileSync(data.fsPath || data.path, 'binary');
+          if (liveBytes != null) workingBytes = liveBytes;
         }
+        const oldText = decode(oldBytes);
         const newText = data.type === 'deleted' ? '' : decode(workingBytes);
         if (data.type === 'modified' && !oldText.length && !newText.length) {
-          throw new Error('Both versions of this file were read as empty. The diff was stopped rather than showing a misleading blank comparison.');
+          throw new Error('Both versions were read as empty. The diff was stopped rather than showing a misleading blank comparison.');
         }
-        if (oldText.includes('\0') || newText.includes('\0')) throw new Error('This file appears to be binary and cannot be shown as a text diff.');
-        const language = window.EditorMonacoLanguage?.(data.path) || 'plaintext';
-        const base = 'inmemory://watermelonkatana-diff/' + encodeURIComponent(data.path || 'file') + '-' + Math.random().toString(36).slice(2);
-        originalModel = monaco.editor.createModel(oldText, language, monaco.Uri.parse(base + '.original'));
-        modifiedModel = monaco.editor.createModel(newText, language, monaco.Uri.parse(base + '.modified'));
-        diffEditor = monaco.editor.createDiffEditor(host, {
-          theme:window.EditorTheme?.id || 'vs-dark',
-          readOnly:true,
-          originalEditable:false,
-          renderSideBySide:true,
-          // The tab may be created while its workbench pane is still being
-          // measured. Let Monaco track visibility/size changes itself; the
-          // explicit layout below remains as a fallback for older builds.
-          automaticLayout:true,
-          minimap:{enabled:false},
-          scrollBeyondLastLine:false,
-          ignoreTrimWhitespace:false,
-          diffCodeLens:false,
-          renderOverviewRuler:true,
-          // The bundled Monaco scrollbar can throw in delegateVerticalScrollbarPointerDown
-          // when the diff editor's scrollbar is mounted in a changing workbench tab.
-          // Keep wheel/trackpad scrolling, but avoid the broken draggable scrollbar path.
-          scrollbar:{vertical:'hidden',horizontal:'auto',alwaysConsumeMouseWheel:false},
-          // Keep the full document visible. Monaco's hidden-region controller
-          // can leave the diff panes visually empty when the editor is first
-          // mounted in an inactive/zero-sized workbench tab.
-          hideUnchangedRegions:{enabled:false}
-        });
-        diffEditor.setModel({original:originalModel,modified:modifiedModel});
-        diffEditor.getOriginalEditor().updateOptions({readOnly:true,domReadOnly:true,wordWrap:'off',lineNumbers:'on'});
-        diffEditor.getModifiedEditor().updateOptions({readOnly:true,domReadOnly:true,wordWrap:'off',lineNumbers:'on'});
-        const layout = () => {
-          if (disposed || !host.isConnected) return;
-          const rect = host.getBoundingClientRect();
-          if (rect.width <= 0 || rect.height <= 0) return;
-          try { diffEditor.layout({width:Math.floor(rect.width),height:Math.floor(rect.height)}); } catch (_) {}
+        if (oldText.includes('\\0') || newText.includes('\\0')) {
+          throw new Error('This file appears to be binary and cannot be shown as a text diff.');
+        }
+
+        // Render the comparison directly in the workbench instead of relying
+        // on Monaco's diff widget. Monaco was mounting (overview markers were
+        // visible) but leaving both text panes black in this workbench layout.
+        const oldLines = oldText.replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n').split('\\n');
+        const newLines = newText.replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n').split('\\n');
+        const pairs = [];
+        const n = oldLines.length, m = newLines.length;
+        if (n * m <= 1200000) {
+          const dp = Array.from({length:n + 1}, () => new Uint32Array(m + 1));
+          for (let i = n - 1; i >= 0; i--) {
+            for (let j = m - 1; j >= 0; j--) {
+              dp[i][j] = oldLines[i] === newLines[j]
+                ? dp[i + 1][j + 1] + 1
+                : Math.max(dp[i + 1][j], dp[i][j + 1]);
+            }
+          }
+          let i = 0, j = 0;
+          while (i < n || j < m) {
+            if (i < n && j < m && oldLines[i] === newLines[j]) {
+              pairs.push({oldLine:oldLines[i], newLine:newLines[j], oldNo:i + 1, newNo:j + 1, kind:'same'}); i++; j++;
+            } else if (i < n && (j >= m || dp[i + 1][j] >= dp[i][j + 1])) {
+              pairs.push({oldLine:oldLines[i], newLine:null, oldNo:i + 1, newNo:null, kind:'removed'}); i++;
+            } else {
+              pairs.push({oldLine:null, newLine:newLines[j], oldNo:null, newNo:j + 1, kind:'added'}); j++;
+            }
+          }
+        } else {
+          const count = Math.max(n, m);
+          for (let i = 0; i < count; i++) {
+            const a = oldLines[i] ?? null, b = newLines[i] ?? null;
+            pairs.push({oldLine:a,newLine:b,oldNo:a === null ? null : i + 1,newNo:b === null ? null : i + 1,kind:a === b ? 'same' : a === null ? 'added' : b === null ? 'removed' : 'changed'});
+          }
+        }
+
+        const grid = document.createElement('div');
+        grid.className = 'source-control-diff-grid';
+        const makePane = label => {
+          const pane = document.createElement('section');
+          pane.className = 'source-control-diff-pane';
+          const bar = document.createElement('div');
+          bar.className = 'source-control-diff-pane-title';
+          bar.textContent = label;
+          const body = document.createElement('div');
+          body.className = 'source-control-diff-lines';
+          pane.append(bar, body);
+          return {pane, body};
         };
-        resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(layout) : null;
-        resizeObserver?.observe(host);
-        // Workbench activation and flex sizing settle over multiple frames.
-        // Re-layout after the pane becomes visible, not just at construction.
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          layout();
-          setTimeout(layout, 80);
-          setTimeout(layout, 240);
-        }));
-        window.addEventListener('resize', layout);
-        const priorCleanup = tab._diffCleanup;
-        tab._diffCleanup = () => { window.removeEventListener('resize', layout); priorCleanup(); };
+        const left = makePane('Previous version');
+        const right = makePane('Working tree');
+        const makeLine = (number, value, kind) => {
+          const row = document.createElement('div');
+          row.className = 'source-control-diff-line' + (kind && kind !== 'same' ? ' is-' + kind : '');
+          const lineNo = document.createElement('span');
+          lineNo.className = 'source-control-diff-line-number';
+          lineNo.textContent = number == null ? '' : String(number);
+          const code = document.createElement('pre');
+          code.className = 'source-control-diff-line-text';
+          code.textContent = value == null ? '' : value;
+          row.append(lineNo, code);
+          return row;
+        };
+        for (const pair of pairs) {
+          left.body.appendChild(makeLine(pair.oldNo, pair.oldLine, pair.kind === 'added' ? 'empty' : pair.kind));
+          right.body.appendChild(makeLine(pair.newNo, pair.newLine, pair.kind === 'removed' ? 'empty' : pair.kind));
+        }
+        grid.append(left.pane, right.pane);
+        host.replaceChildren(grid);
+        const sync = (source, target) => {
+          if (target.scrollTop !== source.scrollTop) target.scrollTop = source.scrollTop;
+          if (target.scrollLeft !== source.scrollLeft) target.scrollLeft = source.scrollLeft;
+        };
+        left.body.addEventListener('scroll', () => sync(left.body, right.body), {passive:true});
+        right.body.addEventListener('scroll', () => sync(right.body, left.body), {passive:true});
       } catch (error) {
         if (!disposed) {
           const message = document.createElement('div');
