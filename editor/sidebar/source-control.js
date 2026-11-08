@@ -7,41 +7,18 @@
       const data = tab.diffData || {};
       const wrap = document.createElement('div');
       wrap.className = 'source-control-diff-tab';
-      const head = document.createElement('div');
-      head.className = 'source-control-diff-tab-head';
-      const heading = document.createElement('strong');
-      heading.textContent = data.path || 'File diff';
-      const status = document.createElement('span');
-      status.textContent = 'Read only';
-      head.append(heading, status);
-      const grid = document.createElement('div');
-      grid.className = 'source-control-diff-grid';
-      const makePane = label => {
-        const pane = document.createElement('section');
-        pane.className = 'source-control-diff-pane';
-        const bar = document.createElement('div');
-        bar.className = 'source-control-diff-pane-title';
-        bar.textContent = label;
-        const editorHost = document.createElement('div');
-        editorHost.className = 'source-control-diff-monaco';
-        pane.append(bar, editorHost);
-        grid.appendChild(pane);
-        return {pane, editorHost};
-      };
-      const left = makePane('Previous version');
-      const right = makePane('Working tree');
-      wrap.append(head, grid);
+      wrap.innerHTML = '<div class="source-control-diff-tab-head"><strong></strong><span>Read only</span></div><div class="source-control-diff-tab-editor"></div>';
+      wrap.querySelector('strong').textContent = data.path || 'File diff';
+      const host = wrap.querySelector('.source-control-diff-tab-editor');
       g.viewBody.appendChild(wrap);
 
-      let disposed = false, oldEditor = null, newEditor = null;
-      let oldModel = null, newModel = null, resizeObserver = null;
+      let disposed = false, diffEditor = null, originalModel = null, modifiedModel = null, resizeObserver = null;
       const cleanup = () => {
         disposed = true;
         try { resizeObserver?.disconnect(); } catch (_) {}
-        try { oldEditor?.dispose(); } catch (_) {}
-        try { newEditor?.dispose(); } catch (_) {}
-        try { oldModel?.dispose(); } catch (_) {}
-        try { newModel?.dispose(); } catch (_) {}
+        try { diffEditor?.dispose(); } catch (_) {}
+        try { originalModel?.dispose(); } catch (_) {}
+        try { modifiedModel?.dispose(); } catch (_) {}
       };
       tab._diffCleanup = cleanup;
       const toBytes = value => {
@@ -58,9 +35,16 @@
       };
       const decode = value => new TextDecoder('utf-8', {fatal:false}).decode(toBytes(value));
       try {
-        if (data.type === 'modified' && !data.oldSha) throw new Error('The previous GitHub version could not be matched to this file. Refresh Source Control and try again.');
-        const oldBytes = data.type === 'added' ? new Uint8Array() : data.oldSha ? await window.GitHubService.readBlob(data.owner, data.repo, data.oldSha) : new Uint8Array();
-        if (disposed || !wrap.isConnected) return wrap;
+        if (data.type === 'modified' && !data.oldSha) {
+          throw new Error('The previous GitHub version could not be matched to this file. Refresh Source Control and try again.');
+        }
+        const oldBytes = data.type === 'added'
+          ? new Uint8Array()
+          : data.oldSha
+            ? await window.GitHubService.readBlob(data.owner, data.repo, data.oldSha)
+            : new Uint8Array();
+        if (disposed || !host.isConnected) return wrap;
+
         let workingBytes = data.newBytes || new Uint8Array();
         if (data.type !== 'deleted' && ctx.state.fs?.readFileSync && (data.fsPath || data.path)) {
           const liveBytes = ctx.state.fs.readFileSync(data.fsPath || data.path, 'binary');
@@ -68,95 +52,62 @@
         }
         const oldText = decode(oldBytes).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
         const newText = (data.type === 'deleted' ? '' : decode(workingBytes)).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        if (data.type === 'modified' && !oldText.length && !newText.length) throw new Error('Both versions were read as empty. The diff was stopped rather than showing a misleading blank comparison.');
-        if (oldText.includes('\\0') || newText.includes('\\0')) throw new Error('This file appears to be binary and cannot be shown as a text diff.');
+        if (data.type === 'modified' && !oldText.length && !newText.length) {
+          throw new Error('Both versions were read as empty. The diff was stopped rather than showing a misleading blank comparison.');
+        }
+        if (oldText.includes('\\0') || newText.includes('\\0')) {
+          throw new Error('This file appears to be binary and cannot be shown as a text diff.');
+        }
 
-        // Myers shortest-edit script: O((N+M)D), avoiding the quadratic LCS
-        // cutoff that previously degraded larger files into positional noise.
-        const oldLines = oldText.split('\n'), newLines = newText.split('\n');
-        const diffLines = (a, b) => {
-          const n = a.length, m = b.length, max = n + m, offset = max + 1;
-          let v = new Int32Array(2 * max + 3);
-          v.fill(-1); v[offset + 1] = 0;
-          const trace = [];
-          let found = false, distance = 0;
-          for (let d = 0; d <= max; d++) {
-            const snapshot = v.slice();
-            trace.push(snapshot);
-            for (let k = -d; k <= d; k += 2) {
-              const idx = offset + k;
-              let x = (k === -d || (k !== d && v[idx - 1] < v[idx + 1])) ? v[idx + 1] : v[idx - 1] + 1;
-              let y = x - k;
-              while (x < n && y < m && a[x] === b[y]) { x++; y++; }
-              v[idx] = x;
-              if (x >= n && y >= m) { found = true; distance = d; break; }
-            }
-            if (found) break;
-          }
-          let x = n, y = m;
-          const edits = [];
-          for (let d = distance; d >= 0; d--) {
-            const vv = trace[d], k = x - y, idx = offset + k;
-            const prevK = (k === -d || (k !== d && vv[idx - 1] < vv[idx + 1])) ? k + 1 : k - 1;
-            const prevX = vv[offset + prevK], prevY = prevX - prevK;
-            while (x > prevX && y > prevY) { edits.push({type:'same', oldLine:x, newLine:y}); x--; y--; }
-            if (d > 0) {
-              if (x === prevX) { edits.push({type:'added', oldLine:null, newLine:y}); y--; }
-              else { edits.push({type:'removed', oldLine:x, newLine:null}); x--; }
-            }
-          }
-          return edits.reverse();
-        };
-        const edits = diffLines(oldLines, newLines);
-        if (disposed || !wrap.isConnected) return wrap;
         const monaco = await ctx.state.ensureMonaco();
-        if (disposed || !wrap.isConnected) return wrap;
+        if (disposed || !host.isConnected) return wrap;
         const language = window.EditorMonacoLanguage?.(data.path) || 'plaintext';
         const base = 'inmemory://watermelonkatana-diff/' + encodeURIComponent(data.path || 'file') + '-' + Math.random().toString(36).slice(2);
-        oldModel = monaco.editor.createModel(oldText, language, monaco.Uri.parse(base + '.original'));
-        newModel = monaco.editor.createModel(newText, language, monaco.Uri.parse(base + '.modified'));
-        const options = {
+        originalModel = monaco.editor.createModel(oldText, language, monaco.Uri.parse(base + '.original'));
+        modifiedModel = monaco.editor.createModel(newText, language, monaco.Uri.parse(base + '.modified'));
+        diffEditor = monaco.editor.createDiffEditor(host, {
           theme:window.EditorTheme?.id || 'vs-dark',
-          readOnly:true, domReadOnly:true, automaticLayout:true,
-          minimap:{enabled:false}, scrollBeyondLastLine:false,
-          wordWrap:'off', lineNumbers:'on', glyphMargin:false,
-          folding:false, renderLineHighlight:'none',
-          overviewRulerLanes:0, scrollbar:{vertical:'auto',horizontal:'auto',alwaysConsumeMouseWheel:false},
-          padding:{top:6,bottom:6}
-        };
-        oldEditor = monaco.editor.create(left.editorHost, {...options, model:oldModel});
-        newEditor = monaco.editor.create(right.editorHost, {...options, model:newModel});
-        const removed = [], added = [];
-        for (const edit of edits) {
-          if (edit.type === 'removed') removed.push(edit.oldLine);
-          if (edit.type === 'added') added.push(edit.newLine);
-        }
-        oldEditor.deltaDecorations([], removed.map(line => ({range:new monaco.Range(line,1,line,1),options:{isWholeLine:true,className:'source-control-monaco-removed',overviewRuler:{color:'#c75b62',position:monaco.editor.OverviewRulerLane.Left}}})));
-        newEditor.deltaDecorations([], added.map(line => ({range:new monaco.Range(line,1,line,1),options:{isWholeLine:true,className:'source-control-monaco-added',overviewRuler:{color:'#58a96b',position:monaco.editor.OverviewRulerLane.Left}}})));
-        const syncScroll = (source, target) => {
-          const top = source.getScrollTop(), left = source.getScrollLeft();
-          if (Math.abs(target.getScrollTop() - top) > 1) target.setScrollTop(top);
-          if (Math.abs(target.getScrollLeft() - left) > 1) target.setScrollLeft(left);
-        };
-        let syncing = false;
-        oldEditor.onDidScrollChange(() => { if (!syncing) { syncing=true; syncScroll(oldEditor,newEditor); syncing=false; } });
-        newEditor.onDidScrollChange(() => { if (!syncing) { syncing=true; syncScroll(newEditor,oldEditor); syncing=false; } });
+          readOnly:true,
+          originalEditable:false,
+          renderSideBySide:false,
+          renderIndicators:true,
+          renderOverviewRuler:true,
+          automaticLayout:true,
+          minimap:{enabled:false},
+          scrollBeyondLastLine:false,
+          ignoreTrimWhitespace:false,
+          diffCodeLens:false,
+          hideUnchangedRegions:{enabled:false},
+          // Avoid the draggable scrollbar path that previously triggered
+          // Monaco's delegateVerticalScrollbarPointerDown exception.
+          scrollbar:{vertical:'auto',horizontal:'auto',alwaysConsumeMouseWheel:false}
+        });
+        diffEditor.setModel({original:originalModel,modified:modifiedModel});
+        diffEditor.getOriginalEditor().updateOptions({readOnly:true,domReadOnly:true,wordWrap:'off',lineNumbers:'on'});
+        diffEditor.getModifiedEditor().updateOptions({readOnly:true,domReadOnly:true,wordWrap:'off',lineNumbers:'on'});
         const layout = () => {
-          if (disposed || !wrap.isConnected) return;
-          oldEditor?.layout(); newEditor?.layout();
+          if (disposed || !host.isConnected) return;
+          const rect = host.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            try { diffEditor.layout({width:Math.floor(rect.width),height:Math.floor(rect.height)}); } catch (_) {}
+          }
         };
         resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(layout) : null;
-        resizeObserver?.observe(grid);
+        resizeObserver?.observe(host);
         window.addEventListener('resize', layout);
         const previousCleanup = tab._diffCleanup;
         tab._diffCleanup = () => { window.removeEventListener('resize',layout); previousCleanup(); };
-        requestAnimationFrame(() => requestAnimationFrame(layout));
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          layout();
+          setTimeout(layout,80);
+          setTimeout(layout,240);
+        }));
       } catch (error) {
         if (!disposed) {
           const message = document.createElement('div');
           message.className = 'source-control-diff-error';
           message.textContent = error?.message || String(error);
-          grid.replaceChildren(message);
+          host.appendChild(message);
         }
       }
       return wrap;
