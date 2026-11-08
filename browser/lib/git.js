@@ -891,14 +891,18 @@
       if (isMergeCommit && (!expectedRemoteSha || parents[1] !== expectedRemoteSha)) throw new Error('This merge commit does not match the most recently fetched origin commit. Fetch again and create a new merge before pushing.');
       const remote = await window.GitHubService.getRemoteState(owner, repo, remoteBranch);
       if (String(remote.commitSha || '') !== String(expectedRemoteSha || '')) throw new Error('The GitHub branch has changed since the local commit was based on it. Fetch and reconcile the remote changes before retrying.');
-      if (!changes.length) throw new Error('The local commit contains no file changes to push.');
+      if (isMergeCommit && remote.truncated) throw new Error('The fetched GitHub tree is truncated, so the merge result cannot be safely published as a complete snapshot.');
+      const pushChanges = isMergeCommit
+        ? await window.GitHubService.compareWorkingTree(this.filesystem, remote.tree)
+        : changes;
+      if (!pushChanges.length) throw new Error('The local commit contains no file changes to push.');
       const result = await window.GitHubService.commitAndPush({
         owner,
         repo,
         branch:remoteBranch,
         message:String(entry.commit.message || '').trim(),
         fs:this.filesystem,
-        changesOverride:changes,
+        changesOverride:pushChanges,
         expectedRemoteSha,
         parentsOverride:isMergeCommit ? [tracking.lastPush, tracking.lastFetch] : null
       });
