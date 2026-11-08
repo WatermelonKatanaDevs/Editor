@@ -391,10 +391,22 @@
 
             const base = destinationForDrop(event);
             const writes = [];
+            const directoriesToCreate = new Set();
             for (const sourcePath of paths) {
               const sourceNode = fileManager.nodeByPath.get(sourcePath);
               if (!sourceNode) continue;
               const prefix = sourceNode.isDir ? sourcePath + '/' : null;
+              const destinationRoot = [base, sourceNode.isDir ? sourceNode.name : '']
+                .filter(Boolean).join('/');
+              if (sourceNode.isDir) {
+                for (const directory of archiveFileSystem.directories) {
+                  if (directory === sourcePath || directory.startsWith(prefix)) {
+                    const relativeDirectory = directory === sourcePath ? '' : directory.slice(prefix.length);
+                    const destinationDirectory = [destinationRoot, relativeDirectory].filter(Boolean).join('/');
+                    if (destinationDirectory) directoriesToCreate.add(destinationDirectory);
+                  }
+                }
+              }
               const filesToCopy = sourceNode.isDir
                 ? [...archiveFileSystem.provider.cache.keys()].filter(path => path.startsWith(prefix))
                 : [sourcePath];
@@ -402,17 +414,19 @@
                 const relative = sourceNode.isDir
                   ? archivePath.slice(prefix.length)
                   : sourceNode.name;
-                const destination = [base, sourceNode.isDir ? sourceNode.name : '', relative]
-                  .filter(Boolean).join('/');
+                const destination = [destinationRoot, relative].filter(Boolean).join('/');
                 const bytes = archiveFileSystem.provider.cache.get(archivePath);
                 if (bytes) writes.push({ path: destination, bytes });
               }
             }
-            if (!writes.length) return;
+            if (!writes.length && !directoriesToCreate.size) return;
             const collisions = writes.filter(item => workspaceState.fs.existsSync?.(item.path));
             if (collisions.length && !confirm('Replace ' + collisions.length + ' existing file' +
               (collisions.length === 1 ? '' : 's') + ' in the workspace?')) return;
 
+            for (const directory of [...directoriesToCreate].sort((a, b) => a.length - b.length)) {
+              workspaceState.fs.mkdirSync?.(directory);
+            }
             for (const item of writes) {
               const slash = item.path.lastIndexOf('/');
               if (slash > 0) workspaceState.fs.mkdirSync?.(item.path.slice(0, slash));
