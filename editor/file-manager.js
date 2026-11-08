@@ -10,7 +10,7 @@
     mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
     pdf: 'application/pdf', zip: 'application/zip', wasm: 'application/wasm', webmanifest: 'application/manifest+json',
     gltf: 'model/gltf+json', glb: 'model/gltf-binary',
-    woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf'
+    eot: 'application/vnd.ms-fontobject', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', tff: 'font/ttf', otf: 'font/otf', ttc: 'font/collection', otc: 'font/collection', dfont: 'font/dfont'
   });
   function editorFileMimeType(name) {
     const ext = String(name || '').split('.').pop().toLowerCase();
@@ -510,7 +510,10 @@
       this.contextMenu.innerHTML = '<ul></ul>';
       const ul = this.contextMenu.firstChild, n = this.selectedNode, selected = [...this.selectedNodes].map(p => this.nodeByPath.get(p)).filter(Boolean), items = [];
       if (n) {
-        if (selected.length > 1) items.push(['delete', `Delete ${selected.length} Items`], ['duplicate', `Duplicate ${selected.length} Items`]);
+        if (selected.length > 1) {
+          items.push(['delete', `Delete ${selected.length} Items`], ['duplicate', `Duplicate ${selected.length} Items`]);
+          if (selected.every(node => !node.isDir)) items.push(['zipSelected', `Zip ${selected.length} Files`]);
+        }
         else items.push(['rename', 'Rename'], ['delete', 'Delete']);
         if (n.isDir) items.push(['flatten', 'Flatten']); else items.push(['copyFile', 'Copy'], ['download', 'Download']);
       }
@@ -555,6 +558,9 @@
             await this.copyNode(n, name);
             break;
           }
+        case 'zipSelected':
+          await this.zipSelected();
+          break;
         case 'download':
           await this.downloadNode(n);
           break;
@@ -816,6 +822,55 @@
       this.fs.deleteDirectorySync?.(node.path);
       this.refresh();
       this.onDelete(node.path, true);
+    }
+    async zipSelected() {
+      const nodes = [...this.selectedNodes]
+        .map(path => this.nodeByPath.get(path))
+        .filter(node => node && !node.isDir);
+      if (nodes.length < 2) return;
+      if (typeof JSZip !== 'function') throw new Error('The ZIP library is unavailable.');
+
+      const normalized = nodes.map(node => ({ node, path: this.normalize(node.path) }));
+      const parentParts = normalized.map(item => this.pathBase(item.path).split('/').filter(Boolean));
+      const commonParts = [];
+      for (let index = 0; parentParts.length && index < parentParts[0].length &&
+        parentParts.every(parts => parts[index] === parentParts[0][index]); index++) {
+        commonParts.push(parentParts[0][index]);
+      }
+      const commonParent = commonParts.join('/');
+      const zip = new JSZip();
+      let added = 0;
+
+      for (const item of normalized) {
+        const relativePath = commonParent
+          ? item.path.slice(commonParent.length + 1)
+          : item.path;
+        if (!relativePath || relativePath.split('/').some(part => !part || part === '.' || part === '..')) continue;
+        const data = this.fs.readFileSync(item.path, 'binary');
+        if (data == null) throw new Error('Could not read selected file: ' + item.path);
+        zip.file(relativePath, data, { binary: true, createFolders: true });
+        added++;
+      }
+      if (!added) throw new Error('No selected files could be added to the ZIP archive.');
+
+      const archiveBytes = await zip.generateAsync({
+        type: 'uint8array',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 }
+      });
+      const base = commonParent ? commonParent + '/' : '';
+      const stem = 'Selected Files';
+      let filename = stem + '.zip';
+      let suffix = 1;
+      while (this.fs.existsSync(base + filename)) filename = stem + ' (' + suffix++ + ').zip';
+      const archivePath = base + filename;
+      this.fs.writeFileSync(archivePath, archiveBytes);
+      this.refresh();
+      const created = this.nodeByPath.get(archivePath);
+      if (created) {
+        this.select(created);
+        this.reveal(archivePath);
+      }
     }
     async downloadNode(node) {
       if (node.isDir) return;
