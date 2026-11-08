@@ -1,5 +1,5 @@
 (function () {
-  const textMimes = ['application/json','application/manifest+json','application/javascript','application/typescript','application/xml','model/gltf+json'];
+  const textMimes = ['application/json','application/manifest+json','application/javascript','application/typescript','application/xml','application/xhtml+xml','model/gltf+json'];
   function match(file) {
     const mime = String(file.mime || '');
     const base = String(file.name || file.path || '').split('/').pop().toLowerCase();
@@ -17,7 +17,9 @@
     return ({
       js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',jsx:'javascript',json:'json',webmanifest:'json',
       html:'html',htm:'html',ejs:'html',jst:'html',css:'css',scss:'scss',less:'less',md:'markdown',xml:'xml',yaml:'yaml',yml:'yaml',
-      py:'python',pyw:'python',gyp:'python',gypi:'python',java:'java',kt:'kotlin',c:'c',h:'c',cpp:'cpp',cc:'cpp',cxx:'cpp',hpp:'cpp',
+      py:'python',pyw:'python',gyp:'python',gypi:'python',java:'java',cs:'csharp',csx:'csharp',
+      rs:'rust',rb:'ruby',rake:'ruby',php:'php',kt:'kotlin',kts:'kotlin',c:'c',h:'c',cpp:'cpp',cc:'cpp',cxx:'cpp',hpp:'cpp',hxx:'cpp',
+      go:'go',swift:'swift',dart:'dart',lua:'lua',pl:'perl',pm:'perl',r:'r',scala:'scala',xhtml:'html',xml:'xml',html:'html',htm:'html',
       sh:'shell',bash:'shell',sql:'sql',ini:'ini',toml:'ini',svg:'html',gltf:'json',frag:'glsl',vert:'glsl',glsl:'glsl',
       hlsl:'hlsl',fx:'hlsl',wgsl:'wgsl',coffee:'coffeescript',patch:'diff',bnf:'bnf'
     })[ext] || 'plaintext';
