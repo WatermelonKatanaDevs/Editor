@@ -349,6 +349,18 @@
     const branches = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=100`);
     return Array.isArray(branches) ? branches.map(x => x.name).filter(Boolean) : [];
   }
+  async function getRemoteHead(owner, repo, branch) {
+    const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+    try {
+      const ref = await publicRequest(`${repoPath}/git/ref/heads/${branchPath(branch)}`);
+      const commitSha = ref?.object?.sha || null;
+      if (!commitSha || ref?.object?.type !== 'commit') throw new Error('GitHub did not return a commit for origin/' + branch + '.');
+      return {commitSha:String(commitSha)};
+    } catch (e) {
+      if (e?.status === 409 || e?.status === 404) return {commitSha:null, empty:true};
+      throw e;
+    }
+  }
   async function getRemoteState(owner, repo, branch) {
     const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
     try {
@@ -974,6 +986,7 @@
   root.downloadArchive = downloadArchive;
   root.listBranches = listBranches;
   root.getRemoteState = getRemoteState;
+  root.getRemoteHead = getRemoteHead;
   root.getCommitState = getCommitState;
   root.readBlob = readBlob;
   root.listCommits = listCommits;
