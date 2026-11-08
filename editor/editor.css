@@ -888,3 +888,12 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .editor-archive-preview{position:relative}
 .editor-archive-model-host>.editor-3d-viewer{height:100%;min-height:0}
 .editor-archive-model-host .editor-3d-workspace{min-height:0}
+
+.editor-3d-material-users{display:block;color:#9eacbb;font-size:9px;line-height:1.4;overflow-wrap:anywhere}
+.editor-3d-material-empty{padding:10px;border:1px solid #454b55;border-radius:4px;background:#242a32;color:#c5cfda;font-size:10px;line-height:1.5}
+.editor-3d-material-empty p{margin:6px 0 0;color:#9eacbb}
+.editor-3d-material .editor-3d-map-row{gap:9px}
+.editor-3d-material .editor-3d-map-thumb{flex-basis:64px;width:64px;height:64px}
+.editor-3d-material .editor-3d-map-details strong{font-size:10px}
+.editor-3d-material .editor-3d-map-details small{font-size:9px;line-height:1.4}
+.editor-3d-side-tabs button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
