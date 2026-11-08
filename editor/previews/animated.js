@@ -138,7 +138,10 @@
           });
           image.close?.();
         }
-        return { width, height, frames, loopCount: Number(track?.repetitionCount) > 0 ? Number(track.repetitionCount) : 0 };
+        const repetitions = Number(track?.repetitionCount);
+        const loopCount = repetitions === Infinity ? 0 :
+          Number.isFinite(repetitions) ? Math.max(1, Math.floor(repetitions) + 1) : 1;
+        return { width, height, frames, loopCount };
       } finally {
         decoder.close();
       }
@@ -162,7 +165,8 @@
       data: new Uint8ClampedArray(buffer),
       duration: Math.max(10, Number(image.frames?.[index]?.delay) || 100)
     }));
-    return { width: image.width, height: image.height, frames, loopCount: Number(image.tabs?.acTL?.num_plays) || 0 };
+    const loopCount = image.tabs?.acTL ? Number(image.tabs.acTL.num_plays) || 0 : 1;
+    return { width: image.width, height: image.height, frames, loopCount };
   }
 
   async function decodeGIF(bytes) {
@@ -186,7 +190,10 @@
         composite.set(previous);
       }
     }
-    return { width, height, frames, loopCount: Number(reader.loopCount?.()) || 0 };
+    const repeatCount = reader.loopCount?.();
+    const loopCount = repeatCount == null ? 1 :
+      Number(repeatCount) === 0 ? 0 : Math.max(1, Number(repeatCount) + 1);
+    return { width, height, frames, loopCount };
   }
 
   async function loadWebPMux() {
@@ -229,6 +236,7 @@
         const image = new Image();
         image.src = url;
         await image.decode();
+        validateDimensions(image.naturalWidth, image.naturalHeight, 1);
         const canvas = document.createElement('canvas');
         canvas.width = image.naturalWidth;
         canvas.height = image.naturalHeight;
@@ -274,12 +282,12 @@
   async function decodeFile(file) {
     const bytes = toBytes(new Uint8Array(await file.arrayBuffer()));
     const mime = inferMime(file);
-    const modern = await decodeWithImageDecoder(bytes, mime);
-    if (modern) return modern;
     if (mime === 'image/gif') return decodeGIF(bytes);
     if (mime === 'image/apng' || (mime === 'image/png' && hasPngChunk(bytes, 'acTL'))) return decodeAPNG(bytes);
     if (mime === 'image/webp' && isAnimatedWebP(bytes)) return decodeWebP(bytes);
     if (mime === 'image/avif' && isAnimatedAvif(bytes)) {
+      const modern = await decodeWithImageDecoder(bytes, mime);
+      if (modern) return modern;
       throw new Error('Animated AVIF editing requires WebCodecs ImageDecoder support in this browser.');
     }
     return decodeStill(bytes, mime);
@@ -519,7 +527,7 @@
         applyAllLabel.append(applyAll, document.createTextNode('Apply timing to all frames'));
 
         const loopLabel = document.createElement('label');
-        loopLabel.textContent = 'Loop playback';
+        loopLabel.textContent = 'Export loop count';
         const loop = document.createElement('select');
         [['0','Forever'],['1','Once'],['2','2 times'],['3','3 times'],['5','5 times']].forEach(pair => {
           const option = document.createElement('option');
@@ -583,7 +591,7 @@
         const timelineTitle = document.createElement('strong');
         timelineTitle.textContent = 'FRAMES';
         const timelineHelp = document.createElement('span');
-        timelineHelp.textContent = 'Drop images here · drag frames to reorder';
+        timelineHelp.textContent = 'Drop images here · drag to reorder or out to upload';
         timelineHeader.append(timelineTitle, timelineHelp);
         const timeline = document.createElement('div');
         timeline.className = 'editor-animation-timeline';
@@ -1079,15 +1087,14 @@
 
         try {
           const initialMime = String(ctx.file.mime || inferMime({ name: ctx.file.name }));
-          let decoded = await decodeWithImageDecoder(sourceBytes, initialMime);
-          if (!decoded) {
-            if (initialMime === 'image/gif') decoded = await decodeGIF(sourceBytes);
-            else if (initialMime === 'image/webp' && isAnimatedWebP(sourceBytes)) decoded = await decodeWebP(sourceBytes);
-            else if (hasPngChunk(sourceBytes, 'acTL')) decoded = await decodeAPNG(sourceBytes);
-            else if (initialMime === 'image/avif' && isAnimatedAvif(sourceBytes)) {
-              throw new Error('Animated AVIF editing requires WebCodecs ImageDecoder support in this browser.');
-            } else decoded = await decodeStill(sourceBytes, initialMime);
-          }
+          let decoded;
+          if (initialMime === 'image/gif') decoded = await decodeGIF(sourceBytes);
+          else if (initialMime === 'image/webp' && isAnimatedWebP(sourceBytes)) decoded = await decodeWebP(sourceBytes);
+          else if ((initialMime === 'image/apng' || initialMime === 'image/png') && hasPngChunk(sourceBytes, 'acTL')) decoded = await decodeAPNG(sourceBytes);
+          else if (initialMime === 'image/avif' && isAnimatedAvif(sourceBytes)) {
+            decoded = await decodeWithImageDecoder(sourceBytes, initialMime);
+            if (!decoded) throw new Error('Animated AVIF editing requires WebCodecs ImageDecoder support in this browser.');
+          } else decoded = await decodeStill(sourceBytes, initialMime);
           validateDimensions(decoded.width, decoded.height, decoded.frames.length);
           width = decoded.width;
           height = decoded.height;
