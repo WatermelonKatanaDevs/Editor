@@ -514,7 +514,11 @@
       const remoteUrl = await this._readConfig(repository, 'remote.origin.url');
       const lastPushedLocal = await this._readConfig(repository, 'remote.origin.lastPushedLocal') || '';
       const lastPush = await this._readConfig(repository, 'remote.origin.lastPush') || '';
-      return {remoteUrl:remoteUrl ? String(remoteUrl) : null, branch, head, lastPushedLocal:String(lastPushedLocal), lastPush:String(lastPush), ahead:!!remoteUrl && !!head && head !== String(lastPushedLocal)};
+      const lastFetch = await this._readConfig(repository, 'remote.origin.lastFetch') || '';
+      const lastFetchBranch = await this._readConfig(repository, 'remote.origin.lastFetchBranch') || '';
+      const lastFetchAt = await this._readConfig(repository, 'remote.origin.lastFetchAt') || '';
+      const remoteUpdated = !!lastFetch && !!lastPush && String(lastFetchBranch) === String(branch) && String(lastFetch) !== String(lastPush);
+      return {remoteUrl:remoteUrl ? String(remoteUrl) : null, branch, head, lastPushedLocal:String(lastPushedLocal), lastPush:String(lastPush), lastFetch:String(lastFetch), lastFetchBranch:String(lastFetchBranch), lastFetchAt:String(lastFetchAt), remoteUpdated, ahead:!!remoteUrl && !!head && head !== String(lastPushedLocal)};
     }
 
     _parseGitHubRemote(url) {
@@ -539,6 +543,30 @@
         changes.push({path, type:oldOid ? 'modified' : 'added', mode:'100644', data:new Uint8Array(blob.blob)});
       }
       return {entry, changes};
+    }
+
+    async fetch(cwd = '/', remoteName = 'origin', branchName = null) {
+      if (remoteName !== 'origin') throw new Error('Only the origin remote is supported for GitHub remote checks.');
+      const repository = await this._repository(cwd);
+      const localBranch = await this.git.currentBranch({fs:this.fs, dir:repository.dir, fullname:false});
+      if (!branchName && !localBranch) throw new Error('Specify a remote branch while HEAD is detached.');
+      const configuredMerge = localBranch ? await this._readConfig(repository, 'branch.' + localBranch + '.merge') : null;
+      const branch = String(branchName || configuredMerge || localBranch || '').replace(/^refs\/heads\//, '');
+      if (!branch) throw new Error('Specify a branch to check on origin.');
+      const remoteUrl = await this._readConfig(repository, 'remote.origin.url');
+      if (!remoteUrl) throw new Error('No remote named origin. Add one with git remote add origin https://github.com/owner/repository.git.');
+      const {owner, repo} = this._parseGitHubRemote(remoteUrl);
+      if (typeof window.GitHubService?.getRemoteHead !== 'function') throw new Error('GitHub remote checking has not loaded.');
+      const remote = await window.GitHubService.getRemoteHead(owner, repo, branch);
+      const previousHead = String(await this._readConfig(repository, 'remote.origin.lastFetch') || '');
+      await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetch', value:String(remote.commitSha || '')});
+      await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchBranch', value:branch});
+      await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchAt', value:new Date().toISOString()});
+      await this.adapter.flush();
+      if (!remote.commitSha) return {output:'origin/' + branch + ' is empty or does not exist.', value:{branch, commitSha:null, changed:!!previousHead, empty:true, downloadedObjects:false}};
+      const sha = String(remote.commitSha);
+      const changed = !!previousHead && previousHead !== sha;
+      return {output:'Checked origin/' + branch + ' at ' + sha.slice(0, 7) + (changed ? ' (remote head changed).' : '.') + ' Git objects were not downloaded.', value:{branch, commitSha:sha, changed, downloadedObjects:false}};
     }
 
     async push(cwd = '/', remoteName = 'origin', branchName = null) {
@@ -572,6 +600,9 @@
       });
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPushedLocal', value:head});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPush', value:result.commitSha});
+      await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetch', value:result.commitSha});
+      await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchBranch', value:remoteBranch});
+      await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchAt', value:new Date().toISOString()});
       await this.adapter.flush();
       return {output:'To ' + remoteUrl + '\n   ' + tracking.lastPush.slice(0, 7) + '..' + result.commitSha.slice(0, 7) + '  ' + branch + ' -> ' + branch, value:{...result, localHead:head}};
     }
@@ -902,6 +933,17 @@
         }
         throw new Error('git remote: supported forms are -v, add origin, set-url origin, and get-url origin.');
       }
+      if (operation === 'fetch') {
+        let remoteName = 'origin';
+        let branchName = null;
+        for (const arg of command.slice(1)) {
+          if (arg.startsWith('-')) throw new Error('git fetch: options are not supported yet.');
+          if (remoteName === 'origin') remoteName = arg;
+          else if (!branchName) branchName = arg;
+          else throw new Error('git fetch: too many arguments.');
+        }
+        return await this.fetch(cwd, remoteName, branchName);
+      }
       if (operation === 'push') {
         let remoteName = 'origin';
         let branchName = null;
@@ -914,7 +956,7 @@
         const result = await this.push(cwd, remoteName, branchName);
         return result;
       }
-      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, branch, switch, checkout, tag (lightweight), remote, push, rev-parse.', value:null};
+      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, branch, switch, checkout, tag (lightweight), remote, fetch (remote head check), push, rev-parse.', value:null};
       throw new Error('git: command not implemented yet: ' + operation);
     }
 
