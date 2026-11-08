@@ -262,7 +262,7 @@
     _queuePersist(operation) {
       const task = this.writeQueue.catch(() => {}).then(operation);
       this.writeQueue = task.catch(error => { this.writeErrors.push(error); });
-      return task;
+      return this.writeQueue;
     }
     write(path, binary, original) {
       this.cache.set(path, binary);
