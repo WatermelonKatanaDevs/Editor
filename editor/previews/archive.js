@@ -323,7 +323,7 @@
       id: 'archive-preview',
       label: 'Archive Preview',
       default: true,
-      priority: 130,
+      priority: 180,
       async create(ctx) {
         const shell = document.createElement('section');
         shell.className = 'editor-archive-preview';
