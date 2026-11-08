@@ -6,9 +6,9 @@
     txt: 'text/plain', md: 'text/markdown', csv: 'text/csv',
     png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
     webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
-    mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4',
+    mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', glsl: 'text/x-hlsl',
     mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
-    pdf: 'application/pdf', zip: 'application/zip', wasm: 'application/wasm',
+    pdf: 'application/pdf', zip: 'application/zip', wasm: 'application/wasm', webmanifest: 'application/manifest+json',
     gltf: 'model/gltf+json', glb: 'model/gltf-binary',
     woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf'
   });
