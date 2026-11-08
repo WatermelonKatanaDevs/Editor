@@ -890,3 +890,16 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .editor-3d-material .editor-3d-map-details strong{font-size:10px}
 .editor-3d-material .editor-3d-map-details small{font-size:9px;line-height:1.4}
 .editor-3d-side-tabs button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Source Control diff: native side-by-side renderer, independent of Monaco. */
+.source-control-diff-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);height:100%;min-height:0;width:100%;background:#111;color:#ddd;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.source-control-diff-pane{display:flex;flex-direction:column;min-width:0;min-height:0;border-right:1px solid var(--editor-border,#333)}
+.source-control-diff-pane-title{flex:none;padding:6px 10px;background:var(--editor-surface,#202020);border-bottom:1px solid var(--editor-border,#333);color:var(--editor-muted,#aaa);font:10px sans-serif}
+.source-control-diff-lines{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}
+.source-control-diff-line{display:flex;min-height:19px;white-space:pre}
+.source-control-diff-line-number{box-sizing:border-box;flex:0 0 48px;padding:0 8px;text-align:right;color:#777;background:#181818;border-right:1px solid #292929;user-select:none}
+.source-control-diff-line-text{flex:1;min-width:0;margin:0;padding:0 10px;overflow:visible;color:inherit;font:inherit;white-space:pre}
+.source-control-diff-line.is-removed{background:rgba(190,65,72,.22)}
+.source-control-diff-line.is-added{background:rgba(55,145,82,.22)}
+.source-control-diff-line.is-changed{background:rgba(180,145,55,.2)}
+.source-control-diff-line.is-empty{background:rgba(120,120,120,.08)}
