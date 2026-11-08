@@ -19,7 +19,10 @@
       'webmanifest': 'application/manifest+json',
       'csv': 'text/csv',
       'tsv': 'text/tab-separated-values',
-      'pdf': 'application/pdf',\n      'db': 'application/vnd.sqlite3',\n      'sqlite': 'application/vnd.sqlite3',\n      'sqlite3': 'application/vnd.sqlite3',
+      'pdf': 'application/pdf',
+      'db': 'application/vnd.sqlite3',
+      'sqlite': 'application/vnd.sqlite3',
+      'sqlite3': 'application/vnd.sqlite3',
       'html': 'text/html',
       'ejs': 'text/x-ejs',
       'jst': 'text/x-jst',
@@ -107,7 +110,8 @@
     if (lowerName === 'makefile' || lowerName === 'gnumakefile') return badgeIcon('MAKE', '#526b58', '#ffffff', 10);
     if (lowerName === 'cakefile') return badgeIcon('☕', '#795548', '#fff4e8', 19);
     if (ext === 'map') return badgeIcon('MAP', '#546e7a', '#ffffff', 10);
-    if (['db', 'sqlite', 'sqlite3'].includes(ext)) return badgeIcon('SQL', '#405b69', '#e8f4f8', 12);\n    if (ext === 'bin') return badgeIcon('0101', '#455a64', '#e1f5fe', 11);
+    if (['db', 'sqlite', 'sqlite3'].includes(ext)) return badgeIcon('SQL', '#405b69', '#e8f4f8', 12);
+    if (ext === 'bin') return badgeIcon('0101', '#455a64', '#e1f5fe', 11);
     if (ext === 'node') return badgeIcon('N', '#397b45', '#ffffff', 21);
     if (ext === 'c' || ext === 'h') return badgeIcon('C', '#1769aa', '#ffffff', 21);
     if (ext === 'cc') return badgeIcon('C++', '#1769aa', '#ffffff', 13);
