@@ -451,7 +451,7 @@
     }
 
     async _walkDiff(repository, walkers, options = {}) {
-      const required = options.requiredIndices || [];
+      const required = options.requiredIndices || options.required || [];
       const pathspecs = options.pathspecs || [];
       const results = await this.git.walk({
         fs:this.fs,
