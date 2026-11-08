@@ -2154,7 +2154,7 @@ window.__editorInitPromise = (async function () {
     if (options.gitEnabled === false) state.gitRemote = null;
     state.projectOwner = options.projectOwner !== false;
     state.gitEnabled = options.gitEnabled !== false;
-    if (state.gitRemote?.provider === 'github' && !fs.isPersistentDirectory) {
+    if (state.gitRemote?.provider === 'github' && !fs.isPersistentDirectory && !(state.gitSubmodules || []).some(module => !module.removed)) {
       try {
         await initializeGitHubWorkspaceRepository(fs, state.gitRemote);
       } catch (error) {
