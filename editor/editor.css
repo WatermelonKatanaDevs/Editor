@@ -844,3 +844,31 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .editor-3d-footer{min-height:22px;padding:4px 8px;background:#202328;border-top:1px solid #353941;color:#9da8b5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px}
 @media(max-width:760px){.editor-3d-sidebar{width:205px;min-width:160px}.editor-3d-engine{display:none}.editor-3d-toolbar button{padding:5px 6px}}
 @media(max-width:560px){.editor-3d-stage{flex-direction:column}.editor-3d-sidebar{width:100%;max-width:none;min-width:0;max-height:38%;border-left:0;border-top:1px solid #363b43}.editor-3d-side-content{max-height:150px}.editor-3d-canvas-host{min-height:180px}}
+
+
+/* 3D viewer layout: keep the inspector in a right-side column, not a full-width bottom row. */
+.editor-3d-workspace{display:flex;flex:1 1 auto;min-width:0;min-height:0;overflow:hidden}
+.editor-3d-workspace>.editor-3d-stage{flex:1 1 auto;min-width:0;min-height:0}
+.editor-3d-workspace>.editor-3d-sidebar{box-sizing:border-box;flex:0 0 280px;width:280px;max-width:38%;min-width:210px;min-height:0;height:auto;border-left:1px solid #363b43;border-top:0}
+.editor-3d-side-content{flex:1 1 auto;overscroll-behavior:contain}
+.editor-3d-maps-title{margin:9px 0 2px;padding-bottom:4px;border-bottom:1px solid #414852;color:#aebbc9;font-size:9px;font-weight:750;letter-spacing:.12em;text-transform:uppercase}
+.editor-3d-map-row{display:flex;align-items:center;gap:8px;min-width:0;padding:5px 0;border-bottom:1px solid #ffffff0d}
+.editor-3d-map-row.is-empty{opacity:.48}
+.editor-3d-map-thumb{box-sizing:border-box;flex:0 0 48px;width:48px;height:48px;border:1px solid #46505c;border-radius:4px;background:#252a31;object-fit:contain}
+.editor-3d-map-details{display:flex;flex:1;flex-direction:column;gap:3px;min-width:0}
+.editor-3d-map-details strong{color:#d8e0e9;font-size:10px;font-weight:650}
+.editor-3d-map-details small{color:#9ca9b7;font-size:9px;line-height:1.35;overflow-wrap:anywhere}
+.editor-3d-factor-row{display:grid;grid-template-columns:78px minmax(40px,1fr) 30px;align-items:center;gap:6px;color:#b9c2cd;font-size:10px}
+.editor-3d-factor-row input[type=range]{width:100%;min-width:0;accent-color:#4c9bd5}
+.editor-3d-factor-value{color:#d6e0ea;text-align:right;font:10px ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.editor-3d-color-row{display:flex;justify-content:space-between;align-items:center;gap:8px;color:#b9c2cd;font-size:10px}
+.editor-3d-material-note{margin:8px 2px 4px;color:#8f9cab;font-size:9px;line-height:1.45}
+@media(max-width:760px){
+  .editor-3d-workspace>.editor-3d-sidebar{flex-basis:235px;width:235px;min-width:185px}
+}
+@media(max-width:560px){
+  .editor-3d-workspace{flex-direction:column}
+  .editor-3d-workspace>.editor-3d-stage{flex:1 1 auto;min-height:180px}
+  .editor-3d-workspace>.editor-3d-sidebar{flex:0 0 min(40%,220px);width:auto;max-width:none;min-width:0;max-height:40%;border-left:0;border-top:1px solid #363b43}
+  .editor-3d-side-content{max-height:none}
+}
