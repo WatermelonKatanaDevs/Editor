@@ -373,6 +373,14 @@
           showStatus('GitHub is still initializing this repository…');
           return;
         }
+        if (remote.truncated) {
+          currentDiffState = null;
+          changesEl.innerHTML = '<div class="source-control-error">GitHub returned an incomplete repository tree. Changes are hidden because showing a partial comparison can produce false additions and deletions.</div>';
+          const button = tree.querySelector('[data-commit]');
+          if (button) button.disabled = true;
+          showStatus('GitHub truncated the remote tree; Source Control cannot safely compare or commit this repository.', true);
+          return;
+        }
         const submoduleRoots = (state.gitSubmodules || []).filter(module => !module.removed && !module.parentPath);
         const changes = await github.compareWorkingTree(state.fs, remote.tree, {excludePaths:submoduleRoots.map(module => module.path)});
         currentDiffState = {remote, changes};
