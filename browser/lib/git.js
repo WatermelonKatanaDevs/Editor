@@ -546,6 +546,97 @@
       return {entry, changes};
     }
 
+    async _fetchRemoteCommitObjects(repository, owner, repo, sha, github) {
+      const local = async () => {
+        try {
+          const result = await this.git.readCommit({fs:this.fs, dir:repository.dir, oid:sha});
+          await this.git.readTree({fs:this.fs, dir:repository.dir, oid:result.commit.tree});
+          return result.commit;
+        } catch (_) {
+          return null;
+        }
+      };
+      const existing = await local();
+      if (existing) return {commit:existing, downloaded:false, blobs:0, trees:0};
+      const remoteState = await github.getRemoteCommitState(owner, repo, sha);
+      if (String(remoteState.commitSha) !== sha) throw new Error('GitHub returned a different commit than the requested remote head.');
+      if (remoteState.truncated) throw new Error('The remote Git tree is too large for one complete recursive response at commit ' + sha.slice(0, 7) + '.');
+      if (String(remoteState.commit?.tree?.sha || '') !== String(remoteState.treeSha)) throw new Error('GitHub commit metadata and tree response do not match.');
+      const entries = Array.isArray(remoteState.tree) ? remoteState.tree : [];
+      const treesByPath = new Map(entries.filter(entry => entry?.type === 'tree').map(entry => [String(entry.path), entry]));
+      const childrenByPath = new Map();
+      for (const entry of entries) {
+        const path = String(entry?.path || '');
+        if (!path || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('GitHub returned an invalid path in its remote Git tree.');
+        const validModes = entry.type === 'tree' ? ['040000'] : entry.type === 'commit' ? ['160000'] : ['100644', '100755', '120000'];
+        if (!validModes.includes(String(entry.mode))) throw new Error('GitHub returned an unsupported Git mode at ' + path + '.');
+        const slash = path.lastIndexOf('/');
+        const parent = slash < 0 ? '' : path.slice(0, slash);
+        if (parent && !treesByPath.has(parent)) throw new Error('The remote Git tree is incomplete at ' + parent + '.');
+        if (!childrenByPath.has(parent)) childrenByPath.set(parent, []);
+        childrenByPath.get(parent).push(entry);
+      }
+      const blobs = new Map();
+      for (const entry of entries) {
+        if (entry.type !== 'blob') continue;
+        if (!entry.sha || !entry.mode) throw new Error('GitHub returned an incomplete blob entry.');
+        blobs.set(String(entry.sha), entry);
+      }
+      const blobList = Array.from(blobs.keys());
+      let blobCount = 0;
+      for (let i = 0; i < blobList.length; i += 4) {
+        const batch = blobList.slice(i, i + 4);
+        const written = await Promise.all(batch.map(async blobSha => {
+          try {
+            await this.git.readBlob({fs:this.fs, dir:repository.dir, oid:blobSha});
+            return false;
+          } catch (_) {}
+          const data = await github.readBlob(owner, repo, blobSha);
+          const writtenSha = await this.git.writeBlob({fs:this.fs, dir:repository.dir, blob:new Uint8Array(data)});
+          if (writtenSha !== blobSha) throw new Error('A downloaded Git blob failed its SHA-1 integrity check: ' + blobSha + '.');
+          return true;
+        }));
+        blobCount += written.filter(Boolean).length;
+      }
+      const writeTree = async path => {
+        const children = childrenByPath.get(path) || [];
+        const tree = [];
+        for (const entry of children) {
+          const name = path ? String(entry.path).slice(path.length + 1) : String(entry.path);
+          let oid = String(entry.sha || '');
+          if (entry.type === 'tree') oid = await writeTree(String(entry.path));
+          else if (entry.type !== 'blob' && entry.type !== 'commit') throw new Error('Unsupported remote Git object type at ' + entry.path + '.');
+          if (!oid) throw new Error('GitHub returned an incomplete tree entry at ' + entry.path + '.');
+          tree.push({mode:String(entry.mode), path:name, oid, type:entry.type});
+        }
+        const oid = await this.git.writeTree({fs:this.fs, dir:repository.dir, tree});
+        const expected = path ? String(treesByPath.get(path)?.sha || '') : String(remoteState.treeSha);
+        if (oid !== expected) throw new Error('A downloaded Git tree failed its SHA-1 integrity check' + (path ? ' at ' + path : '') + '.');
+        return oid;
+      };
+      await writeTree('');
+      const parseIdentity = (identity, label) => {
+        if (!identity || !identity.date || !identity.name || !identity.email) throw new Error('GitHub did not provide complete ' + label + ' identity metadata; refusing to create an inexact commit.');
+        const timestamp = Date.parse(identity.date);
+        if (!Number.isFinite(timestamp)) throw new Error('GitHub returned an invalid ' + label + ' timestamp.');
+        const zone = String(identity.date).match(/([+-])(\d{2}):?(\d{2})$/);
+        const offsetMinutes = zone ? (Number(zone[2]) * 60 + Number(zone[3])) * (zone[1] === '+' ? -1 : 1) : 0;
+        return {name:String(identity.name), email:String(identity.email), timestamp:Math.floor(timestamp / 1000), timezoneOffset:offsetMinutes};
+      };
+      const commitData = remoteState.commit;
+      const commitObject = {
+        message:String(commitData.message || ''),
+        tree:String(remoteState.treeSha),
+        parent:Array.isArray(commitData.parents) ? commitData.parents.map(parent => String(parent.sha)) : [],
+        author:parseIdentity(commitData.author, 'author'),
+        committer:parseIdentity(commitData.committer, 'committer')
+      };
+      if (commitData.verification?.signature) commitObject.gpgsig = String(commitData.verification.signature);
+      const writtenCommit = await this.git.writeCommit({fs:this.fs, dir:repository.dir, commit:commitObject});
+      if (writtenCommit !== sha) throw new Error('The remote commit could not be reconstructed byte-for-byte (expected ' + sha.slice(0, 7) + ', got ' + writtenCommit.slice(0, 7) + '). Its signature or metadata format may not be supported yet.');
+      return {commit:commitObject, downloaded:true, blobs:blobCount, trees:treesByPath.size + 1};
+    }
+
     async fetch(cwd = '/', remoteName = 'origin', branchName = null) {
       if (remoteName !== 'origin') throw new Error('Only the origin remote is supported for GitHub fetch.');
       const repository = await this._repository(cwd);
