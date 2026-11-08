@@ -5225,7 +5225,12 @@
           filesystem: this.filesystem,
           network: this.network,
           rootfolder: runtimeRoot,
-          log: console,
+          log: {
+            log: (...args) => this.dispatchEvent('console', 'log', args),
+            logText: (...args) => this.dispatchEvent('console', 'logText', args),
+            warn: (...args) => this.dispatchEvent('console', 'warn', args),
+            error: (...args) => this.dispatchEvent('console', 'error', args)
+          },
           env: this.env,
           commandRunner: async command => await this.terminalCommand(command),
           onFileSystemChange: () => { try { this.dispatchEvent('filesystemchange'); } catch (_) {} }
