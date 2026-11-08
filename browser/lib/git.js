@@ -266,6 +266,15 @@
         if (options.trackedOnly && row[1] === 0 && row[3] === 0) return false;
         return specs.some(spec => spec === '.' || row[0] === spec || row[0].startsWith(spec + '/'));
       });
+      if (!selected.length && options.allowEmpty) {
+        const root = repository.root.replace(/\/+$/, '');
+        const validPath = specs.some(spec => {
+          const absolute = spec === '.' ? root : root + '/' + spec;
+          const relative = this.adapter.relative(absolute);
+          return this.filesystem.existsSync(relative) || this.filesystem.isDirectorySync(relative);
+        });
+        if (validPath || options.all) return [];
+      }
       if (!selected.length) throw new Error('pathspec did not match any files: ' + pathspecs.join(' '));
       return selected;
     }
@@ -350,7 +359,7 @@
         for (let i = 1; i < command.length; i++) {
           const arg = command[i];
           if (arg === '-A' || arg === '--all') all = true;
-          else if (arg === '-u' || arg === '--update') trackedOnly = true;
+          else if (arg === '-u' || arg === '--update') { trackedOnly = true; all = true; }
           else if (arg === '--') {
             pathspecs.push(...command.slice(i + 1));
             i = command.length;
@@ -358,9 +367,9 @@
           else pathspecs.push(arg);
         }
         const repository = await this._repository(cwd);
-        const rows = await this._selectChanges(repository, cwd, pathspecs, {all, trackedOnly});
+        const rows = await this._selectChanges(repository, cwd, pathspecs, {all, trackedOnly, allowEmpty:true});
         const result = await this._stage(repository, rows);
-        return {output:'Staged ' + (result.added + result.removed) + ' file(s).', value:result};
+        return {output:result.added + result.removed ? 'Staged ' + (result.added + result.removed) + ' file(s).' : 'No changes to stage.', value:result};
       }
       if (operation === 'restore' || operation === 'reset') {
         let staged = operation === 'reset';
@@ -384,9 +393,10 @@
           else paths.push(arg);
         }
         if (unsupported) throw new Error('git ' + operation + ' ' + unsupported + ' is not implemented yet.');
+        if (operation === 'reset' && paths.length === 1 && paths[0] === 'HEAD') paths.length = 0;
         if (operation === 'reset' && paths.length === 0 && !all) all = true;
         if (operation === 'restore' && paths.length === 0) throw new Error('git restore: specify one or more paths.');
-        if (operation === 'reset' && paths.length === 0 && command.some(arg => !arg.startsWith('-') && arg !== 'reset')) throw new Error('git reset: resetting to a commit is not implemented yet.');
+        if (operation === 'reset' && paths.length === 1 && paths[0] !== 'HEAD') throw new Error('git reset: resetting to a commit is not implemented yet.');
         const repository = await this._repository(cwd);
         const rows = await this._selectChanges(repository, cwd, paths, {all});
         if (staged) await this._unstage(repository, rows);
