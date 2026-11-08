@@ -70,7 +70,10 @@
           readOnly:true,
           originalEditable:false,
           renderSideBySide:true,
-          automaticLayout:false,
+          // The tab may be created while its workbench pane is still being
+          // measured. Let Monaco track visibility/size changes itself; the
+          // explicit layout below remains as a fallback for older builds.
+          automaticLayout:true,
           minimap:{enabled:false},
           scrollBeyondLastLine:false,
           ignoreTrimWhitespace:false,
@@ -80,7 +83,10 @@
           // when the diff editor's scrollbar is mounted in a changing workbench tab.
           // Keep wheel/trackpad scrolling, but avoid the broken draggable scrollbar path.
           scrollbar:{vertical:'hidden',horizontal:'auto',alwaysConsumeMouseWheel:false},
-          hideUnchangedRegions:{enabled:true,contextLineCount:3,minimumLineCount:5}
+          // Keep the full document visible. Monaco's hidden-region controller
+          // can leave the diff panes visually empty when the editor is first
+          // mounted in an inactive/zero-sized workbench tab.
+          hideUnchangedRegions:{enabled:false}
         });
         diffEditor.setModel({original:originalModel,modified:modifiedModel});
         diffEditor.getOriginalEditor().updateOptions({readOnly:true,domReadOnly:true,wordWrap:'off',lineNumbers:'on'});
@@ -93,7 +99,13 @@
         };
         resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(layout) : null;
         resizeObserver?.observe(host);
-        requestAnimationFrame(() => requestAnimationFrame(layout));
+        // Workbench activation and flex sizing settle over multiple frames.
+        // Re-layout after the pane becomes visible, not just at construction.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          layout();
+          setTimeout(layout, 80);
+          setTimeout(layout, 240);
+        }));
         window.addEventListener('resize', layout);
         const priorCleanup = tab._diffCleanup;
         tab._diffCleanup = () => { window.removeEventListener('resize', layout); priorCleanup(); };
