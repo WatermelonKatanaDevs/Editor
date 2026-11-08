@@ -344,6 +344,17 @@
           editorFileDropToken = '';
           if (selectedFiles.length && this.fs && typeof File === 'function') {
             const sourceFs = this.fs;
+            if (this.readOnly && e.dataTransfer.items?.add) {
+              for (const item of selectedFiles) {
+                try {
+                  const bytes = sourceFs.readFileSync(item.path, 'binary');
+                  if (bytes != null) e.dataTransfer.items.add(new File([bytes], item.name, {
+                    type: editorFileMimeType(item.name),
+                    lastModified: Date.now()
+                  }));
+                } catch (_) {}
+              }
+            }
             editorFileDropToken = window.__editorFileDropBridge?.registerProvider?.(() => {
               const files = [];
               for (const item of selectedFiles) {
