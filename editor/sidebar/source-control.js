@@ -43,7 +43,17 @@
         const oldBytes = data.type === 'added' ? new Uint8Array() : data.oldSha ? await window.GitHubService.readBlob(data.owner, data.repo, data.oldSha) : new Uint8Array();
         if (disposed || !host.isConnected) return wrap;
         const oldText = decode(oldBytes);
-        const newText = data.type === 'deleted' ? '' : decode(data.newBytes || new Uint8Array());
+        // Resolve the modified side from the live workspace at render time.
+        // Workbench tabs are created asynchronously, and their payload should
+        // not be the only source of truth for potentially large binary buffers.
+        let workingBytes = data.newBytes || new Uint8Array();
+        if (data.type !== 'deleted' && ctx.state.fs?.readFileSync && data.path) {
+          try { workingBytes = toBytes(ctx.state.fs.readFileSync(data.path, 'binary')); } catch (_) {}
+        }
+        const newText = data.type === 'deleted' ? '' : decode(workingBytes);
+        if (data.type === 'modified' && !oldText.length && !newText.length) {
+          throw new Error('Both versions of this file were read as empty. The diff was stopped rather than showing a misleading blank comparison.');
+        }
         if (oldText.includes('\0') || newText.includes('\0')) throw new Error('This file appears to be binary and cannot be shown as a text diff.');
         const language = window.EditorMonacoLanguage?.(data.path) || 'plaintext';
         const base = 'inmemory://watermelonkatana-diff/' + encodeURIComponent(data.path || 'file') + '-' + Math.random().toString(36).slice(2);
