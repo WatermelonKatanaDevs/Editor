@@ -1,5 +1,5 @@
 (function () {
-  const textMimes = ['application/json','application/javascript','application/typescript','application/xml','model/gltf+json'];
+  const textMimes = ['application/json','application/manifest+json','application/javascript','application/typescript','application/xml','model/gltf+json'];
   function match(file) {
     const mime = String(file.mime || '');
     return mime.startsWith('text/') || textMimes.includes(mime) || mime === 'image/svg+xml' || String(file.name || '').toLowerCase().endsWith('.obj');
