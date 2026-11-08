@@ -704,6 +704,13 @@
           else throw new Error('git ' + operation + ': too many revisions.');
         }
         const repository = await this._repository(cwd);
+        if (ref === 'HEAD') {
+          try { await this.git.resolveRef({fs:this.fs, dir:repository.dir, ref:'HEAD'}); }
+          catch (error) {
+            if (operation === 'log' && (error?.code === 'NotFoundError' || error?.name === 'NotFoundError')) return {output:'', value:[]};
+            throw error;
+          }
+        }
         const commits = await this.git.log({fs:this.fs, dir:repository.dir, ref, depth});
         if (!commits.length) return {output:'', value:[]};
         const lines = [];
