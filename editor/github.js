@@ -817,7 +817,7 @@
     return Promise.all(byParent.get('') || []);
   }
 
-  async function commitAndPush({owner, repo, branch, message, fs, compareTree = null, pathPrefix = '', excludePaths = [], gitlinks = [], removedGitlinks = [], changesOverride = null, expectedRemoteSha = null, _attempt = 0}) {
+  async function commitAndPush({owner, repo, branch, message, fs, compareTree = null, pathPrefix = '', excludePaths = [], gitlinks = [], removedGitlinks = [], changesOverride = null, expectedRemoteSha = null, parentsOverride = null, _attempt = 0}) {
     message = String(message || '').trim();
     if (!message) throw new Error('Enter a commit message.');
     let remote = null;
@@ -856,7 +856,10 @@
       if (remote.treeSha) treeBody.base_tree = remote.treeSha;
       const tree = await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/trees', {method:'POST', body:JSON.stringify(treeBody)});
       const commitBody = {message, tree:tree.sha};
-      if (remote.commitSha) commitBody.parents = [remote.commitSha];
+      if (Array.isArray(parentsOverride)) {
+        if (!parentsOverride.length || parentsOverride.length > 2 || parentsOverride.some(parent => !/^[0-9a-f]{40}$/i.test(String(parent || '')))) throw new Error('The supplied merge parents are invalid.');
+        commitBody.parents = [...parentsOverride];
+      } else if (remote.commitSha) commitBody.parents = [remote.commitSha];
       const commit = await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/commits', {method:'POST', body:JSON.stringify(commitBody)});
       const refPath = '/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/refs/heads/' + branchPath(branch);
       try {
@@ -872,7 +875,7 @@
         if (e?.status === 422 && expectedRemoteSha !== null) throw new Error('The GitHub branch moved while pushing. Your local commit is safe; fetch and reconcile the remote changes before retrying.');
         if (e?.status === 422 && _attempt < 8) {
           await new Promise(resolve => setTimeout(resolve, 500 + _attempt * 500));
-          return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, changesOverride, expectedRemoteSha, _attempt:_attempt + 1});
+          return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, changesOverride, expectedRemoteSha, parentsOverride, _attempt:_attempt + 1});
         }
         throw e;
       }
@@ -884,10 +887,11 @@
       // with a bounded backoff before surfacing the error.
       if ((e?.status === 404 || e?.status === 409) && _attempt < 8) {
         await new Promise(resolve => setTimeout(resolve, Math.min(1000 + _attempt * 1000, 5000)));
-        return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, changesOverride, expectedRemoteSha, _attempt:_attempt + 1});
+        return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, changesOverride, expectedRemoteSha, parentsOverride, _attempt:_attempt + 1});
       }
       if (e?.status !== 403) throw e;
       if (updatedGitlinks.length || deletedGitlinks.length) throw new Error('GitHub rejected the Git-data write for a commit containing submodule references. The GraphQL fallback cannot create or remove gitlinks; check your repository permissions and try again.');
+      if (Array.isArray(parentsOverride)) throw new Error('GitHub rejected the Git-data merge commit write. The GraphQL fallback cannot preserve multiple commit parents; check repository permissions and retry.');
       const commitSha = await createGraphQLCommit(owner, repo, branch, message, allChanges, remote.commitSha);
       return {changed:true, changes:allChanges, commitSha};
     }
