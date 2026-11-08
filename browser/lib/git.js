@@ -694,7 +694,7 @@
           commit = local.commit;
         } catch (_) {}
         const wasShallow = shallow.has(oid);
-        const traceExistingHistory = !!commit && !!item.searchBoundary && !wasShallow;
+        const traceExistingHistory = !!item.searchBoundary && !wasShallow;
         if (!commit) {
           if (downloadedCommits >= maxCommits) {
             stoppedAtDepth = true;
