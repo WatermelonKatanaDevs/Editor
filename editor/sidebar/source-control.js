@@ -182,6 +182,11 @@
               const node = document.createElement('div');
               node.className = 'source-control-monaco-collapse-zone';
               node.textContent = '··· ' + block.count + ' unchanged lines ···';
+              // Keep the separator self-styled: the viewer can be mounted
+              // before the sidebar stylesheet finishes loading, and a missing
+              // class rule otherwise leaves the view-zone content effectively
+              // invisible.
+              node.style.cssText = 'box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:100%;height:22px;min-height:22px;padding:0 10px;overflow:hidden;background:#242424;border-top:1px solid #383838;border-bottom:1px solid #383838;color:#b0b0b0;font:11px/20px sans-serif;letter-spacing:.2px;white-space:nowrap;user-select:none;';
               accessor.addZone({
                 afterLineNumber:block.afterLineNumber,
                 heightInPx:22,
