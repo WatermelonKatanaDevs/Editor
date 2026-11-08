@@ -148,7 +148,8 @@
         if (localGitMode) showStatus(error.message || String(error), true);
         return;
       }
-      localGitMode = !!localGitRepository?.isRepository || preferLocal || !github?.isSignedIn?.();
+      const hasRemoteSubmodules = state.gitRemote?.provider === 'github' && (state.gitSubmodules || []).some(module => !module.removed);
+      localGitMode = !hasRemoteSubmodules && (!!localGitRepository?.isRepository || preferLocal || !github?.isSignedIn?.());
       if (!localGitMode) syncSelection();
       renderShell();
       if (localGitMode) {
