@@ -637,8 +637,10 @@
       return {commit:commitObject, downloaded:true, blobs:blobCount, trees:treesByPath.size + 1};
     }
 
-    async fetch(cwd = '/', remoteName = 'origin', branchName = null) {
+    async fetch(cwd = '/', remoteName = 'origin', branchName = null, maxCommits = 20) {
       if (remoteName !== 'origin') throw new Error('Only the origin remote is supported for GitHub fetch.');
+      maxCommits = Number(maxCommits);
+      if (!Number.isInteger(maxCommits) || maxCommits < 1 || maxCommits > 100) throw new Error('Fetch depth must be a whole number from 1 to 100.');
       const repository = await this._repository(cwd);
       const localBranch = await this.git.currentBranch({fs:this.fs, dir:repository.dir, fullname:false});
       if (!branchName && !localBranch) throw new Error('Specify a remote branch while HEAD is detached.');
@@ -654,7 +656,6 @@
       const ref = 'refs/remotes/origin/' + branch;
       const previousHead = String(await this._readConfig(repository, 'remote.origin.lastFetch') || '');
       const lastPush = String(await this._readConfig(repository, 'remote.origin.lastPush') || '');
-      const previousComplete = String(await this._readConfig(repository, 'remote.origin.lastFetchComplete') || '');
       if (!remote.commitSha) {
         try { await this.git.deleteRef({fs:this.fs, dir:repository.dir, ref}); } catch (_) {}
         await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetch', value:''});
@@ -664,124 +665,97 @@
         await this.adapter.flush();
         return {output:'origin/' + branch + ' is empty or does not exist.', value:{branch, commitSha:null, changed:!!previousHead, empty:true, downloadedObjects:false}};
       }
+
       const sha = String(remote.commitSha);
-      let alreadyFetched = false;
-      try {
-        const tracked = await this.git.resolveRef({fs:this.fs, dir:repository.dir, ref});
-        if (tracked === sha && previousComplete === sha) {
-          const read = await this.git.readCommit({fs:this.fs, dir:repository.dir, oid:sha});
-          const tree = await this.git.readTree({fs:this.fs, dir:repository.dir, oid:read.commit.tree});
-          alreadyFetched = !!tree;
-        }
-      } catch (_) {}
-      let blobCount = 0;
-      let treeCount = 0;
-      if (!alreadyFetched) {
-        const remoteState = await github.getRemoteCommitState(owner, repo, sha);
-        if (String(remoteState.commitSha) !== sha) throw new Error('GitHub returned a different commit than the requested remote head.');
-        if (remoteState.truncated) throw new Error('The remote Git tree is too large for one complete recursive response. No remote-tracking ref was updated.');
-        if (String(remoteState.commit?.tree?.sha || '') !== String(remoteState.treeSha)) throw new Error('GitHub commit metadata and tree response do not match.');
-        const entries = Array.isArray(remoteState.tree) ? remoteState.tree : [];
-        const treesByPath = new Map(entries.filter(entry => entry?.type === 'tree').map(entry => [String(entry.path), entry]));
-        const childrenByPath = new Map();
-        for (const entry of entries) {
-          const path = String(entry?.path || '');
-          if (!path || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('GitHub returned an invalid path in its remote Git tree.');
-          const validModes = entry.type === 'tree' ? ['040000'] : entry.type === 'commit' ? ['160000'] : ['100644', '100755', '120000'];
-          if (!validModes.includes(String(entry.mode))) throw new Error('GitHub returned an unsupported Git mode at ' + path + '.');
-          const slash = path.lastIndexOf('/');
-          const parent = slash < 0 ? '' : path.slice(0, slash);
-          if (parent && !treesByPath.has(parent)) throw new Error('The remote Git tree is incomplete at ' + parent + '.');
-          if (!childrenByPath.has(parent)) childrenByPath.set(parent, []);
-          childrenByPath.get(parent).push(entry);
-        }
-        const blobs = new Map();
-        for (const entry of entries) {
-          if (entry.type !== 'blob') continue;
-          if (!entry.sha || !entry.mode) throw new Error('GitHub returned an incomplete blob entry.');
-          blobs.set(String(entry.sha), entry);
-        }
-        const blobList = Array.from(blobs.keys());
-        for (let i = 0; i < blobList.length; i += 4) {
-          const batch = blobList.slice(i, i + 4);
-          const written = await Promise.all(batch.map(async blobSha => {
-            try {
-              await this.git.readBlob({fs:this.fs, dir:repository.dir, oid:blobSha});
-              return false;
-            } catch (_) {}
-            const data = await github.readBlob(owner, repo, blobSha);
-            const writtenSha = await this.git.writeBlob({fs:this.fs, dir:repository.dir, blob:new Uint8Array(data)});
-            if (writtenSha !== blobSha) throw new Error('A downloaded Git blob failed its SHA-1 integrity check: ' + blobSha + '.');
-            return true;
-          }));
-          blobCount += written.filter(Boolean).length;
-        }
-        const writtenTrees = new Map();
-        const writeTree = async path => {
-          const children = childrenByPath.get(path) || [];
-          const tree = [];
-          for (const entry of children) {
-            const name = path ? String(entry.path).slice(path.length + 1) : String(entry.path);
-            let oid = String(entry.sha || '');
-            if (entry.type === 'tree') {
-              oid = await writeTree(String(entry.path));
-            } else if (entry.type !== 'blob' && entry.type !== 'commit') {
-              throw new Error('Unsupported remote Git object type at ' + entry.path + '.');
-            }
-            if (!oid) throw new Error('GitHub returned an incomplete tree entry at ' + entry.path + '.');
-            tree.push({mode:String(entry.mode), path:name, oid, type:entry.type});
+      const shallowPath = repository.root.replace(/\/+$/, '') + '/.git/shallow';
+      let shallowText = '';
+      try { shallowText = await this.fs.promises.readFile(shallowPath, {encoding:'utf8'}); }
+      catch (error) { if (error?.code !== 'ENOENT') throw error; }
+      const shallow = new Set(String(shallowText || '').split(/\r?\n/).filter(Boolean));
+      const queue = [sha];
+      const queued = new Set(queue);
+      const processed = new Set();
+      const parentSources = new Map();
+      let downloadedCommits = 0;
+      let downloadedBlobs = 0;
+      let downloadedTrees = 0;
+      let stoppedAtDepth = false;
+
+      while (queue.length) {
+        const oid = queue.shift();
+        if (processed.has(oid)) continue;
+        let commit = null;
+        try {
+          const local = await this.git.readCommit({fs:this.fs, dir:repository.dir, oid});
+          await this.git.readTree({fs:this.fs, dir:repository.dir, oid:local.commit.tree});
+          commit = local.commit;
+        } catch (_) {}
+        const wasShallow = shallow.has(oid);
+        if (!commit) {
+          if (downloadedCommits >= maxCommits) {
+            stoppedAtDepth = true;
+            break;
           }
-          const oid = await this.git.writeTree({fs:this.fs, dir:repository.dir, tree});
-          const expected = path ? String(treesByPath.get(path)?.sha || '') : String(remoteState.treeSha);
-          if (oid !== expected) throw new Error('A downloaded Git tree failed its SHA-1 integrity check' + (path ? ' at ' + path : '') + '.');
-          writtenTrees.set(path, oid);
-          return oid;
-        };
-        await writeTree('');
-        treeCount = writtenTrees.size;
-        const parseIdentity = (identity, label) => {
-          if (!identity || !identity.date || !identity.name || !identity.email) throw new Error('GitHub did not provide complete ' + label + ' identity metadata; refusing to create an inexact commit.');
-          const timestamp = Date.parse(identity.date);
-          if (!Number.isFinite(timestamp)) throw new Error('GitHub returned an invalid ' + label + ' timestamp.');
-          const zone = String(identity.date).match(/([+-])(\d{2}):?(\d{2})$/);
-          const offsetMinutes = zone ? (Number(zone[2]) * 60 + Number(zone[3])) * (zone[1] === '+' ? -1 : 1) : 0;
-          return {name:String(identity.name), email:String(identity.email), timestamp:Math.floor(timestamp / 1000), timezoneOffset:offsetMinutes};
-        };
-        const commitData = remoteState.commit;
-        const commitObject = {
-          message:String(commitData.message || ''),
-          tree:String(remoteState.treeSha),
-          parent:Array.isArray(commitData.parents) ? commitData.parents.map(parent => String(parent.sha)) : [],
-          author:parseIdentity(commitData.author, 'author'),
-          committer:parseIdentity(commitData.committer, 'committer')
-        };
-        if (commitData.verification?.signature) commitObject.gpgsig = String(commitData.verification.signature);
-        const writtenCommit = await this.git.writeCommit({fs:this.fs, dir:repository.dir, commit:commitObject});
-        if (writtenCommit !== sha) throw new Error('The remote commit could not be reconstructed byte-for-byte (expected ' + sha.slice(0, 7) + ', got ' + writtenCommit.slice(0, 7) + '). Its signature or metadata format may not be supported yet, so the remote ref was not changed.');
-        const shallowPath = repository.root.replace(/\/+$/, '') + '/.git/shallow';
-        let shallowText = '';
-        try { shallowText = await this.fs.promises.readFile(shallowPath, {encoding:'utf8'}); }
-        catch (error) { if (error?.code !== 'ENOENT') throw error; }
-        const shallow = new Set(String(shallowText || '').split(/\r?\n/).filter(Boolean));
-        let missingParent = false;
-        for (const parent of commitObject.parent) {
-          try { await this.git.readCommit({fs:this.fs, dir:repository.dir, oid:parent}); }
-          catch (_) { missingParent = true; break; }
+          const result = await this._fetchRemoteCommitObjects(repository, owner, repo, oid, github);
+          commit = result.commit;
+          if (result.downloaded) downloadedCommits++;
+          downloadedBlobs += result.blobs;
+          downloadedTrees += result.trees;
+        } else if (!wasShallow) {
+          processed.add(oid);
+          continue;
         }
-        if (missingParent) shallow.add(sha);
-        if (shallow.size) await this.fs.promises.writeFile(shallowPath, Array.from(shallow).sort().join('\n') + '\n');
+        processed.add(oid);
+        shallow.delete(oid);
+        for (const parent of commit.parent || []) {
+          const parentSha = String(parent || '');
+          if (!parentSha || processed.has(parentSha)) continue;
+          if (!parentSources.has(parentSha)) parentSources.set(parentSha, new Set());
+          parentSources.get(parentSha).add(oid);
+          if (!queued.has(parentSha)) {
+            queued.add(parentSha);
+            queue.push(parentSha);
+          }
+        }
       }
+
+      if (stoppedAtDepth) {
+        for (const oid of queue) {
+          if (processed.has(oid)) continue;
+          const sources = parentSources.get(oid) || [];
+          let present = false;
+          try {
+            const local = await this.git.readCommit({fs:this.fs, dir:repository.dir, oid});
+            await this.git.readTree({fs:this.fs, dir:repository.dir, oid:local.commit.tree});
+            present = true;
+          } catch (_) {}
+          if (!present) for (const source of sources) shallow.add(source);
+        }
+      }
+
+      if (shallow.size) await this.fs.promises.writeFile(shallowPath, Array.from(shallow).sort().join('\n') + '\n');
+      else {
+        try { await this.fs.promises.unlink(shallowPath); }
+        catch (error) { if (error?.code !== 'ENOENT') throw error; }
+      }
+
       await this.git.writeRef({fs:this.fs, dir:repository.dir, ref, value:sha, force:true});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetch', value:sha});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchComplete', value:sha});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchBranch', value:branch});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchAt', value:new Date().toISOString()});
       await this.adapter.flush();
+
       const changed = !!previousHead && previousHead !== sha;
       const differsFromLastPush = !!lastPush && lastPush !== sha;
+      const boundaryCount = shallow.size;
+      const summary = downloadedCommits
+        ? ' Downloaded ' + downloadedCommits + ' commit(s), ' + downloadedBlobs + ' blob(s), and ' + downloadedTrees + ' tree(s).'
+        : ' All required commit objects were already present locally.';
+      const depthMessage = stoppedAtDepth ? ' History remains shallow; run git fetch --deepen=' + maxCommits + ' to retrieve more.' : boundaryCount ? ' Some unrelated shallow history remains.' : ' The fetched history is complete.';
       return {
-        output:(alreadyFetched ? 'Already fetched' : 'Fetched') + ' origin/' + branch + ' at ' + sha.slice(0, 7) + (differsFromLastPush ? ' (different from the last pushed commit).' : '.') + (alreadyFetched ? '' : ' Downloaded ' + blobCount + ' blob(s) and ' + treeCount + ' tree(s), plus the tip commit. Older history may still need to be fetched; the working tree was not changed.'),
-        value:{branch, commitSha:sha, changed, differsFromLastPush, downloadedObjects:!alreadyFetched, blobs:blobCount, trees:treeCount, commit:!alreadyFetched}
+        output:'Fetched origin/' + branch + ' at ' + sha.slice(0, 7) + (differsFromLastPush ? ' (different from the last pushed commit).' : '.') + summary + depthMessage + ' The working tree was not changed.',
+        value:{branch, commitSha:sha, changed, differsFromLastPush, downloadedObjects:downloadedCommits > 0, commits:downloadedCommits, blobs:downloadedBlobs, trees:downloadedTrees, shallow:stoppedAtDepth || boundaryCount > 0}
       };
     }
 
