@@ -119,10 +119,7 @@
     status.textContent = 'Starting 7-Zip…';
     const worker = new Worker(new URL('editor/previews/archive-7z-worker.js', document.baseURI));
     let complete = false;
-    ctx.addCleanup(() => {
-      if (!complete) worker.terminate();
-      else worker.terminate();
-    });
+    ctx.addCleanup(() => worker.terminate());
 
     const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     const result = await new Promise((resolve, reject) => {
@@ -134,16 +131,19 @@
         }
         if (data.type === 'error') {
           complete = true;
+          worker.terminate();
           reject(new Error(data.message || '7-Zip could not open this archive.'));
           return;
         }
         if (data.type === 'done') {
           complete = true;
+          worker.terminate();
           resolve(data.entries || []);
         }
       };
       worker.onerror = event => {
         complete = true;
+        worker.terminate();
         reject(new Error(event.message || 'The 7-Zip archive worker failed.'));
       };
       worker.postMessage({ buffer }, [buffer]);
@@ -244,7 +244,7 @@
       const name = String(file.name || file.path || '');
       const mime = String(file.mime || '').toLowerCase();
       return /\.(?:zip|7z)$/i.test(name) ||
-        ['application/zip', 'application/x-7z-compressed', 'application/x-7z-compressed-tar'].includes(mime);
+        ['application/zip', 'application/x-zip-compressed', 'application/x-7z-compressed', 'application/x-7z-compressed-tar'].includes(mime);
     },
     views: [{
       id: 'archive-preview',
@@ -305,7 +305,7 @@
           const binary = ctx.readBinary();
           if (!binary || !binary.length) throw new Error('This archive is empty.');
           const isSevenZip = /\.7z$/i.test(ctx.file.name) ||
-            String(ctx.file.mime || '').toLowerCase() === 'application/x-7z-compressed';
+            ['application/x-7z-compressed', 'application/x-7z-compressed-tar'].includes(String(ctx.file.mime || '').toLowerCase());
           const loaded = isSevenZip
             ? await loadSevenZipArchive(ctx, binary, archiveStatus)
             : await loadZipArchive(ctx, binary, archiveStatus);
