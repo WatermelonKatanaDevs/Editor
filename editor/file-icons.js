@@ -59,10 +59,12 @@
       'otc': 'font/collection',
       'dfont': 'font/dfont',
       'py': 'text/x-python',
+      'pyw': 'text/x-python',
       'gyp': 'text/x-python',
       'gypi': 'text/x-python',
       'yml': 'text/yaml',
       'sh': 'text/x-shellscript',
+      'bash': 'text/x-shellscript',
       'coffee': 'text/x-coffeescript',
       'patch': 'text/x-diff',
       'bnf': 'text/x-bnf',
@@ -72,6 +74,12 @@
       'bin': 'application/octet-stream',
       'node': 'application/octet-stream',
       'lock': 'text/plain',
+      'zip': 'application/zip',
+      '7z': 'application/x-7z-compressed',
+      'gz': 'application/gzip',
+      'tgz': 'application/gzip',
+      'tar': 'application/x-tar',
+      'rar': 'application/vnd.rar',
       'txt': 'text/plain'
     };
     return map[ext] || 'application/octet-stream';
@@ -96,7 +104,13 @@
     if (ext === 'cc') return badgeIcon('C++', '#1769aa', '#ffffff', 13);
     if (ext === 'gyp' || ext === 'gypi') return badgeIcon('GYP', '#e68a32', '#ffffff', 12);
     if (ext === 'yml') return badgeIcon('YAML', '#cb3434', '#ffffff', 11);
-    if (ext === 'sh') return badgeIcon('>_', '#4e6a55', '#d9f5de', 13);
+    if (ext === 'sh' || ext === 'bash') return badgeIcon('>_', '#263b2d', '#a8e6b2', 13);
+    if (ext === 'py' || ext === 'pyw') return badgeIcon('PY', '#3776ab', '#ffd43b', 17);
+    if (ext === 'zip') return badgeIcon('ZIP', '#bd8b32', '#fff7dc', 12);
+    if (ext === '7z') return badgeIcon('7Z', '#557a9b', '#ffffff', 17);
+    if (ext === 'gz' || ext === 'tgz') return badgeIcon('GZ', '#557a9b', '#ffffff', 17);
+    if (ext === 'tar') return badgeIcon('TAR', '#8b6a43', '#fff4df', 12);
+    if (ext === 'rar') return badgeIcon('RAR', '#7656a8', '#ffffff', 12);
     if (ext === 'coffee') return badgeIcon('☕', '#795548', '#fff4e8', 19);
     if (ext === 'patch') return badgeIcon('±', '#d97706', '#ffffff', 22);
     if (ext === 'bnf') return badgeIcon('::=', '#6d5ba6', '#ffffff', 13);
