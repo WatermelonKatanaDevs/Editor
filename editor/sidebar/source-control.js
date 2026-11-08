@@ -320,7 +320,7 @@
         try {
           if (typeof JSZip === 'undefined') throw new Error('JSZip is unavailable, so the commit archive cannot be restored.');
           const ignoreNodeModules = state.behavior?.ignoreNodeModules !== false;
-          const isNodeModulesPath = path => ignoreNodeModules && String(path || '').replace(/^\\/+/, '').split('/').includes('node_modules');
+          const isNodeModulesPath = path => ignoreNodeModules && String(path || '').replace(/^\/+/, '').split('/').includes('node_modules');
           const formatBytes = value => {
             const size = Number(value) || 0;
             if (size < 1024) return size + ' B';
@@ -349,7 +349,7 @@
           const topLevels = new Set();
           let hasRootFile = false;
           zip.forEach((relativePath, entry) => {
-            const path = String(relativePath || '').replace(/^\\/+|\\/+$/g, '');
+            const path = String(relativePath || '').replace(/^\/+|\/+$/g, '');
             if (!path) return;
             const parts = path.split('/');
             if (parts.length === 1) {
@@ -391,12 +391,12 @@
           // Replace the workspace while preserving node_modules when the
           // editor's ignoreNodeModules setting is enabled.
           status.textContent = 'Removing files from the current workspace…';
-          const localPaths = state.fs.listFilesSync().map(path => String(path).replace(/^\\/+/, '')).filter(Boolean);
+          const localPaths = state.fs.listFilesSync().map(path => String(path).replace(/^\/+/, '')).filter(Boolean);
           for (const path of localPaths) {
             if (!isNodeModulesPath(path)) state.fs.deleteFileSync(path);
           }
           const localDirs = typeof state.fs.listDirectoriesSync === 'function'
-            ? state.fs.listDirectoriesSync().map(path => String(path).replace(/^\\/+/, '')).filter(Boolean)
+            ? state.fs.listDirectoriesSync().map(path => String(path).replace(/^\/+/, '')).filter(Boolean)
             : [];
           const preservedNodeModulesDirs = ignoreNodeModules ? localDirs.filter(isNodeModulesPath) : [];
           for (const dir of localDirs.sort((a,b) => b.split('/').length - a.split('/').length)) {
