@@ -118,6 +118,45 @@
     let commitBusy = false;
     let currentDiffState = null;
     let selectionProjectId = null;
+    let localGitMode = false;
+    let localGitInstance = null;
+    let localGitFilesystem = null;
+    let localGitRepository = null;
+    let localGitStatus = null;
+    function getLocalGit() {
+      if (!state.fs) throw new Error('No workspace filesystem is open.');
+      if (typeof window.LocalGitService !== 'function') throw new Error('Local Git support has not loaded.');
+      if (!localGitInstance || localGitFilesystem !== state.fs) {
+        localGitFilesystem = state.fs;
+        localGitInstance = new window.LocalGitService(state.fs);
+      }
+      return localGitInstance;
+    }
+    async function detectLocalRepository() {
+      if (!state.fs) return null;
+      return await getLocalGit().detect('/');
+    }
+    async function openLocalSourceControl() {
+      const preferLocal = !!state.fs?.isPersistentDirectory && !state.gitRemote?.provider;
+      try {
+        localGitRepository = await detectLocalRepository();
+      } catch (error) {
+        localGitRepository = null;
+        localGitMode = preferLocal || !github?.isSignedIn?.();
+        renderShell();
+        if (localGitMode) showStatus(error.message || String(error), true);
+        return;
+      }
+      localGitMode = !!localGitRepository?.isRepository || preferLocal || !github?.isSignedIn?.();
+      if (!localGitMode) syncSelection();
+      renderShell();
+      if (localGitMode) {
+        if (localGitRepository?.isRepository) {
+          await refreshLocalStatus();
+          await loadLocalHistory();
+        }
+      } else await refresh();
+    }
     function esc(value) { return String(value ?? '').replace(/[&<>\"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\\':'&#39;'}[ch])); }
     function loadConfig() {
       try { const value = JSON.parse(localStorage.getItem(configKey()) || 'null'); if (value?.owner && value?.repo) return {...value}; } catch (_) {}
@@ -150,7 +189,7 @@
         try { state.saveProjectMetadata?.(); } catch (_) {}
       }
     }
-    function show() { syncSelection(); renderShell(); void refresh(); }
+    function show() { void openLocalSourceControl(); }
     function isLocalProject() { return !state.gitRemote?.provider; }
     function setLocalGitRemote(owner, repo, branch = 'main') {
       state.gitSubmodules = [];
@@ -160,8 +199,195 @@
       selectionProjectId = String(state.projectId || 'workspace');
       saveConfig();
     }
+
+    function renderLocalShell() {
+      tree.classList.remove('activity-collapsed');
+      const persistent = !!state.fs?.isPersistentDirectory;
+      const hasRepository = !!localGitRepository?.isRepository;
+      const changes = localGitStatus?.changes || [];
+      const staged = changes.filter(change => change.staged);
+      const unstaged = changes.filter(change => change.unstaged);
+      const renderChange = (change, area) => {
+        const type = area === 'staged'
+          ? (change.head === 0 ? 'added' : change.stage === 0 ? 'deleted' : 'modified')
+          : (change.stage === 0 ? 'added' : change.workdir === 0 ? 'deleted' : 'modified');
+        const label = type === 'added' ? 'A' : type === 'deleted' ? 'D' : 'M';
+        const action = area === 'staged' ? 'unstage' : 'stage';
+        const actionLabel = area === 'staged' ? 'Unstage' : 'Stage';
+        return '<div class="source-control-change source-control-local-change"><span class="source-control-change-type source-' + type + '">' + label + '</span><button type="button" class="source-control-change-open" data-local-diff="' + esc(change.path) + '" title="View changes in ' + esc(change.path) + '"><span>' + esc(change.path) + '</span><span class="source-control-diff-indicator">Diff</span></button><button type="button" class="source-control-local-action" data-local-action="' + action + '" data-local-path="' + esc(change.path) + '">' + actionLabel + '</button></div>';
+      };
+      tree.innerHTML = '<div class="source-control-sidebar">' +
+        '<div class="source-control-head"><div class="activity-sidebar-title">Source Control</div><button data-refresh title="Refresh">↻</button></div>' +
+        '<section class="source-control-section"><div class="source-control-section-title">Local Repository</div>' +
+        (hasRepository
+          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span><span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span></div>'
+          : persistent
+            ? '<div class="source-control-local-hint">This folder is not being tracked by Git yet.</div><button type="button" class="source-control-create-repo" data-local-init>Initialize Repository</button>'
+            : '<div class="source-control-local-hint">Local Git requires a folder opened directly from your computer. Open a folder to keep commits in its <code>.git</code> directory.</div>') +
+        '</section>' +
+        (hasRepository
+          ? '<section class="source-control-section"><div class="source-control-section-title">Changes</div>' +
+            '<div class="source-control-local-bulk"><button type="button" data-local-stage-all ' + (unstaged.length ? '' : 'disabled') + '>Stage All</button><button type="button" data-local-unstage-all ' + (staged.length ? '' : 'disabled') + '>Unstage All</button></div>' +
+            '<div class="source-control-local-group"><div class="source-control-local-group-title">Staged Changes <span>' + staged.length + '</span></div><div data-local-staged>' + (staged.length ? staged.map(change => renderChange(change, 'staged')).join('') : '<div class="source-control-clean">No staged changes</div>') + '</div></div>' +
+            '<div class="source-control-local-group"><div class="source-control-local-group-title">Changes <span>' + unstaged.length + '</span></div><div data-local-unstaged>' + (unstaged.length ? unstaged.map(change => renderChange(change, 'unstaged')).join('') : '<div class="source-control-clean">No unstaged changes</div>') + '</div></div>' +
+            '<textarea data-local-commit-message placeholder="Commit message" rows="3"></textarea><button class="source-control-commit" data-local-commit ' + (staged.length && !commitBusy ? '' : 'disabled') + '>Commit</button><div data-status class="source-control-status"></div></section>' +
+            '<section class="source-control-section"><div class="source-control-section-title">History</div><div data-local-history class="source-control-history"><div class="source-control-loading">Loading commits…</div></div></section>'
+          : '') +
+        '</div>';
+      tree.querySelector('[data-refresh]')?.addEventListener('click', () => void openLocalSourceControl());
+      tree.querySelector('[data-local-init]')?.addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        button.textContent = 'Initializing…';
+        try {
+          const permission = await state.fs.requestPermission?.();
+          if (permission && permission !== 'granted') throw new Error('Write permission is required to create the .git directory in this folder.');
+          localGitRepository = await getLocalGit().init('/', 'main');
+          await state.fs.flush?.();
+          showStatus('Initialized a local Git repository on branch main.');
+          await refreshLocalStatus();
+          await loadLocalHistory();
+        } catch (error) {
+          showStatus(error.message || String(error), true);
+          if (button.isConnected) { button.disabled = false; button.textContent = 'Initialize Repository'; }
+        }
+      });
+      tree.querySelector('[data-local-stage-all]')?.addEventListener('click', () => void runLocalGitAction(['add', '-A'], 'Staged all changes.'));
+      tree.querySelector('[data-local-unstage-all]')?.addEventListener('click', () => void runLocalGitAction(['reset'], 'Unstaged all changes.'));
+      tree.querySelectorAll('[data-local-action]').forEach(button => button.addEventListener('click', () => {
+        const args = button.dataset.localAction === 'stage' ? ['add', button.dataset.localPath] : ['restore', '--staged', button.dataset.localPath];
+        void runLocalGitAction(args, button.dataset.localAction === 'stage' ? 'Staged ' + button.dataset.localPath + '.' : 'Unstaged ' + button.dataset.localPath + '.');
+      }));
+      tree.querySelectorAll('[data-local-diff]').forEach(button => button.addEventListener('click', () => void openLocalFileDiff(button.dataset.localDiff)));
+      tree.querySelector('[data-local-commit]')?.addEventListener('click', () => void commitLocal());
+      tree.querySelectorAll('[data-local-commit-sha]').forEach(button => button.addEventListener('click', () => void openLocalCommit(button.dataset.localCommitSha)));
+    }
+
+    async function runLocalGitAction(args, message) {
+      try {
+        await getLocalGit().runSerialized(args, {cwd:'/'});
+        await refreshLocalStatus();
+        showStatus(message);
+      } catch (error) {
+        showStatus(error.message || String(error), true);
+      }
+    }
+
+    async function refreshLocalStatus() {
+      const token = ++statusToken;
+      if (!tree.querySelector('[data-local-staged]') || !localGitRepository?.isRepository) return;
+      try {
+        const status = await getLocalGit().status('/');
+        if (token !== statusToken) return;
+        localGitStatus = status;
+        localGitRepository = await getLocalGit().detect('/');
+        if (token !== statusToken) return;
+        renderLocalShell();
+        const button = tree.querySelector('[data-local-commit]');
+        if (button) button.disabled = commitBusy || !status.changes.some(change => change.staged);
+        if (status.clean) clearStatus();
+      } catch (error) {
+        if (token !== statusToken) return;
+        const target = tree.querySelector('[data-local-staged]');
+        if (target) target.innerHTML = '<div class="source-control-error">' + esc(error.message || String(error)) + '</div>';
+        const button = tree.querySelector('[data-local-commit]');
+        if (button) button.disabled = true;
+      }
+    }
+
+    async function openLocalFileDiff(path) {
+      try {
+        const service = getLocalGit();
+        const change = localGitStatus?.changes.find(item => item.path === path);
+        if (!change) return;
+        const outputs = [];
+        if (change.staged) {
+          const staged = await service.runSerialized(['diff', '--cached', '--', path], {cwd:'/'});
+          if (staged.output) outputs.push(staged.output);
+        }
+        if (change.unstaged && !change.untracked) {
+          const unstaged = await service.runSerialized(['diff', '--', path], {cwd:'/'});
+          if (unstaged.output) outputs.push(unstaged.output);
+        }
+        if (change.untracked) {
+          const bytes = service.adapter.readFile(service.resolvePath('/' + path));
+          const isBinary = bytes.some(value => value === 0);
+          let patch = 'diff --git a/' + path + ' b/' + path + '\nnew file mode 100644\n';
+          if (isBinary) patch += 'Binary files /dev/null and b/' + path + ' differ';
+          else {
+            const text = new TextDecoder('utf-8', {fatal:false}).decode(bytes);
+            patch += '--- /dev/null\n+++ b/' + path;
+            const lines = text === '' ? [] : text.split('\n');
+            if (text.endsWith('\n')) lines.pop();
+            patch += lines.length ? '\n@@ -0,0 +' + lines.length + ' @@\n' + lines.map(line => '+' + line).join('\n') : '\n@@ -0,0 +0,0 @@';
+            if (text && !text.endsWith('\n')) patch += '\n\\ No newline at end of file';
+          }
+          outputs.push(patch);
+        }
+        const diffText = outputs.join('\n\n');
+        const tab = state.openDiffTab?.({title:'Diff: ' + path.split('/').pop(), diffData:{path, localDiffText:diffText || 'No text diff is available for this file.'}});
+        if (!tab) showStatus('Could not open the diff viewer.', true);
+      } catch (error) {
+        showStatus(error.message || String(error), true);
+      }
+    }
+
+    async function loadLocalHistory() {
+      const token = ++historyToken;
+      const historyEl = tree.querySelector('[data-local-history]');
+      if (!historyEl || !localGitRepository?.isRepository) return;
+      try {
+        const result = await getLocalGit().runSerialized(['log', '--max-count', '20'], {cwd:'/'});
+        if (token !== historyToken) return;
+        const commits = result.value || [];
+        historyEl.innerHTML = commits.length ? commits.map(entry => {
+          const commit = entry.commit || {};
+          const message = String(commit.message || '(no message)').trim().split('\n')[0];
+          const author = commit.author?.name || 'Unknown';
+          const date = commit.author?.timestamp ? new Date(commit.author.timestamp * 1000).toLocaleString() : '';
+          return '<button type="button" class="source-control-commit-row" data-local-commit-sha="' + esc(entry.oid) + '"><div><strong>' + esc(message) + '</strong><span>' + esc(author) + ' · ' + esc(date) + '</span></div><code>' + esc(entry.oid.slice(0, 7)) + '</code></button>';
+        }).join('') : '<div class="source-control-empty-inline">No commits yet.</div>';
+        historyEl.querySelectorAll('[data-local-commit-sha]').forEach(button => button.addEventListener('click', () => void openLocalCommit(button.dataset.localCommitSha)));
+      } catch (error) {
+        if (token === historyToken) historyEl.innerHTML = '<div class="source-control-error">' + esc(error.message || String(error)) + '</div>';
+      }
+    }
+
+    async function openLocalCommit(oid) {
+      try {
+        const result = await getLocalGit().runSerialized(['show', oid], {cwd:'/'});
+        const tab = state.openDiffTab?.({title:'Commit: ' + oid.slice(0, 7), diffData:{path:'Commit ' + oid.slice(0, 7), localDiffText:result.output}});
+        if (!tab) showStatus('Could not open the commit viewer.', true);
+      } catch (error) {
+        showStatus(error.message || String(error), true);
+      }
+    }
+
+    async function commitLocal() {
+      const button = tree.querySelector('[data-local-commit]');
+      const message = tree.querySelector('[data-local-commit-message]')?.value.trim() || '';
+      if (!button || button.disabled || commitBusy) return;
+      if (!message) { showStatus('Enter a commit message.', true); return; }
+      commitBusy = true;
+      button.disabled = true;
+      button.textContent = 'Committing…';
+      try {
+        const result = await getLocalGit().runSerialized(['commit', '-m', message], {cwd:'/'});
+        tree.querySelector('[data-local-commit-message]').value = '';
+        showStatus(result.output || 'Commit created.');
+        await refreshLocalStatus();
+        await loadLocalHistory();
+      } catch (error) {
+        showStatus(error.message || String(error), true);
+      } finally {
+        commitBusy = false;
+        await refreshLocalStatus();
+      }
+    }
+
     function renderShell() {
       tree.classList.remove('activity-collapsed');
+      if (localGitMode) { renderLocalShell(); return; }
       if (!github?.isSignedIn?.()) {
         tree.innerHTML = `<div class="source-control-sidebar"><div class="activity-sidebar-title">Source Control</div><div class="source-control-empty"><strong>Sign in to GitHub</strong><span>Source Control uses your GitHub account to load repositories and push commits.</span><button data-open-profile>Open Profile</button></div></div>`;
         tree.querySelector('[data-open-profile]')?.addEventListener('click', () => state.sidebarController?.show('Profile'));
@@ -341,9 +567,19 @@
       }
     }
     async function refresh() {
+      if (localGitMode) {
+        try {
+          localGitRepository = await detectLocalRepository();
+          if (!localGitRepository?.isRepository) { renderLocalShell(); return; }
+          renderLocalShell();
+          await refreshLocalStatus();
+          await loadLocalHistory();
+        } catch (error) { showStatus(error.message || String(error), true); }
+        return;
+      }
       const token = ++refreshToken;
       try {
-        if (!github.isSignedIn()) { renderShell(); return; }
+        if (!github?.isSignedIn?.()) { renderShell(); return; }
         await loadRepositories(true);
         if (token !== refreshToken || !selected.repo) return;
         if (!branches.length) await loadBranches(false);
