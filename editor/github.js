@@ -581,6 +581,21 @@
     }
   }
 
+  function gitDataToBytes(value) {
+    if (value instanceof Uint8Array) return value;
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    // The in-memory workspace filesystem's "binary" read mode returns a
+    // binary string in some implementations. Uint8Array(string) is empty.
+    if (typeof value === 'string') {
+      const bytes = new Uint8Array(value.length);
+      for (let i = 0; i < value.length; i++) bytes[i] = value.charCodeAt(i) & 255;
+      return bytes;
+    }
+    if (Array.isArray(value)) return Uint8Array.from(value);
+    return new Uint8Array(value || []);
+  }
+
   async function compareWorkingTree(fs, remoteTree, options = {}) {
     if (!fs) throw new Error('No workspace filesystem is open.');
     const prefix = String(options.pathPrefix || '').replace(/^\/+|\/+$/g, '');
@@ -601,7 +616,7 @@
     const changes = [];
     for (const path of localPaths) {
       const data = fs.readFileSync(path, 'binary');
-      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || []);
+      const bytes = gitDataToBytes(data);
       const sha = await gitBlobSha(bytes);
       const remote = remoteFiles.get(path);
 
