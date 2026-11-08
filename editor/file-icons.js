@@ -60,6 +60,12 @@
       'dfont': 'font/dfont',
       'py': 'text/x-python',
       'pyw': 'text/x-python',
+      'java': 'text/x-java', 'cs': 'text/x-csharp', 'csx': 'text/x-csharp',
+      'rs': 'text/x-rust', 'rb': 'text/x-ruby', 'rake': 'text/x-ruby', 'php': 'text/x-php',
+      'cpp': 'text/x-c++', 'cxx': 'text/x-c++', 'hpp': 'text/x-c++', 'hxx': 'text/x-c++',
+      'go': 'text/x-go', 'kt': 'text/x-kotlin', 'kts': 'text/x-kotlin', 'swift': 'text/x-swift',
+      'dart': 'text/x-dart', 'lua': 'text/x-lua', 'pl': 'text/x-perl', 'pm': 'text/x-perl',
+      'r': 'text/x-r', 'scala': 'text/x-scala', 'xhtml': 'application/xhtml+xml', 'xml': 'application/xml',
       'gyp': 'text/x-python',
       'gypi': 'text/x-python',
       'yml': 'text/yaml',
@@ -105,7 +111,13 @@
     if (ext === 'gyp' || ext === 'gypi') return badgeIcon('GYP', '#e68a32', '#ffffff', 12);
     if (ext === 'yml') return badgeIcon('YAML', '#cb3434', '#ffffff', 11);
     if (ext === 'sh' || ext === 'bash') return badgeIcon('>_', '#263b2d', '#a8e6b2', 13);
-    if (ext === 'py' || ext === 'pyw') return badgeIcon('PY', '#3776ab', '#ffd43b', 17);
+    const deviconByExtension = {
+      py:'python',pyw:'python',java:'java',c:'c',h:'c',cpp:'cpp',cc:'cpp',cxx:'cpp',hpp:'cpp',hxx:'cpp',
+      cs:'csharp',csx:'csharp',rs:'rust',rb:'ruby',rake:'ruby',php:'php',html:'html5',htm:'html5',xhtml:'html5',xml:'xml',
+      go:'go',kt:'kotlin',kts:'kotlin',swift:'swift',dart:'dart',lua:'lua',pl:'perl',pm:'perl',r:'r',scala:'scala'
+    };
+    const devicon = deviconByExtension[ext];
+    if (devicon) return '<img src="editor/assets/file-icons/' + devicon + '.svg" alt="" width="24" height="24" style="width:24px;height:24px;display:block;object-fit:contain">';
     if (ext === 'zip') return badgeIcon('ZIP', '#bd8b32', '#fff7dc', 12);
     if (ext === '7z') return badgeIcon('7Z', '#557a9b', '#ffffff', 17);
     if (ext === 'gz' || ext === 'tgz') return badgeIcon('GZ', '#557a9b', '#ffffff', 17);
