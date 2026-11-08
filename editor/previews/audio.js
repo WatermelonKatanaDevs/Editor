@@ -358,9 +358,47 @@
     dropHint.textContent = 'Drop an image here from your computer, browser downloads, or an editor file tree';
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
-    fileInput.accept = 'image/jpeg,image/png,image/webp,image/gif';
+    fileInput.accept = 'image/*';
     fileInput.className = 'editor-audio-cover-input';
     fileInput.multiple = true;
+
+    const convertCoverToPng = async (file, bytes, sourceMime) => {
+      const source = new Blob([bytes], { type: sourceMime });
+      let bitmap = null;
+      let image = null;
+      let objectURL = null;
+      try {
+        if (typeof createImageBitmap === 'function') {
+          bitmap = await createImageBitmap(source);
+        } else {
+          objectURL = URL.createObjectURL(source);
+          image = new Image();
+          await new Promise((resolve, reject) => {
+            image.onload = resolve;
+            image.onerror = () => reject(new Error('The browser could not decode this image format.'));
+            image.src = objectURL;
+          });
+        }
+        const width = bitmap?.width || image?.naturalWidth || image?.width || 0;
+        const height = bitmap?.height || image?.naturalHeight || image?.height || 0;
+        if (!width || !height || width * height > 100000000) {
+          throw new Error('This image has invalid or excessively large dimensions.');
+        }
+        const scale = Math.min(1, 1600 / Math.max(width, height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('The browser could not prepare this image for album artwork.');
+        context.drawImage(bitmap || image, 0, 0, canvas.width, canvas.height);
+        const png = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (!png) throw new Error('The browser could not convert this image to PNG.');
+        return new Uint8Array(await png.arrayBuffer());
+      } finally {
+        try { bitmap?.close?.(); } catch (_) {}
+        if (objectURL) URL.revokeObjectURL(objectURL);
+      }
+    };
 
     const setCoverFromFile = async file => {
       if (!file || typeof file.arrayBuffer !== 'function') return false;
@@ -369,11 +407,16 @@
         return false;
       }
       try {
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        const mime = window.EditorAudioTags.readImageMime(bytes);
+        let bytes = new Uint8Array(await file.arrayBuffer());
+        let mime = window.EditorAudioTags.readImageMime(bytes);
         if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mime)) {
-          status.textContent = 'That file is not a supported image. Use JPEG, PNG, WebP, or GIF.';
-          return false;
+          const sourceMime = mime.startsWith('image/') ? mime : String(file.type || '').toLowerCase();
+          if (!sourceMime.startsWith('image/')) {
+            status.textContent = 'That file does not appear to be an image.';
+            return false;
+          }
+          bytes = await convertCoverToPng(file, bytes, sourceMime);
+          mime = 'image/png';
         }
         cover = { mime, data: bytes, description: 'Cover' };
         replaceCover = true;
