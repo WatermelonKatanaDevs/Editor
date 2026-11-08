@@ -23,6 +23,33 @@
       try {
         const monaco = await ctx.state.ensureMonaco();
         if (disposed || !host.isConnected) return wrap;
+        if (typeof data.localDiffText === 'string') {
+          originalModel = monaco.editor.createModel(data.localDiffText, 'diff', monaco.Uri.parse('inmemory://watermelonkatana-diff/' + encodeURIComponent(data.path || 'file') + '-' + Math.random().toString(36).slice(2) + '.patch'));
+          diffEditor = monaco.editor.create(host, {
+            model:originalModel,
+            theme:window.EditorTheme?.id || 'vs-dark',
+            readOnly:true,
+            domReadOnly:true,
+            minimap:{enabled:false},
+            wordWrap:'off',
+            lineNumbers:'on',
+            scrollBeyondLastLine:false,
+            scrollbar:{vertical:'auto',horizontal:'auto',alwaysConsumeMouseWheel:false}
+          });
+          const layout = () => {
+            if (disposed || !host.isConnected) return;
+            const rect = host.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) return;
+            try { diffEditor.layout({width:Math.floor(rect.width),height:Math.floor(rect.height)}); } catch (_) {}
+          };
+          resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(layout) : null;
+          resizeObserver?.observe(host);
+          requestAnimationFrame(() => requestAnimationFrame(layout));
+          window.addEventListener('resize', layout);
+          const priorCleanup = tab._diffCleanup;
+          tab._diffCleanup = () => { window.removeEventListener('resize', layout); priorCleanup(); };
+          return wrap;
+        }
         const decode = bytes => new TextDecoder('utf-8', {fatal:false}).decode(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []));
         const oldBytes = data.type === 'added' ? new Uint8Array() : data.oldSha ? await window.GitHubService.readBlob(data.owner, data.repo, data.oldSha) : new Uint8Array();
         if (disposed || !host.isConnected) return wrap;
