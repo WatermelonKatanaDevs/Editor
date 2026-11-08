@@ -828,6 +828,27 @@
         await this.git.branch({fs:this.fs, dir:repository.dir, ref:args[0]});
         return {output:'Created branch ' + args[0] + '.', value:args[0]};
       }
+      if (operation === 'tag') {
+        const repository = await this._repository(cwd);
+        const args = command.slice(1);
+        if (!args.length || args[0] === '-l' || args[0] === '--list') {
+          const tags = await this.git.listTags({fs:this.fs, dir:repository.dir});
+          return {output:tags.join('\n'), value:tags};
+        }
+        if (args[0] === '-d' || args[0] === '--delete') {
+          const name = args[1];
+          if (!name || args.length !== 2) throw new Error('git tag: specify one tag to delete.');
+          const tags = await this.git.listTags({fs:this.fs, dir:repository.dir});
+          if (!tags.includes(name)) throw new Error('Tag ' + name + ' does not exist.');
+          await this.git.deleteTag({fs:this.fs, dir:repository.dir, ref:name});
+          return {output:'Deleted tag ' + name + '.', value:true};
+        }
+        if (args.some(arg => arg.startsWith('-')) || args.length !== 1) throw new Error('git tag: supported forms are --list, <name>, and -d <name>. Annotated tags and tag options are not supported yet.');
+        const tags = await this.git.listTags({fs:this.fs, dir:repository.dir});
+        if (tags.includes(args[0])) throw new Error('Tag ' + args[0] + ' already exists.');
+        await this.git.tag({fs:this.fs, dir:repository.dir, ref:args[0]});
+        return {output:'Created tag ' + args[0] + '.', value:args[0]};
+      }
       if (operation === 'switch' || operation === 'checkout') {
         const repository = await this._repository(cwd);
         const args = command.slice(1);
@@ -893,7 +914,7 @@
         const result = await this.push(cwd, remoteName, branchName);
         return result;
       }
-      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, branch, switch, checkout, remote, push, rev-parse.', value:null};
+      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, branch, switch, checkout, tag (lightweight), remote, push, rev-parse.', value:null};
       throw new Error('git: command not implemented yet: ' + operation);
     }
 
