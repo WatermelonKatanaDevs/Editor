@@ -810,7 +810,7 @@
           const current = await this.git.currentBranch({fs:this.fs, dir:repository.dir, fullname:false});
           const branches = await this.git.listBranches({fs:this.fs, dir:repository.dir});
           const lines = branches.map(name => (name === current ? '* ' : '  ') + name);
-          return {output:lines.join('\\n'), value:branches.map(name => ({name, current:name === current}))};
+          return {output:lines.join('\n'), value:branches.map(name => ({name, current:name === current}))};
         }
         if (args[0] === '-d' || args[0] === '--delete') {
           const name = args[1];
