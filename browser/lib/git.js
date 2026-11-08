@@ -18,7 +18,9 @@
       ENOENT: 'no such file or directory',
       ENOTDIR: 'not a directory',
       ENOTEMPTY: 'directory not empty',
-      EBUSY: 'device or resource busy'
+      EBUSY: 'device or resource busy',
+      EINVAL: 'invalid argument',
+      ENOTSUP: 'operation not supported'
     };
     const error = new Error(code + ': ' + (messages[code] || 'filesystem error') + ", '" + path + "'");
     error.code = code;
@@ -40,7 +42,9 @@
         mkdir: (path, options) => this.mkdir(path, options),
         rmdir: (path, options) => this.rmdir(path, options),
         stat: path => this.stat(path),
-        lstat: path => this.stat(path)
+        lstat: path => this.stat(path),
+        readlink: path => this.readlink(path),
+        symlink: (target, path) => this.symlink(target, path)
       };
       this.fs = {promises};
     }
@@ -94,6 +98,17 @@
       if (this.filesystem.isDirectorySync(relative)) throw gitFsError('EISDIR', normalized);
       if (!this.filesystem.deleteFileSync(relative)) throw gitFsError('ENOENT', normalized);
       this.modifiedAt.delete(normalized);
+    }
+
+    readlink(path) {
+      const normalized = this.normalize(path);
+      const relative = this.relative(normalized);
+      if (!this.filesystem.existsSync(relative) && !this.filesystem.isDirectorySync(relative)) throw gitFsError('ENOENT', normalized);
+      throw gitFsError('EINVAL', normalized);
+    }
+
+    symlink(target, path) {
+      throw gitFsError('ENOTSUP', this.normalize(path));
     }
 
     readdir(path) {
