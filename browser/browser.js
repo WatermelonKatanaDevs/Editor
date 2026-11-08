@@ -2158,7 +2158,8 @@ function applyMobileEmulationDocument(html, emulation) {
       'defineValue(nav,"vendor",ios?"Apple Computer, Inc.":"Google Inc.");defineValue(nav,"maxTouchPoints",5);' +
       'defineValue(window,"devicePixelRatio",Number(config.deviceScaleFactor)||1);' +
       'var scr=window.screen;defineValue(scr,"width",Number(config.width)||390);defineValue(scr,"height",Number(config.height)||844);defineValue(scr,"availWidth",Number(config.width)||390);defineValue(scr,"availHeight",Number(config.height)||844);' +
-      'defineValue(window,"orientation",Number(config.width)>=Number(config.height)?90:0);' +
+      'var landscape=Number(config.width)>=Number(config.height);if(scr.orientation){defineValue(scr.orientation,"angle",landscape?90:0);defineValue(scr.orientation,"type",landscape?"landscape-primary":"portrait-primary");}' +
+      'defineValue(window,"orientation",landscape?90:0);try{if(!("ontouchstart" in window))Object.defineProperty(window,"ontouchstart",{configurable:true,value:null});}catch(e){}' +
       'if(ios){try{Object.defineProperty(nav,"userAgentData",{configurable:true,value:undefined});}catch(e){}}else{' +
         'var uaData={brands:[{brand:"Chromium",version:"120"},{brand:"Google Chrome",version:"120"}],mobile:true,platform:"Android",getHighEntropyValues:async function(){return {architecture:"",bitness:"",model:config.deviceId==="pixel-7"?"Pixel 7":"",platform:"Android",platformVersion:"14.0.0",uaFullVersion:"120.0.0.0",fullVersionList:this.brands,mobile:true};}};' +
         'defineValue(nav,"userAgentData",uaData);' +
