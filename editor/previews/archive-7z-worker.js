@@ -91,6 +91,7 @@ async function unpack(buffer) {
   const entries = [];
   const transfer = [];
   let extractedBytes = 0;
+  let extractedFiles = 0;
 
   function walk(directory, prefix) {
     for (const name of FS.readdir(directory)) {
@@ -110,13 +111,12 @@ async function unpack(buffer) {
       if (stat.size > MAX_FILE_BYTES) throw new Error('An extracted file exceeds the 64 MB preview limit.');
       extractedBytes += stat.size;
       if (extractedBytes > MAX_TOTAL_BYTES) throw new Error('The extracted archive exceeds the 256 MB preview limit.');
+      extractedFiles++;
+      if (extractedFiles > MAX_FILES) throw new Error('This archive contains more than 5,000 files.');
       const bytes = FS.readFile(fullPath);
       const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
       entries.push({ path: relativePath, directory: false, data });
       transfer.push(data);
-      if (entries.filter(entry => !entry.directory).length > MAX_FILES) {
-        throw new Error('This archive contains more than 5,000 files.');
-      }
     }
   }
 
