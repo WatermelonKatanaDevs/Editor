@@ -51,7 +51,10 @@
         // not be the only source of truth for potentially large binary buffers.
         let workingBytes = data.newBytes || new Uint8Array();
         if (data.type !== 'deleted' && ctx.state.fs?.readFileSync && (data.fsPath || data.path)) {
-          try { workingBytes = toBytes(ctx.state.fs.readFileSync(data.fsPath || data.path, 'binary')); } catch (_) {}
+          try {
+            const liveBytes = ctx.state.fs.readFileSync(data.fsPath || data.path, 'binary');
+            if (liveBytes != null) workingBytes = toBytes(liveBytes);
+          } catch (_) {}
         }
         const newText = data.type === 'deleted' ? '' : decode(workingBytes);
         if (data.type === 'modified' && !oldText.length && !newText.length) {
@@ -508,6 +511,7 @@
           newBytes: (() => {
             try {
               const raw = state.fs.readFileSync(fsPath, 'binary');
+              if (raw == null) throw new Error('Workspace file is unavailable: ' + fsPath);
               if (raw instanceof Uint8Array) return raw;
               if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
               if (ArrayBuffer.isView(raw)) return new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
