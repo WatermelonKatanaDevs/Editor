@@ -550,3 +550,6 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
   .editor-wasm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
   .editor-wasm-list-item{flex-direction:column;gap:3px}
 }
+
+.editor-audio-cover-frame{cursor:pointer}
+.editor-audio-cover-frame:focus-visible{outline:2px solid var(--editor-accent);outline-offset:3px}
