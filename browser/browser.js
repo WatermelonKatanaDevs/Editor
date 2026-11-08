@@ -4,6 +4,20 @@
 // Default SVG Globe favicon
 const DEFAULT_FAVICON = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239aa0a6' stroke-width='2'><circle cx='12' cy='12' r='10'/><line x1='2' y1='12' x2='22' y2='12'/><path d='M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'/></svg>";
 
+// Desktop and mobile identities used by the browser's device emulation mode.
+const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const ANDROID_MOBILE_USER_AGENT = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+const IOS_MOBILE_USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+const IPAD_MOBILE_USER_AGENT = 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+const DEVICE_EMULATION_TOOLBAR_HEIGHT = 38;
+const DEVICE_EMULATION_PRESETS = {
+  responsive: { deviceId: 'responsive', deviceName: 'Responsive', width: 390, height: 844, deviceScaleFactor: 2, platform: 'android', userAgent: ANDROID_MOBILE_USER_AGENT },
+  'iphone-se': { deviceId: 'iphone-se', deviceName: 'iPhone SE', width: 375, height: 667, deviceScaleFactor: 2, platform: 'ios', userAgent: IOS_MOBILE_USER_AGENT },
+  'iphone-14-pro': { deviceId: 'iphone-14-pro', deviceName: 'iPhone 14 Pro', width: 393, height: 852, deviceScaleFactor: 3, platform: 'ios', userAgent: IOS_MOBILE_USER_AGENT },
+  'pixel-7': { deviceId: 'pixel-7', deviceName: 'Pixel 7', width: 412, height: 915, deviceScaleFactor: 2.625, platform: 'android', userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36' },
+  'ipad-mini': { deviceId: 'ipad-mini', deviceName: 'iPad mini', width: 768, height: 1024, deviceScaleFactor: 2, platform: 'ios', userAgent: IPAD_MOBILE_USER_AGENT }
+};
+
 // Configurable Proxy Settings
 const browserQuery = new URLSearchParams(window.location.search);
 
@@ -1504,6 +1518,7 @@ function createNewTab(initialUrl = appSettings.defaultTab, activate = true) {
     favicon: DEFAULT_FAVICON,
     iframe: iframe,
     page: page,
+    deviceEmulation: null,
   };
 
   page.tab = newTab;
@@ -1537,6 +1552,7 @@ function switchTab(tabId) {
     const isTarget = t.id === tabId;
     t.iframe.classList.toggle('active', isTarget);
   });
+  applyDeviceEmulation(getActiveTab());
 
   renderTabStrip();
   updateToolbarUI();
@@ -1598,6 +1614,156 @@ function updateLoadingProgress(val) {
 function getActiveTab() {
   return tabs.find(t => t.id === activeTabId);
 }
+
+function getDeviceEmulationUserAgent(emulation) {
+  return emulation?.userAgent || (emulation?.platform === 'ios' ? (emulation?.deviceId === 'ipad-mini' ? IPAD_MOBILE_USER_AGENT : IOS_MOBILE_USER_AGENT) : ANDROID_MOBILE_USER_AGENT);
+}
+
+function getDeviceEmulationConfig(tab = getActiveTab()) {
+  return tab?.deviceEmulation && typeof tab.deviceEmulation === 'object' ? tab.deviceEmulation : null;
+}
+
+function applyDeviceEmulation(tab = getActiveTab()) {
+  const viewport = document.getElementById('viewport-container');
+  if (!viewport) return;
+  const active = !!tab && tab.id === activeTabId && !!tab.deviceEmulation?.enabled;
+  viewport.classList.toggle('device-emulation-active', active);
+
+  tabs.forEach(candidate => {
+    const iframe = candidate?.iframe;
+    if (!iframe) return;
+    const shouldEmulate = active && candidate === tab;
+    iframe.classList.toggle('device-emulated', shouldEmulate);
+    if (!shouldEmulate) {
+      iframe.style.width = '';
+      iframe.style.height = '';
+      iframe.style.left = '';
+      iframe.style.top = '';
+      iframe.style.transform = '';
+      iframe.style.transformOrigin = '';
+      iframe.style.border = '';
+      iframe.style.boxShadow = '';
+      iframe.style.background = '';
+      return;
+    }
+
+    const config = candidate.deviceEmulation;
+    const width = Math.max(200, Math.min(1920, Math.round(Number(config.width) || 390)));
+    const height = Math.max(240, Math.min(2400, Math.round(Number(config.height) || 844)));
+    const viewportWidth = Math.max(1, viewport.clientWidth);
+    const viewportHeight = Math.max(1, viewport.clientHeight - DEVICE_EMULATION_TOOLBAR_HEIGHT);
+    const fitScale = Math.min(1, Math.max(0.1, (viewportWidth - 48) / width), Math.max(0.1, (viewportHeight - 48) / height));
+    const scaleMultiplier = config.scaleMode === '50' ? 0.5 : config.scaleMode === '75' ? 0.75 : 1;
+    const scale = fitScale * scaleMultiplier;
+
+    iframe.style.width = width + 'px';
+    iframe.style.height = height + 'px';
+    iframe.style.left = '50%';
+    iframe.style.top = 'calc(50% + ' + (DEVICE_EMULATION_TOOLBAR_HEIGHT / 2) + 'px)';
+    iframe.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
+    iframe.style.transformOrigin = 'center center';
+    iframe.style.border = '1px solid #7d828c';
+    iframe.style.boxShadow = '0 8px 30px rgba(0,0,0,.48)';
+    iframe.style.background = '#fff';
+
+    try {
+      iframe.contentWindow?.postMessage({
+        __wkDeviceEmulationUpdate: true,
+        config: {
+          width, height,
+          deviceScaleFactor: Number(config.deviceScaleFactor) || 1,
+          platform: config.platform || 'android',
+          deviceId: config.deviceId || 'responsive',
+          userAgent: getDeviceEmulationUserAgent(config)
+        }
+      }, '*');
+    } catch (_) {}
+  });
+
+  const toolbar = document.getElementById('dt-device-toolbar');
+  if (toolbar) toolbar.classList.toggle('hidden', !active);
+  window.dispatchEvent(new CustomEvent('browser-device-emulation-change', {
+    detail: { tabId: tab?.id || null, enabled: active }
+  }));
+}
+
+function reloadDeviceEmulationPage(tab) {
+  if (!tab?.page || tab.page.historyIndex < 0) return Promise.resolve();
+  const url = tab.page.history[tab.page.historyIndex];
+  if (!url) return Promise.resolve();
+  return navigateToInTab(tab, url, false, true, true);
+}
+
+window.browserDeviceEmulation = {
+  getState() {
+    const state = getDeviceEmulationConfig();
+    return state ? { ...state, enabled: !!state.enabled } : null;
+  },
+  toggle() {
+    const tab = getActiveTab();
+    if (!tab) return Promise.resolve();
+    if (!tab.deviceEmulation) {
+      tab.deviceEmulation = { ...DEVICE_EMULATION_PRESETS.responsive, enabled: true, scaleMode: 'fit' };
+    } else {
+      tab.deviceEmulation.enabled = !tab.deviceEmulation.enabled;
+    }
+    applyDeviceEmulation(tab);
+    saveBrowserState();
+    return reloadDeviceEmulationPage(tab);
+  },
+  setPreset(presetId) {
+    const tab = getActiveTab();
+    const preset = DEVICE_EMULATION_PRESETS[presetId];
+    if (!tab || !preset) return Promise.resolve();
+    const previousAgent = getDeviceEmulationUserAgent(tab.deviceEmulation);
+    const scaleMode = tab.deviceEmulation?.scaleMode || 'fit';
+    tab.deviceEmulation = { ...preset, enabled: true, scaleMode };
+    applyDeviceEmulation(tab);
+    saveBrowserState();
+    return previousAgent !== getDeviceEmulationUserAgent(tab.deviceEmulation) ? reloadDeviceEmulationPage(tab) : Promise.resolve();
+  },
+  setDimensions(width, height) {
+    const tab = getActiveTab();
+    if (!tab?.deviceEmulation) return;
+    const nextWidth = Math.round(Number(width));
+    const nextHeight = Math.round(Number(height));
+    if (!Number.isFinite(nextWidth) || !Number.isFinite(nextHeight)) return;
+    tab.deviceEmulation.width = Math.max(200, Math.min(1920, nextWidth));
+    tab.deviceEmulation.height = Math.max(240, Math.min(2400, nextHeight));
+    tab.deviceEmulation.deviceId = 'responsive';
+    tab.deviceEmulation.deviceName = 'Responsive';
+    applyDeviceEmulation(tab);
+    saveBrowserState();
+  },
+  rotate() {
+    const tab = getActiveTab();
+    if (!tab?.deviceEmulation) return;
+    const width = tab.deviceEmulation.width;
+    tab.deviceEmulation.width = tab.deviceEmulation.height;
+    tab.deviceEmulation.height = width;
+    applyDeviceEmulation(tab);
+    saveBrowserState();
+  },
+  setScaleFactor(value) {
+    const tab = getActiveTab();
+    if (!tab?.deviceEmulation) return;
+    const scaleFactor = Number(value);
+    if (![1, 2, 2.625, 3].includes(scaleFactor)) return;
+    tab.deviceEmulation.deviceScaleFactor = scaleFactor;
+    applyDeviceEmulation(tab);
+    saveBrowserState();
+  },
+  setScaleMode(value) {
+    const tab = getActiveTab();
+    if (!tab?.deviceEmulation) return;
+    if (!['fit', '50', '75', '100'].includes(String(value))) return;
+    tab.deviceEmulation.scaleMode = String(value);
+    applyDeviceEmulation(tab);
+    saveBrowserState();
+  }
+};
+
+window.addEventListener('resize', () => applyDeviceEmulation());
 
 function getTabByIframeWindow(win) {
   return tabs.find(t => t.iframe.contentWindow === win);
@@ -1971,22 +2137,65 @@ async function get7zGalleryDocument(input, url, origin, page) {
   }catch(e) {alert(e.message)}
 }
 
+
+function applyMobileEmulationDocument(html, emulation) {
+  if (!emulation?.enabled || typeof html !== 'string') return html;
+  const config = {
+    width: Math.max(200, Math.min(1920, Math.round(Number(emulation.width) || 390))),
+    height: Math.max(240, Math.min(2400, Math.round(Number(emulation.height) || 844))),
+    deviceScaleFactor: Number(emulation.deviceScaleFactor) || 1,
+    platform: emulation.platform === 'ios' ? 'ios' : 'android',
+    deviceId: emulation.deviceId || 'responsive',
+    userAgent: getDeviceEmulationUserAgent(emulation)
+  };
+  const safeConfig = JSON.stringify(config).replace(/</g, '\\u003c');
+  const script = '<script data-wk-device-emulation="1">(function(){' +
+    'var state=' + safeConfig + ';' +
+    'function defineValue(target,key,value){if(!target)return;try{Object.defineProperty(target,key,{configurable:true,get:function(){return value;}});return;}catch(e){}try{Object.defineProperty(target,key,{configurable:true,value:value});}catch(e){}}' +
+    'function apply(config){if(!config)return;state=config;var nav=window.navigator;var proto=Object.getPrototypeOf(nav);var ios=config.platform==="ios";' +
+      'defineValue(proto,"userAgent",config.userAgent);defineValue(nav,"userAgent",config.userAgent);' +
+      'defineValue(proto,"platform",ios?(config.deviceId==="ipad-mini"?"iPad":"iPhone"):"Linux armv8l");defineValue(nav,"platform",ios?(config.deviceId==="ipad-mini"?"iPad":"iPhone"):"Linux armv8l");' +
+      'defineValue(nav,"vendor",ios?"Apple Computer, Inc.":"Google Inc.");defineValue(nav,"maxTouchPoints",5);' +
+      'defineValue(window,"devicePixelRatio",Number(config.deviceScaleFactor)||1);' +
+      'var scr=window.screen;defineValue(scr,"width",Number(config.width)||390);defineValue(scr,"height",Number(config.height)||844);defineValue(scr,"availWidth",Number(config.width)||390);defineValue(scr,"availHeight",Number(config.height)||844);' +
+      'defineValue(window,"orientation",Number(config.width)>=Number(config.height)?90:0);' +
+      'if(ios){try{Object.defineProperty(nav,"userAgentData",{configurable:true,value:undefined});}catch(e){}}else{' +
+        'var uaData={brands:[{brand:"Chromium",version:"120"},{brand:"Google Chrome",version:"120"}],mobile:true,platform:"Android",getHighEntropyValues:async function(){return {architecture:"",bitness:"",model:config.deviceId==="pixel-7"?"Pixel 7":"",platform:"Android",platformVersion:"14.0.0",uaFullVersion:"120.0.0.0",fullVersionList:this.brands,mobile:true};}};' +
+        'defineValue(nav,"userAgentData",uaData);' +
+      '}' +
+    '}' +
+    'var originalMatchMedia=typeof window.matchMedia==="function"?window.matchMedia.bind(window):null;' +
+    'if(originalMatchMedia){window.matchMedia=function(query){var result=originalMatchMedia(query);var q=String(query).toLowerCase();var forced=null;' +
+      'if(/\\((any-)?pointer\\s*:\\s*coarse\\)/.test(q)||/\\((any-)?hover\\s*:\\s*none\\)/.test(q))forced=true;' +
+      'if(/\\((any-)?pointer\\s*:\\s*fine\\)/.test(q)||/\\((any-)?hover\\s*:\\s*hover\\)/.test(q))forced=false;' +
+      'if(forced===null)return result;return new Proxy(result,{get:function(target,key){if(key==="matches")return forced;var value=Reflect.get(target,key,target);return typeof value==="function"?value.bind(target):value;}});};}' +
+    'apply(state);window.addEventListener("message",function(event){if(event.source!==window.parent||!event.data||event.data.__wkDeviceEmulationUpdate!==true)return;apply(event.data.config);});' +
+  '})();</script>';
+  const viewportMeta = /<meta\b[^>]*\bname\s*=\s*(['"]?)viewport\1/i.test(html)
+    ? ''
+    : '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">';
+  const headInsert = viewportMeta + script;
+  if (/<head\b[^>]*>/i.test(html)) return html.replace(/<head\b[^>]*>/i, match => match + headInsert);
+  if (/<html\b[^>]*>/i.test(html)) return html.replace(/<html\b[^>]*>/i, match => match + '<head>' + headInsert + '</head>');
+  return '<html><head>' + headInsert + '</head><body>' + html + '</body></html>';
+}
+
 async function renderTabContent(tab, url) {
   tab.url = url;
   let origin = "https://example.com";
   try { origin = new URL(url).origin; } catch(e) {}
 
-  var response = await tab.page.network.request(url, origin, {
-    headers:{
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': origin || 'https://google.com'
-    }
-  }, 'page-load');
+  const mobileEmulation = tab.deviceEmulation?.enabled ? tab.deviceEmulation : null;
+  const requestHeaders = {
+    'User-Agent': mobileEmulation ? getDeviceEmulationUserAgent(mobileEmulation) : DESKTOP_BROWSER_USER_AGENT,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': origin || 'https://google.com'
+  };
+  var response = await tab.page.network.request(url, origin, { headers: requestHeaders }, 'page-load');
   for (var i = 0; i < 5 && (!response || !response.ok); i++) {
     await wait(i * 1000);
-    response = await tab.page.network.request(url, origin, {}, 'page-load');
+    response = await tab.page.network.request(url, origin, { headers: requestHeaders }, 'page-load');
   }
 
   if (!response) {
@@ -2021,6 +2230,9 @@ async function renderTabContent(tab, url) {
   } catch(e) {}
 
   var rawHtml = await getDocumentContent(response, url, origin, tab.page);
+  if (mobileEmulation && (response.headers.get('content-type') || '').includes('text/html')) {
+    rawHtml = applyMobileEmulationDocument(rawHtml, mobileEmulation);
+  }
   tab.page.setLocation(url, origin);
   await tab.page.setDocument(rawHtml);
   tab.page.processedDocument = rawHtml;
