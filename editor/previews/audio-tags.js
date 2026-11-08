@@ -179,7 +179,10 @@
       frames.push(frame);
       const field = FRAME_FIELDS[normalizedId] || (normalizedId === 'TYER' ? 'year' : null);
       if (field) tags[field] = decodeTextFrame(normalizedId, data);
-      else if (normalizedId === 'APIC' && !picture) picture = parsePicture(data);
+      else if (normalizedId === 'APIC') {
+        const candidate = parsePicture(data);
+        if (candidate && (!picture || candidate.type === 3)) picture = candidate;
+      }
       cursor = dataEnd;
     }
     return { tags, picture, frames, major, end: tagEnd };
@@ -283,7 +286,7 @@
     const frames = [];
     const replacedIds = new Set(['TIT2', 'TPE1', 'TALB', 'TPE2', 'TCON', 'TDRC', 'TYER', 'TRCK', 'TPOS', 'TCOM', 'COMM']);
     for (const frame of priorFrames || []) {
-      if (replacedIds.has(frame.id)) continue;
+      if (!/^[A-Z0-9]{4}$/.test(frame.id) || replacedIds.has(frame.id)) continue;
       if (frame.id === 'APIC' && replacePicture) continue;
       frames.push(encodeFrame(frame.id, frame.data));
     }
