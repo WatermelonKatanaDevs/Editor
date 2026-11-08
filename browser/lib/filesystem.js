@@ -331,7 +331,11 @@
       try { return await this.dirHandle.requestPermission({ mode: 'readwrite' }); } catch (_) { return 'denied'; }
     }
     async flush() {
-      await this.writeQueue;
+      let queue;
+      do {
+        queue = this.writeQueue;
+        await queue;
+      } while (queue !== this.writeQueue);
       if (this.writeErrors.length) {
         const errors = this.writeErrors.splice(0);
         const error = new Error('Unable to persist ' + errors.length + ' filesystem operation' + (errors.length === 1 ? '' : 's') + '. ' + (errors[0]?.message || errors[0]));
