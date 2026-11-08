@@ -803,6 +803,43 @@
         }
         return {output:lines.join('\n').trimEnd(), value:commits};
       }
+      if (operation === 'branch') {
+        const repository = await this._repository(cwd);
+        const args = command.slice(1);
+        if (!args.length || args[0] === '--list' || args[0] === '-l') {
+          const current = await this.git.currentBranch({fs:this.fs, dir:repository.dir, fullname:false});
+          const branches = await this.git.listBranches({fs:this.fs, dir:repository.dir});
+          const lines = branches.map(name => (name === current ? '* ' : '  ') + name);
+          return {output:lines.join('\\n'), value:branches.map(name => ({name, current:name === current}))};
+        }
+        if (args[0] === '-d' || args[0] === '-D' || args[0] === '--delete') {
+          const name = args[1];
+          if (!name || args.length > 2) throw new Error('git branch: specify one branch to delete.');
+          await this.git.deleteBranch({fs:this.fs, dir:repository.dir, ref:name});
+          return {output:'Deleted branch ' + name + '.', value:true};
+        }
+        if (args.length !== 1 || args[0].startsWith('-')) throw new Error('git branch: supported forms are --list, <name>, and -d <name>.');
+        await this.git.branch({fs:this.fs, dir:repository.dir, ref:args[0]});
+        return {output:'Created branch ' + args[0] + '.', value:args[0]};
+      }
+      if (operation === 'switch' || operation === 'checkout') {
+        const repository = await this._repository(cwd);
+        const args = command.slice(1);
+        let create = false;
+        let name = null;
+        for (let i = 0; i < args.length; i++) {
+          if (args[i] === '-c' || args[i] === '-b' || args[i] === '--create') create = true;
+          else if (args[i].startsWith('-')) throw new Error('git ' + operation + ': unsupported option ' + args[i]);
+          else if (!name) name = args[i];
+          else throw new Error('git ' + operation + ': specify one branch.');
+        }
+        if (!name) throw new Error('git ' + operation + ': specify a branch name.');
+        const status = await this.status(cwd);
+        if (!status.clean) throw new Error('Cannot switch branches with staged or unstaged changes. Commit or restore them first.');
+        if (create) await this.git.branch({fs:this.fs, dir:repository.dir, ref:name});
+        await this.git.checkout({fs:this.fs, dir:repository.dir, ref:name, force:false});
+        return {output:(create ? 'Switched to a new branch ' : 'Switched to branch ') + "'" + name + "'.", value:{branch:name, created:create}};
+      }
       if (operation === 'remote') {
         const repository = await this._repository(cwd);
         const subcommand = command[1] || '-v';
@@ -850,7 +887,7 @@
         const result = await this.push(cwd, remoteName, branchName);
         return result;
       }
-      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, remote, push, rev-parse.', value:null};
+      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, branch, switch, checkout, remote, push, rev-parse.', value:null};
       throw new Error('git: command not implemented yet: ' + operation);
     }
 
