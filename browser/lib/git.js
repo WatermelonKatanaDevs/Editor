@@ -672,9 +672,8 @@
       try { shallowText = await this.fs.promises.readFile(shallowPath, {encoding:'utf8'}); }
       catch (error) { if (error?.code !== 'ENOENT') throw error; }
       const shallow = new Set(String(shallowText || '').split(/\r?\n/).filter(Boolean));
-      const queue = [sha];
-      const queued = new Set(queue);
-      const processed = new Set();
+      const queue = [{oid:sha, searchBoundary:shallow.size > 0}];
+      const processed = new Map();
       const parentSources = new Map();
       let downloadedCommits = 0;
       let downloadedBlobs = 0;
@@ -682,8 +681,10 @@
       let stoppedAtDepth = false;
 
       while (queue.length) {
-        const oid = queue.shift();
-        if (processed.has(oid)) continue;
+        const item = queue.shift();
+        const oid = item.oid;
+        const wasProcessed = processed.get(oid);
+        if (wasProcessed === true || (wasProcessed === false && !item.searchBoundary)) continue;
         let commit = null;
         try {
           const local = await this.git.readCommit({fs:this.fs, dir:repository.dir, oid});
@@ -691,6 +692,7 @@
           commit = local.commit;
         } catch (_) {}
         const wasShallow = shallow.has(oid);
+        const traceExistingHistory = !!commit && !!item.searchBoundary && !wasShallow;
         if (!commit) {
           if (downloadedCommits >= maxCommits) {
             stoppedAtDepth = true;
@@ -701,27 +703,25 @@
           if (result.downloaded) downloadedCommits++;
           downloadedBlobs += result.blobs;
           downloadedTrees += result.trees;
-        } else if (!wasShallow) {
-          processed.add(oid);
+        } else if (!wasShallow && !item.searchBoundary) {
+          processed.set(oid, false);
           continue;
         }
-        processed.add(oid);
+        processed.set(oid, traceExistingHistory);
         shallow.delete(oid);
         for (const parent of commit.parent || []) {
           const parentSha = String(parent || '');
-          if (!parentSha || processed.has(parentSha)) continue;
+          if (!parentSha) continue;
           if (!parentSources.has(parentSha)) parentSources.set(parentSha, new Set());
           parentSources.get(parentSha).add(oid);
-          if (!queued.has(parentSha)) {
-            queued.add(parentSha);
-            queue.push(parentSha);
-          }
+          queue.push({oid:parentSha, searchBoundary:traceExistingHistory});
         }
       }
 
       if (stoppedAtDepth) {
-        for (const oid of queue) {
-          if (processed.has(oid)) continue;
+        for (const item of queue) {
+          const oid = item.oid;
+          if (processed.get(oid) === true || (processed.get(oid) === false && !item.searchBoundary)) continue;
           const sources = parentSources.get(oid) || [];
           let present = false;
           try {
