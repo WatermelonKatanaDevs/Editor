@@ -1234,8 +1234,16 @@
 
     async runSerialized(args, context = {}) {
       const task = this.queue.catch(() => {}).then(async () => {
-        const result = await this.run(args, context);
-        await this.adapter.flush();
+        let result;
+        let operationError = null;
+        try { result = await this.run(args, context); }
+        catch (error) { operationError = error; }
+        try { await this.adapter.flush(); }
+        catch (flushError) {
+          if (!operationError) throw flushError;
+          operationError.message = String(operationError.message || operationError) + ' Git metadata also failed to flush: ' + String(flushError.message || flushError);
+        }
+        if (operationError) throw operationError;
         return result;
       });
       this.queue = task.then(() => undefined, () => undefined);
