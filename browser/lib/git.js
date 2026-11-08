@@ -238,7 +238,7 @@
         stage:row[3],
         staged:row[1] !== row[3],
         unstaged:row[2] !== row[3],
-        untracked:row[1] === 0 && row[2] === 2 && row[3] === 0
+        untracked:(row[1] === 0 && row[2] === 2 && row[3] === 0) || (row[1] === 1 && row[2] !== 0 && row[3] === 0)
       }));
       let branch = null;
       let head = null;
