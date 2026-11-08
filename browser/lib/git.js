@@ -276,6 +276,10 @@
     const oldLines = splitDiffText(oldText);
     const newLines = splitDiffText(newText);
     const edits = myersDiff(oldLines, newLines);
+    if (oldText.endsWith('\n') !== newText.endsWith('\n') && oldLines.length && newLines.length && oldLines[oldLines.length - 1] === newLines[newLines.length - 1]) {
+      const last = edits[edits.length - 1];
+      if (last?.type === ' ') edits.splice(-1, 1, {type:'-', line:oldLines[oldLines.length - 1]}, {type:'+', line:newLines[newLines.length - 1]});
+    }
     if (!edits.some(edit => edit.type !== ' ')) return lines.join('\n');
     lines.push('--- ' + (oldBytes ? 'a/' + path : '/dev/null'));
     lines.push('+++ ' + (newBytes ? 'b/' + path : '/dev/null'));
@@ -304,11 +308,14 @@
       let newIndex = newBefore;
       for (const edit of chunk) {
         lines.push(edit.type + edit.line);
-        if (edit.type !== '+') {
+        if (edit.type === ' ') {
+          oldIndex++;
+          newIndex++;
+          if ((!oldText.endsWith('\n') && oldIndex === oldLines.length) || (!newText.endsWith('\n') && newIndex === newLines.length)) lines.push('\\ No newline at end of file');
+        } else if (edit.type === '-') {
           oldIndex++;
           if (!oldText.endsWith('\n') && oldIndex === oldLines.length) lines.push('\\ No newline at end of file');
-        }
-        if (edit.type !== '-') {
+        } else {
           newIndex++;
           if (!newText.endsWith('\n') && newIndex === newLines.length) lines.push('\\ No newline at end of file');
         }
