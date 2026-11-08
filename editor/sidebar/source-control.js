@@ -379,13 +379,13 @@
         const result = await getLocalGit().runSerialized(['commit', '-m', message], {cwd:'/'});
         tree.querySelector('[data-local-commit-message]').value = '';
         successMessage = result.output || 'Commit created.';
-        await loadLocalHistory();
       } catch (error) {
         errorMessage = error.message || String(error);
       } finally {
         commitBusy = false;
         await refreshLocalStatus();
       }
+      await loadLocalHistory();
       if (errorMessage) showStatus(errorMessage, true);
       else if (successMessage) showStatus(successMessage);
     }
