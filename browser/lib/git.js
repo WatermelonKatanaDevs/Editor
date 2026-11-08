@@ -260,6 +260,7 @@
     async _selectChanges(repository, cwd, pathspecs = [], options = {}) {
       const matrix = await this.git.statusMatrix({fs:this.fs, dir:repository.dir});
       let specs = pathspecs.map(path => this._repoPath(repository, cwd, path).replace(/\/+$/, '')).filter(Boolean);
+      if (!specs.length && options.wholeRepo) return options.trackedOnly ? matrix.filter(row => row[1] !== 0 || row[3] !== 0) : matrix;
       if (!specs.length && options.all) specs = ['.'];
       if (!specs.length) throw new Error('a path or -A/--all is required');
       const selected = matrix.filter(row => {
@@ -294,12 +295,15 @@
 
     async _unstage(repository, rows) {
       const remove = [];
+      let count = 0;
       for (const row of rows) {
+        if (row[1] === row[3]) continue;
+        count++;
         if (row[1] === 0 && row[3] !== 0) remove.push(row[0]);
-        else if (row[1] !== row[3]) await this.git.resetIndex({fs:this.fs, dir:repository.dir, filepath:row[0], ref:'HEAD'});
+        else await this.git.resetIndex({fs:this.fs, dir:repository.dir, filepath:row[0], ref:'HEAD'});
       }
       if (remove.length) await this.git.remove({fs:this.fs, dir:repository.dir, filepath:remove});
-      return true;
+      return count;
     }
 
     async _readConfig(repository, path) {
@@ -395,19 +399,22 @@
         }
         if (unsupported) throw new Error('git ' + operation + ' ' + unsupported + ' is not implemented yet.');
         if (operation === 'reset' && paths[0] === 'HEAD') paths.shift();
-        if (operation === 'reset' && paths.length === 0 && !all) all = true;
+        const wholeRepo = operation === 'reset' && paths.length === 0 && !all;
+        if (wholeRepo) all = true;
         if (operation === 'restore' && paths.length === 0) throw new Error('git restore: specify one or more paths.');
         const repository = await this._repository(cwd);
-        const rows = await this._selectChanges(repository, cwd, paths, {all});
-        if (staged) await this._unstage(repository, rows);
-        else {
+        const rows = await this._selectChanges(repository, cwd, paths, {all, wholeRepo});
+        if (staged) {
+          const count = await this._unstage(repository, rows);
+          return {output:'Unstaged ' + count + ' path(s).', value:count};
+        } else {
           const filepaths = rows.filter(row => row[3] !== 0 || row[1] !== 0).map(row => row[0]);
           if (!filepaths.length) throw new Error('git restore: none of the selected paths are in the index.');
           const options = {fs:this.fs, dir:repository.dir, filepaths, force:true};
           if (source !== 'HEAD') options.ref = source;
           await this.git.checkout(options);
         }
-        return {output:(staged ? 'Unstaged' : 'Restored') + ' ' + rows.length + ' path(s).', value:true};
+        return {output:'Restored ' + rows.length + ' path(s).', value:true};
       }
       if (operation === 'config') {
         const values = command.slice(1);
