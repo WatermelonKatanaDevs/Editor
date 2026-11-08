@@ -559,6 +559,7 @@
       if (typeof window.GitHubService?.getRemoteHead !== 'function') throw new Error('GitHub remote checking has not loaded.');
       const remote = await window.GitHubService.getRemoteHead(owner, repo, branch);
       const previousHead = String(await this._readConfig(repository, 'remote.origin.lastFetch') || '');
+      const lastPush = String(await this._readConfig(repository, 'remote.origin.lastPush') || '');
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetch', value:String(remote.commitSha || '')});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchBranch', value:branch});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchAt', value:new Date().toISOString()});
@@ -566,7 +567,8 @@
       if (!remote.commitSha) return {output:'origin/' + branch + ' is empty or does not exist.', value:{branch, commitSha:null, changed:!!previousHead, empty:true, downloadedObjects:false}};
       const sha = String(remote.commitSha);
       const changed = !!previousHead && previousHead !== sha;
-      return {output:'Checked origin/' + branch + ' at ' + sha.slice(0, 7) + (changed ? ' (remote head changed).' : '.') + ' Git objects were not downloaded.', value:{branch, commitSha:sha, changed, downloadedObjects:false}};
+      const differsFromLastPush = !!lastPush && lastPush !== sha;
+      return {output:'Checked origin/' + branch + ' at ' + sha.slice(0, 7) + (differsFromLastPush ? ' (different from the last pushed commit).' : changed ? ' (remote head changed since the previous check).' : '.') + ' Git objects were not downloaded.', value:{branch, commitSha:sha, changed, differsFromLastPush, downloadedObjects:false}};
     }
 
     async push(cwd = '/', remoteName = 'origin', branchName = null) {
