@@ -231,6 +231,7 @@
             ? '<div class="source-control-local-hint">This folder is not being tracked by Git yet.</div><button type="button" class="source-control-create-repo" data-local-init>Initialize Repository</button>'
             : '<div class="source-control-local-hint">Local Git requires a folder opened directly from your computer. Open a folder to keep commits in its <code>.git</code> directory.</div>') +
         '</section>' +
+        (!connectedRemote && hasRepository && github?.isSignedIn?.() ? '<section class="source-control-section"><button type="button" class="source-control-create-repo" data-local-publish>Publish to GitHub</button></section>' : '') +
         (hasRepository
           ? '<section class="source-control-section"><div class="source-control-section-title">Changes</div>' +
             '<div class="source-control-local-bulk"><button type="button" data-local-stage-all ' + (unstaged.length ? '' : 'disabled') + '>Stage All</button><button type="button" data-local-unstage-all ' + (staged.length ? '' : 'disabled') + '>Unstage All</button></div>' +
@@ -268,6 +269,7 @@
       }));
       tree.querySelectorAll('[data-local-diff]').forEach(button => button.addEventListener('click', () => void openLocalFileDiff(button.dataset.localDiff)));
       tree.querySelector('[data-local-commit]')?.addEventListener('click', () => void commitLocal());
+      tree.querySelector('[data-local-publish]')?.addEventListener('click', () => void publishLocalRepository());
       tree.querySelectorAll('[data-local-commit-sha]').forEach(button => button.addEventListener('click', () => void openLocalCommit(button.dataset.localCommitSha)));
     }
 
@@ -407,6 +409,57 @@
         if (!tab) showStatus('Could not open the commit viewer.', true);
       } catch (error) {
         showStatus(error.message || String(error), true);
+      }
+    }
+
+    async function publishLocalRepository() {
+      if (!github?.isSignedIn?.() || !localGitRepository?.isRepository || commitBusy) return;
+      const name = window.prompt('New GitHub repository name', String(state.projectName || 'workspace').toLowerCase().replace(/[^a-z0-9._-]+/g, '-'));
+      if (name == null || !name.trim()) return;
+      const privateRepo = window.confirm('Create this repository as private?');
+      commitBusy = true;
+      const button = tree.querySelector('[data-local-publish]');
+      if (button) { button.disabled = true; button.textContent = 'Publishing…'; }
+      try {
+        const service = getLocalGit();
+        const repository = await service._repository('/');
+        const account = github.getUser?.() || {};
+        const login = String(account.login || 'github-user');
+        const currentName = await service.git.getConfig({fs:service.fs, dir:repository.dir, path:'user.name'}).catch(() => null);
+        const currentEmail = await service.git.getConfig({fs:service.fs, dir:repository.dir, path:'user.email'}).catch(() => null);
+        if (!currentName) await service.runSerialized(['config', 'user.name', String(account.name || login)], {cwd:'/'});
+        if (!currentEmail) await service.runSerialized(['config', 'user.email', String(account.email || (account.id ? account.id + '+' : '') + login + '@users.noreply.github.com')], {cwd:'/'});
+        await service.runSerialized(['add', '-A'], {cwd:'/'});
+        const status = await service.status('/');
+        if (status.changes.some(change => change.staged)) await service.runSerialized(['commit', '-m', 'Published workspace baseline'], {cwd:'/'});
+        const created = await github.createRepository({name:name.trim(), description:'', privateRepo, autoInit:false});
+        const owner = created?.owner?.login || github.getUser?.()?.login;
+        const repoName = created?.name || name.trim();
+        const branch = created?.default_branch || 'main';
+        if (!owner || !repoName) throw new Error('GitHub did not return the new repository details.');
+        const pushed = await github.commitWorkspaceAndPush({owner, repo:repoName, branch, message:'Initialized Repository', fs:state.fs, submodules:[]});
+        if (!pushed.changed) throw new Error('The GitHub repository was created, but there were no files to publish.');
+        const head = (await service.detect('/')).head || '';
+        state.gitRemote = {provider:'github', owner:String(owner), repo:String(repoName), branch:String(branch), revision:pushed.commitSha};
+        await service.runSerialized(['config', 'remote.origin.url', 'https://github.com/' + owner + '/' + repoName + '.git'], {cwd:'/'});
+        await service.runSerialized(['config', 'branch.' + branch + '.remote', 'origin'], {cwd:'/'});
+        await service.runSerialized(['config', 'branch.' + branch + '.merge', 'refs/heads/' + branch], {cwd:'/'});
+        await service.runSerialized(['config', 'remote.origin.lastPushedLocal', head], {cwd:'/'});
+        await service.runSerialized(['config', 'remote.origin.lastPush', pushed.commitSha], {cwd:'/'});
+        await state.fs.flush?.();
+        state.saveProjectMetadata?.();
+        localGitRepository = await service.detect('/');
+        localGitPushStatus = await service.pushStatus('/');
+        renderLocalShell();
+        await refreshLocalStatus();
+        await loadLocalHistory();
+        showStatus('Published to https://github.com/' + owner + '/' + repoName + '.');
+      } catch (error) {
+        showStatus(error.message || String(error), true);
+        if (button?.isConnected) { button.disabled = false; button.textContent = 'Publish to GitHub'; }
+      } finally {
+        commitBusy = false;
+        await refreshLocalStatus();
       }
     }
 
