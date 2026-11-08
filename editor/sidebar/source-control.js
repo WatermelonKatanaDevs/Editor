@@ -481,10 +481,12 @@
       const change = snapshot.changes.find(item => item.path === path);
       if (!change) return;
       const oldEntry = (snapshot.remote.tree || []).find(entry => entry.path === path && entry.type === 'blob');
+      const fsPath = change.fsPath || path;
       const tab = state.openDiffTab?.({
         title:'Diff: ' + path.split('/').pop(),
         diffData:{
           path,
+          fsPath,
           type:change.type,
           owner:selected.owner,
           repo:selected.repo,
@@ -494,7 +496,7 @@
           // through the Workbench tab object.
           newBytes: (() => {
             try {
-              const raw = state.fs.readFileSync(path, 'binary');
+              const raw = state.fs.readFileSync(fsPath, 'binary');
               if (raw instanceof Uint8Array) return raw;
               if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
               if (ArrayBuffer.isView(raw)) return new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
