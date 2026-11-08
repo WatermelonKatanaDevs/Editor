@@ -1126,9 +1126,22 @@
       }
       if (operation === 'fetch') {
         const args = command.slice(1);
-        if (args.length > 2) throw new Error('git fetch: specify at most one remote and one branch.');
-        if (args.some(arg => arg.startsWith('-'))) throw new Error('git fetch: options are not supported yet.');
-        return await this.fetch(cwd, args[0] || 'origin', args[1] || null);
+        const positional = [];
+        let depth = 20;
+        for (let i = 0; i < args.length; i++) {
+          const arg = args[i];
+          if (arg === '--deepen') {
+            depth = Number(args[++i]);
+            if (!Number.isInteger(depth)) throw new Error('git fetch: --deepen requires a whole number from 1 to 100.');
+          } else if (arg.startsWith('--deepen=')) {
+            depth = Number(arg.slice(9));
+            if (!Number.isInteger(depth)) throw new Error('git fetch: --deepen requires a whole number from 1 to 100.');
+          } else if (arg.startsWith('-')) throw new Error('git fetch: only --deepen is currently supported.');
+          else positional.push(arg);
+        }
+        if (positional.length > 2) throw new Error('git fetch: specify at most one remote and one branch.');
+        if (depth < 1 || depth > 100) throw new Error('git fetch: --deepen must be from 1 to 100.');
+        return await this.fetch(cwd, positional[0] || 'origin', positional[1] || null, depth);
       }
       if (operation === 'push') {
         const args = command.slice(1);
@@ -1136,7 +1149,7 @@
         if (args.some(arg => arg.startsWith('-'))) throw new Error('git push: force, tags, and other options are not supported.');
         return await this.push(cwd, args[0] || 'origin', args[1] || null);
       }
-      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, branch, switch, checkout, tag (lightweight), remote, fetch (GitHub objects), push, rev-parse.', value:null};
+      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, branch, switch, checkout, tag (lightweight), remote, fetch (GitHub objects, --deepen N), push, rev-parse.', value:null};
       throw new Error('git: command not implemented yet: ' + operation);
     }
 
