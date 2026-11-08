@@ -2215,8 +2215,14 @@ window.__editorInitPromise = (async function () {
       }
 
       if (zipSource) updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
+      const directoryHandleSource = typeof FileSystemDirectoryHandle !== 'undefined' && filesystemSource instanceof FileSystemDirectoryHandle;
+      if (directoryHandleSource) {
+        let permission = await filesystemSource.queryPermission?.({mode:'readwrite'});
+        if (permission !== 'granted' && typeof filesystemSource.requestPermission === 'function') permission = await filesystemSource.requestPermission({mode:'readwrite'});
+        if (permission && permission !== 'granted') throw new Error('WatermelonKatana needs read/write permission to keep this folder synchronized with your computer. Reopen the folder and allow access.');
+      }
       const fs = await FileSystem.create(filesystemSource, {
-        sync: false
+        sync: directoryHandleSource
       });
       const projectName = zipSource ? stripZipProjectName(name) : (name || 'Workspace');
       if (zipSource) updateRemoteLoadProgress('Starting workspace…', 97, projectName || 'Workspace');
@@ -3257,7 +3263,7 @@ window.__editorInitPromise = (async function () {
     modal.querySelector('[data-source="folder"]').onclick = async () => {
       if (window.showDirectoryPicker) {
         try {
-          const h = await showDirectoryPicker();
+          const h = await showDirectoryPicker({mode:'readwrite'});
           await importFileSystemSource(h, h.name);
         } catch (e) {
           if (e?.name !== 'AbortError') logError(e);
