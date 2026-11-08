@@ -8,6 +8,7 @@
       'js': 'text/javascript',
       'ts': 'text/typescript',
       'json': 'application/json',
+      'webmanifest': 'application/manifest+json',
       'html': 'text/html',
       'css': 'text/css',
       'png': 'image/png',
@@ -29,10 +30,12 @@
       'fbx': 'model/x-fbx',
       'glb': 'model/gltf-binary',
       'gltf': 'model/gltf+json',
+      'wasm': 'application/wasm',
       'mtl': 'text/plain',
       'frag': 'text/x-hlsl',
       'vert': 'text/x-hlsl',
       'hlsl': 'text/x-hlsl',
+      'glsl': 'text/x-hlsl',
       'fx': 'text/x-hlsl',
       'wgsl': 'text/wgsl',
       'py': 'text/x-python',
@@ -45,6 +48,16 @@
     if (isdir) return '';
     if (name == "package.json" || name == "package-lock.json") return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><title>file_type_npm</title><path d="M2,10.555H30v9.335H16v1.556H9.778V19.889H2Zm1.556,7.779H6.667V13.666H8.222v4.667H9.778V12.111H3.556Zm7.778-6.223v7.779h3.111V18.334h3.111V12.111Zm3.111,1.556H16v3.112H14.444Zm4.667-1.556v6.223h3.111V13.666h1.556v4.667h1.556V13.666h1.556v4.667h1.556V12.111Z" style="fill:#cb3837"/></svg>';
     if (name == "LICENSE" || name == "LICENSE.txt") return '<?xml version="1.0" encoding="utf-8"?><svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 122.88 102.72" style="enable-background:new 0 0 122.88 102.72" xml:space="preserve"><style type="text/css">.lic-st0{fill-rule:evenodd;clip-rule:evenodd;fill:#f5de19;}</style><g><path class="lic-st0" d="M65.61,20.91v72.74h35.63c0.38,0,0.68,0.31,0.68,0.69v7.7c0,0.38-0.31,0.69-0.68,0.69H22.84 c-0.38,0-0.69-0.31-0.69-0.69v-7.7c0-0.38,0.31-0.69,0.69-0.69h35.63l0-72.71c-3.1-1.08-5.56-3.53-6.64-6.63H29.3v3.43 c0,0.38-0.31,0.68-0.68,0.68h-5.78c-0.38,0-0.69-0.31-0.69-0.68v-3.43h-5.73c-0.44,0-0.8-0.31-0.8-0.68V7.84 c0-0.38,0.36-0.69,0.8-0.69h35.43C53.33,2.99,57.31,0,61.99,0c4.68,0,8.66,2.99,10.14,7.16h35.53c0.44,0,0.8,0.31,0.8,0.69v5.78 c0,0.38-0.36,0.68-0.8,0.68h-6.46v3.43c0,0.38-0.31,0.68-0.68,0.68h-5.78c-0.38,0-0.69-0.31-0.69-0.68v-3.43H72.16 C71.09,17.38,68.67,19.81,65.61,20.91L65.61,20.91z M99.66,22.3l22.91,40.48c0.2,0.35,0.29,0.73,0.28,1.1h0.02c0,0.05,0,0.1,0,0.15 c0,9.64-11.35,17.46-25.35,17.46c-13.85,0-25.1-7.65-25.34-17.15c-0.04-0.16-0.06-0.34-0.06-0.51c0-0.44,0.14-0.86,0.37-1.2 l23.43-40.43c0.59-1.02,1.89-1.37,2.91-0.78C99.2,21.65,99.48,21.95,99.66,22.3L99.66,22.3z M99.75,31.11v30.6h17.32L99.75,31.11 L99.75,31.11z M95.67,61.7V31.16L77.96,61.7H95.67L95.67,61.7z M27.54,22.3l22.91,40.48c0.2,0.35,0.29,0.73,0.28,1.1h0.02 c0,0.05,0,0.1,0,0.15c0,9.64-11.35,17.46-25.35,17.46c-13.85,0-25.1-7.65-25.34-17.15C0.02,64.19,0,64.02,0,63.84 c0-0.44,0.14-0.86,0.37-1.2L23.8,22.21c0.59-1.02,1.89-1.37,2.91-0.78C27.08,21.65,27.36,21.95,27.54,22.3L27.54,22.3z M27.63,31.11v30.6h17.32L27.63,31.11L27.63,31.11z M23.54,61.7V31.16L5.84,61.7H23.54L23.54,61.7z M61.99,6.07 c2.59,0,4.69,2.1,4.69,4.69c0,2.59-2.1,4.69-4.69,4.69c-2.59,0-4.69-2.1-4.69-4.69C57.3,8.17,59.4,6.07,61.99,6.07L61.99,6.07z"/></g></svg>';
+    var ext = name.split('.').pop()?.toLowerCase();
+    if (ext === 'webmanifest') {
+      return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M7 3.5h18A2.5 2.5 0 0 1 27.5 6v20a2.5 2.5 0 0 1-2.5 2.5H7A2.5 2.5 0 0 1 4.5 26V6A2.5 2.5 0 0 1 7 3.5Z" fill="#263d59" stroke="#79b9ef" stroke-width="1.5"/><path d="M10 9h12M10 13h7" stroke="#d7ecff" stroke-width="1.5" stroke-linecap="round"/><path d="M16 18.1c-1.5 0-2.7 1.2-2.7 2.7v3h5.4v-3c0-1.5-1.2-2.7-2.7-2.7Z" fill="#4ea2e8"/><path d="M16 16.8v-2.2m-2-1.5 2 1.5 2-1.5" fill="none" stroke="#80c5ff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    }
+    if (ext === 'wasm') {
+      return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M4 7.5 8 24.5h4l4-11 4 11h4l4-17h-4l-2.3 11.2L18 7.5h-4l-3.7 11.2L8 7.5Z" fill="#a78bfa"/><path d="M3.5 4.5h25v23h-25z" fill="none" stroke="#8b5cf6" stroke-width="1.4" rx="3"/><path d="M6 27.5h20" stroke="#c4b5fd" stroke-width="1.4" stroke-linecap="round"/></svg>';
+    }
+    if (['frag', 'vert', 'hlsl', 'glsl', 'fx'].includes(ext)) {
+      return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="m11 7-8 9 8 9M21 7l8 9-8 9" fill="none" stroke="#e28b57" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="m18.5 4-5 24" stroke="#f4bb72" stroke-width="2.2" stroke-linecap="round"/><circle cx="16" cy="16" r="2" fill="#ffe1a8"/></svg>';
+    }
     var mime = inferMime(name);
     switch (mime) {
       case 'text/plain':
@@ -70,7 +83,6 @@
     if (type[0] == 'audio') return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M16 9V7h-4v5.5c-.42-.31-.93-.5-1.5-.5A2.5 2.5 0 0 0 8 14.5a2.5 2.5 0 0 0 2.5 2.5 2.5 2.5 0 0 0 2.5-2.5V9h3m-4-7a10 10 0 0 1 10 10 10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2z" fill="#ef5350"/></svg>';
     if (type[0] == 'video') return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m18 4 2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V4h-4z" fill="#ff9800"/></svg>';
     if (type[0] == 'model') return '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A.991.991 0 0 1 3 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88v9M12 4.15 6.04 7.5 12 10.85l5.96-3.35L12 4.15M5 15.91l6 3.38v-6.71L5 9.21v6.7m14 0v-6.7l-6 3.37v6.71z" style="fill:#29b6f6"/></svg>';
-    var ext = name.split('.').pop()?.toLowerCase();
     if (ext == 'zip') return '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M14 17h-2v-2h-2v-2h2v2h2m0-6h-2v2h2v2h-2v-2h-2V9h2V7h-2V5h2v2h2m5-4H5c-1.11 0-2 .89-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z" fill="#afb42b"/></svg>';
     if (ext == "ico") return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 32 32"><defs><linearGradient id="a" x1="-66.775" y1="-171.703" x2="-66.775" y2="-171.817" gradientTransform="matrix(240, 0, 0, -240, 16042, -41206)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ec790f"/><stop offset="1" stop-color="#f51032"/></linearGradient></defs><title>file_type_favicon</title><rect x="2" y="2" width="28" height="28" rx="1.75" ry="1.75" style="fill:url(#a)"/><polygon points="16 22.625 9.511 26.033 10.75 18.815 5.5 13.704 12.755 12.65 16 6.083 19.245 12.65 26.5 13.704 21.25 18.815 22.489 26.033 16 22.625" style="fill:#fff"/></svg>';
     return '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 9h5.5L13 3.5V9M6 2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4c0-1.11.89-2 2-2m5 2H6v16h12v-9h-7V4z" fill="#42a5f5"/></svg>';
