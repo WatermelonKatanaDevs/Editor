@@ -388,7 +388,7 @@
           .source-control-diff-body{position:relative;flex:1;min-height:0}
           .source-control-diff-editor{position:absolute;inset:0}
           .source-control-diff-error{padding:18px;color:var(--editor-muted,#aaa);font:13px sans-serif}
-          .source-control-change-open{width:100%;text-align:left;color:inherit;font:inherit;cursor:pointer}
+          .source-control-change-open{width:100%;text-align:left;color:inherit;font:inherit;cursor:pointer;border:0;background:transparent;}
           .source-control-change-open:hover{background:var(--editor-hover,#333)}
           .source-control-diff-indicator{margin-left:auto;color:var(--editor-muted,#888);font-size:10px;opacity:0}
           .source-control-change-open:hover .source-control-diff-indicator{opacity:1}
@@ -399,8 +399,9 @@
         </div>`;
       document.body.appendChild(modal);
       const host = modal.querySelector('.source-control-diff-editor');
-      let diffEditor = null, originalModel = null, modifiedModel = null;
+      let diffEditor = null, originalModel = null, modifiedModel = null, onKey = null;
       const close = () => {
+        if (onKey) document.removeEventListener('keydown', onKey);
         try { diffEditor?.dispose(); } catch (_) {}
         try { originalModel?.dispose(); } catch (_) {}
         try { modifiedModel?.dispose(); } catch (_) {}
@@ -408,7 +409,7 @@
       };
       modal.querySelector('.source-control-diff-close').addEventListener('click', close);
       modal.addEventListener('click', event => { if (event.target === modal) close(); });
-      const onKey = event => { if (event.key === 'Escape' && modal.isConnected) { close(); document.removeEventListener('keydown', onKey); } };
+      onKey = event => { if (event.key === 'Escape' && modal.isConnected) close(); };
       document.addEventListener('keydown', onKey);
       try {
         const monaco = await state.ensureMonaco();
