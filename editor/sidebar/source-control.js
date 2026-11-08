@@ -123,6 +123,7 @@
     let localGitFilesystem = null;
     let localGitRepository = null;
     let localGitStatus = null;
+    let localGitPushStatus = null;
     function getLocalGit() {
       if (!state.fs) throw new Error('No workspace filesystem is open.');
       if (typeof window.LocalGitService !== 'function') throw new Error('Local Git support has not loaded.');
@@ -204,6 +205,10 @@
       tree.classList.remove('activity-collapsed');
       const persistent = !!state.fs?.isPersistentDirectory;
       const hasRepository = !!localGitRepository?.isRepository;
+      const connectedRemote = state.gitRemote?.provider === 'github' ? state.gitRemote : null;
+      const hasPendingPush = !!connectedRemote && !!localGitPushStatus?.ahead;
+      const commitDisabled = commitBusy || (connectedRemote ? (!staged.length && !hasPendingPush) : !staged.length);
+      const commitLabel = connectedRemote ? (hasPendingPush && !staged.length ? 'Push' : 'Commit & Push') : 'Commit';
       const changes = localGitStatus?.changes || [];
       const staged = changes.filter(change => change.staged);
       const unstaged = changes.filter(change => change.unstaged);
@@ -220,7 +225,7 @@
         '<div class="source-control-head"><div class="activity-sidebar-title">Source Control</div><button data-refresh title="Refresh">↻</button></div>' +
         '<section class="source-control-section"><div class="source-control-section-title">Local Repository</div>' +
         (hasRepository
-          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span><span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span></div>'
+          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span>') + '</div>'
           : persistent
             ? '<div class="source-control-local-hint">This folder is not being tracked by Git yet.</div><button type="button" class="source-control-create-repo" data-local-init>Initialize Repository</button>'
             : '<div class="source-control-local-hint">Local Git requires a folder opened directly from your computer. Open a folder to keep commits in its <code>.git</code> directory.</div>') +
@@ -230,7 +235,7 @@
             '<div class="source-control-local-bulk"><button type="button" data-local-stage-all ' + (unstaged.length ? '' : 'disabled') + '>Stage All</button><button type="button" data-local-unstage-all ' + (staged.length ? '' : 'disabled') + '>Unstage All</button></div>' +
             '<div class="source-control-local-group"><div class="source-control-local-group-title">Staged Changes <span>' + staged.length + '</span></div><div data-local-staged>' + (staged.length ? staged.map(change => renderChange(change, 'staged')).join('') : '<div class="source-control-clean">No staged changes</div>') + '</div></div>' +
             '<div class="source-control-local-group"><div class="source-control-local-group-title">Changes <span>' + unstaged.length + '</span></div><div data-local-unstaged>' + (unstaged.length ? unstaged.map(change => renderChange(change, 'unstaged')).join('') : '<div class="source-control-clean">No unstaged changes</div>') + '</div></div>' +
-            '<textarea data-local-commit-message placeholder="Commit message" rows="3"></textarea><button class="source-control-commit" data-local-commit ' + (staged.length && !commitBusy ? '' : 'disabled') + '>Commit</button><div data-status class="source-control-status"></div></section>' +
+            '<textarea data-local-commit-message placeholder="Commit message" rows="3"></textarea><button class="source-control-commit" data-local-commit ' + (commitDisabled ? 'disabled' : '') + '>' + commitLabel + '</button><div data-status class="source-control-status"></div></section>' +
             '<section class="source-control-section"><div class="source-control-section-title">History</div><div data-local-history class="source-control-history"><div class="source-control-loading">Loading commits…</div></div></section>'
           : '') +
         '</div>';
@@ -279,14 +284,22 @@
       const token = ++statusToken;
       if (!tree.querySelector('[data-local-staged]') || !localGitRepository?.isRepository) return;
       try {
-        const status = await getLocalGit().status('/');
+        const service = getLocalGit();
+        const status = await service.status('/');
         if (token !== statusToken) return;
         localGitStatus = status;
-        localGitRepository = await getLocalGit().detect('/');
+        localGitPushStatus = await service.pushStatus('/');
+        if (token !== statusToken) return;
+        localGitRepository = await service.detect('/');
         if (token !== statusToken) return;
         renderLocalShell();
         const button = tree.querySelector('[data-local-commit]');
-        if (button) button.disabled = commitBusy || !status.changes.some(change => change.staged);
+        if (button) {
+          const staged = status.changes.some(change => change.staged);
+          const remote = state.gitRemote?.provider === 'github';
+          button.disabled = commitBusy || (remote ? (!staged && !localGitPushStatus?.ahead) : !staged);
+          button.textContent = remote ? (localGitPushStatus?.ahead && !staged ? 'Push' : 'Commit & Push') : 'Commit';
+        }
         if (status.clean) clearStatus();
       } catch (error) {
         if (token !== statusToken) return;
@@ -369,18 +382,36 @@
       const button = tree.querySelector('[data-local-commit]');
       const message = tree.querySelector('[data-local-commit-message]')?.value.trim() || '';
       if (!button || button.disabled || commitBusy) return;
-      if (!message) { showStatus('Enter a commit message.', true); return; }
+      const connectedRemote = state.gitRemote?.provider === 'github';
+      const service = getLocalGit();
       commitBusy = true;
       button.disabled = true;
-      button.textContent = 'Committing…';
+      button.textContent = connectedRemote ? 'Committing…' : 'Committing…';
       let successMessage = '';
       let errorMessage = '';
+      let localCommitCreated = false;
       try {
-        const result = await getLocalGit().runSerialized(['commit', '-m', message], {cwd:'/'});
-        tree.querySelector('[data-local-commit-message]').value = '';
-        successMessage = result.output || 'Commit created.';
+        const status = await service.status('/');
+        if (status.changes.some(change => change.staged)) {
+          if (!message) throw new Error('Enter a commit message.');
+          const result = await service.runSerialized(['commit', '-m', message], {cwd:'/'});
+          localCommitCreated = true;
+          if (tree.querySelector('[data-local-commit-message]')) tree.querySelector('[data-local-commit-message]').value = '';
+          successMessage = result.output || 'Commit created.';
+        } else if (!connectedRemote || !localGitPushStatus?.ahead) {
+          throw new Error('Nothing staged to commit.');
+        }
+        if (connectedRemote) {
+          const pushed = await service.runSerialized(['push'], {cwd:'/'});
+          if (pushed.value?.commitSha) {
+            state.gitRemote.revision = pushed.value.commitSha;
+            state.saveProjectMetadata?.();
+          }
+          successMessage = (localCommitCreated ? successMessage + '\n' : '') + (pushed.output || 'Pushed to GitHub.');
+        }
       } catch (error) {
         errorMessage = error.message || String(error);
+        if (localCommitCreated && connectedRemote) errorMessage = 'Committed locally, but the push failed: ' + errorMessage;
       } finally {
         commitBusy = false;
         await refreshLocalStatus();
