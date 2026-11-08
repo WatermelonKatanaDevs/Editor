@@ -3326,6 +3326,7 @@
                 if (prop === 'navigator') {
                   const nativeNavigator = Reflect.get(window, 'navigator', window);
                   const ios = emulation.platform === 'ios';
+                  const androidPlatformVersion = /Android 10/i.test(emulation.userAgent || '') ? '10.0.0' : '14.0.0';
                   const uaData = ios ? undefined : {
                     brands: [{brand:'Chromium',version:'120'},{brand:'Google Chrome',version:'120'}],
                     mobile: true,
@@ -3334,7 +3335,7 @@
                       return {
                         architecture: '', bitness: '',
                         model: emulation.deviceId === 'pixel-7' ? 'Pixel 7' : '',
-                        platform: 'Android', platformVersion: '14.0.0',
+                        platform: 'Android', platformVersion: androidPlatformVersion,
                         uaFullVersion: '120.0.0.0',
                         fullVersionList: this.brands, mobile: true
                       };
