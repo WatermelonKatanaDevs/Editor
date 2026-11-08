@@ -502,8 +502,73 @@
       return patches.join('\n');
     }
 
-    async _readConfig(repository, path) {
-      return await this.git.getConfig({fs:this.fs, dir:repository.dir, path});
+    async pushStatus(cwd = '/') {
+      const repository = await this._repository(cwd);
+      const branch = await this.git.currentBranch({fs:this.fs, dir:repository.dir, fullname:false});
+      let head = null;
+      try { head = await this.git.resolveRef({fs:this.fs, dir:repository.dir, ref:'HEAD'}); } catch (_) {}
+      const remoteUrl = await this._readConfig(repository, 'remote.origin.url');
+      const lastPushedLocal = await this._readConfig(repository, 'remote.origin.lastPushedLocal') || '';
+      const lastPush = await this._readConfig(repository, 'remote.origin.lastPush') || '';
+      return {remoteUrl:remoteUrl ? String(remoteUrl) : null, branch, head, lastPushedLocal:String(lastPushedLocal), lastPush:String(lastPush), ahead:!!head && head !== String(lastPushedLocal)};
+    }
+
+    _parseGitHubRemote(url) {
+      const value = String(url || '').trim();
+      const match = value.match(/^(?:https?:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+      if (!match) throw new Error('GitHub push currently supports GitHub remotes in HTTPS or SSH URL format.');
+      return {owner:match[1], repo:match[2]};
+    }
+
+    async _getCommitChanges(repository, oid) {
+      const entries = await this.git.log({fs:this.fs, dir:repository.dir, ref:oid, depth:1, includeChanges:true});
+      const entry = entries[0];
+      if (!entry) throw new Error('The local commit could not be read.');
+      const changes = [];
+      for (const change of entry.commit.changes || []) {
+        const [newOid, oldOid, path] = change;
+        if (!newOid) {
+          changes.push({path, type:'deleted', mode:'100644', sha:null});
+          continue;
+        }
+        const blob = await this.git.readBlob({fs:this.fs, dir:repository.dir, oid:newOid});
+        changes.push({path, type:oldOid ? 'modified' : 'added', mode:'100644', data:new Uint8Array(blob.blob)});
+      }
+      return {entry, changes};
+    }
+
+    async push(cwd = '/', remoteName = 'origin', branchName = null) {
+      if (remoteName !== 'origin') throw new Error('Only the origin remote is supported for GitHub pushes.');
+      const repository = await this._repository(cwd);
+      const branch = branchName || await this.git.currentBranch({fs:this.fs, dir:repository.dir, fullname:false});
+      if (!branch) throw new Error('Cannot push while HEAD is detached.');
+      const remoteUrl = await this._readConfig(repository, 'remote.origin.url');
+      if (!remoteUrl) throw new Error('No remote named origin. Add one with git remote add origin https://github.com/owner/repository.git.');
+      const {owner, repo} = this._parseGitHubRemote(remoteUrl);
+      const head = await this.git.resolveRef({fs:this.fs, dir:repository.dir, ref:'HEAD'});
+      const tracking = await this.pushStatus(cwd);
+      if (head === tracking.lastPushedLocal) return {output:'Everything up-to-date', value:{changed:false, head}};
+      const {entry, changes} = await this._getCommitChanges(repository, head);
+      const parent = entry.commit.parent?.[0] || '';
+      if (parent !== tracking.lastPushedLocal) throw new Error('Your local branch has multiple unpushed commits or its history diverged. Push one commit at a time; fetching and rebasing are not implemented yet.');
+      if (!window.GitHubService?.isSignedIn?.()) throw new Error('Sign in to GitHub before pushing this repository.');
+      if (typeof window.GitHubService.commitAndPush !== 'function' || typeof window.GitHubService.getRemoteState !== 'function') throw new Error('GitHub push support has not loaded.');
+      const remoteBranch = branchName || branch;
+      const remote = await window.GitHubService.getRemoteState(owner, repo, remoteBranch);
+      if (String(remote.commitSha || '') !== tracking.lastPush) throw new Error('The GitHub branch has changed since your last push. Fetching and merging remote commits is not implemented yet, so this push was stopped to avoid overwriting remote work.');
+      if (!changes.length) throw new Error('The local commit contains no file changes to push.');
+      const result = await window.GitHubService.commitAndPush({
+        owner,
+        repo,
+        branch:remoteBranch,
+        message:String(entry.commit.message || '').trim(),
+        fs:this.filesystem,
+        changesOverride:changes
+      });
+      await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPushedLocal', value:head});
+      await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastPush', value:result.commitSha});
+      await this.adapter.flush();
+      return {output:'To ' + remoteUrl + '\\n   ' + tracking.lastPush.slice(0, 7) + '..' + result.commitSha.slice(0, 7) + '  ' + branch + ' -> ' + branch, value:{...result, localHead:head}};
     }
 
     async run(args = [], context = {}) {
@@ -733,7 +798,54 @@
         }
         return {output:lines.join('\n').trimEnd(), value:commits};
       }
-      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, rev-parse.', value:null};
+      if (operation === 'remote') {
+        const repository = await this._repository(cwd);
+        const subcommand = command[1] || '-v';
+        if (subcommand === '-v' || subcommand === '--verbose') {
+          const url = await this._readConfig(repository, 'remote.origin.url');
+          return {output:url ? 'origin\\t' + url + ' (fetch)\\norigin\\t' + url + ' (push)' : '', value:url ? [{name:'origin',url:String(url)}] : []};
+        }
+        if (subcommand === 'add') {
+          const name = command[2];
+          const url = command[3];
+          if (!name || !url) throw new Error('git remote add: expected a remote name and URL.');
+          if (name !== 'origin') throw new Error('Only the origin remote is supported.');
+          const existing = await this._readConfig(repository, 'remote.origin.url');
+          if (existing) throw new Error('remote origin already exists; use git remote set-url origin <url>.');
+          this._parseGitHubRemote(url);
+          await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.url', value:url});
+          return {output:'', value:true};
+        }
+        if (subcommand === 'set-url') {
+          const name = command[2];
+          const url = command[3];
+          if (name !== 'origin' || !url) throw new Error('git remote set-url: expected origin and a URL.');
+          this._parseGitHubRemote(url);
+          await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.url', value:url});
+          return {output:'', value:true};
+        }
+        if (subcommand === 'get-url') {
+          const name = command[2] || 'origin';
+          if (name !== 'origin') throw new Error('Unknown remote: ' + name);
+          const url = await this._readConfig(repository, 'remote.origin.url');
+          if (!url) throw new Error('No such remote: origin');
+          return {output:String(url), value:String(url)};
+        }
+        throw new Error('git remote: supported forms are -v, add origin, set-url origin, and get-url origin.');
+      }
+      if (operation === 'push') {
+        let remoteName = 'origin';
+        let branchName = null;
+        for (const arg of command.slice(1)) {
+          if (arg.startsWith('-')) throw new Error('git push: force, tags, and other options are not supported.');
+          if (remoteName === 'origin') remoteName = arg;
+          else if (!branchName) branchName = arg;
+          else throw new Error('git push: too many arguments.');
+        }
+        const result = await this.push(cwd, remoteName, branchName);
+        return result;
+      }
+      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, remote, push, rev-parse.', value:null};
       throw new Error('git: command not implemented yet: ' + operation);
     }
 
