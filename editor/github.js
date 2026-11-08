@@ -791,7 +791,7 @@
     return Promise.all(byParent.get('') || []);
   }
 
-  async function commitAndPush({owner, repo, branch, message, fs, compareTree = null, pathPrefix = '', excludePaths = [], gitlinks = [], removedGitlinks = [], _attempt = 0}) {
+  async function commitAndPush({owner, repo, branch, message, fs, compareTree = null, pathPrefix = '', excludePaths = [], gitlinks = [], removedGitlinks = [], changesOverride = null, _attempt = 0}) {
     message = String(message || '').trim();
     if (!message) throw new Error('Enter a commit message.');
     let remote = null;
@@ -801,7 +801,7 @@
       await new Promise(resolve => setTimeout(resolve, 500 + attempt * 500));
     }
     if (remote?.unavailable) throw new Error('GitHub is still initializing this repository. Please try again in a moment.');
-    const changes = await compareWorkingTree(fs, compareTree || remote.tree, {pathPrefix, excludePaths});
+    const changes = Array.isArray(changesOverride) ? changesOverride : await compareWorkingTree(fs, compareTree || remote.tree, {pathPrefix, excludePaths});
     const remoteGitlinks = new Map((remote.tree || []).filter(entry => entry?.mode === '160000' || entry?.type === 'commit').map(entry => [entry.path, entry.sha]));
     const updatedGitlinks = (gitlinks || []).filter(link => link?.path && link?.sha && remoteGitlinks.get(link.path) !== link.sha);
     const deletedGitlinks = [...new Set((removedGitlinks || []).map(path => String(path || '').replace(/^\/+|\/+$/g, '')).filter(path => path && remoteGitlinks.has(path)))];
@@ -844,7 +844,7 @@
         // never force-push over the intervening commit.
         if (e?.status === 422 && _attempt < 8) {
           await new Promise(resolve => setTimeout(resolve, 500 + _attempt * 500));
-          return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, _attempt:_attempt + 1});
+          return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, changesOverride, _attempt:_attempt + 1});
         }
         throw e;
       }
@@ -856,7 +856,7 @@
       // with a bounded backoff before surfacing the error.
       if ((e?.status === 404 || e?.status === 409) && _attempt < 8) {
         await new Promise(resolve => setTimeout(resolve, Math.min(1000 + _attempt * 1000, 5000)));
-        return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, _attempt:_attempt + 1});
+        return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, removedGitlinks, changesOverride, _attempt:_attempt + 1});
       }
       if (e?.status !== 403) throw e;
       if (updatedGitlinks.length || deletedGitlinks.length) throw new Error('GitHub rejected the Git-data write for a commit containing submodule references. The GraphQL fallback cannot create or remove gitlinks; check your repository permissions and try again.');
