@@ -334,7 +334,7 @@
             .filter(node => node && !node.isDir)
             .map(node => ({path: node.path, name: node.name}));
           e.dataTransfer.setData('text/plain', this.readOnly
-            ? selectedFiles.map(item => item.name).join('\\n')
+            ? selectedFiles.map(item => item.name).join('\n')
             : JSON.stringify(paths));
           if (!this.readOnly) e.dataTransfer.setData('application/x-file-manager-paths', JSON.stringify(paths));
           // Keep internal explorer drags as moves, while also exposing selected files
