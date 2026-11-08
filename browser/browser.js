@@ -1624,6 +1624,15 @@ function getDeviceEmulationConfig(tab = getActiveTab()) {
 }
 
 function applyDeviceEmulation(tab = getActiveTab()) {
+  // Device settings live on the PageEmulator too, so the sandbox and DevTools
+  // see the same values immediately (including orientation changes).
+  tabs.forEach(candidate => {
+    if (candidate?.page) {
+      candidate.page.deviceEmulation = candidate.deviceEmulation?.enabled
+        ? { ...candidate.deviceEmulation }
+        : null;
+    }
+  });
   const viewport = document.getElementById('viewport-container');
   if (!viewport) return;
   const active = !!tab && tab.id === activeTabId && !!tab.deviceEmulation?.enabled;
@@ -2170,7 +2179,11 @@ function applyMobileEmulationDocument(html, emulation) {
       'if(/\\((any-)?pointer\\s*:\\s*coarse\\)/.test(q)||/\\((any-)?hover\\s*:\\s*none\\)/.test(q))forced=true;' +
       'if(/\\((any-)?pointer\\s*:\\s*fine\\)/.test(q)||/\\((any-)?hover\\s*:\\s*hover\\)/.test(q))forced=false;' +
       'if(forced===null)return result;return new Proxy(result,{get:function(target,key){if(key==="matches")return forced;var value=Reflect.get(target,key,target);return typeof value==="function"?value.bind(target):value;}});};}' +
-    'apply(state);window.addEventListener("message",function(event){if(event.source!==window.parent||!event.data||event.data.__wkDeviceEmulationUpdate!==true)return;apply(event.data.config);});' +
+    'apply(state);window.addEventListener("message",function(event){if(!event.data||event.data.__wkDeviceEmulationUpdate!==true)return;' +
+      'var hostWindow=window.__pageEmulator&&window.__pageEmulator.iframe&&window.__pageEmulator.iframe.ownerDocument&&window.__pageEmulator.iframe.ownerDocument.defaultView;' +
+      'if(hostWindow&&event.source!==hostWindow)return;apply(event.data.config);' +
+      'try{window.dispatchEvent(new Event("resize"));window.dispatchEvent(new Event("orientationchange"));if(window.screen.orientation)window.screen.orientation.dispatchEvent(new Event("change"));}catch(e){}' +
+    '});' +
   '})();</script>';
   const viewportMeta = /<meta\b[^>]*\bname\s*=\s*(['"]?)viewport\1/i.test(html)
     ? ''
