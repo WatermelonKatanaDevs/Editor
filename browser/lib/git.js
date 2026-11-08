@@ -502,6 +502,10 @@
       return patches.join('\n');
     }
 
+    async _readConfig(repository, path) {
+      return await this.git.getConfig({fs:this.fs, dir:repository.dir, path});
+    }
+
     async pushStatus(cwd = '/') {
       const repository = await this._repository(cwd);
       const branch = await this.git.currentBranch({fs:this.fs, dir:repository.dir, fullname:false});
