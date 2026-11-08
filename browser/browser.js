@@ -2201,6 +2201,11 @@ async function renderTabContent(tab, url) {
 
   const mobileEmulation = tab.deviceEmulation?.enabled ? tab.deviceEmulation : null;
   const requestHeaders = {
+    // User-Agent is a forbidden Fetch header in browsers, so setting it here
+    // is not a reliable way to change what an upstream server receives. Carry
+    // the requested identity in an ordinary header for the proxy to forward;
+    // the WatermelonKatana Express middleware consumes it before device.capture.
+    ...(mobileEmulation ? { 'X-WK-Emulated-User-Agent': getDeviceEmulationUserAgent(mobileEmulation) } : {}),
     'User-Agent': mobileEmulation ? getDeviceEmulationUserAgent(mobileEmulation) : DESKTOP_BROWSER_USER_AGENT,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
