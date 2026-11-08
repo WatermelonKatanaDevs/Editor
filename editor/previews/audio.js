@@ -10,7 +10,8 @@
     ['track', 'Track number', 'text'],
     ['disc', 'Disc number', 'text'],
     ['composer', 'Composer', 'text'],
-    ['comment', 'Comment', 'textarea']
+    ['comment', 'Comment', 'textarea'],
+    ['lyrics', 'Lyrics', 'textarea']
   ];
 
   function isTaggable(file) {
@@ -28,15 +29,17 @@
     return mins + ':' + String(secs).padStart(2, '0');
   }
 
-  function makeIcon(path) {
+  function makeIcon(path, solid = false) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
     svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('fill', 'none');
-    svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '1.8');
-    svg.setAttribute('stroke-linecap', 'round');
-    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('fill', solid ? 'currentColor' : 'none');
+    svg.setAttribute('stroke', solid ? 'none' : 'currentColor');
+    if (!solid) {
+      svg.setAttribute('stroke-width', '1.8');
+      svg.setAttribute('stroke-linecap', 'round');
+      svg.setAttribute('stroke-linejoin', 'round');
+    }
     const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     p.setAttribute('d', path);
     svg.appendChild(p);
@@ -83,6 +86,75 @@
     art.innerHTML = '<span class="editor-audio-note">♫</span><span class="editor-audio-art-glow"></span>';
     host.appendChild(art);
     return null;
+  }
+
+  function applyArtworkAccent(root, image) {
+    const reset = () => {
+      root.style.removeProperty('--audio-cover-accent');
+      root.style.removeProperty('--audio-cover-glow');
+      root.style.removeProperty('--audio-cover-accent-ink');
+    };
+    if (!image) {
+      reset();
+      return;
+    }
+    const sample = () => {
+      if (!image.isConnected || !image.naturalWidth || !image.naturalHeight) return;
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 40;
+        canvas.height = 40;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        if (!context) return;
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+        const bins = Array.from({ length: 36 }, () => ({ weight: 0, x: 0, y: 0 }));
+        for (let i = 0; i < pixels.length; i += 4) {
+          const r = pixels[i] / 255, g = pixels[i + 1] / 255, b = pixels[i + 2] / 255;
+          const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
+          if (!delta) continue;
+          const saturation = max ? delta / max : 0;
+          if (saturation < 0.2 || max < 0.14 || max > 0.97) continue;
+          let hue;
+          if (max === r) hue = 60 * (((g - b) / delta) % 6);
+          else if (max === g) hue = 60 * ((b - r) / delta + 2);
+          else hue = 60 * ((r - g) / delta + 4);
+          if (hue < 0) hue += 360;
+          const weight = saturation * Math.max(0.2, 1 - Math.abs(max - 0.58));
+          const bin = bins[Math.floor(hue / 10) % 36];
+          const radians = hue * Math.PI / 180;
+          bin.weight += weight;
+          bin.x += Math.cos(radians) * weight;
+          bin.y += Math.sin(radians) * weight;
+        }
+        let best = null;
+        for (const bin of bins) if (!best || bin.weight > best.weight) best = bin;
+        if (!best || best.weight < 0.5) {
+          reset();
+          return;
+        }
+        let hue = Math.atan2(best.y, best.x) * 180 / Math.PI;
+        if (hue < 0) hue += 360;
+        const accent = 'hsl(' + Math.round(hue) + ' 68% 58%)';
+        root.style.setProperty('--audio-cover-accent', accent);
+        root.style.setProperty('--audio-cover-glow', 'hsl(' + Math.round(hue) + ' 48% 27%)');
+        root.style.setProperty('--audio-cover-accent-ink', 'hsl(' + Math.round(hue) + ' 24% 10%)');
+      } catch (_) {
+        // Tainted or unsupported image formats should leave the default theme intact.
+        reset();
+      }
+    };
+    if (image.complete) sample();
+    else image.addEventListener('load', sample, { once: true });
+  }
+
+  function updateRangeFill(input) {
+    const min = Number(input.min || 0);
+    const max = Number(input.max || 100);
+    const value = Math.min(max, Math.max(min, Number(input.value || 0)));
+    const percent = max > min ? ((value - min) / (max - min)) * 100 : 0;
+    const fill = 'var(--audio-cover-accent, #d8e9da)';
+    input.style.background = 'linear-gradient(to right, ' + fill + ' 0%, ' + fill + ' ' + percent + '%, #ffffff35 ' + percent + '%, #ffffff35 100%)';
   }
 
   function makePlayer(ctx) {
@@ -145,7 +217,20 @@
     volume.value = '1';
     volume.className = 'editor-audio-volume';
     volume.setAttribute('aria-label', 'Volume');
-    controls.append(play, current, progress, duration, volumeButton, volume);
+    const speed = document.createElement('select');
+    speed.className = 'editor-audio-speed';
+    speed.setAttribute('aria-label', 'Playback speed');
+    speed.title = 'Playback speed';
+    for (const rate of [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]) {
+      const option = document.createElement('option');
+      option.value = String(rate);
+      option.textContent = (rate === 1 ? '1' : String(rate)) + '×';
+      speed.appendChild(option);
+    }
+    speed.value = '1';
+    controls.append(play, current, progress, duration, volumeButton, volume, speed);
+    updateRangeFill(progress);
+    updateRangeFill(volume);
 
     const footer = document.createElement('div');
     footer.className = 'editor-audio-footer';
@@ -186,16 +271,17 @@
       }
       if (artworkURL) URL.revokeObjectURL(artworkURL);
       artworkURL = makeArtwork(art, data?.picture, 'artwork');
+      applyArtworkAccent(root, art.querySelector('img'));
     };
 
     const updatePlayButton = () => {
       play.innerHTML = '';
       if (audio.paused) {
-        play.appendChild(makeIcon('M8 5v14l11-7z'));
+        play.appendChild(makeIcon('M8 5v14l11-7z', true));
         play.setAttribute('aria-label', 'Play');
         play.title = 'Play';
       } else {
-        play.appendChild(makeIcon('M8 5h3v14H8z M15 5h3v14h-3z'));
+        play.appendChild(makeIcon('M7 5h4v14H7z M15 5h4v14h-4z', true));
         play.setAttribute('aria-label', 'Pause');
         play.title = 'Pause';
       }
@@ -215,18 +301,33 @@
       current.textContent = formatTime(audio.currentTime);
       duration.textContent = formatTime(audio.duration);
       if (!dragging) progress.value = String(audio.duration ? Math.round(audio.currentTime / audio.duration * 1000) : 0);
+      updateRangeFill(progress);
     });
-    progress.addEventListener('input', () => { dragging = true; });
+    progress.addEventListener('input', () => { dragging = true; updateRangeFill(progress); });
     progress.addEventListener('change', () => {
       if (Number.isFinite(audio.duration)) audio.currentTime = Number(progress.value) / 1000 * audio.duration;
       dragging = false;
     });
-    volume.addEventListener('input', () => { audio.volume = Number(volume.value); audio.muted = audio.volume === 0; });
-    volumeButton.addEventListener('click', () => {
-      audio.muted = !audio.muted;
-      volume.value = audio.muted ? '0' : String(audio.volume || 1);
+    volume.addEventListener('input', () => {
+      audio.volume = Number(volume.value);
+      audio.muted = audio.volume === 0;
+      updateRangeFill(volume);
+    });
+    audio.addEventListener('volumechange', () => {
+      if (audio.muted) volume.value = '0';
+      else volume.value = String(audio.volume);
+      updateRangeFill(volume);
       volumeButton.title = audio.muted ? 'Unmute' : 'Mute';
       volumeButton.setAttribute('aria-label', volumeButton.title);
+    });
+    volumeButton.addEventListener('click', () => {
+      audio.muted = !audio.muted;
+      if (!audio.muted && audio.volume === 0) audio.volume = 1;
+      volume.value = audio.muted ? '0' : String(audio.volume || 1);
+      updateRangeFill(volume);
+    });
+    speed.addEventListener('change', () => {
+      audio.playbackRate = Number(speed.value) || 1;
     });
     const refresh = event => {
       if (event?.detail?.path !== ctx.file.path || disposed) return;
@@ -318,6 +419,7 @@
         if (key === 'year') input.placeholder = 'e.g. 2025';
         if (key === 'track') input.placeholder = 'e.g. 3 or 3/12';
         if (key === 'disc') input.placeholder = 'e.g. 1';
+        if (key === 'lyrics') input.rows = 7;
       }
       input.name = key;
       input.value = parsed.tags?.[key] || '';
@@ -606,17 +708,17 @@
         create: makePlayer
       },
       {
-        id: 'audio-raw',
-        label: 'Raw',
-        priority: 90,
-        create: makeRawPlayer
-      },
-      {
         id: 'audio-tags',
         label: 'Edit Tags',
         priority: 100,
         match: isTaggable,
         create: makeTagEditor
+      },
+      {
+        id: 'audio-raw',
+        label: 'Raw',
+        priority: 80,
+        create: makeRawPlayer
       }
     ]
   });
