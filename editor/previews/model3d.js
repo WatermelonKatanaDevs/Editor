@@ -112,7 +112,6 @@
     let THREE,renderer,scene,camera,controls,modelRoot=null,mixer=null,clock=null,raf=0,resizeObserver=null;
     let grid=null,axes=null,skeletonHelper=null,wireframe=false,showGrid=true,showAxes=false,background=0x202124;
     let animationActions=[],activeAction=null,animationSelect=null,playButton=null,timeSlider=null,timeLabel=null;
-    const _fitPoint=new (window.THREE?.Vector3||Object)();
     let disposed=false,modelFiles=new Map(),objectURLs=new Map(),decoderLoaders=[],selectedRoot=null,modelInfo=null,activeModelPath=ctx.file.path;
     const cleanup=()=>{
       disposed=true;cancelAnimationFrame(raf);resizeObserver?.disconnect();controls?.dispose();renderer?.dispose();for(const loader of decoderLoaders)try{loader.dispose?.();}catch(_){}
@@ -158,7 +157,7 @@
     }
     function fitObject(obj){
       const box=new THREE.Box3().setFromObject(obj);
-      if(box.isEmpty())obj.traverse?.(node=>{if(node.isBone){node.getWorldPosition(_fitPoint);box.expandByPoint(_fitPoint);}});
+      if(box.isEmpty()){const fitPoint=new THREE.Vector3();obj.traverse?.(node=>{if(node.isBone){node.getWorldPosition(fitPoint);box.expandByPoint(fitPoint);}});}
       if(box.isEmpty()){controls.target.set(0,0,0);controls.update();return;}
       const size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());
       const max=Math.max(size.x,size.y,size.z)||1;
