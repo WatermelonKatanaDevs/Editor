@@ -279,6 +279,9 @@
     if (mime === 'image/gif') return decodeGIF(bytes);
     if (mime === 'image/apng' || (mime === 'image/png' && hasPngChunk(bytes, 'acTL'))) return decodeAPNG(bytes);
     if (mime === 'image/webp' && isAnimatedWebP(bytes)) return decodeWebP(bytes);
+    if (mime === 'image/avif' && isAnimatedAvif(bytes)) {
+      throw new Error('Animated AVIF editing requires WebCodecs ImageDecoder support in this browser.');
+    }
     return decodeStill(bytes, mime);
   }
 
@@ -665,7 +668,7 @@
               renderTimeline();
             };
             item.addEventListener('dragstart', event => {
-              event.dataTransfer.effectAllowed = 'copy';
+              event.dataTransfer.effectAllowed = 'copyMove';
               event.dataTransfer.setData('application/x-wk-animation-frame', String(index));
               const name = originalName + '-frame-' + String(index + 1).padStart(3, '0') + '.png';
               try {
@@ -753,6 +756,7 @@
 
         async function importFiles(files) {
           if (busy) return;
+          stopPlayback();
           const images = Array.from(files || []).filter(isImageFile);
           if (!images.length) {
             say('Drop image files to add frames.', true);
@@ -793,6 +797,7 @@
         }
 
         function moveSelected(direction) {
+          stopPlayback();
           const destination = selected + direction;
           if (destination < 0 || destination >= frames.length) return;
           const frame = frames.splice(selected, 1)[0];
@@ -989,12 +994,15 @@
         });
         blankButton.onclick = () => {
           if (busy || !width || !height || frames.length >= MAX_FRAMES) return;
+          stopPlayback();
           frames.splice(selected + 1, 0, { data: new Uint8ClampedArray(width * height * 4), duration: 100, source: 'Blank' });
           selected++;
           refresh();
           say('Added a blank frame.');
         };
         duplicateButton.onclick = () => {
+          if (busy || frames.length >= MAX_FRAMES) return;
+          stopPlayback();
           const copy = { data: new Uint8ClampedArray(frames[selected].data), duration: frames[selected].duration, source: 'Duplicate' };
           frames.splice(selected + 1, 0, copy);
           selected++;
@@ -1004,7 +1012,9 @@
         previousButton.onclick = () => moveSelected(-1);
         nextButton.onclick = () => moveSelected(1);
         removeButton.onclick = () => {
+          if (busy) return;
           if (frames.length <= 1) { say('Keep at least one frame in the animation.', true); return; }
+          stopPlayback();
           frames.splice(selected, 1);
           selected = Math.min(selected, frames.length - 1);
           refresh();
@@ -1012,6 +1022,7 @@
         };
         playButton.onclick = startPlayback;
         duration.addEventListener('change', () => {
+          stopPlayback();
           const value = Math.max(10, Math.min(60000, Number(duration.value) || 100));
           if (applyAll.checked) frames.forEach(frame => { frame.duration = value; });
           else frames[selected].duration = value;
