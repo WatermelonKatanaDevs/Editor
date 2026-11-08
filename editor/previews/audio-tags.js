@@ -180,7 +180,7 @@
       const normalizedId = major === 2 ? ({ TT2: 'TIT2', TP1: 'TPE1', TAL: 'TALB', TP2: 'TPE2', TCO: 'TCON', TRK: 'TRCK', TYE: 'TYER', PIC: 'APIC' }[id] || id) : id;
       const frame = { id: normalizedId, data: new Uint8Array(data), originalId: id, flags: formatFlags };
       frames.push(frame);
-      const field = FRAME_FIELDS[normalizedId] || (normalizedId === 'TYER' ? 'year' : null);
+      const field = FRAME_FIELDS[normalizedId] || (normalizedId === 'TYER' ? 'year' : normalizedId === 'USLT' ? 'lyrics' : null);
       if (field) tags[field] = decodeTextFrame(normalizedId, data);
       else if (normalizedId === 'APIC') {
         const candidate = parsePicture(data);
@@ -302,6 +302,12 @@
     return encodeFrame('COMM', joinBytes([Uint8Array.of(3), encoder.encode('eng'), Uint8Array.of(0), encoder.encode(text)]));
   }
 
+  function encodeLyricsFrame(value) {
+    const text = String(value || '').trim();
+    if (!text) return null;
+    return encodeFrame('USLT', joinBytes([Uint8Array.of(3), encoder.encode('eng'), Uint8Array.of(0), encoder.encode(text)]));
+  }
+
   function encodePictureFrame(picture) {
     if (!picture?.data?.length) return null;
     const mime = String(picture.mime || 'image/jpeg').split(/[;\s]/)[0].toLowerCase();
@@ -317,7 +323,7 @@
 
   function buildID3(metadata, priorFrames, picture, replacePicture) {
     const frames = [];
-    const replacedIds = new Set(['TIT2', 'TPE1', 'TALB', 'TPE2', 'TCON', 'TDRC', 'TYER', 'TRCK', 'TPOS', 'TCOM', 'COMM']);
+    const replacedIds = new Set(['TIT2', 'TPE1', 'TALB', 'TPE2', 'TCON', 'TDRC', 'TYER', 'TRCK', 'TPOS', 'TCOM', 'COMM', 'USLT']);
     for (const frame of priorFrames || []) {
       if (!/^[A-Z0-9]{4}$/.test(frame.id) || replacedIds.has(frame.id) || (frame.flags && frame.flags !== 0x02)) continue;
       if (frame.id === 'APIC' && replacePicture) continue;
@@ -332,6 +338,8 @@
         if (frame) frames.push(frame);
       }
     }
+    const lyricsFrame = encodeLyricsFrame(metadata.lyrics);
+    if (lyricsFrame) frames.push(lyricsFrame);
     if (metadata.year && !frames.some(frame => String.fromCharCode(...frame.subarray(0, 4)) === 'TDRC')) {
       const frame = encodeTextFrame('TDRC', metadata.year);
       if (frame) frames.push(frame);
