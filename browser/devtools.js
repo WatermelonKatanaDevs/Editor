@@ -3471,6 +3471,7 @@ var DevToolsInternal = {
     }
 
     function isBrowserInjectedScript(value) {
+      if (value?.hasAttribute?.('data-wk-device-emulation')) return true;
       const code = typeof value === 'string' ? value : (value?.textContent || '');
       if (!code) return false;
       return (
@@ -4123,6 +4124,47 @@ var DevToolsInternal = {
     function q(id){ return getUIElement(id); }
     ['elements','console','sources','network','performance','application'].forEach(function(name){ q('dt-tab-'+name)?.addEventListener('click',function(){ DevToolsInternal.ui.switchTab(name); }); });
     q('dt-clear-active')?.addEventListener('click',function(){ DevToolsInternal.ui.clearActive(); });
+    function runDeviceEmulation(action) {
+      try {
+        const result = action?.();
+        if (result && typeof result.catch === 'function') result.catch(function(error) {
+          emitEvent('toast',error?.message || String(error),'error');
+        });
+      } catch (error) {
+        emitEvent('toast',error?.message || String(error),'error');
+      }
+    }
+    q('dt-device-toggle')?.addEventListener('click',function(){
+      runDeviceEmulation(() => window.browserDeviceEmulation?.toggle?.());
+    });
+    q('dt-device-close')?.addEventListener('click',function(){
+      const state = window.browserDeviceEmulation?.getState?.();
+      if (state?.enabled) runDeviceEmulation(() => window.browserDeviceEmulation?.toggle?.());
+    });
+    q('dt-device-preset')?.addEventListener('change',function(){
+      runDeviceEmulation(() => window.browserDeviceEmulation?.setPreset?.(this.value));
+    });
+    function commitDeviceDimensions() {
+      const width = q('dt-device-width');
+      const height = q('dt-device-height');
+      if (!width || !height) return;
+      runDeviceEmulation(() => window.browserDeviceEmulation?.setDimensions?.(width.value,height.value));
+      syncDeviceEmulationToolbar();
+    }
+    q('dt-device-width')?.addEventListener('change',commitDeviceDimensions);
+    q('dt-device-height')?.addEventListener('change',commitDeviceDimensions);
+    q('dt-device-rotate')?.addEventListener('click',function(){
+      runDeviceEmulation(() => window.browserDeviceEmulation?.rotate?.());
+      syncDeviceEmulationToolbar();
+    });
+    q('dt-device-dpr')?.addEventListener('change',function(){
+      runDeviceEmulation(() => window.browserDeviceEmulation?.setScaleFactor?.(this.value));
+      syncDeviceEmulationToolbar();
+    });
+    q('dt-device-scale')?.addEventListener('change',function(){
+      runDeviceEmulation(() => window.browserDeviceEmulation?.setScaleMode?.(this.value));
+      syncDeviceEmulationToolbar();
+    });
     q('dt-panel-close')?.addEventListener('click',function(){ DevToolsInternal.ui.toggle(); });
     q('dt-pick-element')?.addEventListener('click',function(){ DevToolsInternal.elements.togglePicker(); });
     q('dom-tree-filter')?.addEventListener('input',function(){ DevToolsInternal.elements.filter(this.value); });
@@ -4159,14 +4201,116 @@ var DevToolsInternal = {
   }
 
 
+  function createDeviceEmulationToolbar() {
+    const viewport = document.getElementById('viewport-container');
+    const clearButton = getUIElement('dt-clear-active');
+    const headerControls = clearButton?.parentElement;
+    if (headerControls && !getUIElement('dt-device-toggle')) {
+      const toggleButton = document.createElement('button');
+      toggleButton.id = 'dt-device-toggle';
+      toggleButton.className = 'hover:text-white p-1 text-gray-400';
+      toggleButton.title = 'Toggle device toolbar (Ctrl+Shift+M)';
+      toggleButton.setAttribute('aria-label', 'Toggle device toolbar');
+      toggleButton.innerHTML = '<i class="fa-solid fa-mobile-screen-button text-xs"></i>';
+      headerControls.insertBefore(toggleButton, clearButton);
+    }
+
+    if (!viewport || document.getElementById('dt-device-toolbar')) return;
+    const toolbar = document.createElement('div');
+    toolbar.id = 'dt-device-toolbar';
+    toolbar.className = 'dt-device-toolbar hidden';
+    toolbar.setAttribute('aria-label', 'Device emulation toolbar');
+    toolbar.innerHTML = [
+      '<div class="dt-device-toolbar-content">',
+      '<select id="dt-device-preset" class="dt-device-control dt-device-preset" title="Select a device">',
+      '<option value="responsive">Responsive</option>',
+      '<option value="iphone-se">iPhone SE</option>',
+      '<option value="iphone-14-pro">iPhone 14 Pro</option>',
+      '<option value="pixel-7">Pixel 7</option>',
+      '<option value="ipad-mini">iPad mini</option>',
+      '</select>',
+      '<span class="dt-device-separator"></span>',
+      '<span class="dt-device-label">Dimensions</span>',
+      '<input id="dt-device-width" class="dt-device-control dt-device-dimension" type="number" min="200" max="1920" step="1" aria-label="Viewport width" title="Viewport width">',
+      '<span class="dt-device-times">×</span>',
+      '<input id="dt-device-height" class="dt-device-control dt-device-dimension" type="number" min="240" max="2400" step="1" aria-label="Viewport height" title="Viewport height">',
+      '<button id="dt-device-rotate" class="dt-device-icon" title="Rotate device" aria-label="Rotate device"><i class="fa-solid fa-rotate"></i></button>',
+      '<span class="dt-device-separator"></span>',
+      '<span class="dt-device-label">DPR</span>',
+      '<select id="dt-device-dpr" class="dt-device-control dt-device-small-select" title="Device pixel ratio">',
+      '<option value="1">1×</option><option value="2">2×</option><option value="2.625">2.625×</option><option value="3">3×</option>',
+      '</select>',
+      '<select id="dt-device-scale" class="dt-device-control dt-device-small-select" title="Viewport scale">',
+      '<option value="fit">Fit</option><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option>',
+      '</select>',
+      '<span id="dt-device-viewport-size" class="dt-device-size"></span>',
+      '<button id="dt-device-close" class="dt-device-icon dt-device-close" title="Turn off device emulation" aria-label="Turn off device emulation"><i class="fa-solid fa-xmark"></i></button>',
+      '</div>'
+    ].join('');
+    viewport.insertBefore(toolbar, viewport.firstChild);
+  }
+
+  function syncDeviceEmulationToolbar() {
+    const api = window.browserDeviceEmulation;
+    const state = api?.getState?.() || null;
+    const enabled = !!state?.enabled;
+    const toggle = getUIElement('dt-device-toggle');
+    if (toggle) {
+      toggle.classList.toggle('active-toggle', enabled);
+      toggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    }
+    const toolbar = document.getElementById('dt-device-toolbar');
+    if (toolbar) toolbar.classList.toggle('hidden', !enabled);
+    if (!state) return;
+
+    const preset = getUIElement('dt-device-preset');
+    const width = getUIElement('dt-device-width');
+    const height = getUIElement('dt-device-height');
+    const dpr = getUIElement('dt-device-dpr');
+    const scale = getUIElement('dt-device-scale');
+    const size = getUIElement('dt-device-viewport-size');
+    if (preset) {
+      const known = Array.from(preset.options || []).some(option => option.value === state.deviceId);
+      preset.value = known ? state.deviceId : 'responsive';
+    }
+    if (width) width.value = String(state.width || 390);
+    if (height) height.value = String(state.height || 844);
+    if (dpr) dpr.value = String(state.deviceScaleFactor || 1);
+    if (scale) scale.value = String(state.scaleMode || 'fit');
+    if (size) size.textContent = (state.width || 390) + ' × ' + (state.height || 844);
+  }
+
   function setupUI(){
     root = uiRoot;
     root.innerHTML = DEVTOOLS_UI_HTML;
+    createDeviceEmulationToolbar();
     var style = document.createElement('style');
-    style.textContent = DEVTOOLS_CSS;
+    style.textContent = DEVTOOLS_CSS + '\n' + [
+      '#dt-device-toolbar{position:absolute;top:0;left:0;right:0;height:38px;z-index:150;display:flex;align-items:center;justify-content:center;background:#202124;border-bottom:1px solid #3c4043;color:#e8eaed;font:12px Arial,sans-serif;box-sizing:border-box;user-select:none;}',
+      '#dt-device-toolbar.hidden{display:none;}',
+      '#dt-device-toolbar .dt-device-toolbar-content{display:flex;align-items:center;gap:6px;max-width:100%;padding:0 8px;box-sizing:border-box;overflow-x:auto;scrollbar-width:none;}',
+      '#dt-device-toolbar .dt-device-toolbar-content::-webkit-scrollbar{display:none;}',
+      '#dt-device-toolbar .dt-device-control{height:25px;min-width:0;background:#292a2d;border:1px solid #5f6368;border-radius:3px;color:#e8eaed;padding:0 6px;font-size:11px;outline:none;}',
+      '#dt-device-toolbar .dt-device-control:focus{border-color:#8ab4f8;}',
+      '#dt-device-toolbar .dt-device-preset{width:138px;}',
+      '#dt-device-toolbar .dt-device-dimension{width:64px;text-align:center;padding:0 3px;}',
+      '#dt-device-toolbar .dt-device-small-select{width:66px;}',
+      '#dt-device-toolbar .dt-device-label{font-size:10px;color:#bdc1c6;white-space:nowrap;}',
+      '#dt-device-toolbar .dt-device-times{color:#9aa0a6;font-size:13px;}',
+      '#dt-device-toolbar .dt-device-separator{height:18px;border-left:1px solid #5f6368;margin:0 3px;}',
+      '#dt-device-toolbar .dt-device-icon{width:26px;height:25px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid transparent;border-radius:3px;color:#bdc1c6;cursor:pointer;}',
+      '#dt-device-toolbar .dt-device-icon:hover{background:#3c4043;color:#fff;border-color:#5f6368;}',
+      '#dt-device-toolbar .dt-device-size{font:10px monospace;color:#9aa0a6;white-space:nowrap;padding-left:3px;}',
+      '#dt-device-toolbar .dt-device-close{margin-left:2px;}',
+      '#dt-device-toggle.active-toggle{color:#8ab4f8;background:#303134;border-radius:3px;}',
+      '#viewport-container.device-emulation-active{background:#202124!important;overflow:hidden;}',
+      '#viewport-container.device-emulation-active #loading-progress{top:38px;}',
+      '#viewport-container .tab-iframe.device-emulated{max-width:none;max-height:none;}'
+    ].join('\n');
     root.appendChild(style);
     styleElement = style;
     bindUI();
+    syncDeviceEmulationToolbar();
     DevToolsInternal.console.refreshFrameSelector();
     if (window.BrowserConsole && getUIElement('consoleOutput')) {
       browserConsole = new window.BrowserConsole(getUIElement('consoleOutput'), {
@@ -4440,6 +4584,7 @@ var DevToolsInternal = {
         DevToolsInternal.console.resetHistory();
         DevToolsInternal.console.resetFrame();
         DevToolsInternal.ui.refreshActiveViews();
+        syncDeviceEmulationToolbar();
       },
       tabClosed:function(e){
         var page=e.detail?.page || e.detail?.tab?.page;
@@ -4469,8 +4614,10 @@ var DevToolsInternal = {
         DevToolsInternal.sources.captureProcessed(record.tab);
         if(getRootPage(page)===activePage) DevToolsInternal.ui.refreshActiveViews();
       },
-      browserState:function(){ DevToolsInternal.ui.refreshActiveViews(); },
+      browserState:function(){ DevToolsInternal.ui.refreshActiveViews(); syncDeviceEmulationToolbar(); },
+      deviceEmulation:function(){ syncDeviceEmulationToolbar(); },
       keydown:function(e){
+        if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='m' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){ e.preventDefault(); window.browserDeviceEmulation?.toggle?.(); return; }
         if(e.key==='F12' || ((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='i')){ e.preventDefault(); toggle(); return; }
         if(e.key==='Escape' && DevToolsInternal.elements.isPickerActive()){ e.preventDefault(); DevToolsInternal.elements.stopPicker(); return; }
         if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='c' && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)){ e.preventDefault(); DevToolsInternal.elements.startPicker(); }
@@ -4483,6 +4630,7 @@ var DevToolsInternal = {
     window.addEventListener('browser-navigation-start',globalHandlers.navigationStart);
     window.addEventListener('browser-document-ready',globalHandlers.documentReady);
     window.addEventListener('browser-view-refresh',globalHandlers.browserState);
+    window.addEventListener('browser-device-emulation-change',globalHandlers.deviceEmulation);
     window.addEventListener('keydown',globalHandlers.keydown);
     window.addEventListener('resize',globalHandlers.resize);
   }
@@ -4495,6 +4643,7 @@ var DevToolsInternal = {
     window.removeEventListener('browser-navigation-start',globalHandlers.navigationStart);
     window.removeEventListener('browser-document-ready',globalHandlers.documentReady);
     window.removeEventListener('browser-view-refresh',globalHandlers.browserState);
+    window.removeEventListener('browser-device-emulation-change',globalHandlers.deviceEmulation);
     window.removeEventListener('keydown',globalHandlers.keydown);
     window.removeEventListener('resize',globalHandlers.resize);
     globalHandlers=null;
