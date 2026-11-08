@@ -20,7 +20,7 @@
     webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
     mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', glsl: 'text/x-hlsl',
     mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
-    pdf: 'application/pdf', zip: 'application/zip', '7z': 'application/x-7z-compressed', gz: 'application/gzip', tgz: 'application/gzip', tar: 'application/x-tar', rar: 'application/vnd.rar', wasm: 'application/wasm', webmanifest: 'application/manifest+json',
+    pdf: 'application/pdf', db: 'application/vnd.sqlite3', sqlite: 'application/vnd.sqlite3', sqlite3: 'application/vnd.sqlite3', zip: 'application/zip', '7z': 'application/x-7z-compressed', gz: 'application/gzip', tgz: 'application/gzip', tar: 'application/x-tar', rar: 'application/vnd.rar', wasm: 'application/wasm', webmanifest: 'application/manifest+json',
     gltf: 'model/gltf+json', glb: 'model/gltf-binary',
     eot: 'application/vnd.ms-fontobject', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', tff: 'font/ttf', otf: 'font/otf', ttc: 'font/collection', otc: 'font/collection', dfont: 'font/dfont'
   });
