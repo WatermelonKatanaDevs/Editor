@@ -28,6 +28,7 @@
       'jst': 'text/x-jst',
       'css': 'text/css',
       'png': 'image/png',
+      'apng': 'image/apng',
       'jpg': 'image/jpeg',
       'jpeg': 'image/jpeg',
       'gif': 'image/gif',
