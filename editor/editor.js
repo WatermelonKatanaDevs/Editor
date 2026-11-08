@@ -122,7 +122,7 @@ window.__editorInitPromise = (async function () {
       autoClearTerminal: false,
       confirmBeforeReplace: true,
       confirmBeforeDelete: true,
-      showHiddenFolders: false,
+      dimHiddenFolders: true,
       ignoreNodeModules: true,
       hideBrowserBar: true
     }
@@ -2134,7 +2134,7 @@ window.__editorInitPromise = (async function () {
     state.gitEnabled = options.gitEnabled !== false;
     getBuiltin('environment')?.load();
     state.fileManager.setFileSystem(fs);
-    state.fileManager.setShowHiddenFolders?.(state.behavior.showHiddenFolders);
+    state.fileManager.setDimHiddenFolders?.(state.behavior.dimHiddenFolders);
     state.fileManager.refresh();
     state.runConfig.detect();
     state.sidebarController?.syncSourceControlActivity?.();
