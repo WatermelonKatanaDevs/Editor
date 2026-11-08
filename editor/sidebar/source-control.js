@@ -599,8 +599,13 @@
     }
 
     async function openFileDiff(path) {
+      if (!state.fs || !selected.repo) return;
+      // Recompute the working-tree comparison every time a diff is opened.
+      // This prevents a previously-opened/cached change snapshot from being
+      // used after the file or remote branch has changed.
+      await refreshStatus();
       const snapshot = currentDiffState;
-      if (!snapshot || !state.fs || !selected.repo) return;
+      if (!snapshot) return;
       const change = snapshot.changes.find(item => item.path === path);
       if (!change) return;
       const oldEntry = (snapshot.remote.tree || []).find(entry => entry.path === path && entry.type === 'blob');
