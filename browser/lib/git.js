@@ -461,6 +461,7 @@
           const types = await Promise.all(entries.map(async entry => entry ? await entry.type() : null));
           if (!types.includes('blob')) return undefined;
           if (required.some(index => types[index] !== 'blob')) return undefined;
+          if (options.requiredAnyIndices?.length && !options.requiredAnyIndices.some(index => types[index] === 'blob')) return undefined;
           if (pathspecs.length && !pathspecs.some(path => path === '.' || filepath === path || filepath.startsWith(path + '/'))) return undefined;
           const read = async (entry, index) => {
             if (!entry || types[index] !== 'blob') return {bytes:null, mode:null};
@@ -639,6 +640,44 @@
         const commit = (await this.git.log({fs:this.fs, dir:repository.dir, ref:oid, depth:1}))[0];
         return {output:'[' + (result.branch || 'HEAD') + ' ' + oid.slice(0, 7) + '] ' + message.split('\n')[0], value:{oid, commit:commit?.commit || null}};
       }
+      if (operation === 'diff') {
+        let cached = false;
+        let reference = null;
+        const pathspecs = [];
+        for (let i = 1; i < command.length; i++) {
+          const arg = command[i];
+          if (arg === '--cached' || arg === '--staged') cached = true;
+          else if (arg === '--') {
+            pathspecs.push(...command.slice(i + 1));
+            break;
+          } else if (arg.startsWith('-')) throw new Error('git diff: unsupported option ' + arg);
+          else if (!reference && (arg === 'HEAD' || /^[0-9a-f]{7,40}$/i.test(arg))) reference = arg;
+          else pathspecs.push(arg);
+        }
+        const repository = await this._repository(cwd);
+        const resolvedPaths = pathspecs.map(path => this._repoPath(repository, cwd, path).replace(/\/+$/, '')).filter(Boolean);
+        let walkers;
+        let options;
+        if (cached) {
+          let base = reference || 'HEAD';
+          if (base === 'HEAD') {
+            try { base = await this.git.resolveRef({fs:this.fs, dir:repository.dir, ref:'HEAD'}); }
+            catch (_) { base = await this._emptyTree(repository); }
+          }
+          walkers = [this.git.TREE({ref:base}), this.git.STAGE()];
+          options = {pathspecs:resolvedPaths, stageIndices:[1], leftIndex:0, rightIndex:1};
+        } else if (reference) {
+          let base = reference;
+          if (base === 'HEAD') base = await this.git.resolveRef({fs:this.fs, dir:repository.dir, ref:'HEAD'});
+          walkers = [this.git.TREE({ref:base}), this.git.WORKDIR(), this.git.STAGE()];
+          options = {pathspecs:resolvedPaths, requiredAnyIndices:[0,2], leftIndex:0, rightIndex:1};
+        } else {
+          walkers = [this.git.STAGE(), this.git.WORKDIR()];
+          options = {pathspecs:resolvedPaths, required:[0], stageIndices:[0], leftIndex:0, rightIndex:1};
+        }
+        const output = await this._diffOutput(repository, walkers, options);
+        return {output, value:output};
+      }
       if (operation === 'log' || operation === 'show') {
         let depth = operation === 'show' ? 1 : 10;
         let oneline = false;
@@ -655,7 +694,7 @@
           else throw new Error('git ' + operation + ': too many revisions.');
         }
         const repository = await this._repository(cwd);
-        const commits = await this.git.log({fs:this.fs, dir:repository.dir, ref, depth, includeChanges:operation === 'show'});
+        const commits = await this.git.log({fs:this.fs, dir:repository.dir, ref, depth});
         if (!commits.length) return {output:'', value:[]};
         const lines = [];
         for (const entry of commits) {
@@ -667,17 +706,17 @@
             if (commit.author) lines.push('Author: ' + commit.author.name + ' <' + commit.author.email + '>');
             if (commit.author?.timestamp) lines.push('Date:   ' + new Date(commit.author.timestamp * 1000).toString());
             lines.push('', '    ' + subject);
-            if (operation === 'show' && Array.isArray(commit.changes)) {
-              lines.push('', 'Changed files:');
-              for (const change of commit.changes) lines.push('    ' + (change[0] == null ? 'D' : change[1] == null ? 'A' : 'M') + ' ' + change[2]);
-            }
           }
-          if (!oneline) lines.push('');
+          if (operation === 'show') {
+            const parent = commit.parent?.[0] || await this._emptyTree(repository);
+            const patch = await this._diffOutput(repository, [this.git.TREE({ref:parent}), this.git.TREE({ref:entry.oid})], {leftIndex:0, rightIndex:1});
+            if (patch) lines.push('', patch);
+          }
+          if (!oneline || operation === 'show') lines.push('');
         }
-        if (operation === 'show') lines.push('Note: git show currently lists commit metadata and changed paths; patch output is not implemented yet.');
         return {output:lines.join('\n').trimEnd(), value:commits};
       }
-      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, rev-parse.', value:null};
+      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, diff, rev-parse.', value:null};
       throw new Error('git: command not implemented yet: ' + operation);
     }
 
