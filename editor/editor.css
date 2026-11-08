@@ -903,3 +903,9 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .source-control-diff-line.is-added{background:rgba(55,145,82,.22)}
 .source-control-diff-line.is-changed{background:rgba(180,145,55,.2)}
 .source-control-diff-line.is-empty{background:rgba(120,120,120,.08)}
+
+/* Monaco-backed Source Control panes retain language tokenization. */
+.source-control-diff-monaco{position:relative;flex:1;min-height:0;min-width:0;width:100%;height:100%;overflow:hidden}
+.source-control-diff-monaco>.monaco-editor{position:absolute;inset:0}
+.source-control-monaco-removed{background:rgba(190,65,72,.20)}
+.source-control-monaco-added{background:rgba(55,145,82,.20)}
