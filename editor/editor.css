@@ -65,6 +65,7 @@ body { margin:0; font-family:sans-serif; background:var(--editor-bg); color:var(
     #tree li.selected-file:hover:not(:has(li:hover)) { background:#0e639c; }
     #tree li:hover:not(:has(li:hover)), li.draghover { background:var(--editor-border); }
     #tree svg { display: inline-block; height: 1em; padding-right: 2px; }
+    #tree img { display: inline-block; width: 1em; height: 1em; object-fit: contain; vertical-align: -2px; padding-right: 2px; box-sizing: content-box; }
     #treebuttons { padding-left: 10px; }
     #treebuttons button { display: inline-block; background: none; border: none; border-radius: 2px; position: relative; }
     #treebuttons button:hover { background: var(--editor-surface); }
