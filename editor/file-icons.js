@@ -47,7 +47,7 @@
       'obj': 'model/obj',
       'fbx': 'model/x-fbx',
       'glb': 'model/gltf-binary',
-      'stl': 'model/stl', 'dae': 'model/vnd.collada+xml', 'wrl': 'model/vrml', 'vrml': 'model/vrml', '3mf': 'model/3mf', 'usdz': 'model/vnd.usdz+zip',
+      'stl': 'model/stl', 'ply': 'application/octet-stream', 'dae': 'model/vnd.collada+xml', '3ds': 'application/octet-stream', '3mf': 'model/3mf', 'amf': 'application/x-amf', 'wrl': 'model/vrml', 'vrml': 'model/vrml', 'usd': 'model/vnd.usd', 'usda': 'model/vnd.usd', 'usdc': 'model/vnd.usd', 'usdz': 'model/vnd.usdz+zip', 'vtk': 'application/octet-stream', 'pcd': 'application/octet-stream', 'xyz': 'text/plain', 'gcode': 'text/plain', 'md2': 'application/octet-stream', 'bvh': 'text/plain',
       'gltf': 'model/gltf+json',
       'wasm': 'application/wasm',
       'mtl': 'text/plain',
