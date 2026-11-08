@@ -1,12 +1,12 @@
 (function () {
-  const THREE_VERSION = '0.180.0';
+  const THREE_VERSION = '0.186.0';
   const CDN = 'https://cdn.jsdelivr.net/npm/three@' + THREE_VERSION;
-  const EXTENSIONS = /\.(?:gltf|glb|fbx|obj|stl|ply|dae|3ds|3mf|amf|wrl|vrml|usdz|vtk|pcd|xyz|gcode|md2|bvh)$/i;
+  const EXTENSIONS = /\.(?:gltf|glb|fbx|obj|stl|ply|dae|3ds|3mf|amf|wrl|vrml|usd|usda|usdc|usdz|vtk|pcd|xyz|gcode|md2|bvh)$/i;
   const MIME = {
     gltf:'model/gltf+json',glb:'model/gltf-binary',fbx:'application/octet-stream',obj:'text/plain',
     mtl:'text/plain',stl:'model/stl',ply:'application/octet-stream',dae:'model/vnd.collada+xml',
     '3ds':'application/octet-stream','3mf':'model/3mf',amf:'application/x-amf',wrl:'model/vrml',
-    vrml:'model/vrml',usdz:'model/vnd.usdz+zip',vtk:'application/octet-stream',pcd:'application/octet-stream',
+    vrml:'model/vrml',usd:'model/vnd.usd',usda:'model/vnd.usd',usdc:'model/vnd.usd',usdz:'model/vnd.usdz+zip',vtk:'application/octet-stream',pcd:'application/octet-stream',
     xyz:'text/plain',gcode:'text/plain',md2:'application/octet-stream',bvh:'text/plain'
   };
   const element = (tag, cls, value) => {
@@ -51,7 +51,7 @@
     if (!modulesPromise) modulesPromise = (async()=>{
       installImportMap();
       const THREE = await import(CDN+'/build/three.module.js');
-      const [controls,gltf,obj,mtl,fbx,stl,ply,collada,tds,threeMF,amf,vrml,usdz,vtk,pcd,xyz,gcode,md2,bvh] = await Promise.all([
+      const [controls,gltf,obj,mtl,fbx,stl,ply,collada,tds,threeMF,amf,vrml,usd,vtk,pcd,xyz,gcode,md2,bvh] = await Promise.all([
         import(CDN+'/examples/jsm/controls/OrbitControls.js'),
         import(CDN+'/examples/jsm/loaders/GLTFLoader.js'),
         import(CDN+'/examples/jsm/loaders/OBJLoader.js'),
@@ -64,7 +64,7 @@
         import(CDN+'/examples/jsm/loaders/3MFLoader.js'),
         import(CDN+'/examples/jsm/loaders/AMFLoader.js'),
         import(CDN+'/examples/jsm/loaders/VRMLLoader.js'),
-        import(CDN+'/examples/jsm/loaders/USDZLoader.js'),
+        import(CDN+'/examples/jsm/loaders/USDLoader.js'),
         import(CDN+'/examples/jsm/loaders/VTKLoader.js'),
         import(CDN+'/examples/jsm/loaders/PCDLoader.js'),
         import(CDN+'/examples/jsm/loaders/XYZLoader.js'),
@@ -72,7 +72,7 @@
         import(CDN+'/examples/jsm/loaders/MD2Loader.js'),
         import(CDN+'/examples/jsm/loaders/BVHLoader.js')
       ]);
-      return {THREE,OrbitControls:controls.OrbitControls,GLTFLoader:gltf.GLTFLoader,OBJLoader:obj.OBJLoader,MTLLoader:mtl.MTLLoader,FBXLoader:fbx.FBXLoader,STLLoader:stl.STLLoader,PLYLoader:ply.PLYLoader,ColladaLoader:collada.ColladaLoader,TDSLoader:tds.TDSLoader,ThreeMFLoader:threeMF.ThreeMFLoader,AMFLoader:amf.AMFLoader,VRMLLoader:vrml.VRMLLoader,USDZLoader:usdz.USDZLoader,VTKLoader:vtk.VTKLoader,PCDLoader:pcd.PCDLoader,XYZLoader:xyz.XYZLoader,GCodeLoader:gcode.GCodeLoader,MD2Loader:md2.MD2Loader,BVHLoader:bvh.BVHLoader};
+      return {THREE,OrbitControls:controls.OrbitControls,GLTFLoader:gltf.GLTFLoader,OBJLoader:obj.OBJLoader,MTLLoader:mtl.MTLLoader,FBXLoader:fbx.FBXLoader,STLLoader:stl.STLLoader,PLYLoader:ply.PLYLoader,ColladaLoader:collada.ColladaLoader,TDSLoader:tds.TDSLoader,ThreeMFLoader:threeMF.ThreeMFLoader,AMFLoader:amf.AMFLoader,VRMLLoader:vrml.VRMLLoader,USDLoader:usd.USDLoader,VTKLoader:vtk.VTKLoader,PCDLoader:pcd.PCDLoader,XYZLoader:xyz.XYZLoader,GCodeLoader:gcode.GCodeLoader,MD2Loader:md2.MD2Loader,BVHLoader:bvh.BVHLoader};
     })();
     return modulesPromise;
   }
@@ -273,13 +273,13 @@
       else if(ext==='3mf'){object=new THREE.ThreeMFLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));}
       else if(ext==='amf'){object=new THREE.AMFLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));}
       else if(ext==='wrl'||ext==='vrml'){object=new THREE.VRMLLoader(manager).parse(text());}
-      else if(ext==='usdz'){object=await new THREE.USDZLoader(manager).parseAsync(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));}
+      else if(['usd','usda','usdc','usdz'].includes(ext)){object=new THREE.USDLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),'');}
       else if(ext==='vtk'){const geometry=new THREE.VTKLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));geometry.computeVertexNormals();object=addPrimitiveGeometry(geometry,'VTK model');}
       else if(ext==='pcd'){object=new THREE.PCDLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),'');}
       else if(ext==='xyz'){const geometry=new THREE.XYZLoader(manager).parse(text());object=addPrimitiveGeometry(geometry,'Point cloud');}
       else if(ext==='gcode'){object=new THREE.GCodeLoader(manager).parse(text());}
       else if(ext==='md2'){const geometry=new THREE.MD2Loader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));object=addPrimitiveGeometry(geometry,'MD2 model',new THREE.MeshStandardMaterial({color:0xb9c7d8,morphTargets:true}));}
-      else if(ext==='bvh'){const result=new THREE.BVHLoader().parse(text());object=new THREE.SkeletonHelper(result.skeleton.bones[0]);animations=result.clip?[result.clip]:[];}
+      else if(ext==='bvh'){const result=new THREE.BVHLoader().parse(text());object=result.skeleton.bones[0];animations=result.clip?[result.clip]:[];}
       if(!object)throw new Error('No loader is available for .' + ext + ' files.');
       return {object,animations};
     }
@@ -292,7 +292,7 @@
         modelRoot=result.object;modelInfo=result;scene.add(modelRoot);
         if(result.animations?.length){mixer=new THREE.AnimationMixer(modelRoot);}
         if(modelRoot.traverse)modelRoot.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;if(o.material){for(const m of Array.isArray(o.material)?o.material:[o.material])if(m){m.side=THREE.DoubleSide;m.needsUpdate=true;}}}});
-        if(showAxes&&modelRoot){skeletonHelper=new THREE.SkeletonHelper(modelRoot);skeletonHelper.visible=false;scene.add(skeletonHelper);}
+        if(modelRoot&&(showAxes||modelRoot.isBone)){skeletonHelper=new THREE.SkeletonHelper(modelRoot);skeletonHelper.visible=showAxes||!!modelRoot.isBone;scene.add(skeletonHelper);}
         fitObject(modelRoot);renderInspector(modelRoot,result.animations||[]);
         const s=statsFor(modelRoot);status(name+' · '+s.meshes+' meshes · '+s.vertices.toLocaleString()+' vertices · '+(result.animations?.length||0)+' animations');
         overlay.style.display='none';
@@ -397,8 +397,10 @@
         if(main)await loadModel(main,modelFiles.get(main).data);
         else status('Added '+paths.length+' workspace resource(s). Reload the model to apply new textures.');
       };
-      ui.canvasHost.addEventListener('dragover',e=>{if(e.dataTransfer?.types?.includes('application/x-file-manager-paths')||e.dataTransfer?.files?.length)e.preventDefault();});
-      ui.canvasHost.addEventListener('drop',e=>handleWorkspaceDrop(e).catch(err=>status(err.message)));
+      ui.canvasHost.addEventListener('dragenter',e=>{if(e.dataTransfer?.files?.length||e.dataTransfer?.types?.includes('application/x-file-manager-paths'))ui.drop.style.display='flex';});
+      ui.canvasHost.addEventListener('dragleave',e=>{if(!ui.canvasHost.contains(e.relatedTarget))ui.drop.style.display='none';});
+      ui.canvasHost.addEventListener('dragover',e=>{if(e.dataTransfer?.types?.includes('application/x-file-manager-paths')||e.dataTransfer?.files?.length){e.preventDefault();ui.drop.style.display='flex';}});
+      ui.canvasHost.addEventListener('drop',e=>{ui.drop.style.display='none';if(e.dataTransfer?.files?.length){e.preventDefault();addFiles(e.dataTransfer.files).catch(err=>status(err.message));}else handleWorkspaceDrop(e).catch(err=>status(err.message));});
       ui.drop.style.display='none';overlay.style.display='none';
       status('Ready · drag a texture or model into the viewer to add it');
     }catch(error){
