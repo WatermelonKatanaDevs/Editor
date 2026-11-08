@@ -5,7 +5,6 @@
 const DEFAULT_FAVICON = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239aa0a6' stroke-width='2'><circle cx='12' cy='12' r='10'/><line x1='2' y1='12' x2='22' y2='12'/><path d='M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'/></svg>";
 
 // Desktop and mobile identities used by the browser's device emulation mode.
-const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const ANDROID_MOBILE_USER_AGENT = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
 const IOS_MOBILE_USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 const IPAD_MOBILE_USER_AGENT = 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
@@ -2170,7 +2169,8 @@ function applyMobileEmulationDocument(html, emulation) {
       'var landscape=Number(config.width)>=Number(config.height);if(scr.orientation){defineValue(scr.orientation,"angle",landscape?90:0);defineValue(scr.orientation,"type",landscape?"landscape-primary":"portrait-primary");}' +
       'defineValue(window,"orientation",landscape?90:0);try{if(!("ontouchstart" in window))Object.defineProperty(window,"ontouchstart",{configurable:true,value:null});}catch(e){}' +
       'if(ios){try{Object.defineProperty(nav,"userAgentData",{configurable:true,value:undefined});}catch(e){}}else{' +
-        'var uaData={brands:[{brand:"Chromium",version:"120"},{brand:"Google Chrome",version:"120"}],mobile:true,platform:"Android",getHighEntropyValues:async function(){return {architecture:"",bitness:"",model:config.deviceId==="pixel-7"?"Pixel 7":"",platform:"Android",platformVersion:"14.0.0",uaFullVersion:"120.0.0.0",fullVersionList:this.brands,mobile:true};}};' +
+        'var androidPlatformVersion=/Android 10/i.test(config.userAgent||"")?"10.0.0":"14.0.0";' +
+        'var uaData={brands:[{brand:"Chromium",version:"120"},{brand:"Google Chrome",version:"120"}],mobile:true,platform:"Android",getHighEntropyValues:async function(){return {architecture:"",bitness:"",model:config.deviceId==="pixel-7"?"Pixel 7":"",platform:"Android",platformVersion:androidPlatformVersion,uaFullVersion:"120.0.0.0",fullVersionList:this.brands,mobile:true};}};' +
         'defineValue(nav,"userAgentData",uaData);' +
       '}' +
     '}' +
@@ -2201,12 +2201,10 @@ async function renderTabContent(tab, url) {
 
   const mobileEmulation = tab.deviceEmulation?.enabled ? tab.deviceEmulation : null;
   const requestHeaders = {
-    // User-Agent is a forbidden Fetch header in browsers, so setting it here
-    // is not a reliable way to change what an upstream server receives. Carry
-    // the requested identity in an ordinary header for the proxy to forward;
-    // the WatermelonKatana Express middleware consumes it before device.capture.
+    // User-Agent is controlled by the browser shell and cannot be reliably
+    // overridden from page Fetch. The proxy Worker consumes this ordinary
+    // header and rewrites User-Agent on the outbound request to the target.
     ...(mobileEmulation ? { 'X-WK-Emulated-User-Agent': getDeviceEmulationUserAgent(mobileEmulation) } : {}),
-    'User-Agent': mobileEmulation ? getDeviceEmulationUserAgent(mobileEmulation) : DESKTOP_BROWSER_USER_AGENT,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
     'Referer': origin || 'https://google.com'
