@@ -44,7 +44,10 @@
           ignoreTrimWhitespace:false,
           diffCodeLens:false,
           renderOverviewRuler:true,
-          scrollbar:{vertical:'auto',horizontal:'auto',alwaysConsumeMouseWheel:false},
+          // The bundled Monaco scrollbar can throw in delegateVerticalScrollbarPointerDown
+          // when the diff editor's scrollbar is mounted in a changing workbench tab.
+          // Keep wheel/trackpad scrolling, but avoid the broken draggable scrollbar path.
+          scrollbar:{vertical:'hidden',horizontal:'auto',alwaysConsumeMouseWheel:false},
           hideUnchangedRegions:{enabled:true,contextLineCount:3,minimumLineCount:5}
         });
         diffEditor.setModel({original:originalModel,modified:modifiedModel});
