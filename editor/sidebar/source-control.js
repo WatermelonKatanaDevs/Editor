@@ -249,7 +249,7 @@
             : '<div class="source-control-local-hint">Local Git requires a folder opened directly from your computer. Open a folder to keep commits in its <code>.git</code> directory.</div>') +
         '</section>' +
         (hasRepository ? '<section class="source-control-section"><div class="source-control-section-title">Tags</div><div class="source-control-local-tags" data-local-tags><span class="source-control-local-hint">Loading tags…</span></div><button type="button" data-local-tag-create' + (!localGitRepository.head ? ' disabled' : '') + '>Create Tag</button></section>' : '') +
-        (hasRepository && connectedRemote ? '<section class="source-control-section"><button type="button" class="source-control-local-fetch" data-local-fetch title="Download the remote commit and file objects without changing workspace files">Fetch</button></section>' : '') +
+        (hasRepository && connectedRemote ? '<section class="source-control-section"><div class="source-control-local-remote-actions"><button type="button" class="source-control-local-fetch" data-local-fetch title="Download remote commits and objects without changing workspace files">Fetch</button><button type="button" class="source-control-local-pull" data-local-pull' + (localGitStatus?.clean ? '' : ' disabled') + ' title="Fetch and fast-forward the current branch; refuses divergent histories and local changes">Pull (FF only)</button></div></section>' : '') +
         (!connectedRemote && hasRepository && github?.isSignedIn?.() ? '<section class="source-control-section"><button type="button" class="source-control-create-repo" data-local-publish>Publish to GitHub</button></section>' : '') +
         (hasRepository
           ? '<section class="source-control-section"><div class="source-control-section-title">Changes</div>' +
@@ -275,6 +275,10 @@
       tree.querySelector('[data-local-fetch]')?.addEventListener('click', () => {
         const remoteBranch = String(state.gitRemote?.branch || localGitRepository?.branch || 'main');
         void runLocalGitAction(['fetch', 'origin', remoteBranch], 'Fetched origin/' + remoteBranch + '.');
+      });
+      tree.querySelector('[data-local-pull]')?.addEventListener('click', () => {
+        const remoteBranch = String(state.gitRemote?.branch || localGitRepository?.branch || 'main');
+        void runLocalGitAction(['pull', '--ff-only', 'origin', remoteBranch], 'Pulled origin/' + remoteBranch + '.');
       });
       tree.querySelector('[data-local-tag-create]')?.addEventListener('click', () => {
         const name = window.prompt('Tag name (for example, v1.0.0)');
@@ -359,7 +363,8 @@
         const result = await getLocalGit().runSerialized(args, {cwd:'/'});
         state.markDirty?.('.git');
         await refreshLocalStatus();
-        showStatus(args[0] === 'fetch' && result?.output ? result.output : message);
+        if (args[0] === 'pull') await loadLocalHistory();
+        showStatus((args[0] === 'fetch' || args[0] === 'pull') && result?.output ? result.output : message);
       } catch (error) {
         showStatus(error.message || String(error), true);
       }
