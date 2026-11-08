@@ -38,6 +38,15 @@
       'glsl': 'text/x-hlsl',
       'fx': 'text/x-hlsl',
       'wgsl': 'text/wgsl',
+      'eot': 'application/vnd.ms-fontobject',
+      'woff': 'font/woff',
+      'woff2': 'font/woff2',
+      'ttf': 'font/ttf',
+      'tff': 'font/ttf',
+      'otf': 'font/otf',
+      'ttc': 'font/collection',
+      'otc': 'font/collection',
+      'dfont': 'font/dfont',
       'py': 'text/x-python',
       'c': 'text/x-c',
       'cpp': 'text/x-c'
@@ -49,6 +58,9 @@
     if (name == "package.json" || name == "package-lock.json") return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><title>file_type_npm</title><path d="M2,10.555H30v9.335H16v1.556H9.778V19.889H2Zm1.556,7.779H6.667V13.666H8.222v4.667H9.778V12.111H3.556Zm7.778-6.223v7.779h3.111V18.334h3.111V12.111Zm3.111,1.556H16v3.112H14.444Zm4.667-1.556v6.223h3.111V13.666h1.556v4.667h1.556V13.666h1.556v4.667h1.556V12.111Z" style="fill:#cb3837"/></svg>';
     if (name == "LICENSE" || name == "LICENSE.txt") return '<?xml version="1.0" encoding="utf-8"?><svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 122.88 102.72" style="enable-background:new 0 0 122.88 102.72" xml:space="preserve"><style type="text/css">.lic-st0{fill-rule:evenodd;clip-rule:evenodd;fill:#f5de19;}</style><g><path class="lic-st0" d="M65.61,20.91v72.74h35.63c0.38,0,0.68,0.31,0.68,0.69v7.7c0,0.38-0.31,0.69-0.68,0.69H22.84 c-0.38,0-0.69-0.31-0.69-0.69v-7.7c0-0.38,0.31-0.69,0.69-0.69h35.63l0-72.71c-3.1-1.08-5.56-3.53-6.64-6.63H29.3v3.43 c0,0.38-0.31,0.68-0.68,0.68h-5.78c-0.38,0-0.69-0.31-0.69-0.68v-3.43h-5.73c-0.44,0-0.8-0.31-0.8-0.68V7.84 c0-0.38,0.36-0.69,0.8-0.69h35.43C53.33,2.99,57.31,0,61.99,0c4.68,0,8.66,2.99,10.14,7.16h35.53c0.44,0,0.8,0.31,0.8,0.69v5.78 c0,0.38-0.36,0.68-0.8,0.68h-6.46v3.43c0,0.38-0.31,0.68-0.68,0.68h-5.78c-0.38,0-0.69-0.31-0.69-0.68v-3.43H72.16 C71.09,17.38,68.67,19.81,65.61,20.91L65.61,20.91z M99.66,22.3l22.91,40.48c0.2,0.35,0.29,0.73,0.28,1.1h0.02c0,0.05,0,0.1,0,0.15 c0,9.64-11.35,17.46-25.35,17.46c-13.85,0-25.1-7.65-25.34-17.15c-0.04-0.16-0.06-0.34-0.06-0.51c0-0.44,0.14-0.86,0.37-1.2 l23.43-40.43c0.59-1.02,1.89-1.37,2.91-0.78C99.2,21.65,99.48,21.95,99.66,22.3L99.66,22.3z M99.75,31.11v30.6h17.32L99.75,31.11 L99.75,31.11z M95.67,61.7V31.16L77.96,61.7H95.67L95.67,61.7z M27.54,22.3l22.91,40.48c0.2,0.35,0.29,0.73,0.28,1.1h0.02 c0,0.05,0,0.1,0,0.15c0,9.64-11.35,17.46-25.35,17.46c-13.85,0-25.1-7.65-25.34-17.15C0.02,64.19,0,64.02,0,63.84 c0-0.44,0.14-0.86,0.37-1.2L23.8,22.21c0.59-1.02,1.89-1.37,2.91-0.78C27.08,21.65,27.36,21.95,27.54,22.3L27.54,22.3z M27.63,31.11v30.6h17.32L27.63,31.11L27.63,31.11z M23.54,61.7V31.16L5.84,61.7H23.54L23.54,61.7z M61.99,6.07 c2.59,0,4.69,2.1,4.69,4.69c0,2.59-2.1,4.69-4.69,4.69c-2.59,0-4.69-2.1-4.69-4.69C57.3,8.17,59.4,6.07,61.99,6.07L61.99,6.07z"/></g></svg>';
     var ext = name.split('.').pop()?.toLowerCase();
+    if (['eot', 'woff', 'woff2', 'ttf', 'tff', 'otf', 'ttc', 'otc', 'dfont'].includes(ext)) {
+      return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M6 2.5h14l6 6V29H6a2 2 0 0 1-2-2V4.5a2 2 0 0 1 2-2Z" fill="#f4eeee" stroke="#d4b8b8" stroke-width="1.2"/><path d="M20 2.8v6h5.8" fill="none" stroke="#d4b8b8" stroke-width="1.2"/><text x="16" y="24" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="22" font-weight="bold" fill="#df3038">T</text></svg>';
+    }
     if (ext === 'webmanifest') {
       return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M7 3.5h18A2.5 2.5 0 0 1 27.5 6v20a2.5 2.5 0 0 1-2.5 2.5H7A2.5 2.5 0 0 1 4.5 26V6A2.5 2.5 0 0 1 7 3.5Z" fill="#263d59" stroke="#79b9ef" stroke-width="1.5"/><path d="M10 9h12M10 13h7" stroke="#d7ecff" stroke-width="1.5" stroke-linecap="round"/><path d="M16 18.1c-1.5 0-2.7 1.2-2.7 2.7v3h5.4v-3c0-1.5-1.2-2.7-2.7-2.7Z" fill="#4ea2e8"/><path d="M16 16.8v-2.2m-2-1.5 2 1.5 2-1.5" fill="none" stroke="#80c5ff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     }
