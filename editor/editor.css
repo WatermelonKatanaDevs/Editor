@@ -558,3 +558,32 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 
 .editor-audio-cover-frame{cursor:pointer}
 .editor-audio-cover-frame:focus-visible{outline:2px solid var(--editor-accent);outline-offset:3px}
+
+ 
+/* Font file specimen preview */
+.editor-font-preview{box-sizing:border-box;display:flex;flex-direction:column;gap:18px;width:100%;height:100%;min-height:0;overflow:auto;padding:clamp(16px,3vw,28px);background:var(--editor-surface-2);color:var(--editor-text-secondary);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.editor-font-header{display:flex;align-items:center;justify-content:space-between;gap:14px;padding-bottom:12px;border-bottom:1px solid var(--editor-divider)}
+.editor-font-heading{min-width:0}
+.editor-font-heading h2{margin:0 0 4px;color:var(--editor-text);font-size:18px;font-weight:650}
+.editor-font-heading p{margin:0;color:var(--editor-muted-2);font-size:12px;overflow-wrap:anywhere}
+.editor-font-format{flex:0 0 auto;padding:5px 8px;border:1px solid #bd5757;border-radius:4px;background:#5b2528;color:#ffd8d8;font-size:10px;font-weight:700;letter-spacing:.08em}
+.editor-font-controls{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.editor-font-size-label,.editor-font-custom-label{display:flex;align-items:center;gap:9px;color:var(--editor-muted);font-size:11px}
+.editor-font-size{width:130px;accent-color:#df3038}
+.editor-font-size-value{min-width:44px;color:var(--editor-muted-2);font-size:11px;font-variant-numeric:tabular-nums}
+.editor-font-custom-label{flex:1 1 260px}
+.editor-font-custom-input{box-sizing:border-box;flex:1;min-width:120px;height:32px;padding:6px 9px;border:1px solid var(--editor-border);border-radius:4px;background:var(--editor-surface);color:var(--editor-text);font:inherit;font-size:12px;outline:none}
+.editor-font-custom-input:focus{border-color:#d84b52;box-shadow:0 0 0 1px #d84b52}
+.editor-font-specimen{display:flex;flex-direction:column;gap:12px;min-width:0}
+.editor-font-hero,.editor-font-sample-card,.editor-font-custom-card{box-sizing:border-box;min-width:0;padding:clamp(15px,2.5vw,24px);border:1px solid var(--editor-divider);border-radius:7px;background:var(--editor-surface)}
+.editor-font-hero{display:flex;flex-direction:column;gap:9px;overflow:hidden}
+.editor-font-hero-letters{color:var(--editor-text);font-size:64px;line-height:1.06;overflow-wrap:anywhere}
+.editor-font-hero-text{color:var(--editor-text-secondary);font-size:23px;line-height:1.35;overflow-wrap:anywhere}
+.editor-font-sample-card{display:grid;grid-template-columns:110px minmax(0,1fr);align-items:center;gap:9px 15px}
+.editor-font-sample-caption{color:var(--editor-muted-2);font-family:Inter,system-ui,sans-serif;font-size:9px;font-weight:750;letter-spacing:.13em}
+.editor-font-sample-text{min-width:0;color:var(--editor-text);font-size:clamp(18px,2.4vw,28px);line-height:1.45;overflow-wrap:anywhere}
+.editor-font-custom-card{display:flex;flex-direction:column;gap:12px}
+.editor-font-custom-sample{min-height:46px;color:var(--editor-text);font-size:clamp(20px,2.7vw,32px);line-height:1.4;overflow-wrap:anywhere}
+.editor-font-status{padding:9px 11px;border:1px solid #477d59;border-radius:4px;background:#1b3827;color:#b9e3c4;font-size:11px;line-height:1.5}
+.editor-font-status.is-error{border-color:#855052;background:#402629;color:#f2c7c8}
+@media(max-width:620px){.editor-font-controls{align-items:stretch;flex-direction:column;gap:10px}.editor-font-sample-card{grid-template-columns:minmax(0,1fr)}}
