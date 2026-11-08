@@ -299,6 +299,13 @@
         localGitStatus = status;
         localGitPushStatus = await service.pushStatus('/');
         if (token !== statusToken) return;
+        if (!state.gitRemote?.provider && localGitPushStatus.remoteUrl) {
+          try {
+            const remote = service._parseGitHubRemote(localGitPushStatus.remoteUrl);
+            state.gitRemote = {provider:'github', owner:remote.owner, repo:remote.repo, branch:localGitPushStatus.branch || 'main', revision:localGitPushStatus.lastPush || ''};
+            state.saveProjectMetadata?.();
+          } catch (_) {}
+        }
         localGitRepository = await service.detect('/');
         if (token !== statusToken) return;
         renderLocalShell();
