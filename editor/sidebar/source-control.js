@@ -9,6 +9,7 @@
       wrap.className = 'source-control-diff-tab';
       wrap.innerHTML = '<div class="source-control-diff-tab-head"><strong></strong><span>Read only</span></div><div class="source-control-diff-tab-editor"></div>';
       wrap.querySelector('strong').textContent = data.path || 'File diff';
+      const status = wrap.querySelector('.source-control-diff-tab-head span');
       const host = wrap.querySelector('.source-control-diff-tab-editor');
       g.viewBody.appendChild(wrap);
 
@@ -33,8 +34,46 @@
         return new Uint8Array(value || []);
       };
       const decode = value => new TextDecoder('utf-8', {fatal:false}).decode(toBytes(value));
+      const lineDiff = (before, after) => {
+        const a = before.split('\n'), b = after.split('\n');
+        const n = a.length, m = b.length;
+        let prefix = 0;
+        while (prefix < n && prefix < m && a[prefix] === b[prefix]) prefix++;
+        let suffix = 0;
+        while (suffix < n-prefix && suffix < m-prefix && a[n-1-suffix] === b[m-1-suffix]) suffix++;
+        const an = n-prefix-suffix, bm = m-prefix-suffix;
+        const ops = [];
+        for (let i=0;i<prefix;i++) ops.push({type:'equal',line:i});
+        if (an * bm <= 4000000) {
+          const width = bm + 1;
+          const table = new Uint32Array((an + 1) * width);
+          for (let i=an-1;i>=0;i--) {
+            for (let j=bm-1;j>=0;j--) {
+              table[i*width+j] = a[prefix+i] === b[prefix+j]
+                ? table[(i+1)*width+j+1] + 1
+                : Math.max(table[(i+1)*width+j], table[i*width+j+1]);
+            }
+          }
+          let i=0,j=0;
+          while (i<an || j<bm) {
+            if (i<an && j<bm && a[prefix+i] === b[prefix+j]) {
+              ops.push({type:'equal',line:prefix+j}); i++; j++;
+            } else if (j<bm && (i===an || table[i*width+j+1] >= table[(i+1)*width+j])) {
+              ops.push({type:'add',line:prefix+j}); j++;
+            } else {
+              ops.push({type:'remove',text:a[prefix+i]}); i++;
+            }
+          }
+        } else {
+          for (let i=0;i<an;i++) ops.push({type:'remove',text:a[prefix+i]});
+          for (let j=0;j<bm;j++) ops.push({type:'add',line:prefix+j});
+        }
+        for (let i=suffix;i>0;i--) ops.push({type:'equal',line:m-i});
+        return ops;
+      };
       try {
         let bytes = data.newBytes || new Uint8Array();
+        let oldText = '';
         if (data.type === 'deleted') {
           if (!data.oldSha) throw new Error('The previous GitHub version could not be matched to this file.');
           bytes = await window.GitHubService.readBlob(data.owner, data.repo, data.oldSha);
@@ -42,10 +81,14 @@
           const liveBytes = ctx.state.fs.readFileSync(data.fsPath || data.path, 'binary');
           if (liveBytes != null) bytes = liveBytes;
         }
+        if (data.type === 'modified' && data.oldSha) {
+          const previousBytes = await window.GitHubService.readBlob(data.owner, data.repo, data.oldSha);
+          oldText = decode(previousBytes).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        }
         if (disposed || !host.isConnected) return wrap;
 
-        const content = decode(bytes).replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n');
-        if (content.includes('\\0')) throw new Error('This file appears to be binary and cannot be shown as text.');
+        const content = decode(bytes).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        if (content.includes('\0') || oldText.includes('\0')) throw new Error('This file appears to be binary and cannot be shown as text.');
         const monaco = await ctx.state.ensureMonaco();
         if (disposed || !host.isConnected) return wrap;
         const language = window.EditorMonacoLanguage?.(data.path) || 'plaintext';
@@ -67,6 +110,56 @@
           contextmenu:false,
           scrollbar:{vertical:'auto',horizontal:'auto',alwaysConsumeMouseWheel:false}
         });
+
+        const ops = data.type === 'added'
+          ? content.split('\n').map((_, line) => ({type:'add',line}))
+          : data.type === 'deleted'
+            ? content.split('\n').map(text => ({type:'remove',text}))
+            : data.type === 'modified'
+              ? lineDiff(oldText, content)
+              : [];
+        const addedLines = ops.filter(op => op.type === 'add').map(op => op.line + 1);
+        const removed = [];
+        let currentLine = 0;
+        for (let i=0;i<ops.length;) {
+          if (ops[i].type !== 'remove') {
+            if (ops[i].type === 'equal' || ops[i].type === 'add') currentLine++;
+            i++;
+            continue;
+          }
+          const lines = [];
+          while (i<ops.length && ops[i].type === 'remove') lines.push(ops[i++].text);
+          removed.push({afterLineNumber:currentLine,lines});
+        }
+        const decorations = addedLines.map(line => ({
+          range:new monaco.Range(line,1,line,1),
+          options:{isWholeLine:true,className:'source-control-monaco-added',linesDecorationsClassName:'source-control-monaco-added-gutter'}
+        }));
+        editor.deltaDecorations([], decorations);
+        if (removed.length) {
+          editor.changeViewZones(accessor => {
+            for (const block of removed) {
+              const node = document.createElement('div');
+              node.className = 'source-control-monaco-removed-zone';
+              for (const text of block.lines) {
+                const row = document.createElement('div');
+                row.className = 'source-control-monaco-removed-line';
+                row.textContent = text || ' ';
+                node.appendChild(row);
+              }
+              accessor.addZone({
+                afterLineNumber:block.afterLineNumber,
+                heightInLines:block.lines.length,
+                domNode:node,
+                suppressMouseDown:true
+              });
+            }
+          });
+        }
+        const addedCount = ops.filter(op => op.type === 'add').length;
+        const removedCount = ops.filter(op => op.type === 'remove').length;
+        status.textContent = addedCount + ' added · ' + removedCount + ' removed · Read only';
+
         const layout = () => {
           if (disposed || !host.isConnected || !editor) return;
           const rect = host.getBoundingClientRect();
