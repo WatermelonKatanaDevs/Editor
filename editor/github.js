@@ -607,7 +607,7 @@
     // path. For submodules pathPrefix is stripped for Git comparisons, but
     // filesystem reads must still use the prefixed workspace path.
     const localPaths = fs.listFilesSync()
-      .map(rawPath => String(rawPath).replace(/^\\/+/, ''))
+      .map(rawPath => String(rawPath).replace(/^\/+/, ''))
       .filter(fsPath => fsPath && (!prefix || fsPath.startsWith(prefix + '/')))
       .map(fsPath => ({fsPath, path:prefix ? fsPath.slice(prefix.length + 1) : fsPath}))
       .filter(item => item.path && !ignoredPath(item.path) && !inExcludedPath(item.path) && !(ignoreNodeModules && isNodeModulesPath(item.path)));
