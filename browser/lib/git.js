@@ -649,7 +649,7 @@
           if (!identity || !identity.date || !identity.name || !identity.email) throw new Error('GitHub did not provide complete ' + label + ' identity metadata; refusing to create an inexact commit.');
           const timestamp = Date.parse(identity.date);
           if (!Number.isFinite(timestamp)) throw new Error('GitHub returned an invalid ' + label + ' timestamp.');
-          const zone = String(identity.date).match(/([+-])(\\d{2}):?(\\d{2})$/);
+          const zone = String(identity.date).match(/([+-])(\d{2}):?(\d{2})$/);
           const offsetMinutes = zone ? (Number(zone[2]) * 60 + Number(zone[3])) * (zone[1] === '+' ? -1 : 1) : 0;
           return {name:String(identity.name), email:String(identity.email), timestamp:Math.floor(timestamp / 1000), timezoneOffset:offsetMinutes};
         };
@@ -664,17 +664,17 @@
         if (commitData.verification?.signature) commitObject.gpgsig = String(commitData.verification.signature);
         const writtenCommit = await this.git.writeCommit({fs:this.fs, dir:repository.dir, commit:commitObject});
         if (writtenCommit !== sha) throw new Error('The remote commit could not be reconstructed byte-for-byte (expected ' + sha.slice(0, 7) + ', got ' + writtenCommit.slice(0, 7) + '). Its signature or metadata format may not be supported yet, so the remote ref was not changed.');
-        const shallowPath = repository.root.replace(/\\/+$/, '') + '/.git/shallow';
+        const shallowPath = repository.root.replace(/\/+$/, '') + '/.git/shallow';
         let shallowText = '';
         try { shallowText = await this.fs.promises.readFile(shallowPath, {encoding:'utf8'}); } catch (_) {}
-        const shallow = new Set(String(shallowText || '').split(/\\r?\\n/).filter(Boolean));
+        const shallow = new Set(String(shallowText || '').split(/\r?\n/).filter(Boolean));
         let missingParent = false;
         for (const parent of commitObject.parent) {
           try { await this.git.readCommit({fs:this.fs, dir:repository.dir, oid:parent}); }
           catch (_) { missingParent = true; break; }
         }
         if (missingParent) shallow.add(sha);
-        if (shallow.size) await this.fs.promises.writeFile(shallowPath, Array.from(shallow).sort().join('\\n') + '\\n');
+        if (shallow.size) await this.fs.promises.writeFile(shallowPath, Array.from(shallow).sort().join('\n') + '\n');
       }
       await this.git.writeRef({fs:this.fs, dir:repository.dir, ref, value:sha, force:true});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetch', value:sha});
