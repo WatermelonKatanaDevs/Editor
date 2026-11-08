@@ -803,7 +803,7 @@
         const subcommand = command[1] || '-v';
         if (subcommand === '-v' || subcommand === '--verbose') {
           const url = await this._readConfig(repository, 'remote.origin.url');
-          return {output:url ? 'origin\t' + url + ' (fetch)\\norigin\\t' + url + ' (push)' : '', value:url ? [{name:'origin',url:String(url)}] : []};
+          return {output:url ? 'origin\t' + url + ' (fetch)\norigin\t' + url + ' (push)' : '', value:url ? [{name:'origin',url:String(url)}] : []};
         }
         if (subcommand === 'add') {
           const name = command[2];
