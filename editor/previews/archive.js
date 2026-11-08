@@ -173,7 +173,7 @@
     const views = manager.getViews(file).filter(view => {
       const label = String(view.label || '').toLowerCase();
       const id = String(view.id || '').toLowerCase();
-      return (label.includes('preview') || id.endsWith('-preview') || id === 'ico-preview') &&
+      return (label.includes('preview') || id.endsWith('-preview') || id === 'ico-preview' || id === 'audio-player' || id === 'audio-raw') &&
         !id.includes('piskel');
     });
     if (!views.length) return null;
