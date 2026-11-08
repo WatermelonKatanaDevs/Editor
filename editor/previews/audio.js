@@ -136,7 +136,7 @@
     const duration = document.createElement('span');
     duration.className = 'editor-audio-time';
     duration.textContent = '0:00';
-    const volumeButton = makeButton('Mute', 'M11 5 6 9H3v6h3l5 4z M15 9a5 5 0 0 1 0 6 M18 6a9 9 0 0 1 0 12', 'editor-audio-volume-button');
+    const volumeButton = makeButton('Mute', 'M11 5 6 9H3v6h3l5 4z M15 9a5 5 0 0 1 0 6 M18 6a9 9 0 0 1 0 12', 'editor-audio-button editor-audio-volume-button');
     const volume = document.createElement('input');
     volume.type = 'range';
     volume.min = '0';
