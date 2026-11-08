@@ -909,3 +909,12 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .source-control-diff-monaco>.monaco-editor{position:absolute;inset:0}
 .source-control-monaco-removed{background:rgba(190,65,72,.20)}
 .source-control-monaco-added{background:rgba(55,145,82,.20)}
+
+/* Monaco diff editor needs a definite block size through every flex layer. */
+.source-control-diff-tab{height:100%;min-height:0;min-width:0;overflow:hidden}
+.source-control-diff-tab-editor{display:block;flex:1 1 0;height:calc(100% - 32px);min-height:120px;min-width:0;position:relative;overflow:hidden}
+.source-control-diff-tab-editor>.monaco-diff-editor,
+.source-control-diff-tab-editor .monaco-diff-editor,
+.source-control-diff-tab-editor .monaco-editor,
+.source-control-diff-tab-editor .overflow-guard{height:100%}
+.source-control-diff-tab-editor .monaco-diff-editor{width:100%}
