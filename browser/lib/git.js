@@ -247,6 +247,55 @@
       return {root:repository.root, branch, head, changes, clean:changes.length === 0};
     }
 
+
+    _repoPath(repository, cwd, value) {
+      const input = String(value || '.');
+      const target = input.startsWith('/') ? this.resolvePath(input) : normalizeGitPath(this.resolvePath(cwd) + '/' + input);
+      const root = repository.root.replace(/\/+$/, '') || '/';
+      const prefix = root === '/' ? '/' : root + '/';
+      if (target !== root && !target.startsWith(prefix)) throw new Error('pathspec is outside the Git repository: ' + value);
+      return target === root ? '.' : target.slice(prefix.length);
+    }
+
+    async _selectChanges(repository, cwd, pathspecs = [], options = {}) {
+      const matrix = await this.git.statusMatrix({fs:this.fs, dir:repository.dir});
+      let specs = pathspecs.map(path => this._repoPath(repository, cwd, path).replace(/\/+$/, '')).filter(Boolean);
+      if (!specs.length && options.all) specs = ['.'];
+      if (!specs.length) throw new Error('a path or -A/--all is required');
+      const selected = matrix.filter(row => {
+        if (options.trackedOnly && row[1] === 0 && row[3] === 0) return false;
+        return specs.some(spec => spec === '.' || row[0] === spec || row[0].startsWith(spec + '/'));
+      });
+      if (!selected.length) throw new Error('pathspec did not match any files: ' + pathspecs.join(' '));
+      return selected;
+    }
+
+    async _stage(repository, rows) {
+      const additions = [];
+      const removals = [];
+      for (const row of rows) {
+        if (row[2] === 0 && row[1] !== 0) removals.push(row[0]);
+        else if (row[2] !== 0) additions.push(row[0]);
+      }
+      if (additions.length) await this.git.add({fs:this.fs, dir:repository.dir, filepath:additions});
+      if (removals.length) await this.git.remove({fs:this.fs, dir:repository.dir, filepath:removals});
+      return {added:additions.length, removed:removals.length};
+    }
+
+    async _unstage(repository, rows) {
+      const remove = [];
+      for (const row of rows) {
+        if (row[1] === 0 && row[3] !== 0) remove.push(row[0]);
+        else if (row[1] !== row[3]) await this.git.resetIndex({fs:this.fs, dir:repository.dir, filepath:row[0], ref:'HEAD'});
+      }
+      if (remove.length) await this.git.remove({fs:this.fs, dir:repository.dir, filepath:remove});
+      return true;
+    }
+
+    async _readConfig(repository, path) {
+      return await this.git.getConfig({fs:this.fs, dir:repository.dir, path});
+    }
+
     async run(args = [], context = {}) {
       const command = Array.from(args || [], value => String(value));
       const operation = command[0] || '--help';
@@ -285,7 +334,7 @@
         if (result.clean) lines.push('', 'nothing to commit, working tree clean');
         else {
           const staged = result.changes.filter(change => change.staged);
-          const unstaged = result.changes.filter(change => !change.staged && !change.untracked);
+          const unstaged = result.changes.filter(change => change.unstaged && !change.untracked);
           const untracked = result.changes.filter(change => change.untracked);
           if (staged.length) lines.push('', 'Changes to be committed:', ...staged.map(change => '        ' + change.path));
           if (unstaged.length) lines.push('', 'Changes not staged for commit:', ...unstaged.map(change => '        ' + change.path));
@@ -294,7 +343,139 @@
         }
         return {output:lines.join('\n'), value:result};
       }
-      if (operation === '--help' || operation === '-h') return {output:'Supported Git commands are being initialized. Try git --version, git init, git status, or git rev-parse.', value:null};
+      if (operation === 'add') {
+        const pathspecs = [];
+        let all = false;
+        let trackedOnly = false;
+        for (let i = 1; i < command.length; i++) {
+          const arg = command[i];
+          if (arg === '-A' || arg === '--all') all = true;
+          else if (arg === '-u' || arg === '--update') trackedOnly = true;
+          else if (arg === '--') {
+            pathspecs.push(...command.slice(i + 1));
+            i = command.length;
+          } else if (arg.startsWith('-')) throw new Error('git add: unsupported option ' + arg);
+          else pathspecs.push(arg);
+        }
+        const repository = await this._repository(cwd);
+        const rows = await this._selectChanges(repository, cwd, pathspecs, {all, trackedOnly});
+        const result = await this._stage(repository, rows);
+        return {output:'Staged ' + (result.added + result.removed) + ' file(s).', value:result};
+      }
+      if (operation === 'restore' || operation === 'reset') {
+        let staged = operation === 'reset';
+        let source = 'HEAD';
+        const paths = [];
+        let all = false;
+        let unsupported = null;
+        for (let i = 1; i < command.length; i++) {
+          const arg = command[i];
+          if (arg === '--staged' || arg === '--cached') staged = true;
+          else if (arg === '--worktree' || arg === '-W') staged = false;
+          else if (arg === '--mixed') staged = true;
+          else if (arg === '--hard' || arg === '--soft') unsupported = arg;
+          else if (arg === '--all' || arg === '-A') all = true;
+          else if (arg.startsWith('--source=')) source = arg.slice(9);
+          else if (arg === '--source' || arg === '-s') source = command[++i] || source;
+          else if (arg === '--') {
+            paths.push(...command.slice(i + 1));
+            i = command.length;
+          } else if (arg.startsWith('-')) throw new Error('git ' + operation + ': unsupported option ' + arg);
+          else paths.push(arg);
+        }
+        if (unsupported) throw new Error('git ' + operation + ' ' + unsupported + ' is not implemented yet.');
+        if (operation === 'reset' && paths.length === 0 && !all) all = true;
+        if (operation === 'restore' && paths.length === 0) throw new Error('git restore: specify one or more paths.');
+        if (operation === 'reset' && paths.length === 0 && command.some(arg => !arg.startsWith('-') && arg !== 'reset')) throw new Error('git reset: resetting to a commit is not implemented yet.');
+        const repository = await this._repository(cwd);
+        const rows = await this._selectChanges(repository, cwd, paths, {all});
+        if (staged) await this._unstage(repository, rows);
+        else {
+          const filepaths = rows.filter(row => row[3] !== 0 || row[1] !== 0).map(row => row[0]);
+          if (!filepaths.length) throw new Error('git restore: none of the selected paths are in the index.');
+          const options = {fs:this.fs, dir:repository.dir, filepaths, force:true};
+          if (source !== 'HEAD') options.ref = source;
+          await this.git.checkout(options);
+        }
+        return {output:(staged ? 'Unstaged' : 'Restored') + ' ' + rows.length + ' path(s).', value:true};
+      }
+      if (operation === 'config') {
+        const values = command.slice(1);
+        if (values[0] === '--global' || values[0] === '--system') throw new Error('git config: only repository-local configuration is supported.');
+        if (values[0] === '--local') values.shift();
+        if (!values.length) throw new Error('git config: expected a key.');
+        const repository = await this._repository(cwd);
+        const path = values[0];
+        if (values.length === 1) {
+          const value = await this._readConfig(repository, path);
+          if (value == null) throw new Error('git config: key not found: ' + path);
+          return {output:String(value), value};
+        }
+        if (values.length === 2) {
+          await this.git.setConfig({fs:this.fs, dir:repository.dir, path, value:values[1]});
+          return {output:'', value:values[1]};
+        }
+        throw new Error('git config: unsupported arguments.');
+      }
+      if (operation === 'commit') {
+        let message = '';
+        for (let i = 1; i < command.length; i++) {
+          if (command[i] === '-m' || command[i] === '--message') message = command[++i] || '';
+          else if (command[i].startsWith('--message=')) message = command[i].slice(10);
+          else if (command[i] === '--') continue;
+          else if (command[i].startsWith('-')) throw new Error('git commit: unsupported option ' + command[i]);
+          else throw new Error('git commit: path-based commit options are not implemented yet.');
+        }
+        if (!message.trim()) throw new Error('git commit: use -m "message" to provide a commit message.');
+        const repository = await this._repository(cwd);
+        const name = await this._readConfig(repository, 'user.name');
+        const email = await this._readConfig(repository, 'user.email');
+        if (!name || !email) throw new Error('Author identity unknown. Set it with: git config user.name "Your Name" and git config user.email "you@example.com"');
+        const result = await this.status(cwd);
+        if (!result.changes.some(change => change.staged)) throw new Error('nothing to commit (use git add to stage changes first)');
+        const oid = await this.git.commit({fs:this.fs, dir:repository.dir, message, author:{name:String(name), email:String(email)}, disallowEmpty:true});
+        const commit = (await this.git.log({fs:this.fs, dir:repository.dir, ref:oid, depth:1}))[0];
+        return {output:'[' + (result.branch || 'HEAD') + ' ' + oid.slice(0, 7) + '] ' + message.split('\n')[0], value:{oid, commit:commit?.commit || null}};
+      }
+      if (operation === 'log' || operation === 'show') {
+        let depth = operation === 'show' ? 1 : 10;
+        let oneline = false;
+        let ref = 'HEAD';
+        let refSet = false;
+        for (let i = 1; i < command.length; i++) {
+          const arg = command[i];
+          if (arg === '--oneline') oneline = true;
+          else if (arg === '-n' || arg === '--max-count') depth = Math.max(1, Number(command[++i]) || depth);
+          else if (/^-\d+$/.test(arg)) depth = Math.max(1, Number(arg.slice(1)));
+          else if (arg.startsWith('--max-count=')) depth = Math.max(1, Number(arg.slice(12)) || depth);
+          else if (arg.startsWith('-')) throw new Error('git ' + operation + ': unsupported option ' + arg);
+          else if (!refSet) { ref = arg; refSet = true; }
+          else throw new Error('git ' + operation + ': too many revisions.');
+        }
+        const repository = await this._repository(cwd);
+        const commits = await this.git.log({fs:this.fs, dir:repository.dir, ref, depth, includeChanges:operation === 'show'});
+        if (!commits.length) return {output:'', value:[]};
+        const lines = [];
+        for (const entry of commits) {
+          const commit = entry.commit;
+          const subject = String(commit.message || '').trim().split('\n')[0];
+          if (oneline) lines.push(entry.oid.slice(0, 7) + ' ' + subject);
+          else {
+            lines.push('commit ' + entry.oid);
+            if (commit.author) lines.push('Author: ' + commit.author.name + ' <' + commit.author.email + '>');
+            if (commit.author?.timestamp) lines.push('Date:   ' + new Date(commit.author.timestamp * 1000).toString());
+            lines.push('', '    ' + subject);
+            if (operation === 'show' && Array.isArray(commit.changes)) {
+              lines.push('', 'Changed files:');
+              for (const change of commit.changes) lines.push('    ' + (change[0] == null ? 'D' : change[1] == null ? 'A' : 'M') + ' ' + change[2]);
+            }
+          }
+          if (!oneline) lines.push('');
+        }
+        if (operation === 'show') lines.push('Note: git show currently lists commit metadata and changed paths; patch output is not implemented yet.');
+        return {output:lines.join('\n').trimEnd(), value:commits};
+      }
+      if (operation === '--help' || operation === '-h' || operation === 'help') return {output:'Supported Git commands: --version, init, status, add, restore, reset (mixed), config, commit, log, show, rev-parse.', value:null};
       throw new Error('git: command not implemented yet: ' + operation);
     }
 
