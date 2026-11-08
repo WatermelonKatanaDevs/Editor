@@ -353,10 +353,116 @@
         coverFrame.appendChild(empty);
       }
     };
+    const dropHint = document.createElement('div');
+    dropHint.className = 'editor-audio-cover-drop-hint';
+    dropHint.textContent = 'Drop an image here from your computer, browser downloads, or an editor file tree';
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.accept = 'image/jpeg,image/png,image/webp,image/gif';
     fileInput.className = 'editor-audio-cover-input';
+    fileInput.multiple = true;
+
+    const setCoverFromFile = async file => {
+      if (!file || typeof file.arrayBuffer !== 'function') return false;
+      if (file.size > 10 * 1024 * 1024) {
+        status.textContent = 'Album artwork must be 10 MB or smaller.';
+        return false;
+      }
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const mime = window.EditorAudioTags.readImageMime(bytes);
+        if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mime)) {
+          status.textContent = 'That file is not a supported image. Use JPEG, PNG, WebP, or GIF.';
+          return false;
+        }
+        cover = { mime, data: bytes, description: 'Cover' };
+        replaceCover = true;
+        removeCover.disabled = false;
+        renderCover();
+        status.textContent = 'Cover selected: ' + (file.name || 'image');
+        return true;
+      } catch (error) {
+        status.textContent = error?.message || 'Could not read that image file.';
+        return false;
+      }
+    };
+
+    const collectDroppedFiles = async transfer => {
+      const token = transfer.getData('application/x-wk-editor-files');
+      const browserToken = transfer.getData('application/x-proxy-download');
+      const tokenToRead = token || browserToken;
+      if (tokenToRead) {
+        const payload = await window.__editorFileDropBridge?.take?.(tokenToRead);
+        const files = (Array.isArray(payload) ? payload : [payload]).filter(file =>
+          file && typeof file.name === 'string' && typeof file.arrayBuffer === 'function'
+        );
+        if (files.length) return files;
+      }
+
+      const files = Array.from(transfer.files || []);
+      if (files.length) return files;
+      const itemFiles = Array.from(transfer.items || [])
+        .filter(item => item.kind === 'file')
+        .map(item => item.getAsFile?.())
+        .filter(Boolean);
+      if (itemFiles.length) return itemFiles;
+
+      // Some editor tree drags expose paths as a secondary fallback. Prefer
+      // the shared file bridge above because it works across isolated trees.
+      const rawPaths = transfer.getData('application/x-file-manager-paths');
+      if (rawPaths && ctx.state?.fs?.readFileSync) {
+        try {
+          const paths = JSON.parse(rawPaths);
+          if (Array.isArray(paths)) {
+            return paths.map(path => {
+              const name = String(path).split('/').pop();
+              const data = ctx.state.fs.readFileSync(path, 'binary');
+              return data == null ? null : new File([data], name, {
+                type: window.EditorInferMime?.(name) || 'application/octet-stream'
+              });
+            }).filter(Boolean);
+          }
+        } catch (_) {}
+      }
+      return [];
+    };
+
+    const handleCoverDrop = async event => {
+      event.preventDefault();
+      event.stopPropagation();
+      coverPanel.classList.remove('is-dragover');
+      try {
+        const files = await collectDroppedFiles(event.dataTransfer);
+        if (!files.length) {
+          status.textContent = 'Drop an image file here to use it as the album cover.';
+          return;
+        }
+        const image = files.find(file =>
+          /\\.(png|jpe?g|webp|gif)$/i.test(file.name || '') ||
+          /^image\\//i.test(file.type || '')
+        ) || files[0];
+        await setCoverFromFile(image);
+      } catch (error) {
+        status.textContent = error?.message || 'Could not import the dropped image.';
+      }
+    };
+
+    coverPanel.addEventListener('dragenter', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      coverPanel.classList.add('is-dragover');
+    });
+    coverPanel.addEventListener('dragover', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      coverPanel.classList.add('is-dragover');
+    });
+    coverPanel.addEventListener('dragleave', event => {
+      if (event.relatedTarget && coverPanel.contains(event.relatedTarget)) return;
+      coverPanel.classList.remove('is-dragover');
+    });
+    coverPanel.addEventListener('drop', handleCoverDrop);
     const chooseCover = document.createElement('button');
     chooseCover.type = 'button';
     chooseCover.className = 'editor-audio-secondary-button';
@@ -374,26 +480,12 @@
       renderCover();
     });
     fileInput.addEventListener('change', async () => {
-      const file = fileInput.files?.[0];
+      const files = Array.from(fileInput.files || []);
       fileInput.value = '';
-      if (!file) return;
-      if (file.size > 10 * 1024 * 1024) {
-        status.textContent = 'Album artwork must be 10 MB or smaller.';
-        return;
-      }
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const mime = window.EditorAudioTags.readImageMime(bytes);
-      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mime)) {
-        status.textContent = 'Choose a JPEG, PNG, WebP, or GIF image.';
-        return;
-      }
-      cover = { mime, data: bytes, description: 'Cover' };
-      replaceCover = true;
-      removeCover.disabled = false;
-      renderCover();
-      status.textContent = '';
+      const image = files.find(file => /\\.(png|jpe?g|webp|gif)$/i.test(file.name || '')) || files[0];
+      if (image) await setCoverFromFile(image);
     });
-    coverPanel.append(coverLabel, coverFrame, fileInput, chooseCover, removeCover);
+    coverPanel.append(coverLabel, coverFrame, fileInput, chooseCover, removeCover, dropHint);
     layout.append(form, coverPanel);
 
     const footer = document.createElement('div');
