@@ -562,9 +562,11 @@
       const ref = 'refs/remotes/origin/' + branch;
       const previousHead = String(await this._readConfig(repository, 'remote.origin.lastFetch') || '');
       const lastPush = String(await this._readConfig(repository, 'remote.origin.lastPush') || '');
+      const previousComplete = String(await this._readConfig(repository, 'remote.origin.lastFetchComplete') || '');
       if (!remote.commitSha) {
         try { await this.git.deleteRef({fs:this.fs, dir:repository.dir, ref}); } catch (_) {}
         await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetch', value:''});
+        await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchComplete', value:''});
         await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchBranch', value:branch});
         await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchAt', value:new Date().toISOString()});
         await this.adapter.flush();
@@ -574,7 +576,7 @@
       let alreadyFetched = false;
       try {
         const tracked = await this.git.resolveRef({fs:this.fs, dir:repository.dir, ref});
-        if (tracked === sha) {
+        if (tracked === sha && previousComplete === sha) {
           const read = await this.git.readCommit({fs:this.fs, dir:repository.dir, oid:sha});
           const tree = await this.git.readTree({fs:this.fs, dir:repository.dir, oid:read.commit.tree});
           alreadyFetched = !!tree;
@@ -662,9 +664,21 @@
         if (commitData.verification?.signature) commitObject.gpgsig = String(commitData.verification.signature);
         const writtenCommit = await this.git.writeCommit({fs:this.fs, dir:repository.dir, commit:commitObject});
         if (writtenCommit !== sha) throw new Error('The remote commit could not be reconstructed byte-for-byte (expected ' + sha.slice(0, 7) + ', got ' + writtenCommit.slice(0, 7) + '). Its signature or metadata format may not be supported yet, so the remote ref was not changed.');
+        const shallowPath = repository.root.replace(/\\/+$/, '') + '/.git/shallow';
+        let shallowText = '';
+        try { shallowText = await this.fs.promises.readFile(shallowPath, {encoding:'utf8'}); } catch (_) {}
+        const shallow = new Set(String(shallowText || '').split(/\\r?\\n/).filter(Boolean));
+        let missingParent = false;
+        for (const parent of commitObject.parent) {
+          try { await this.git.readCommit({fs:this.fs, dir:repository.dir, oid:parent}); }
+          catch (_) { missingParent = true; break; }
+        }
+        if (missingParent) shallow.add(sha);
+        if (shallow.size) await this.fs.promises.writeFile(shallowPath, Array.from(shallow).sort().join('\\n') + '\\n');
       }
       await this.git.writeRef({fs:this.fs, dir:repository.dir, ref, value:sha, force:true});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetch', value:sha});
+      await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchComplete', value:sha});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchBranch', value:branch});
       await this.git.setConfig({fs:this.fs, dir:repository.dir, path:'remote.origin.lastFetchAt', value:new Date().toISOString()});
       await this.adapter.flush();
