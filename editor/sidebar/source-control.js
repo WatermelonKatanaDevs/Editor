@@ -223,9 +223,11 @@
           ? 'Remote branch is empty'
           : !remoteFetchComplete
             ? 'Remote objects not downloaded yet'
-            : localGitPushStatus.lastPush && localGitPushStatus.lastFetch !== localGitPushStatus.lastPush
-              ? 'Fetched remote differs from last push'
-              : 'Fetched origin at ' + localGitPushStatus.lastFetch.slice(0, 7);
+            : localGitPushStatus.lastFetchShallow === 'true'
+              ? 'Fetched origin; history is still shallow'
+              : localGitPushStatus.lastPush && localGitPushStatus.lastFetch !== localGitPushStatus.lastPush
+                ? 'Fetched remote differs from last push'
+                : 'Fetched origin at ' + localGitPushStatus.lastFetch.slice(0, 7);
       const commitDisabled = commitBusy || (connectedRemote ? (!staged.length && !hasPendingPush) : !staged.length);
       const commitLabel = connectedRemote ? (hasPendingPush && !staged.length ? 'Push' : 'Commit & Push') : 'Commit';
       const renderChange = (change, area) => {
@@ -272,7 +274,7 @@
       void loadLocalTags();
       tree.querySelector('[data-local-fetch]')?.addEventListener('click', () => {
         const remoteBranch = String(state.gitRemote?.branch || localGitRepository?.branch || 'main');
-        void runLocalGitAction(['fetch', 'origin', remoteBranch], 'Checked the latest origin/' + remoteBranch + ' commit.');
+        void runLocalGitAction(['fetch', 'origin', remoteBranch], 'Fetched origin/' + remoteBranch + '.');
       });
       tree.querySelector('[data-local-tag-create]')?.addEventListener('click', () => {
         const name = window.prompt('Tag name (for example, v1.0.0)');
@@ -354,10 +356,10 @@
 
     async function runLocalGitAction(args, message) {
       try {
-        await getLocalGit().runSerialized(args, {cwd:'/'});
+        const result = await getLocalGit().runSerialized(args, {cwd:'/'});
         state.markDirty?.('.git');
         await refreshLocalStatus();
-        showStatus(message);
+        showStatus(args[0] === 'fetch' && result?.output ? result.output : message);
       } catch (error) {
         showStatus(error.message || String(error), true);
       }
