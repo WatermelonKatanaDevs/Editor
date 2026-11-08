@@ -1079,7 +1079,9 @@
             if (initialMime === 'image/gif') decoded = await decodeGIF(sourceBytes);
             else if (initialMime === 'image/webp' && isAnimatedWebP(sourceBytes)) decoded = await decodeWebP(sourceBytes);
             else if (hasPngChunk(sourceBytes, 'acTL')) decoded = await decodeAPNG(sourceBytes);
-            else decoded = await decodeStill(sourceBytes, initialMime);
+            else if (initialMime === 'image/avif' && isAnimatedAvif(sourceBytes)) {
+              throw new Error('Animated AVIF editing requires WebCodecs ImageDecoder support in this browser.');
+            } else decoded = await decodeStill(sourceBytes, initialMime);
           }
           validateDimensions(decoded.width, decoded.height, decoded.frames.length);
           width = decoded.width;
