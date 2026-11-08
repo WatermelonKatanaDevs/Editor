@@ -268,7 +268,29 @@
       updatedAt: repo.updated_at || ''
     }));
   }
-  async function getRepository(owner, repo) { return request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`); }
+  async function publicRequest(path) {
+    const token = getToken();
+    const headers = new Headers({Accept:'application/vnd.github+json','X-GitHub-Api-Version':API_VERSION});
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const init = {headers, credentials:'omit', cache:'no-store'};
+    const network = window.__sharedBrowserNetwork || window.EditorAppState?.browserNetwork;
+    const response = network?.request ? await network.request(new Request(API + path, init), 'github-api', () => true) : await fetch(API + path, init);
+    if (!response) throw new Error('GitHub API request failed: no Network endpoint returned a response.');
+    if (response.status === 401 && token) {
+      clearStoredAuth();
+      notify();
+      throw new Error('GitHub authentication expired. Sign in again from Profile.');
+    }
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const error = new Error(data?.message || `GitHub API request failed (${response.status}).`);
+      error.status = response.status;
+      error.data = data;
+      throw error;
+    }
+    return data;
+  }
+  async function getRepository(owner, repo) { return publicRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`); }
   async function createRepository({name, description = '', privateRepo = false, autoInit = true}) {
     name = String(name || '').trim();
     if (!name) throw new Error('Enter a repository name.');
@@ -322,13 +344,13 @@
   async function getRemoteState(owner, repo, branch) {
     const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
     try {
-      const ref = await request(`${repoPath}/git/ref/heads/${branchPath(branch)}`);
+      const ref = await publicRequest(`${repoPath}/git/ref/heads/${branchPath(branch)}`);
       const commitSha = ref?.object?.sha || null;
       if (!commitSha) return {commitSha:null, treeSha:null, tree:[]};
-      const commit = await request(`${repoPath}/git/commits/${encodeURIComponent(commitSha)}`);
+      const commit = await publicRequest(`${repoPath}/git/commits/${encodeURIComponent(commitSha)}`);
       const treeSha = commit?.tree?.sha || null;
       if (!treeSha) return {commitSha, treeSha:null, tree:[]};
-      const tree = await request(`${repoPath}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`);
+      const tree = await publicRequest(`${repoPath}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`);
       return {commitSha, treeSha, tree:Array.isArray(tree?.tree) ? tree.tree : [], truncated:!!tree?.truncated};
     } catch (e) {
       // An empty repository has no refs yet. GitHub reports the missing
@@ -343,7 +365,7 @@
   }
   async function listCommits(owner, repo, branch, count = 20) {
     try {
-      const items = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits?sha=${encodeURIComponent(branch || 'main')}&per_page=${Math.min(100, Math.max(1, count))}`);
+      const items = await publicRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits?sha=${encodeURIComponent(branch || 'main')}&per_page=${Math.min(100, Math.max(1, count))}`);
       return Array.isArray(items) ? items.map(item => ({
       sha: item.sha,
       message: String(item.commit?.message || '').split(/\r?\n/, 1)[0],
@@ -359,20 +381,84 @@
   }
   async function getCommitState(owner, repo, commitSha) {
     const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
-    const commit = await request(`${repoPath}/git/commits/${encodeURIComponent(commitSha)}`);
+    const commit = await publicRequest(`${repoPath}/git/commits/${encodeURIComponent(commitSha)}`);
     const treeSha = commit?.tree?.sha;
     if (!treeSha) throw new Error('GitHub did not return the selected commit tree.');
-    const tree = await request(`${repoPath}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`);
-    const entries = Array.isArray(tree?.tree) ? tree.tree.filter(entry => entry?.type === 'blob' && entry.path && !ignoredPath(entry.path)) : [];
-    return {commitSha:String(commitSha), treeSha, tree:entries, truncated:!!tree?.truncated};
+    const tree = await publicRequest(`${repoPath}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`);
+    const gitTree = Array.isArray(tree?.tree) ? tree.tree.filter(entry => entry?.path && !ignoredPath(entry.path)) : [];
+    const entries = gitTree.filter(entry => entry?.type === 'blob');
+    return {commitSha:String(commit?.sha || commitSha), treeSha, tree:entries, gitTree, truncated:!!tree?.truncated};
   }
   async function readBlob(owner, repo, sha) {
-    const data = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs/${encodeURIComponent(sha)}`);
+    const data = await publicRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs/${encodeURIComponent(sha)}`);
     if (data?.encoding !== 'base64' || typeof data.content !== 'string') throw new Error('GitHub returned an unsupported blob encoding.');
     const binary = atob(data.content.replace(/\s/g, ''));
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return bytes;
+  }
+  function parseGitmodules(text) {
+    const modules = [];
+    let current = null;
+    for (const raw of String(text || '').split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+      const section = line.match(/^\[submodule\s+"((?:[^"\\]|\\.)+)"\]$/i);
+      if (section) {
+        current = {name:section[1].replace(/\\"/g, '"')};
+        modules.push(current);
+        continue;
+      }
+      if (!current) continue;
+      const setting = line.match(/^([A-Za-z][A-Za-z0-9.-]*)\s*=\s*(.*)$/);
+      if (!setting) continue;
+      let value = setting[2].trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+      current[setting[1].toLowerCase()] = value;
+    }
+    return modules.filter(module => module.path && module.url);
+  }
+  function resolveGitHubRepositoryUrl(value, parentOwner, parentRepo) {
+    let raw = String(value || '').trim();
+    if (!raw) throw new Error('A submodule has an empty repository URL.');
+    raw = raw.replace(/^git@github\.com:/i, 'https://github.com/').replace(/^ssh:\/\/git@github\.com\//i, 'https://github.com/');
+    let url;
+    try { url = new URL(raw, `https://github.com/${encodeURIComponent(parentOwner)}/${encodeURIComponent(parentRepo)}`); }
+    catch (_) { throw new Error(`Invalid submodule repository URL: ${raw}`); }
+    if (url.hostname.toLowerCase() !== 'github.com' || !/^https?:$/.test(url.protocol)) throw new Error(`Submodule URL uses an unsupported host: ${url.hostname}. Only GitHub repositories are supported.`);
+    let parts;
+    try { parts = url.pathname.split('/').filter(Boolean).map(part => decodeURIComponent(part)); }
+    catch (_) { throw new Error(`Invalid submodule repository URL: ${raw}`); }
+    if (parts.length !== 2) throw new Error(`Submodule URL does not identify a GitHub repository: ${raw}`);
+    const repo = parts[1].replace(/\.git$/i, '');
+    if (!parts[0] || !repo || parts.some(part => part === '.' || part === '..')) throw new Error(`Invalid submodule repository URL: ${raw}`);
+    return {owner:parts[0], repo};
+  }
+  async function listSubmodules(owner, repo, commitSha) {
+    const state = await getCommitState(owner, repo, commitSha);
+    if (state.truncated) throw new Error(`GitHub truncated the commit tree for ${owner}/${repo}@${String(commitSha).slice(0, 7)}. Submodules cannot be loaded safely from a truncated tree.`);
+    const links = (state.gitTree || []).filter(entry => entry.mode === '160000' || entry.type === 'commit');
+    if (!links.length) return [];
+    const modulesEntry = (state.gitTree || []).find(entry => entry.path === '.gitmodules' && entry.type === 'blob');
+    if (!modulesEntry?.sha) throw new Error(`Commit ${String(commitSha).slice(0, 7)} contains submodules but has no .gitmodules file.`);
+    const text = new TextDecoder().decode(await readBlob(owner, repo, modulesEntry.sha));
+    const configs = parseGitmodules(text);
+    return links.map(link => {
+      const config = configs.find(item => item.path === link.path);
+      if (!config) throw new Error(`Submodule ${link.path} has no matching entry in .gitmodules.`);
+      const remote = resolveGitHubRepositoryUrl(config.url, owner, repo);
+      return {
+        name:String(config.name || link.path.split('/').pop()),
+        path:String(link.path),
+        url:String(config.url),
+        owner:remote.owner,
+        repo:remote.repo,
+        branch:String(config.branch || ''),
+        configuredBranch:String(config.branch || ''),
+        commitSha:String(link.sha),
+        mode:'160000'
+      };
+    });
   }
   function bytesToBase64(data) {
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || []);
@@ -442,11 +528,12 @@
     try { return {negated, regex:new RegExp(source)}; } catch (_) { return null; }
   }
 
-  function readGitIgnore(fs) {
+  function readGitIgnore(fs, pathPrefix = '') {
     const entries = [];
+    const ignorePath = pathPrefix ? String(pathPrefix).replace(/\/+$/, '') + '/.gitignore' : '.gitignore';
     try {
-      if (!fs?.existsSync?.('.gitignore')) return entries;
-      const text = fs.readFileSync('.gitignore', 'utf8');
+      if (!fs?.existsSync?.(ignorePath)) return entries;
+      const text = fs.readFileSync(ignorePath, 'utf8');
       for (const raw of String(text || '').split(/\r?\n/)) {
         const entry = gitIgnoreRegex(raw);
         if (entry) entries.push(entry);
@@ -484,16 +571,21 @@
     }
   }
 
-  async function compareWorkingTree(fs, remoteTree) {
+  async function compareWorkingTree(fs, remoteTree, options = {}) {
     if (!fs) throw new Error('No workspace filesystem is open.');
-    const rules = readGitIgnore(fs);
+    const prefix = String(options.pathPrefix || '').replace(/^\/+|\/+$/g, '');
+    const excluded = (options.excludePaths || []).map(path => String(path || '').replace(/^\/+|\/+$/g, '')).filter(Boolean);
+    const inExcludedPath = path => excluded.some(excludedPath => path === excludedPath || path.startsWith(excludedPath + '/'));
+    const rules = readGitIgnore(fs, prefix);
     const ignoreNodeModules = isNodeModulesIgnoredBySetting(fs);
     const localPaths = fs.listFilesSync()
       .map(path => String(path).replace(/^\/+/, ''))
-      .filter(path => path && !ignoredPath(path) && !(ignoreNodeModules && isNodeModulesPath(path)));
+      .filter(path => path && (!prefix || path.startsWith(prefix + '/')))
+      .map(path => prefix ? path.slice(prefix.length + 1) : path)
+      .filter(path => path && !ignoredPath(path) && !inExcludedPath(path) && !(ignoreNodeModules && isNodeModulesPath(path)));
     const remoteFiles = new Map();
     for (const entry of remoteTree || []) {
-      if (entry?.type === 'blob' && entry.path && !ignoredPath(entry.path) && !(ignoreNodeModules && isNodeModulesPath(entry.path))) remoteFiles.set(entry.path, entry);
+      if (entry?.type === 'blob' && entry.path && !ignoredPath(entry.path) && !inExcludedPath(entry.path) && !(ignoreNodeModules && isNodeModulesPath(entry.path))) remoteFiles.set(entry.path, entry);
     }
 
     const changes = [];
@@ -550,18 +642,20 @@
 
   async function createInitializedRepositoryCommit(owner, repo, branch, message, changes, attempt = 0) {
     try {
-      const files = (changes || []).filter(change => change.type !== 'deleted');
+      const files = (changes || []).filter(change => change.type !== 'deleted' && change.type !== 'gitlink');
       const blobs = await withConcurrency(files, 4, async change => ({
         path:change.path,
         mode:change.mode || '100644',
         type:'blob',
         sha:(await createBlob(owner, repo, change.data)).sha
       }));
-      if (!blobs.length) throw new Error('The workspace has no files to initialize the GitHub repository with.');
+      const gitlinks = (changes || []).filter(change => change.type === 'gitlink').map(change => ({path:change.path, mode:'160000', type:'commit', sha:change.sha}));
+      const entries = [...blobs, ...gitlinks];
+      if (!entries.length) throw new Error('The workspace has no files or submodules to initialize the GitHub repository with.');
 
       const tree = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees`, {
         method:'POST',
-        body:JSON.stringify({tree:blobs})
+        body:JSON.stringify({tree:entries})
       });
       const commit = await request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/commits`, {
         method:'POST',
@@ -638,7 +732,58 @@
     }
     return data;
   }
-  async function commitAndPush({owner, repo, branch, message, fs, _attempt = 0}) {
+  function validateSubmoduleConfiguration(fs, modules = []) {
+    const parents = new Set(['', ...(modules || []).map(module => String(module.path || ''))]);
+    for (const parentPath of parents) {
+      const configPath = parentPath ? parentPath + '/.gitmodules' : '.gitmodules';
+      const configs = fs?.existsSync?.(configPath) ? parseGitmodules(fs.readFileSync(configPath, 'utf8')) : [];
+      const children = (modules || []).filter(module => String(module.parentPath || '') === parentPath);
+      if (configs.length !== children.length) {
+        throw new Error(`Submodule configuration changed at ${parentPath || 'the repository root'}. Adding, removing, or renaming submodules is not supported yet; reload the repository to restore its original submodule layout.`);
+      }
+      for (const config of configs) {
+        const module = children.find(child => String(child.path || '').slice(parentPath ? parentPath.length + 1 : 0) === config.path);
+        if (!module) throw new Error(`Submodule path ${config.path} changed at ${parentPath || 'the repository root'}. Reload the repository before committing.`);
+        if (String(module.url || '') !== String(config.url || '') || String(module.configuredBranch || '') !== String(config.branch || '')) {
+          throw new Error(`Submodule settings for ${config.path} changed. URL and branch changes must be handled by a dedicated submodule update before committing.`);
+        }
+        if (!fs?.existsSync?.(module.path)) throw new Error(`Submodule directory ${module.path} is missing. Restore it before committing.`);
+      }
+    }
+    return true;
+  }
+
+  async function getSubmoduleStatuses(fs, modules = []) {
+    validateSubmoduleConfiguration(fs, modules);
+    const byParent = new Map();
+    for (const module of modules || []) {
+      const key = String(module.parentPath || '');
+      if (!byParent.has(key)) byParent.set(key, []);
+      byParent.get(key).push(module);
+    }
+    async function inspect(module) {
+      const children = byParent.get(String(module.path || '')) || [];
+      const baseSha = String(module.pendingCommitSha || module.commitSha || '');
+      const childResults = await Promise.all(children.map(inspect));
+      let changes = [];
+      if (baseSha) {
+        const base = await getCommitState(module.owner, module.repo, baseSha);
+        changes = await compareWorkingTree(fs, base.tree, {
+          pathPrefix:module.path,
+          excludePaths:children.map(child => String(child.path || '').slice(String(module.path || '').length + 1))
+        });
+      }
+      let canPush = false;
+      try {
+        const info = await getRepository(module.owner, module.repo);
+        canPush = info?.permissions?.push !== false;
+      } catch (_) {}
+      return {...module, changes, children:childResults, canPush, dirty:!!changes.length || childResults.some(child => child.dirty) || !!module.pendingCommitSha};
+    }
+    return Promise.all(byParent.get('') || []);
+  }
+
+  async function commitAndPush({owner, repo, branch, message, fs, compareTree = null, pathPrefix = '', excludePaths = [], gitlinks = [], _attempt = 0}) {
     message = String(message || '').trim();
     if (!message) throw new Error('Enter a commit message.');
     let remote = null;
@@ -648,8 +793,11 @@
       await new Promise(resolve => setTimeout(resolve, 500 + attempt * 500));
     }
     if (remote?.unavailable) throw new Error('GitHub is still initializing this repository. Please try again in a moment.');
-    let changes = await compareWorkingTree(fs, remote.tree);
-    if (!changes.length) return {changed:false, changes:[], commitSha:remote.commitSha};
+    const changes = await compareWorkingTree(fs, compareTree || remote.tree, {pathPrefix, excludePaths});
+    const remoteGitlinks = new Map((remote.tree || []).filter(entry => entry?.mode === '160000' || entry?.type === 'commit').map(entry => [entry.path, entry.sha]));
+    const updatedGitlinks = (gitlinks || []).filter(link => link?.path && link?.sha && remoteGitlinks.get(link.path) !== link.sha);
+    const allChanges = [...changes, ...updatedGitlinks.map(link => ({path:link.path,type:'gitlink',mode:'160000',sha:link.sha}))];
+    if (!allChanges.length) return {changed:false, changes:[], commitSha:remote.commitSha};
     if (remote.empty) {
       // GitHub requires an empty repository to be bootstrapped through the
       // Contents API before its Git-data API can be used. The bootstrap commit
@@ -661,13 +809,13 @@
         repo,
         branch,
         message,
-        changes
+        allChanges
       );
       return {changed:true, changes, commitSha, initialized:true};
     }
     try {
-      const blobs = await withConcurrency(changes.filter(x => x.type !== 'deleted'), 4, async change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:(await createBlob(owner, repo, change.data)).sha}));
-      const treeEntries = [...blobs, ...changes.filter(x => x.type === 'deleted').map(change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:null}))];
+      const blobs = await withConcurrency(allChanges.filter(x => x.type !== 'deleted' && x.type !== 'gitlink'), 4, async change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:(await createBlob(owner, repo, change.data)).sha}));
+      const treeEntries = [...blobs, ...updatedGitlinks.map(change => ({path:change.path, mode:'160000', type:'commit', sha:change.sha})), ...allChanges.filter(x => x.type === 'deleted').map(change => ({path:change.path, mode:change.mode || '100644', type:'blob', sha:null}))];
       const treeBody = {tree:treeEntries};
       if (remote.treeSha) treeBody.base_tree = remote.treeSha;
       const tree = await request('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/git/trees', {method:'POST', body:JSON.stringify(treeBody)});
@@ -687,11 +835,11 @@
         // never force-push over the intervening commit.
         if (e?.status === 422 && _attempt < 8) {
           await new Promise(resolve => setTimeout(resolve, 500 + _attempt * 500));
-          return await commitAndPush({owner, repo, branch, message, fs, _attempt:_attempt + 1});
+          return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, _attempt:_attempt + 1});
         }
         throw e;
       }
-      return {changed:true, changes, commitSha:commit.sha};
+      return {changed:true, changes:allChanges, commitSha:commit.sha};
     } catch (e) {
       // A freshly-created repository may still be provisioning its Git
       // database. GitHub can briefly return 404/409 for Git-data writes even
@@ -699,12 +847,77 @@
       // with a bounded backoff before surfacing the error.
       if ((e?.status === 404 || e?.status === 409) && _attempt < 8) {
         await new Promise(resolve => setTimeout(resolve, Math.min(1000 + _attempt * 1000, 5000)));
-        return await commitAndPush({owner, repo, branch, message, fs, _attempt:_attempt + 1});
+        return await commitAndPush({owner, repo, branch, message, fs, compareTree, pathPrefix, excludePaths, gitlinks, _attempt:_attempt + 1});
       }
       if (e?.status !== 403) throw e;
-      const commitSha = await createGraphQLCommit(owner, repo, branch, message, changes, remote.commitSha);
-      return {changed:true, changes, commitSha};
+      if (updatedGitlinks.length) throw new Error('GitHub rejected the Git-data write for a commit containing submodule references. The GraphQL fallback cannot create gitlinks; check your repository permissions and try again.');
+      const commitSha = await createGraphQLCommit(owner, repo, branch, message, allChanges, remote.commitSha);
+      return {changed:true, changes:allChanges, commitSha};
     }
+  }
+  async function commitWorkspaceAndPush({owner, repo, branch, message, fs, submodules = []}) {
+    message = String(message || '').trim();
+    if (!message) throw new Error('Enter a commit message.');
+    const modules = Array.isArray(submodules) ? submodules : [];
+    validateSubmoduleConfiguration(fs, modules);
+    const byParent = new Map();
+    for (const module of modules) {
+      const key = String(module.parentPath || '');
+      if (!byParent.has(key)) byParent.set(key, []);
+      byParent.get(key).push(module);
+    }
+
+    async function commitModule(module) {
+      const children = byParent.get(String(module.path || '')) || [];
+      const childResults = [];
+      for (const child of children) childResults.push({module:child, sha:await commitModule(child)});
+      const baselineSha = String(module.pendingCommitSha || module.commitSha || '');
+      if (!baselineSha) throw new Error(`Submodule ${module.path} has no pinned commit SHA.`);
+      const base = await getCommitState(module.owner, module.repo, baselineSha);
+      const childGitlinks = childResults
+        .filter(item => item.sha && item.sha !== String(item.module.commitSha || ''))
+        .map(item => ({path:String(item.module.path || '').slice(String(module.path || '').length + 1), sha:item.sha}));
+      const excludedChildren = children.map(child => String(child.path || '').slice(String(module.path || '').length + 1));
+      const result = await commitAndPush({
+        owner:module.owner,
+        repo:module.repo,
+        branch:module.branch || 'main',
+        message,
+        fs,
+        compareTree:base.tree,
+        pathPrefix:module.path,
+        excludePaths:excludedChildren,
+        gitlinks:childGitlinks
+      });
+      if (result.changed) module.pendingCommitSha = result.commitSha;
+      return String(module.pendingCommitSha || module.commitSha || '');
+    }
+
+    const roots = byParent.get('') || [];
+    const updatedRoots = [];
+    for (const module of roots) {
+      const sha = await commitModule(module);
+      if (sha && sha !== String(module.commitSha || '')) updatedRoots.push({path:module.path, sha});
+    }
+
+    const result = await commitAndPush({
+      owner,
+      repo,
+      branch,
+      message,
+      fs,
+      excludePaths:roots.map(module => module.path),
+      gitlinks:updatedRoots
+    });
+
+    // Pending SHAs survive a failed parent push and are promoted only after success.
+    for (const module of modules) {
+      if (module.pendingCommitSha) {
+        module.commitSha = module.pendingCommitSha;
+        module.pendingCommitSha = null;
+      }
+    }
+    return {...result, submodules:modules};
   }
   root.init = init;
   root.onChange = onChange;
@@ -725,6 +938,11 @@
   root.request = request;
   root.listRepositories = listRepositories;
   root.getRepository = getRepository;
+  root.publicRequest = publicRequest;
+  root.listSubmodules = listSubmodules;
+  root.validateSubmoduleConfiguration = validateSubmoduleConfiguration;
+  root.getSubmoduleStatuses = getSubmoduleStatuses;
+  root.commitWorkspaceAndPush = commitWorkspaceAndPush;
   root.createRepository = createRepository;
   root.downloadArchive = downloadArchive;
   root.listBranches = listBranches;

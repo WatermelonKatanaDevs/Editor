@@ -797,7 +797,8 @@ window.__editorInitPromise = (async function () {
         owner: String(state.gitRemote.owner || ''),
         repo: String(state.gitRemote.repo || ''),
         branch: String(state.gitRemote.branch || 'main')
-      } : existing.gitRemote ?? null)
+      } : existing.gitRemote ?? null),
+      gitSubmodules: extra.gitSubmodules ?? (Array.isArray(state.gitSubmodules) ? state.gitSubmodules : existing.gitSubmodules || [])
     };
     if (index < 0) list.unshift(record);
     else {
@@ -2096,6 +2097,7 @@ window.__editorInitPromise = (async function () {
     state.projectOwner = options.projectOwner !== false;
     state.gitEnabled = options.gitEnabled !== false;
     state.gitRemote = state.gitEnabled ? (options.gitRemote || null) : null;
+    state.gitSubmodules = Array.isArray(options.gitSubmodules) ? options.gitSubmodules : [];
     state.deploymentSettings = {thirdParty:false, externalUrl:'', branch:String(state.gitRemote?.branch || '').trim(), commit:'latest', path:'/'};
     state.projectTemplate = !!options.isTemplate;
     state.projectName = name || 'Workspace';
@@ -2428,27 +2430,144 @@ window.__editorInitPromise = (async function () {
     updateRemoteLoadProgress('Project archive ready…', 88, formatProgressBytes(blob.size));
     return new File([blob], file.name, {type:'application/zip'});
   }
+  async function downloadGithubSubmoduleArchive(owner, repo, ref) {
+    const github = window.GitHubService;
+    if (github?.isSignedIn?.()) return github.downloadArchive(owner, repo, ref);
+    if (!state.browserNetwork?.request) throw new Error('Network is not initialized.');
+    const codeload = `https://codeload.github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zip/${encodeURIComponent(ref).replace(/%2F/g, '/')}`;
+    const response = await state.browserNetwork.request(codeload, location.origin, {}, 'project-import');
+    if (!response?.ok) throw new Error(`Could not download submodule ${owner}/${repo}@${String(ref).slice(0, 7)} (${response?.status || 'no response'}). Check that the repository and pinned commit are accessible.`);
+    return responseToBlobWithEditorProgress(response, 88, 92, 'Downloading submodule…');
+  }
+
+  function clearGithubSubmodulePath(fs, targetPath) {
+    const prefix = String(targetPath || '').replace(/^\/+|\/+$/g, '');
+    if (!prefix) throw new Error('A submodule cannot be extracted at the workspace root.');
+    for (const path of (fs.listFilesSync?.() || []).map(path => String(path).replace(/^\/+/, '')).filter(path => path === prefix || path.startsWith(prefix + '/'))) {
+      fs.deleteFileSync(path);
+    }
+    const directories = (fs.listDirectoriesSync?.() || []).map(path => String(path).replace(/^\/+|\/+$/g, '')).filter(path => path === prefix || path.startsWith(prefix + '/'));
+    for (const dir of directories.sort((a,b) => b.split('/').length - a.split('/').length)) {
+      try { fs.deleteDirectorySync?.(dir); } catch (_) {}
+    }
+  }
+
+  async function extractGithubSubmoduleArchive(fs, archive, targetPath) {
+    if (typeof JSZip === 'undefined') throw new Error('JSZip is unavailable, so Git submodules cannot be extracted.');
+    const zip = await JSZip.loadAsync(archive, {
+      onUpdate(meta) {
+        updateRemoteLoadProgress('Extracting submodule…', null, `${Math.round(Number(meta?.percent) || 0)}%`);
+      }
+    });
+    const entries = [];
+    const topLevels = new Set();
+    let hasRootFile = false;
+    zip.forEach((relativePath, entry) => {
+      const path = String(relativePath || '').replace(/^\/+|\/+$/g, '');
+      if (!path) return;
+      const parts = path.split('/');
+      if (parts.length === 1) {
+        if (!entry.dir) hasRootFile = true;
+        return;
+      }
+      topLevels.add(parts[0]);
+      entries.push({path, entry});
+    });
+    const wrapper = !hasRootFile && topLevels.size === 1 && entries.length ? [...topLevels][0] : '';
+    const files = entries.filter(item => !item.entry.dir).map(item => ({
+      path:wrapper && item.path.startsWith(wrapper + '/') ? item.path.slice(wrapper.length + 1) : item.path,
+      entry:item.entry
+    })).filter(item => {
+      const parts = item.path.split('/');
+      return item.path && !parts.some(part => !part || part === '.' || part === '..') && parts[0] !== '.git' && !item.path.startsWith('.git/');
+    });
+    try { fs.mkdirSync(targetPath); } catch (error) { if (!fs.existsSync?.(targetPath)) throw error; }
+    const directories = new Set();
+    for (const item of files) {
+      const parts = item.path.split('/');
+      for (let i = 1; i < parts.length; i++) directories.add(parts.slice(0, i).join('/'));
+    }
+    for (const dir of [...directories].sort((a,b) => a.split('/').length - b.split('/').length)) {
+      const full = [targetPath, dir].filter(Boolean).join('/');
+      try { fs.mkdirSync(full); } catch (error) { if (!fs.existsSync?.(full)) throw error; }
+    }
+    let cursor = 0;
+    const workers = Array.from({length:Math.min(6, files.length)}, async () => {
+      while (cursor < files.length) {
+        const item = files[cursor++];
+        const full = [targetPath, item.path].filter(Boolean).join('/');
+        fs.writeFileSync(full, await item.entry.async('uint8array'));
+      }
+    });
+    await Promise.all(workers);
+    return files.length;
+  }
+
+  async function loadGithubSubmodules(fs, owner, repo, commitSha, rootBranch = 'main') {
+    const github = window.GitHubService;
+    if (!github?.listSubmodules || !commitSha) return [];
+    const modules = [];
+    const visited = new Set();
+    async function load(parentOwner, parentRepo, parentSha, prefix = '', depth = 0, parentBranch = 'main') {
+      if (depth >= 8) throw new Error('Git submodule nesting exceeds the supported depth of 8.');
+      const identity = `${parentOwner}/${parentRepo}@${parentSha}`;
+      if (visited.has(identity)) throw new Error(`Circular Git submodule reference detected at ${identity}.`);
+      visited.add(identity);
+      const children = await github.listSubmodules(parentOwner, parentRepo, parentSha);
+      for (const child of children) {
+        const relativePath = String(child.path || '').replace(/^\/+|\/+$/g, '');
+        const parts = relativePath.split('/');
+        if (!relativePath || parts.some(part => !part || part === '.' || part === '..')) throw new Error(`Submodule ${child.name || child.path} has an unsafe repository path.`);
+        const fullPath = [prefix, relativePath].filter(Boolean).join('/');
+        const module = {...child, path:fullPath, parentPath:prefix, pendingCommitSha:null};
+        const info = await github.getRepository(child.owner, child.repo);
+        module.branch = child.branch === '.' ? parentBranch : child.branch || String(info?.default_branch || 'main');
+        if (!module.branch) module.branch = 'main';
+        modules.push(module);
+        updateRemoteLoadProgress('Loading Git submodules…', null, `${module.owner}/${module.repo} · ${fullPath}`);
+        clearGithubSubmodulePath(fs, fullPath);
+        const archive = await downloadGithubSubmoduleArchive(module.owner, module.repo, module.commitSha);
+        if (!archive?.size) throw new Error(`GitHub returned an empty archive for submodule ${fullPath}.`);
+        await extractGithubSubmoduleArchive(fs, archive, fullPath);
+        await load(module.owner, module.repo, module.commitSha, fullPath, depth + 1, module.branch);
+      }
+      visited.delete(identity);
+    }
+    await load(owner, repo, commitSha, '', 0, String(rootBranch || 'main'));
+    return modules;
+  }
+
   async function fetchRemoteProject(url) {
     if (!state.browserNetwork?.request) throw new Error('Network is not initialized.');
     showRemoteLoadProgress();
     updateRemoteLoadProgress('Preparing remote project…', 2, url);
     const github = githubRepositoryFromUrl(url);
-    if (github && window.GitHubService?.isSignedIn?.()) {
+    if (github) {
       try {
         const info = await window.GitHubService.getRepository(github.owner, github.repo);
         const branch = github.branch || info.default_branch || 'main';
+        const remoteState = await window.GitHubService.getRemoteState(github.owner, github.repo, branch);
+        const ref = remoteState.commitSha || branch;
         updateRemoteLoadProgress('Downloading project archive…', 5, 'GitHub');
-        const blob = await window.GitHubService.downloadArchive(github.owner, github.repo, branch, {
-          onProgress(received, total) {
-            const pct = total ? 5 + (received / total) * 50 : null;
-            updateRemoteLoadProgress('Downloading project archive…', pct, total ? `${formatProgressBytes(received)} / ${formatProgressBytes(total)}` : `${formatProgressBytes(received)} downloaded`);
-          }
-        });
+        let blob;
+        if (window.GitHubService.isSignedIn?.()) {
+          blob = await window.GitHubService.downloadArchive(github.owner, github.repo, ref, {
+            onProgress(received, total) {
+              const pct = total ? 5 + (received / total) * 50 : null;
+              updateRemoteLoadProgress('Downloading project archive…', pct, total ? `${formatProgressBytes(received)} / ${formatProgressBytes(total)}` : `${formatProgressBytes(received)} downloaded`);
+            }
+          });
+        } else {
+          const codeload = `https://codeload.github.com/${encodeURIComponent(github.owner)}/${encodeURIComponent(github.repo)}/zip/${encodeURIComponent(ref).replace(/%2F/g, '/')}`;
+          const response = await state.browserNetwork.request(codeload, location.origin, {}, 'project-import');
+          if (!response?.ok) throw new Error(`GitHub archive download failed (${response?.status || 'no response'}).`);
+          blob = await responseToBlobWithEditorProgress(response, 5, 55, 'Downloading project archive…');
+        }
         if (!blob?.size) throw new Error('GitHub returned an empty project archive.');
         const name = info.name || github.repo;
         let file = new File([blob], name + '.zip', {type:'application/zip'});
         file = await flattenProjectZip(file);
-        return {file, name, source:`github:${github.owner}/${github.repo}@${branch}`, gitRemote:{provider:'github',owner:github.owner,repo:github.repo,branch}, projectId:`github:${github.owner}/${github.repo}@${branch}`};
+        return {file, name, source:`github:${github.owner}/${github.repo}@${ref}`, gitRemote:{provider:'github',owner:github.owner,repo:github.repo,branch}, gitCommitSha:remoteState.commitSha || ref, projectId:`github:${github.owner}/${github.repo}@${branch}`};
       } catch (e) {
         if (e?.status !== 404 && e?.status !== 401) throw e;
       }
@@ -2499,8 +2618,9 @@ window.__editorInitPromise = (async function () {
       const remote = await fetchRemoteProject(input);
       updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
       const fs = await FileSystem.create(remote.file, {sync:false});
+      const gitSubmodules = remote.gitRemote?.provider === 'github' && remote.gitCommitSha ? await loadGithubSubmodules(fs, remote.gitRemote.owner, remote.gitRemote.repo, remote.gitCommitSha, remote.gitRemote.branch) : [];
       updateRemoteLoadProgress('Starting workspace…', 97, remote.name || 'Remote Project');
-      await replaceFileSystem(fs, remote.name || 'Remote Project', true, {projectId:remote.projectId || undefined, gitRemote:remote.gitRemote || null});
+      await replaceFileSystem(fs, remote.name || 'Remote Project', true, {projectId:remote.projectId || undefined, gitRemote:remote.gitRemote || null, gitSubmodules});
       finishRemoteImport({returnToChooser:options.returnToChooser});
       finishRemoteLoadProgress();
       return true;
@@ -2579,26 +2699,11 @@ window.__editorInitPromise = (async function () {
 
     // "latest" is stored as a symbolic project revision. Resolve it to the
     // current HEAD of the selected branch each time the project is opened.
-    if (requestedRevision === 'latest') {
-      // Signed-in owners can resolve the symbolic "latest" revision to a SHA,
-      // preserving the existing authenticated project behavior. For anonymous
-      // non-owner viewers, the public codeload endpoint can resolve the branch
-      // directly, so do not make an authenticated API request just to determine
-      // its current HEAD.
-      if (window.GitHubService?.isSignedIn?.()) {
-        let commits = [];
-        try {
-          commits = await window.GitHubService.listCommits(parsed.owner, parsed.repo, branch, 1) || [];
-        } catch (e) {
-          if (e?.status !== 404 && e?.status !== 401) throw e;
-        }
-        if (!commits[0]?.sha) {
-          throw new Error(`No commits are available on GitHub branch "${branch}".`);
-        }
-        ref = commits[0].sha;
-      } else {
-        ref = branch;
-      }
+    if (requestedRevision === 'latest' || !/^[a-f0-9]{7,40}$/i.test(ref)) {
+      const lookupRef = requestedRevision === 'latest' ? branch : ref;
+      const commits = await window.GitHubService.listCommits(parsed.owner, parsed.repo, lookupRef, 1) || [];
+      if (!commits[0]?.sha) throw new Error(`No commits are available for GitHub revision "${lookupRef}".`);
+      ref = commits[0].sha;
     }
 
     let blob = null;
@@ -2633,6 +2738,7 @@ window.__editorInitPromise = (async function () {
     file = await flattenProjectZip(file);
     updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
     const fs = await FileSystem.create(file, {sync:false});
+    const gitSubmodules = await loadGithubSubmodules(fs, parsed.owner, parsed.repo, ref, branch);
     updateRemoteLoadProgress('Starting workspace…', 97, name || 'Remote Project');
 
     const projectId = options.projectId || `github:${parsed.owner}/${parsed.repo}@${ref}`;
@@ -2646,7 +2752,8 @@ window.__editorInitPromise = (async function () {
         repo:parsed.repo,
         branch,
         revision:requestedRevision === 'latest' ? 'latest' : ref
-      }
+      },
+      gitSubmodules
     });
     finishRemoteImport();
     finishRemoteLoadProgress();
@@ -2661,7 +2768,9 @@ window.__editorInitPromise = (async function () {
     const branch = String(repo.branch || repo.defaultBranch || 'main');
     const info = repo.defaultBranch ? repo : await github.getRepository(repo.owner, repo.repo);
     updateRemoteLoadProgress('Downloading project archive…', 5, 'GitHub');
-    const blob = await github.downloadArchive(repo.owner, repo.repo, branch, {
+    const remoteState = await github.getRemoteState(repo.owner, repo.repo, branch);
+    const ref = remoteState.commitSha || branch;
+    const blob = await github.downloadArchive(repo.owner, repo.repo, ref, {
       onProgress(received, total) {
         const pct = total ? 5 + (received / total) * 50 : null;
         updateRemoteLoadProgress('Downloading project archive…', pct, total ? `${formatProgressBytes(received)} / ${formatProgressBytes(total)}` : `${formatProgressBytes(received)} downloaded`);
@@ -2671,8 +2780,9 @@ window.__editorInitPromise = (async function () {
     let file = new File([blob], (info.name || repo.repo) + '.zip', {type:'application/zip'});
     file = await flattenProjectZip(file);
     const fs = await FileSystem.create(file, {sync:false});
+    const gitSubmodules = await loadGithubSubmodules(fs, repo.owner, repo.repo, ref, branch);
     const projectId = `github:${repo.owner}/${repo.repo}@${branch}`;
-    await replaceFileSystem(fs, info.name || repo.repo || 'Remote Project', true, {projectId, gitRemote:{provider:'github',owner:repo.owner,repo:repo.repo,branch}});
+    await replaceFileSystem(fs, info.name || repo.repo || 'Remote Project', true, {projectId, gitRemote:{provider:'github',owner:repo.owner,repo:repo.repo,branch,revision:ref},gitSubmodules});
     finishRemoteImport();
     finishRemoteLoadProgress();
     return true;
@@ -2986,6 +3096,7 @@ window.__editorInitPromise = (async function () {
         cachedDirty: !!record.unsaved,
         lastSavedAt: record.lastSavedAt || 0,
         gitRemote: record.gitConnected ? record.gitRemote : null,
+        gitSubmodules: record.gitConnected ? record.gitSubmodules || [] : [],
         gitEnabled: record.gitConnected ? true : false
       });
       if (record.gitConnected && state.gitRemote?.provider === 'github') {
@@ -3312,6 +3423,15 @@ window.__editorInitPromise = (async function () {
       logError(e);
     }
   }
+  state.saveGitSubmodules = () => {
+    rememberRecentProject({gitSubmodules:state.gitSubmodules || []});
+    void saveProjectCache(true);
+  };
+  state.loadGitSubmodules = async (owner, repo, commitSha, branch = 'main') => {
+    state.gitSubmodules = await loadGithubSubmodules(state.fs, owner, repo, commitSha, branch);
+    state.saveGitSubmodules();
+    return state.gitSubmodules;
+  };
   state.saveEditorConfig = saveEditorConfig;
   state.markDirty = markDirty;
   state.updateStatus = updateStatus;

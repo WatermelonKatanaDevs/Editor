@@ -48,6 +48,7 @@
     function show() { syncSelection(); renderShell(); void refresh(); }
     function isLocalProject() { return !state.gitRemote?.provider; }
     function setLocalGitRemote(owner, repo, branch = 'main') {
+      state.gitSubmodules = [];
       state.gitRemote = {provider:'github', owner:String(owner), repo:String(repo), branch:String(branch || 'main')};
       try { state.saveProjectMetadata?.(); } catch (_) {}
       selected = {owner:String(owner), repo:String(repo), branch:String(branch || 'main')};
@@ -70,7 +71,7 @@
           <div class="source-control-select-row"><select data-repo ${repos.length ? '' : 'disabled'}><option value="">${repos.length ? 'Select repository…' : 'Loading repositories…'}</option>${repos.map(r => `<option value="${esc(r.fullName)}" ${r.fullName === `${selected.owner}/${selected.repo}` ? 'selected' : ''}>${esc(r.fullName)}${r.private ? ' · private' : ''}</option>`).join('')}</select><button data-repo-refresh title="Refresh repositories">↻</button></div>
           <div class="source-control-select-row"><select data-branch ${branches.length ? '' : 'disabled'}><option value="">${branches.length ? 'Select branch…' : (selected.repo ? 'Loading branches…' : 'Select repository first')}</option>${branches.map(branch => `<option value="${esc(branch)}" ${branch === selected.branch ? 'selected' : ''}>${esc(branch)}</option>`).join('')}</select><button data-branch-refresh title="Refresh branches">↻</button></div>
         </section>
-        ${selected.repo ? `<section class="source-control-section"><div class="source-control-section-title">Changes</div><div data-changes class="source-control-changes"><div class="source-control-loading">Checking working tree…</div></div><textarea data-commit-message placeholder="Commit message" rows="3"></textarea><button class="source-control-commit" data-commit disabled>Commit & Push</button><div data-status class="source-control-status"></div></section><section class="source-control-section"><div class="source-control-section-title">History</div><div data-history class="source-control-history"><div class="source-control-loading">Loading commits…</div></div></section>` : `<div class="source-control-empty"><strong>Select a repository</strong><span>Once a repository is selected, the editor compares this workspace against the selected branch.</span></div>`}
+        ${selected.repo ? `<section class="source-control-section"><div class="source-control-section-title">Changes</div><div data-changes class="source-control-changes"><div class="source-control-loading">Checking working tree…</div></div>${(state.gitSubmodules || []).length ? `<div class="source-control-submodule-section"><div class="source-control-section-title">Submodules</div><div data-submodules class="source-control-submodules"><div class="source-control-loading">Checking submodules…</div></div></div>` : ''}<textarea data-commit-message placeholder="Commit message" rows="3"></textarea><button class="source-control-commit" data-commit disabled>Commit & Push</button><div data-status class="source-control-status"></div></section><section class="source-control-section"><div class="source-control-section-title">History</div><div data-history class="source-control-history"><div class="source-control-loading">Loading commits…</div></div></section>` : `<div class="source-control-empty"><strong>Select a repository</strong><span>Once a repository is selected, the editor compares this workspace against the selected branch.</span></div>`}
       </div>`;
       tree.querySelector('[data-refresh]')?.addEventListener('click', () => refresh());
       const createLocalButton = tree.querySelector('[data-create-local-repo]');
@@ -150,6 +151,7 @@
         if (!fullName) { ++branchLoadToken; ++refreshToken; selected = {owner:'', repo:'', branch:'main'}; branches = []; state.gitRemote = null; state.deploymentSettings = {...(state.deploymentSettings || {}), branch:'', commit:''}; state.saveProjectMetadata?.(); saveConfig(); state.runDebugRefresh?.(); renderShell(); return; }
         const [owner, ...repoParts] = fullName.split('/');
         selected = {owner, repo:repoParts.join('/'), branch:repos.find(r => r.fullName === fullName)?.defaultBranch || 'main'};
+        state.gitSubmodules = [];
         state.gitRemote = {provider:'github', owner, repo:selected.repo, branch:selected.branch};
         state.deploymentSettings = {...(state.deploymentSettings || {}), branch: state.deploymentSettings?.branch || selected.branch};
         state.saveProjectMetadata?.(); state.markDirty?.('editor/project.json');
@@ -234,8 +236,23 @@
           showStatus('GitHub is still initializing this repository…');
           return;
         }
-        const changes = await github.compareWorkingTree(state.fs, remote.tree);
+        const submoduleRoots = (state.gitSubmodules || []).filter(module => !module.parentPath);
+        const changes = await github.compareWorkingTree(state.fs, remote.tree, {excludePaths:submoduleRoots.map(module => module.path)});
+        const submoduleStatuses = await github.getSubmoduleStatuses(state.fs, state.gitSubmodules || []);
         if (token !== statusToken) return;
+        const renderSubmodules = (items, depth = 0) => (items || []).map(module => {
+          const label = module.pendingCommitSha ? 'Pushed · parent pending' : module.dirty ? 'Modified' : 'Clean';
+          const statusClass = module.pendingCommitSha ? 'pending' : module.dirty ? 'modified' : 'clean';
+          return `<div class="source-control-submodule ${statusClass}" style="padding-left:${Math.min(depth, 8) * 12}px"><span class="source-control-submodule-dot"></span><div><strong>${esc(module.path)}</strong><span>${esc(module.owner + '/' + module.repo)} · ${esc(module.branch || 'main')}</span></div><em>${label}</em></div>${renderSubmodules(module.children, depth + 1)}`;
+        }).join('');
+        const allSubmodules = [];
+        const collectSubmodules = items => (items || []).forEach(module => { allSubmodules.push(module); collectSubmodules(module.children); });
+        collectSubmodules(submoduleStatuses);
+        const submoduleDirty = allSubmodules.some(module => module.dirty);
+        const submoduleBlocked = allSubmodules.some(module => module.dirty && !module.canPush);
+        const submoduleElement = tree.querySelector('[data-submodules]');
+        if (submoduleElement) submoduleElement.innerHTML = submoduleStatuses.length ? renderSubmodules(submoduleStatuses) : '<div class="source-control-clean">No submodules</div>';
+
         const showHidden = !!state.behavior?.showHiddenFolders;
         const visibleChanges = [];
         let settingsChanged = false;
@@ -255,11 +272,12 @@
         const button = tree.querySelector('[data-commit]');
         const isInitialCommit = !!remote.empty || !remote.commitSha;
         if (button) {
-          button.disabled = commitBusy || !changes.length || !canPush;
+          button.disabled = commitBusy || (!changes.length && !submoduleDirty) || !canPush || submoduleBlocked;
           button.textContent = isInitialCommit ? 'Initial Commit & Push' : 'Commit & Push';
           button.title = canPush ? (isInitialCommit ? 'Create the first commit on this empty GitHub repository.' : '') : 'You do not have push permission for this repository.';
         }
         if (!canPush) showStatus('This repository is read-only for your GitHub account.', true);
+        else if (submoduleBlocked) showStatus('A modified submodule is read-only. Grant push access to its repository or discard its changes.', true);
         else if (remote.truncated) showStatus('GitHub truncated the remote tree; large repositories may need a more focused sync later.', true);
         else if (isInitialCommit && changes.length) showStatus('This GitHub repository has no commits yet. Your next commit will become its initial commit.');
         else clearStatus();
@@ -411,6 +429,10 @@
               status.textContent = `Writing files… ${index + 1}/${restoredFiles.length}`;
             }
           }
+          if (state.loadGitSubmodules) {
+            status.textContent = 'Loading submodules from restored commit…';
+            await state.loadGitSubmodules(selected.owner, selected.repo, commitSha, selected.branch || 'main');
+          }
           state.markDirty?.();
           state.runDebugRefresh?.();
           state.refreshExplorer?.();
@@ -434,11 +456,12 @@
       button.textContent = 'Pushing…';
       clearStatus();
       try {
-        const result = await github.commitAndPush({owner:selected.owner, repo:selected.repo, branch:selected.branch || 'main', message, fs:state.fs});
+        const result = await github.commitWorkspaceAndPush({owner:selected.owner, repo:selected.repo, branch:selected.branch || 'main', message, fs:state.fs, submodules:state.gitSubmodules || []});
         if (!result.changed) {
           showStatus('Nothing to commit.');
           return;
         }
+        state.saveGitSubmodules?.();
         tree.querySelector('[data-commit-message]').value = '';
         showStatus(`Committed ${result.commitSha.slice(0, 7)} and pushed to ${selected.branch || 'main'}.`);
         // GitHub can briefly lag when the branch ref is read immediately after
@@ -452,6 +475,7 @@
         await refreshStatus();
         await loadHistory();
       } catch (e) {
+        state.saveGitSubmodules?.();
         showStatus(e.message || String(e), true);
         await refreshStatus();
       } finally {
