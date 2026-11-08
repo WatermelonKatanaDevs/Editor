@@ -379,8 +379,9 @@
       let objectURL = null;
       try {
         if (typeof createImageBitmap === 'function') {
-          bitmap = await createImageBitmap(source);
-        } else {
+          try { bitmap = await createImageBitmap(source); } catch (_) {}
+        }
+        if (!bitmap) {
           objectURL = URL.createObjectURL(source);
           image = new Image();
           await new Promise((resolve, reject) => {
