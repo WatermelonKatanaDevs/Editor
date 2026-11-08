@@ -491,8 +491,8 @@
           return;
         }
         const image = files.find(file =>
-          /\\.(png|jpe?g|webp|gif)$/i.test(file.name || '') ||
-          /^image\\//i.test(file.type || '')
+          /\.(png|jpe?g|webp|gif)$/i.test(file.name || '') ||
+          /^image\//i.test(file.type || '')
         ) || files[0];
         await setCoverFromFile(image);
       } catch (error) {
