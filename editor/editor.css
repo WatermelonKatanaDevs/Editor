@@ -497,3 +497,8 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
   .editor-audio-time{flex-basis:31px;font-size:10px}
   .editor-audio-volume{display:none}
 }
+
+.editor-audio-cover-panel{position:relative}
+.editor-audio-cover-drop-hint{padding:8px 10px;border:1px dashed var(--editor-border);border-radius:4px;color:var(--editor-muted-2);font-size:10px;line-height:1.45;text-align:center}
+.editor-audio-cover-panel.is-dragover .editor-audio-cover-frame{outline:2px solid var(--editor-accent);outline-offset:3px}
+.editor-audio-cover-panel.is-dragover .editor-audio-cover-drop-hint{border-color:var(--editor-accent);color:var(--editor-text);background:var(--editor-hover)}
