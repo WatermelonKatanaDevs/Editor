@@ -4302,6 +4302,7 @@ var DevToolsInternal = {
       '#dt-device-toolbar .dt-device-icon:hover{background:#3c4043;color:#fff;border-color:#5f6368;}',
       '#dt-device-toolbar .dt-device-size{font:10px monospace;color:#9aa0a6;white-space:nowrap;padding-left:3px;}',
       '#dt-device-toolbar .dt-device-close{margin-left:2px;}',
+      '#dt-device-toggle.active-toggle{color:#8ab4f8;background:#303134;border-radius:3px;}',
       '#viewport-container.device-emulation-active{background:#202124!important;overflow:hidden;}',
       '#viewport-container.device-emulation-active #loading-progress{top:38px;}',
       '#viewport-container .tab-iframe.device-emulated{max-width:none;max-height:none;}'
