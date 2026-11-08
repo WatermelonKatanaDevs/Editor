@@ -230,7 +230,7 @@
         '<div class="source-control-head"><div class="activity-sidebar-title">Source Control</div><button data-refresh title="Refresh">↻</button></div>' +
         '<section class="source-control-section"><div class="source-control-section-title">Local Repository</div>' +
         (hasRepository
-          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span>') + '</div>'
+          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span>') + '</div><div class="source-control-local-branch"><select data-local-branch aria-label="Switch branch"></select><button type="button" data-local-branch-create>New Branch</button></div>'
           : persistent
             ? '<div class="source-control-local-hint">This folder is not being tracked by Git yet.</div><button type="button" class="source-control-create-repo" data-local-init>Initialize Repository</button>'
             : '<div class="source-control-local-hint">Local Git requires a folder opened directly from your computer. Open a folder to keep commits in its <code>.git</code> directory.</div>') +
@@ -246,6 +246,16 @@
           : '') +
         '</div>';
       tree.querySelector('[data-refresh]')?.addEventListener('click', () => void openLocalSourceControl());
+      tree.querySelector('[data-local-branch]')?.addEventListener('change', event => {
+        const branch = event.currentTarget.value;
+        if (branch && branch !== localGitRepository?.branch) void runLocalGitAction(['switch', branch], 'Switched to branch ' + branch + '.');
+      });
+      tree.querySelector('[data-local-branch-create]')?.addEventListener('click', () => {
+        const name = window.prompt('New local branch name');
+        if (name == null || !name.trim()) return;
+        void runLocalGitAction(['switch', '-c', name.trim()], 'Created and switched to branch ' + name.trim() + '.');
+      });
+      void loadLocalBranches();
       tree.querySelector('[data-local-init]')?.addEventListener('click', async event => {
         const button = event.currentTarget;
         button.disabled = true;
@@ -276,6 +286,21 @@
       tree.querySelector('[data-local-commit]')?.addEventListener('click', () => void commitLocal());
       tree.querySelector('[data-local-publish]')?.addEventListener('click', () => void publishLocalRepository());
       tree.querySelectorAll('[data-local-commit-sha]').forEach(button => button.addEventListener('click', () => void openLocalCommit(button.dataset.localCommitSha)));
+    }
+
+    async function loadLocalBranches() {
+      const select = tree.querySelector('[data-local-branch]');
+      if (!select || !localGitRepository?.isRepository) return;
+      try {
+        const service = getLocalGit();
+        const branches = await service.git.listBranches({fs:service.fs, dir:(await service._repository('/')).dir});
+        const current = localGitRepository.branch || '';
+        select.innerHTML = branches.map(name => '<option value="' + esc(name) + '"' + (name === current ? ' selected' : '') + '>' + esc(name) + '</option>').join('');
+        select.disabled = branches.length < 2;
+      } catch (error) {
+        select.innerHTML = '<option value="">' + esc(error.message || 'Could not load branches') + '</option>';
+        select.disabled = true;
+      }
     }
 
     async function runLocalGitAction(args, message) {
