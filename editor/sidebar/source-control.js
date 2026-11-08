@@ -244,9 +244,11 @@
           if (permission && permission !== 'granted') throw new Error('Write permission is required to create the .git directory in this folder.');
           localGitRepository = await getLocalGit().init('/', 'main');
           await state.fs.flush?.();
-          showStatus('Initialized a local Git repository on branch main.');
+          localGitStatus = {changes:[], clean:true};
+          renderLocalShell();
           await refreshLocalStatus();
           await loadLocalHistory();
+          showStatus('Initialized a local Git repository on branch main.');
         } catch (error) {
           showStatus(error.message || String(error), true);
           if (button.isConnected) { button.disabled = false; button.textContent = 'Initialize Repository'; }
