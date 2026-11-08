@@ -384,11 +384,38 @@
     return encoder.bytes();
   }
 
-  async function encodeAPNG(frames, width, height) {
+  function crc32(bytes, start, end) {
+    let crc = 0xffffffff;
+    for (let i = start; i < end; i++) {
+      crc ^= bytes[i];
+      for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  function setAPNGLoopCount(bytes, loopCount) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let offset = 8;
+    while (offset + 12 <= bytes.length) {
+      const length = view.getUint32(offset, false);
+      const end = offset + 12 + length;
+      if (end > bytes.length) break;
+      if (readAscii(bytes, offset + 4, 4) === 'acTL' && length === 8) {
+        view.setUint32(offset + 12, Math.max(0, Number(loopCount) || 0), false);
+        view.setUint32(offset + 16, crc32(bytes, offset + 4, offset + 16), false);
+        return bytes;
+      }
+      offset = end;
+    }
+    return bytes;
+  }
+
+  async function encodeAPNG(frames, width, height, loopCount) {
     const upng = await loadUPNG();
-    const buffers = frames.map(frame => exactBuffer(new Uint8Array(frame.data)));
+    const buffers = frames.map(frame => exactBuffer(frame.data));
     const delays = frames.map(frame => Math.max(10, Math.round(frame.duration)));
-    return new Uint8Array(upng.encode(buffers, width, height, 0, delays));
+    const encoded = new Uint8Array(upng.encode(buffers, width, height, 0, delays));
+    return frames.length > 1 ? setAPNGLoopCount(encoded, loopCount) : encoded;
   }
 
   async function encodeWebP(frames, width, height, loopCount) {
@@ -778,7 +805,7 @@
           if (!frames.length) throw new Error('Add at least one frame before exporting.');
           validateDimensions(width, height, frames.length);
           if (format === 'gif') return new Uint8Array(await encodeGIF(frames, width, height, currentLoopCount));
-          if (format === 'apng') return new Uint8Array(await encodeAPNG(frames, width, height));
+          if (format === 'apng') return new Uint8Array(await encodeAPNG(frames, width, height, currentLoopCount));
           if (format === 'webp') return new Uint8Array(await encodeWebP(frames, width, height, currentLoopCount));
           throw new Error('Unsupported animation format.');
         }
@@ -852,7 +879,7 @@
           try {
             const format = outputFormat.value;
             const bytes = await encode(format);
-            downloadBlob(new Blob([bytes], { type: format === 'gif' ? 'image/gif' : format === 'webp' ? 'image/webp' : 'image/apng' }),
+            downloadBlob(new Blob([bytes], { type: format === 'gif' ? 'image/gif' : format === 'webp' ? 'image/webp' : 'image/png' }),
               cleanFileName(outputName.value || 'animation') + extensionFor(format));
             say('Animation downloaded · ' + formatBytes(bytes.byteLength));
           } catch (error) {
