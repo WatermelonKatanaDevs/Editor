@@ -12,13 +12,12 @@
       const host = wrap.querySelector('.source-control-diff-tab-editor');
       g.viewBody.appendChild(wrap);
 
-      let disposed = false, diffEditor = null, originalModel = null, modifiedModel = null, resizeObserver = null;
+      let disposed = false, editor = null, model = null, resizeObserver = null;
       const cleanup = () => {
         disposed = true;
         try { resizeObserver?.disconnect(); } catch (_) {}
-        try { diffEditor?.dispose(); } catch (_) {}
-        try { originalModel?.dispose(); } catch (_) {}
-        try { modifiedModel?.dispose(); } catch (_) {}
+        try { editor?.dispose(); } catch (_) {}
+        try { model?.dispose(); } catch (_) {}
       };
       tab._diffCleanup = cleanup;
       const toBytes = value => {
@@ -35,73 +34,50 @@
       };
       const decode = value => new TextDecoder('utf-8', {fatal:false}).decode(toBytes(value));
       try {
-        if (data.type === 'modified' && !data.oldSha) {
-          throw new Error('The previous GitHub version could not be matched to this file. Refresh Source Control and try again.');
+        let bytes = data.newBytes || new Uint8Array();
+        if (data.type === 'deleted') {
+          if (!data.oldSha) throw new Error('The previous GitHub version could not be matched to this file.');
+          bytes = await window.GitHubService.readBlob(data.owner, data.repo, data.oldSha);
+        } else if (ctx.state.fs?.readFileSync && (data.fsPath || data.path)) {
+          const liveBytes = ctx.state.fs.readFileSync(data.fsPath || data.path, 'binary');
+          if (liveBytes != null) bytes = liveBytes;
         }
-        const oldBytes = data.type === 'added'
-          ? new Uint8Array()
-          : data.oldSha
-            ? await window.GitHubService.readBlob(data.owner, data.repo, data.oldSha)
-            : new Uint8Array();
         if (disposed || !host.isConnected) return wrap;
 
-        let workingBytes = data.newBytes || new Uint8Array();
-        if (data.type !== 'deleted' && ctx.state.fs?.readFileSync && (data.fsPath || data.path)) {
-          const liveBytes = ctx.state.fs.readFileSync(data.fsPath || data.path, 'binary');
-          if (liveBytes != null) workingBytes = liveBytes;
-        }
-        const oldText = decode(oldBytes).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        const newText = (data.type === 'deleted' ? '' : decode(workingBytes)).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        if (data.type === 'modified' && !oldText.length && !newText.length) {
-          throw new Error('Both versions were read as empty. The diff was stopped rather than showing a misleading blank comparison.');
-        }
-        if (oldText.includes('\\0') || newText.includes('\\0')) {
-          throw new Error('This file appears to be binary and cannot be shown as a text diff.');
-        }
-
+        const content = decode(bytes).replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n');
+        if (content.includes('\\0')) throw new Error('This file appears to be binary and cannot be shown as text.');
         const monaco = await ctx.state.ensureMonaco();
         if (disposed || !host.isConnected) return wrap;
         const language = window.EditorMonacoLanguage?.(data.path) || 'plaintext';
-        const base = 'inmemory://watermelonkatana-diff/' + encodeURIComponent(data.path || 'file') + '-' + Math.random().toString(36).slice(2);
-        originalModel = monaco.editor.createModel(oldText, language, monaco.Uri.parse(base + '.original'));
-        modifiedModel = monaco.editor.createModel(newText, language, monaco.Uri.parse(base + '.modified'));
-        diffEditor = monaco.editor.createDiffEditor(host, {
+        const uri = monaco.Uri.parse('inmemory://watermelonkatana-source-view/' + encodeURIComponent(data.path || 'file') + '-' + Math.random().toString(36).slice(2));
+        model = monaco.editor.createModel(content, language, uri);
+        editor = monaco.editor.create(host, {
+          model,
           theme:window.EditorTheme?.id || 'vs-dark',
           readOnly:true,
-          originalEditable:false,
-          renderSideBySide:false,
-          renderIndicators:true,
-          renderOverviewRuler:true,
-          automaticLayout:true,
+          domReadOnly:true,
           minimap:{enabled:false},
+          automaticLayout:true,
           scrollBeyondLastLine:false,
-          ignoreTrimWhitespace:false,
-          diffCodeLens:false,
-          hideUnchangedRegions:{enabled:false},
-          // Avoid the draggable scrollbar path that previously triggered
-          // Monaco's delegateVerticalScrollbarPointerDown exception.
+          wordWrap:'off',
+          lineNumbers:'on',
+          glyphMargin:false,
+          folding:true,
+          renderLineHighlight:'none',
+          contextmenu:false,
           scrollbar:{vertical:'auto',horizontal:'auto',alwaysConsumeMouseWheel:false}
         });
-        diffEditor.setModel({original:originalModel,modified:modifiedModel});
-        diffEditor.getOriginalEditor().updateOptions({readOnly:true,domReadOnly:true,wordWrap:'off',lineNumbers:'on'});
-        diffEditor.getModifiedEditor().updateOptions({readOnly:true,domReadOnly:true,wordWrap:'off',lineNumbers:'on'});
         const layout = () => {
-          if (disposed || !host.isConnected) return;
+          if (disposed || !host.isConnected || !editor) return;
           const rect = host.getBoundingClientRect();
-          if (rect.width > 0 && rect.height > 0) {
-            try { diffEditor.layout({width:Math.floor(rect.width),height:Math.floor(rect.height)}); } catch (_) {}
-          }
+          if (rect.width > 0 && rect.height > 0) editor.layout({width:Math.floor(rect.width),height:Math.floor(rect.height)});
         };
         resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(layout) : null;
         resizeObserver?.observe(host);
         window.addEventListener('resize', layout);
         const previousCleanup = tab._diffCleanup;
         tab._diffCleanup = () => { window.removeEventListener('resize',layout); previousCleanup(); };
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          layout();
-          setTimeout(layout,80);
-          setTimeout(layout,240);
-        }));
+        requestAnimationFrame(() => requestAnimationFrame(layout));
       } catch (error) {
         if (!disposed) {
           const message = document.createElement('div');
