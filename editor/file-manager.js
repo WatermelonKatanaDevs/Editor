@@ -3,7 +3,7 @@
     html: 'text/html', htm: 'text/html', css: 'text/css',
     js: 'text/javascript', mjs: 'text/javascript', cjs: 'text/javascript',
     json: 'application/json', map: 'application/json', xml: 'application/xml',
-    txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', tsv: 'text/tab-separated-values', pdf: 'application/pdf',
+    txt: 'text/plain', md: 'text/markdown', tsv: 'text/tab-separated-values',
     jst: 'text/x-jst', ejs: 'text/x-ejs',
     c: 'text/x-c', h: 'text/x-c', cc: 'text/x-c++',
     py: 'text/x-python', pyw: 'text/x-python', gyp: 'text/x-python', gypi: 'text/x-python',
