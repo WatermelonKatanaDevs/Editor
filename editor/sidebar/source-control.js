@@ -120,23 +120,47 @@
               : [];
         const addedLines = ops.filter(op => op.type === 'add').map(op => op.line + 1);
         const removed = [];
+        const unchangedRuns = [];
         let currentLine = 0;
         for (let i=0;i<ops.length;) {
-          if (ops[i].type !== 'remove') {
-            if (ops[i].type === 'equal' || ops[i].type === 'add') currentLine++;
-            i++;
+          if (ops[i].type === 'remove') {
+            const lines = [];
+            while (i<ops.length && ops[i].type === 'remove') lines.push(ops[i++].text);
+            removed.push({afterLineNumber:currentLine,lines});
             continue;
           }
-          const lines = [];
-          while (i<ops.length && ops[i].type === 'remove') lines.push(ops[i++].text);
-          removed.push({afterLineNumber:currentLine,lines});
+          if (ops[i].type === 'equal') {
+            const first = currentLine + 1;
+            while (i<ops.length && ops[i].type === 'equal') { currentLine++; i++; }
+            unchangedRuns.push({first,last:currentLine});
+            continue;
+          }
+          if (ops[i].type === 'add') { currentLine++; i++; }
         }
+        // Keep a little context around each change and collapse the middle of
+        // long unchanged stretches into a clickable-looking visual divider.
+        const hiddenRanges = [];
+        const collapsed = [];
+        const contextLines = 3;
+        const collapseThreshold = 12;
+        for (const run of unchangedRuns) {
+          const count = run.last - run.first + 1;
+          if (count > collapseThreshold) {
+            const start = run.first + contextLines;
+            const end = run.last - contextLines;
+            if (end >= start) {
+              hiddenRanges.push(new monaco.Range(start,1,end,1));
+              collapsed.push({afterLineNumber:start-1,count:end-start+1});
+            }
+          }
+        }
+        if (hiddenRanges.length) editor.setHiddenAreas(hiddenRanges);
         const decorations = addedLines.map(line => ({
           range:new monaco.Range(line,1,line,1),
           options:{isWholeLine:true,className:'source-control-monaco-added',linesDecorationsClassName:'source-control-monaco-added-gutter'}
         }));
         editor.deltaDecorations([], decorations);
-        if (removed.length) {
+        if (removed.length || collapsed.length) {
           editor.changeViewZones(accessor => {
             for (const block of removed) {
               const node = document.createElement('div');
@@ -150,6 +174,17 @@
               accessor.addZone({
                 afterLineNumber:block.afterLineNumber,
                 heightInLines:block.lines.length,
+                domNode:node,
+                suppressMouseDown:true
+              });
+            }
+            for (const block of collapsed) {
+              const node = document.createElement('div');
+              node.className = 'source-control-monaco-collapse-zone';
+              node.textContent = '··· ' + block.count + ' unchanged lines ···';
+              accessor.addZone({
+                afterLineNumber:block.afterLineNumber,
+                heightInPx:22,
                 domNode:node,
                 suppressMouseDown:true
               });
