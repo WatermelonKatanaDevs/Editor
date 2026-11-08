@@ -2114,12 +2114,14 @@ window.__editorInitPromise = (async function () {
     }
     const branch = String(remote.branch || detected.branch || 'main');
     const remoteState = await window.GitHubService.getRemoteState(remote.owner, remote.repo, branch);
+    const importedRevision = String(remote.revision || '');
+    const lastPush = /^[0-9a-f]{40}$/i.test(importedRevision) ? importedRevision : String(remoteState.commitSha || '');
     await service.runSerialized(['config', 'remote.origin.url', 'https://github.com/' + remote.owner + '/' + remote.repo + '.git'], {cwd:'/'});
     await service.runSerialized(['config', 'branch.' + branch + '.remote', 'origin'], {cwd:'/'});
     await service.runSerialized(['config', 'branch.' + branch + '.merge', 'refs/heads/' + branch], {cwd:'/'});
-    const lastPushedLocal = remoteState.commitSha ? (detected.head || '') : '';
+    const lastPushedLocal = lastPush ? (detected.head || '') : '';
     await service.runSerialized(['config', 'remote.origin.lastPushedLocal', lastPushedLocal], {cwd:'/'});
-    await service.runSerialized(['config', 'remote.origin.lastPush', String(remoteState.commitSha || '')], {cwd:'/'});
+    await service.runSerialized(['config', 'remote.origin.lastPush', lastPush], {cwd:'/'});
     await fs.flush?.();
   }
 
