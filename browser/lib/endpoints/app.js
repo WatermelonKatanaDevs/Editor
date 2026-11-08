@@ -2553,6 +2553,311 @@
       })();
 
       /**
+       * assert
+       */
+      polyfills.assert = (function() {
+        const module = { exports: {} };
+
+        function inspect(value) {
+          try {
+            const result = polyfills.util && polyfills.util.inspect ? polyfills.util.inspect(value) : JSON.stringify(value);
+            if (result !== undefined) return result;
+          } catch (_) {}
+          try { return String(value); } catch (_) { return '<uninspectable value>'; }
+        }
+
+        class AssertionError extends Error {
+          constructor(options = {}) {
+            const message = options.message == null
+              ? inspect(options.actual) + ' ' + (options.operator || '==') + ' ' + inspect(options.expected)
+              : String(options.message);
+            super(message);
+            this.name = 'AssertionError';
+            this.actual = options.actual;
+            this.expected = options.expected;
+            this.operator = options.operator || '==';
+            this.generatedMessage = options.message == null;
+            this.code = 'ERR_ASSERTION';
+            if (Error.captureStackTrace) Error.captureStackTrace(this, options.stackStartFn || AssertionError);
+          }
+        }
+
+        function assertionFailure(actual, expected, message, operator, stackStartFn) {
+          throw new AssertionError({ actual, expected, message, operator, stackStartFn });
+        }
+
+        function enumerableKeys(value) {
+          return Reflect.ownKeys(value).filter(key => {
+            const descriptor = Object.getOwnPropertyDescriptor(value, key);
+            return !!(descriptor && descriptor.enumerable);
+          });
+        }
+
+        function bytesEqual(a, b) {
+          if (a.byteLength !== b.byteLength) return false;
+          const left = new Uint8Array(a.buffer || a, a.byteOffset || 0, a.byteLength);
+          const right = new Uint8Array(b.buffer || b, b.byteOffset || 0, b.byteLength);
+          for (let i = 0; i < left.length; i++) {
+            if (left[i] !== right[i]) return false;
+          }
+          return true;
+        }
+
+        function deepEqual(actual, expected, strict, pairs = new Map()) {
+          if (strict ? Object.is(actual, expected) : actual == expected) return true;
+          if (actual === null || expected === null || typeof actual !== 'object' || typeof expected !== 'object') return false;
+          if (typeof actual === 'function' || typeof expected === 'function') return false;
+
+          const actualTag = Object.prototype.toString.call(actual);
+          const expectedTag = Object.prototype.toString.call(expected);
+          if (actualTag !== expectedTag) return false;
+          if (strict && Object.getPrototypeOf(actual) !== Object.getPrototypeOf(expected)) return false;
+
+          if (pairs.has(actual)) return pairs.get(actual) === expected;
+          pairs.set(actual, expected);
+
+          if (actualTag === '[object Date]') return actual.getTime() === expected.getTime();
+          if (actualTag === '[object RegExp]') {
+            return actual.source === expected.source && actual.flags === expected.flags && actual.lastIndex === expected.lastIndex;
+          }
+          if (actualTag === '[object Number]' || actualTag === '[object String]' ||
+              actualTag === '[object Boolean]' || actualTag === '[object BigInt]' ||
+              actualTag === '[object Symbol]') {
+            if (!deepEqual(actual.valueOf(), expected.valueOf(), strict, pairs)) return false;
+          }
+          if (actualTag === '[object ArrayBuffer]' || actualTag === '[object SharedArrayBuffer]') {
+            if (!bytesEqual(actual, expected)) return false;
+          } else if (ArrayBuffer.isView(actual)) {
+            if (actual.constructor !== expected.constructor || !bytesEqual(actual, expected)) return false;
+          } else if (actualTag === '[object Map]') {
+            if (actual.size !== expected.size) return false;
+            const remaining = Array.from(expected.entries());
+            for (const [key, value] of actual.entries()) {
+              let found = -1;
+              for (let i = 0; i < remaining.length; i++) {
+                const trialPairs = new Map(pairs);
+                if (deepEqual(key, remaining[i][0], strict, trialPairs) &&
+                    deepEqual(value, remaining[i][1], strict, trialPairs)) {
+                  found = i;
+                  for (const [left, right] of trialPairs) pairs.set(left, right);
+                  break;
+                }
+              }
+              if (found < 0) return false;
+              remaining.splice(found, 1);
+            }
+          } else if (actualTag === '[object Set]') {
+            if (actual.size !== expected.size) return false;
+            const remaining = Array.from(expected.values());
+            for (const value of actual.values()) {
+              let found = -1;
+              for (let i = 0; i < remaining.length; i++) {
+                const trialPairs = new Map(pairs);
+                if (deepEqual(value, remaining[i], strict, trialPairs)) {
+                  found = i;
+                  for (const [left, right] of trialPairs) pairs.set(left, right);
+                  break;
+                }
+              }
+              if (found < 0) return false;
+              remaining.splice(found, 1);
+            }
+          } else if (actualTag === '[object WeakMap]' || actualTag === '[object WeakSet]' || actualTag === '[object Promise]') {
+            return false;
+          } else if (actualTag === '[object Error]' || actual instanceof Error || expected instanceof Error) {
+            if (actual.name !== expected.name || actual.message !== expected.message) return false;
+            if (!deepEqual(actual.cause, expected.cause, strict, pairs)) return false;
+          }
+
+          const actualKeys = enumerableKeys(actual);
+          const expectedKeys = enumerableKeys(expected);
+          if (actualKeys.length !== expectedKeys.length) return false;
+          for (const key of actualKeys) {
+            if (!expectedKeys.includes(key)) return false;
+            let left, right;
+            try {
+              left = actual[key];
+              right = expected[key];
+            } catch (_) {
+              return false;
+            }
+            if (!deepEqual(left, right, strict, pairs)) return false;
+          }
+          return true;
+        }
+
+        function matchesError(error, expected) {
+          if (expected == null) return true;
+          if (expected instanceof RegExp) {
+            expected.lastIndex = 0;
+            return expected.test(String(error && error.message !== undefined ? error.message : error));
+          }
+          if (typeof expected === 'function') {
+            if (expected.prototype instanceof Error || expected === Error || expected === TypeError ||
+                expected === RangeError || expected === ReferenceError || expected === SyntaxError) {
+              return error instanceof expected;
+            }
+            return expected(error) === true;
+          }
+          if (typeof expected === 'object') {
+            for (const key of Reflect.ownKeys(expected)) {
+              if (typeof key === 'symbol') continue;
+              const expectedValue = expected[key];
+              const actualValue = error == null ? undefined : error[key];
+              if (typeof expectedValue === 'function') {
+                if (expectedValue(actualValue) !== true) return false;
+              } else if (!deepEqual(actualValue, expectedValue, true)) {
+                return false;
+              }
+            }
+            return true;
+          }
+          throw new TypeError('The "expected" argument must be a RegExp, function, or object.');
+        }
+
+        function createAssert(strictMode) {
+          function assert(value, message) {
+            if (!value) assertionFailure(value, true, message, '==', assert);
+          }
+
+          assert.ok = assert;
+          assert.fail = function(actual, expected, message, operator) {
+            if (arguments.length === 1) {
+              message = actual;
+              actual = undefined;
+              expected = undefined;
+              operator = 'fail';
+            } else if (arguments.length === 2 && typeof expected === 'string') {
+              message = expected;
+              expected = undefined;
+              operator = 'fail';
+            }
+            assertionFailure(actual, expected, message, operator || 'fail', assert.fail);
+          };
+
+          assert.equal = function(actual, expected, message) {
+            if (!(strictMode ? Object.is(actual, expected) : actual == expected)) {
+              assertionFailure(actual, expected, message, strictMode ? 'strictEqual' : '==', assert.equal);
+            }
+          };
+          assert.notEqual = function(actual, expected, message) {
+            if (strictMode ? Object.is(actual, expected) : actual == expected) {
+              assertionFailure(actual, expected, message, strictMode ? 'notStrictEqual' : '!=', assert.notEqual);
+            }
+          };
+          assert.strictEqual = function(actual, expected, message) {
+            if (!Object.is(actual, expected)) assertionFailure(actual, expected, message, 'strictEqual', assert.strictEqual);
+          };
+          assert.notStrictEqual = function(actual, expected, message) {
+            if (Object.is(actual, expected)) assertionFailure(actual, expected, message, 'notStrictEqual', assert.notStrictEqual);
+          };
+          assert.deepEqual = function(actual, expected, message) {
+            if (!deepEqual(actual, expected, strictMode, new Map())) {
+              assertionFailure(actual, expected, message, strictMode ? 'deepStrictEqual' : 'deepEqual', assert.deepEqual);
+            }
+          };
+          assert.notDeepEqual = function(actual, expected, message) {
+            if (deepEqual(actual, expected, strictMode, new Map())) {
+              assertionFailure(actual, expected, message, strictMode ? 'notDeepStrictEqual' : 'notDeepEqual', assert.notDeepEqual);
+            }
+          };
+          assert.deepStrictEqual = function(actual, expected, message) {
+            if (!deepEqual(actual, expected, true, new Map())) {
+              assertionFailure(actual, expected, message, 'deepStrictEqual', assert.deepStrictEqual);
+            }
+          };
+          assert.notDeepStrictEqual = function(actual, expected, message) {
+            if (deepEqual(actual, expected, true, new Map())) {
+              assertionFailure(actual, expected, message, 'notDeepStrictEqual', assert.notDeepStrictEqual);
+            }
+          };
+
+          assert.throws = function(block, expected, message) {
+            if (typeof expected === 'string' && message === undefined) {
+              message = expected;
+              expected = undefined;
+            }
+            if (typeof block !== 'function') throw new TypeError('The "block" argument must be of type function.');
+            let thrown = false;
+            let error;
+            try { block(); } catch (err) { thrown = true; error = err; }
+            if (!thrown) assertionFailure(undefined, expected, message, 'throws', assert.throws);
+            if (!matchesError(error, expected)) throw error;
+            return error;
+          };
+
+          assert.doesNotThrow = function(block, expected, message) {
+            if (typeof expected === 'string' && message === undefined) {
+              message = expected;
+              expected = undefined;
+            }
+            if (typeof block !== 'function') throw new TypeError('The "block" argument must be of type function.');
+            try {
+              return block();
+            } catch (error) {
+              if (expected != null && !matchesError(error, expected)) throw error;
+              assertionFailure(error, undefined, message, 'doesNotThrow', assert.doesNotThrow);
+            }
+          };
+
+          assert.rejects = async function(block, expected, message) {
+            if (typeof expected === 'string' && message === undefined) {
+              message = expected;
+              expected = undefined;
+            }
+            let promise;
+            try {
+              promise = typeof block === 'function' ? block() : block;
+              await Promise.resolve(promise);
+            } catch (error) {
+              if (!matchesError(error, expected)) throw error;
+              return error;
+            }
+            assertionFailure(undefined, expected, message, 'rejects', assert.rejects);
+          };
+
+          assert.doesNotReject = async function(block, expected, message) {
+            if (typeof expected === 'string' && message === undefined) {
+              message = expected;
+              expected = undefined;
+            }
+            try {
+              const promise = typeof block === 'function' ? block() : block;
+              return await Promise.resolve(promise);
+            } catch (error) {
+              if (expected != null && !matchesError(error, expected)) throw error;
+              assertionFailure(error, undefined, message, 'doesNotReject', assert.doesNotReject);
+            }
+          };
+
+          assert.ifError = function(error) {
+            if (error !== null && error !== undefined) throw error;
+          };
+
+          assert.match = function(value, regexp, message) {
+            if (typeof value !== 'string') throw new TypeError('The "string" argument must be of type string.');
+            if (!(regexp instanceof RegExp)) throw new TypeError('The "regexp" argument must be an instance of RegExp.');
+            regexp.lastIndex = 0;
+            if (!regexp.test(value)) assertionFailure(value, regexp, message, 'match', assert.match);
+          };
+          assert.doesNotMatch = function(value, regexp, message) {
+            if (typeof value !== 'string') throw new TypeError('The "string" argument must be of type string.');
+            if (!(regexp instanceof RegExp)) throw new TypeError('The "regexp" argument must be an instance of RegExp.');
+            regexp.lastIndex = 0;
+            if (regexp.test(value)) assertionFailure(value, regexp, message, 'doesNotMatch', assert.doesNotMatch);
+          };
+
+          assert.AssertionError = AssertionError;
+          return assert;
+        }
+
+        const assert = createAssert(false);
+        const strict = createAssert(true);
+        assert.strict = strict;
+        return assert;
+      })();
+
+      /**
        * util (Updated with TextDecoder and TextEncoder support)
        */
       polyfills.util = (function() {
