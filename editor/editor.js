@@ -2095,6 +2095,34 @@ window.__editorInitPromise = (async function () {
     state.peerServers.clear();
     try { window.keepAlive?.disable?.(); } catch (_) {}
   }
+  async function initializeGitHubWorkspaceRepository(fs, remote) {
+    if (!fs || remote?.provider !== 'github' || !remote.owner || !remote.repo || typeof window.LocalGitService !== 'function') return;
+    const service = new window.LocalGitService(fs);
+    let detected = await service.detect('/');
+    if (!detected.isRepository) {
+      await service.init('/', remote.branch || 'main');
+      const account = window.GitHubService?.getUser?.() || {};
+      const login = String(account.login || 'github-user');
+      await service.runSerialized(['config', 'user.name', String(account.name || login)], {cwd:'/'});
+      await service.runSerialized(['config', 'user.email', String(account.email || (account.id ? account.id + '+' : '') + login + '@users.noreply.github.com')], {cwd:'/'});
+      await service.runSerialized(['add', '-A'], {cwd:'/'});
+      const status = await service.status('/');
+      if (status.changes.some(change => change.staged)) {
+        await service.runSerialized(['commit', '-m', 'GitHub workspace baseline'], {cwd:'/'});
+      }
+      detected = await service.detect('/');
+    }
+    const branch = String(remote.branch || detected.branch || 'main');
+    const remoteState = await window.GitHubService.getRemoteState(remote.owner, remote.repo, branch);
+    await service.runSerialized(['config', 'remote.origin.url', 'https://github.com/' + remote.owner + '/' + remote.repo + '.git'], {cwd:'/'});
+    await service.runSerialized(['config', 'branch.' + branch + '.remote', 'origin'], {cwd:'/'});
+    await service.runSerialized(['config', 'branch.' + branch + '.merge', 'refs/heads/' + branch], {cwd:'/'});
+    const lastPushedLocal = remoteState.commitSha ? (detected.head || '') : '';
+    await service.runSerialized(['config', 'remote.origin.lastPushedLocal', lastPushedLocal], {cwd:'/'});
+    await service.runSerialized(['config', 'remote.origin.lastPush', String(remoteState.commitSha || '')], {cwd:'/'});
+    await fs.flush?.();
+  }
+
   async function replaceFileSystem(fs, name, openFirst = true, options = {}) {
     saveWorkspaceLayout();
     clearTimeout(state.cacheTimer);
@@ -2126,6 +2154,13 @@ window.__editorInitPromise = (async function () {
     if (options.gitEnabled === false) state.gitRemote = null;
     state.projectOwner = options.projectOwner !== false;
     state.gitEnabled = options.gitEnabled !== false;
+    if (state.gitRemote?.provider === 'github' && !fs.isPersistentDirectory) {
+      try {
+        await initializeGitHubWorkspaceRepository(fs, state.gitRemote);
+      } catch (error) {
+        console.warn('Could not initialize the local Git view for this GitHub workspace:', error);
+      }
+    }
     getBuiltin('environment')?.load();
     state.fileManager.setFileSystem(fs);
     state.fileManager.setShowHiddenFolders?.(state.behavior.showHiddenFolders);
