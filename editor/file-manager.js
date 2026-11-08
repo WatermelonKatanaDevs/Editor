@@ -16,7 +16,7 @@
     sh: 'text/x-shellscript', bash: 'text/x-shellscript', coffee: 'text/x-coffeescript',
     patch: 'text/x-diff', bnf: 'text/x-bnf',
     bin: 'application/octet-stream', node: 'application/octet-stream', lock: 'text/plain',
-    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    png: 'image/png', apng: 'image/apng', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
     webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
     mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', glsl: 'text/x-hlsl',
     mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
