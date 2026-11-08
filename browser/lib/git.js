@@ -31,6 +31,7 @@
       if (!filesystem || typeof filesystem.readFileSync !== 'function') throw new Error('Git requires an initialized editor filesystem.');
       this.filesystem = filesystem;
       this.modifiedAt = new Map();
+      this.statClock = Date.now();
       const promises = {
         readFile: (path, options) => this.readFile(path, options),
         writeFile: (path, data, options) => this.writeFile(path, data, options),
@@ -147,7 +148,11 @@
       const file = !directory && this.filesystem.existsSync(relative);
       if (!directory && !file) throw gitFsError('ENOENT', normalized);
       const bytes = file ? this.filesystem.readFileSync(relative, 'binary') : null;
-      const modified = new Date(this.modifiedAt.get(normalized) || 0);
+      // FileSystem caches bytes but does not retain browser File.lastModified values.
+      // Use a monotonic timestamp so isomorphic-git never trusts a stale stat cache
+      // after the editor changes a same-sized file outside this adapter.
+      const modified = new Date(Math.max(Date.now(), ++this.statClock, this.modifiedAt.get(normalized) || 0));
+      this.statClock = modified.getTime();
       return {
         dev: 0,
         ino: 0,
