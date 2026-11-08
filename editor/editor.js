@@ -2113,15 +2113,24 @@ window.__editorInitPromise = (async function () {
       detected = await service.detect('/');
     }
     const branch = String(remote.branch || detected.branch || 'main');
-    const remoteState = await window.GitHubService.getRemoteState(remote.owner, remote.repo, branch);
-    const importedRevision = String(remote.revision || '');
-    const lastPush = /^[0-9a-f]{40}$/i.test(importedRevision) ? importedRevision : String(remoteState.commitSha || '');
-    await service.runSerialized(['config', 'remote.origin.url', 'https://github.com/' + remote.owner + '/' + remote.repo + '.git'], {cwd:'/'});
+    const remoteUrl = 'https://github.com/' + remote.owner + '/' + remote.repo + '.git';
+    const repository = await service._repository('/');
+    const readConfig = async path => await service.git.getConfig({fs:service.fs, dir:repository.dir, path}).catch(() => null);
+    const existingUrl = await readConfig('remote.origin.url');
+    const existingLastPushedLocal = await readConfig('remote.origin.lastPushedLocal');
+    const existingLastPush = await readConfig('remote.origin.lastPush');
+    const trackingReady = existingUrl === remoteUrl && existingLastPushedLocal !== null && existingLastPush !== null;
+    await service.runSerialized(['config', 'remote.origin.url', remoteUrl], {cwd:'/'});
     await service.runSerialized(['config', 'branch.' + branch + '.remote', 'origin'], {cwd:'/'});
     await service.runSerialized(['config', 'branch.' + branch + '.merge', 'refs/heads/' + branch], {cwd:'/'});
-    const lastPushedLocal = lastPush ? (detected.head || '') : '';
-    await service.runSerialized(['config', 'remote.origin.lastPushedLocal', lastPushedLocal], {cwd:'/'});
-    await service.runSerialized(['config', 'remote.origin.lastPush', lastPush], {cwd:'/'});
+    if (!trackingReady) {
+      const remoteState = await window.GitHubService.getRemoteState(remote.owner, remote.repo, branch);
+      const importedRevision = String(remote.revision || '');
+      const lastPush = /^[0-9a-f]{40}$/i.test(importedRevision) ? importedRevision : String(remoteState.commitSha || '');
+      const lastPushedLocal = lastPush ? (detected.head || '') : '';
+      await service.runSerialized(['config', 'remote.origin.lastPushedLocal', lastPushedLocal], {cwd:'/'});
+      await service.runSerialized(['config', 'remote.origin.lastPush', lastPush], {cwd:'/'});
+    }
     await fs.flush?.();
   }
 
