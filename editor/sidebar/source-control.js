@@ -904,6 +904,10 @@
           if (typeof JSZip === 'undefined') throw new Error('JSZip is unavailable, so the commit archive cannot be restored.');
           const ignoreNodeModules = state.behavior?.ignoreNodeModules !== false;
           const isNodeModulesPath = path => ignoreNodeModules && String(path || '').replace(/^\/+/, '').split('/').includes('node_modules');
+          const isGitMetadataPath = path => {
+            const normalized = String(path || '').replace(/^\/+/, '');
+            return normalized === '.git' || normalized.startsWith('.git/');
+          };
           const formatBytes = value => {
             const size = Number(value) || 0;
             if (size < 1024) return size + ' B';
@@ -976,14 +980,14 @@
           status.textContent = 'Removing files from the current workspace…';
           const localPaths = state.fs.listFilesSync().map(path => String(path).replace(/^\/+/, '')).filter(Boolean);
           for (const path of localPaths) {
-            if (!isNodeModulesPath(path)) state.fs.deleteFileSync(path);
+            if (!isNodeModulesPath(path) && !isGitMetadataPath(path)) state.fs.deleteFileSync(path);
           }
           const localDirs = typeof state.fs.listDirectoriesSync === 'function'
             ? state.fs.listDirectoriesSync().map(path => String(path).replace(/^\/+/, '')).filter(Boolean)
             : [];
           const preservedNodeModulesDirs = ignoreNodeModules ? localDirs.filter(isNodeModulesPath) : [];
           for (const dir of localDirs.sort((a,b) => b.split('/').length - a.split('/').length)) {
-            if (isNodeModulesPath(dir) || preservedNodeModulesDirs.some(path => path.startsWith(dir + '/'))) continue;
+            if (isGitMetadataPath(dir) || isNodeModulesPath(dir) || preservedNodeModulesDirs.some(path => path.startsWith(dir + '/'))) continue;
             state.fs.deleteDirectorySync?.(dir);
           }
 
