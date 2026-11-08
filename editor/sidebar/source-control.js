@@ -318,37 +318,100 @@
         confirmButton.textContent = 'Restoring…';
         status.textContent = '';
         try {
-          const snapshot = await github.getCommitState(selected.owner, selected.repo, commitSha);
-          if (snapshot.truncated) throw new Error('GitHub truncated this commit tree, so the workspace cannot be restored safely.');
+          if (typeof JSZip === 'undefined') throw new Error('JSZip is unavailable, so the commit archive cannot be restored.');
+          const ignoreNodeModules = state.behavior?.ignoreNodeModules !== false;
+          const isNodeModulesPath = path => ignoreNodeModules && String(path || '').replace(/^\\/+/, '').split('/').includes('node_modules');
+          const formatBytes = value => {
+            const size = Number(value) || 0;
+            if (size < 1024) return size + ' B';
+            if (size < 1024 * 1024) return (size / 1024).toFixed(size < 10240 ? 1 : 0) + ' KB';
+            return (size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0) + ' MB';
+          };
 
-          const target = new Map();
-          for (const entry of snapshot.tree) {
-            target.set(entry.path, entry);
-          }
+          // A ZIP archive replaces thousands of serial Git blob requests with
+          // one streamed download. GitHub accepts a commit SHA as the archive ref.
+          const archive = await github.downloadArchive(selected.owner, selected.repo, commitSha, {
+            onProgress(received, total) {
+              status.textContent = total
+                ? `Downloading commit archive… ${formatBytes(received)} / ${formatBytes(total)}`
+                : `Downloading commit archive… ${formatBytes(received)} received`;
+            }
+          });
+          if (!archive?.size) throw new Error('GitHub returned an empty commit archive.');
 
-          // Restoring a commit is a full filesystem replacement. Clear every
-          // existing file and directory first so files that are absent from the
-          // target commit cannot survive the restore.
-          const localPaths = state.fs.listFilesSync().map(path => String(path).replace(/^\/+/, '')).filter(Boolean);
+          status.textContent = 'Inspecting commit archive…';
+          const zip = await JSZip.loadAsync(archive, {
+            onUpdate(meta) {
+              status.textContent = `Inspecting commit archive… ${Math.round(Number(meta?.percent) || 0)}%`;
+            }
+          });
+          const archiveEntries = [];
+          const topLevels = new Set();
+          let hasRootFile = false;
+          zip.forEach((relativePath, entry) => {
+            const path = String(relativePath || '').replace(/^\\/+|\\/+$/g, '');
+            if (!path) return;
+            const parts = path.split('/');
+            if (parts.length === 1) {
+              if (!entry.dir) hasRootFile = true;
+              return;
+            }
+            topLevels.add(parts[0]);
+            archiveEntries.push({path, entry});
+          });
+
+          // GitHub wraps repository archives in a single <repo>-<sha> folder.
+          const wrapper = !hasRootFile && topLevels.size === 1 && archiveEntries.length ? [...topLevels][0] : '';
+          const files = archiveEntries
+            .filter(item => !item.entry.dir)
+            .map(item => ({
+              path: wrapper && item.path.startsWith(wrapper + '/') ? item.path.slice(wrapper.length + 1) : item.path,
+              entry: item.entry
+            }))
+            .filter(item => item.path && item.path !== '.git' && !item.path.startsWith('.git/') && !isNodeModulesPath(item.path));
+
+          // Extract a few files at a time. This keeps the UI responsive without
+          // creating thousands of concurrent decompression jobs.
+          const restoredFiles = new Array(files.length);
+          let cursor = 0;
+          let extracted = 0;
+          const workers = Array.from({length:Math.min(8, files.length)}, async () => {
+            while (cursor < files.length) {
+              const index = cursor++;
+              const item = files[index];
+              restoredFiles[index] = {path:item.path, bytes:await item.entry.async('uint8array')};
+              extracted++;
+              if (extracted % 20 === 0 || extracted === files.length) {
+                status.textContent = `Extracting files… ${extracted}/${files.length}`;
+              }
+            }
+          });
+          await Promise.all(workers);
+
+          // Replace the workspace while preserving node_modules when the
+          // editor's ignoreNodeModules setting is enabled.
+          status.textContent = 'Removing files from the current workspace…';
+          const localPaths = state.fs.listFilesSync().map(path => String(path).replace(/^\\/+/, '')).filter(Boolean);
           for (const path of localPaths) {
-            state.fs.deleteFileSync(path);
-            state.markDirty?.(path);
+            if (!isNodeModulesPath(path)) state.fs.deleteFileSync(path);
           }
           const localDirs = typeof state.fs.listDirectoriesSync === 'function'
-            ? state.fs.listDirectoriesSync().map(path => String(path).replace(/^\/+/, '')).filter(Boolean)
+            ? state.fs.listDirectoriesSync().map(path => String(path).replace(/^\\/+/, '')).filter(Boolean)
             : [];
+          const preservedNodeModulesDirs = ignoreNodeModules ? localDirs.filter(isNodeModulesPath) : [];
           for (const dir of localDirs.sort((a,b) => b.split('/').length - a.split('/').length)) {
+            if (isNodeModulesPath(dir) || preservedNodeModulesDirs.some(path => path.startsWith(dir + '/'))) continue;
             state.fs.deleteDirectorySync?.(dir);
           }
 
-
-          let index = 0;
-          for (const entry of snapshot.tree) {
-            status.textContent = `Restoring ${++index}/${snapshot.tree.length}…`;
-            const bytes = await github.readBlob(selected.owner, selected.repo, entry.sha);
-            state.fs.writeFileSync(entry.path, bytes);
-            state.markDirty?.(entry.path);
+          for (let index = 0; index < restoredFiles.length; index++) {
+            const file = restoredFiles[index];
+            state.fs.writeFileSync(file.path, file.bytes);
+            if ((index + 1) % 20 === 0 || index + 1 === restoredFiles.length) {
+              status.textContent = `Writing files… ${index + 1}/${restoredFiles.length}`;
+            }
           }
+          state.markDirty?.();
           state.runDebugRefresh?.();
           state.refreshExplorer?.();
           close();
