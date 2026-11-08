@@ -174,7 +174,7 @@
     const views = manager.getViews(file).filter(view => {
       const label = String(view.label || '').toLowerCase();
       const id = String(view.id || '').toLowerCase();
-      return (label.includes('preview') || id.endsWith('-preview') || id === 'ico-preview' || id === 'audio-player' || id === 'audio-raw' || id === 'wasm-inspect') &&
+      return (label.includes('preview') || id.endsWith('-preview') || id === 'ico-preview' || id === 'audio-player' || id === 'audio-raw' || id === 'wasm-inspect' || id === 'model-3d-viewer') &&
         !id.includes('piskel');
     });
     if (!views.length) return null;
@@ -238,6 +238,48 @@
     showMessage(viewer, 'No preview is available for this file type. Drag it out of the archive to copy the original file.');
   }
 
+  function inspectModelPackage(fs) {
+    const paths = [...fs.provider.cache.keys()];
+    const candidates = paths.filter(path => /\.(?:gltf|glb)$/i.test(path));
+    if (candidates.length !== 1) return null;
+    const modelPath = candidates[0];
+    const modelDir = modelPath.includes('/') ? modelPath.slice(0, modelPath.lastIndexOf('/')) : '';
+    const modelExt = modelPath.split('.').pop().toLowerCase();
+    const modelBytes = fs.readFileSync(modelPath, 'binary');
+    const related = paths.filter(path => path !== modelPath);
+    const assetExt = /\.(?:bin|png|jpe?g|webp|avif|ktx2|hdr|exr|tif|tiff|dds|basis|ktx)$/i;
+    let refs = [];
+    if (modelExt === 'gltf') {
+      try {
+        const json = JSON.parse(new TextDecoder().decode(modelBytes));
+        const uris = [...(json.buffers || []).map(item => item.uri), ...(json.images || []).map(item => item.uri)]
+          .filter(uri => typeof uri === 'string' && !/^(?:data:|https?:|blob:)/i.test(uri));
+        refs = uris.map(uri => {
+          let decoded = uri; try { decoded = decodeURIComponent(uri); } catch (_) {}
+          const parts = (modelDir ? modelDir + '/' : '').concat(decoded).replace(/\\/g, '/').split('/');
+          const clean = [];
+          for (const part of parts) { if (!part || part === '.') continue; if (part === '..') clean.pop(); else clean.push(part); }
+          return clean.join('/');
+        });
+      } catch (_) { return null; }
+    } else if (modelBytes?.length >= 20) {
+      const bytes = modelBytes instanceof Uint8Array ? modelBytes : new Uint8Array(modelBytes);
+      if (String.fromCharCode(...bytes.subarray(0,4)) !== 'glTF') return null;
+    }
+    const resolvedRefs = refs.filter(path => fs.provider.cache.has(path));
+    const allRefsResolve = refs.length > 0 && resolvedRefs.length === refs.length;
+    const samePackageFolder = related.every(path =>
+      (!modelDir || path.startsWith(modelDir + '/')) &&
+      (assetExt.test(path) || /\.(?:gltf|glb|json|txt|md|mtl)$/i.test(path))
+    );
+    const dedicatedGLB = modelExt === 'glb' && related.length <= 8 && samePackageFolder;
+    const dependencyPackage = modelExt === 'gltf' && allRefsResolve && resolvedRefs.length > 0 &&
+      related.every(path => refs.includes(path) || assetExt.test(path));
+    const isPackage = dedicatedGLB || dependencyPackage;
+    return { path:modelPath, isPackage, kind:isPackage?'3D model package':'Archive containing a 3D model',
+      referencedAssets:resolvedRefs.length, externalReferences:refs.length, fileCount:paths.length };
+  }
+
   window.EditorPreviewProviders = window.EditorPreviewProviders || [];
   window.EditorPreviewProviders.push({
     id: 'archive',
@@ -263,7 +305,12 @@
         const archiveStatus = document.createElement('div');
         archiveStatus.className = 'editor-archive-status';
         archiveStatus.textContent = 'Opening archive…';
-        topbar.append(archiveTitle, archiveStatus);
+        const modelButton = document.createElement('button');
+        modelButton.className = 'editor-archive-model-button';
+        modelButton.type = 'button';
+        modelButton.hidden = true;
+        modelButton.textContent = 'Open 3D model';
+        topbar.append(archiveTitle, archiveStatus, modelButton);
 
         const workspace = document.createElement('div');
         workspace.className = 'editor-archive-workspace';
@@ -296,10 +343,51 @@
         ctx.host.appendChild(shell);
 
         let archiveFileSystem = null;
+        let modelPackage = null;
+        let modelHost = null;
+        let modelOpened = false;
         let innerManager = null;
         const innerTab = {};
         ctx.addCleanup(() => {
           if (innerManager) innerManager.dispose(innerTab);
+        });
+        const showArchiveBrowser = () => {
+          if (modelHost) modelHost.style.display = 'none';
+          viewer.style.display = '';
+          modelButton.textContent = modelPackage?.isPackage ? '3D Model Package' : 'Open embedded model';
+          modelButton.classList.remove('active');
+        };
+        const showModelViewer = async () => {
+          if (!modelPackage || !archiveFileSystem) return;
+          viewer.style.display = 'none';
+          if (!modelHost) {
+            modelHost = document.createElement('div');
+            modelHost.className = 'editor-archive-model-host';
+            shell.appendChild(modelHost);
+          }
+          modelHost.style.display = 'block';
+          modelButton.textContent = 'Browse archive';
+          modelButton.classList.add('active');
+          if (modelOpened) return;
+          modelOpened = true;
+          const virtualState = Object.create(ctx.state || null);
+          virtualState.fs = archiveFileSystem;
+          const modelContext = {
+            state: virtualState,
+            file: { id:'archive-model:'+modelPackage.path, path:modelPackage.path,
+              name:modelPackage.path.split('/').pop(), mime:EditorInferMime(modelPackage.path) },
+            host:modelHost,
+            readBinary:path=>archiveFileSystem.readFileSync(path || modelPackage.path,'binary'),
+            addCleanup:cleanup=>ctx.addCleanup(cleanup),
+            isCurrent:()=>ctx.isCurrent()
+          };
+          const factory = window.Editor3DModelPreview?.create;
+          if (typeof factory !== 'function') { modelHost.textContent='The 3D viewer is not available.'; return; }
+          await factory(modelContext);
+        };
+        modelButton.addEventListener('click', () => {
+          if (modelHost?.style.display === 'block') showArchiveBrowser();
+          else showModelViewer().catch(error => { modelHost.textContent='Could not open the model: '+(error?.message || error); });
         });
 
         try {
@@ -315,6 +403,15 @@
           for (const directory of loaded.directories || []) entries.push({ path: directory, directory: true });
           for (const file of loaded.files || []) entries.push({ path: file.path, directory: false, data: file.data });
           archiveFileSystem = makeArchiveFileSystem(entries);
+          modelPackage = inspectModelPackage(archiveFileSystem);
+          if (modelPackage) {
+            modelButton.hidden = false;
+            modelButton.textContent = modelPackage.isPackage ? '3D Model Package' : 'Open embedded model';
+            archiveTitle.textContent = ctx.file.name + (modelPackage.isPackage ? ' · 3D model package' : ' · contains a model');
+            modelButton.title = modelPackage.isPackage
+              ? 'This ZIP is structured as a 3D model package with resolvable model assets.'
+              : 'This archive contains a glTF file but also unrelated content, so it remains an archive.';
+          }
           const fileCount = archiveFileSystem.listFilesSync().length;
           const folderCount = archiveFileSystem.listDirectoriesSync().length;
           const totalBytes = [...archiveFileSystem.provider.cache.values()].reduce((sum, data) => sum + data.byteLength, 0);
@@ -457,6 +554,12 @@
             }
           });
           if (!fileCount) showMessage(viewer, 'This archive does not contain any visible files.');
+          if (modelPackage?.isPackage) {
+            await showModelViewer();
+            archiveStatus.textContent = '3D model package · '+modelPackage.referencedAssets+' referenced assets · '+fileCount+' files';
+          } else if (modelPackage) {
+            archiveStatus.textContent = 'Archive · includes a glTF model ('+fileCount+' files)';
+          }
         } catch (error) {
           if (ctx.isCurrent()) {
             archiveStatus.textContent = 'Could not open archive';
