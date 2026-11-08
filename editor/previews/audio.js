@@ -99,7 +99,11 @@
       return;
     }
     const sample = () => {
-      if (!image.isConnected || !image.naturalWidth || !image.naturalHeight) return;
+      if (!image.isConnected) return;
+      if (!image.naturalWidth || !image.naturalHeight) {
+        reset();
+        return;
+      }
       try {
         const canvas = document.createElement('canvas');
         canvas.width = 40;
@@ -145,7 +149,12 @@
       }
     };
     if (image.complete) sample();
-    else image.addEventListener('load', sample, { once: true });
+    else {
+      image.addEventListener('load', sample, { once: true });
+      image.addEventListener('error', () => {
+        if (image.isConnected) reset();
+      }, { once: true });
+    }
   }
 
   function updateRangeFill(input) {
