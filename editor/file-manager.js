@@ -44,7 +44,7 @@
       this.onChange = options.onChange || (() => {});
       this.onMove = options.onMove || (() => {});
       this.onDelete = options.onDelete || (() => {});
-      this.dimHiddenFolders = options.dimHiddenFolders !== false;
+      this.showHiddenFiles = !!options.showHiddenFiles;
       this.readOnly = !!options.readOnly;
       this.canContextMenu = options.canContextMenu || (() => true);
       this.selectedNode = null;
@@ -100,8 +100,8 @@
       this.collapsedPaths.clear();
       this.buildTree();
     }
-    setDimHiddenFolders(value) {
-      this.dimHiddenFolders = !!value;
+    setShowHiddenFiles(value) {
+      this.showHiddenFiles = !!value;
       this.render();
     }
     isHiddenPath(path) {
@@ -294,10 +294,11 @@
     renderNode(node) {
       const ul = document.createElement('ul');
       for (const child of node.children) {
+        if (child.hidden && !this.showHiddenFiles) continue;
         const li = document.createElement('li');
         li.dataset.path = child.path;
         li.innerHTML = EditorRenderIcon(child.name, child.isDir);
-        if (child.hidden && this.dimHiddenFolders) li.classList.add('hidden-file');
+        if (child.hidden) li.classList.add('hidden-file');
         if (child.isDir) {
           const arrow = document.createElement('span');
           arrow.textContent = '▼';
