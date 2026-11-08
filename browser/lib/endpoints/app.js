@@ -4445,7 +4445,7 @@
         return entries;
       } else if (bin === "which") {
         const name = args[0];
-        const supported = new Set(['pwd','cd','cat','echo','printf','true','false','whoami','hostname','env','which','ls','dir','node','npm']);
+        const supported = new Set(['pwd','cd','cat','echo','printf','true','false','whoami','hostname','env','which','ls','dir','node','npm','git']);
         if (!name || !supported.has(name)) {
           console.logText(`${name || ''}: not found`);
           return null;
@@ -4530,8 +4530,17 @@
           console.error(`npm ERR! ${e.message || e}`);
           throw e;
         }
+      } else if (bin === "git") {
+        try {
+          const result = await getGitManager().run(args);
+          if (result?.output) console.logText(result.output);
+          return result?.value ?? result;
+        } catch (e) {
+          console.error(`fatal: ${e.message || e}`);
+          throw e;
+        }
       } else {
-        const error = new Error(`Command not found: ${bin}. The virtual terminal is not a real OS shell; supported commands are pwd, cd, cat, echo, printf, true, false, whoami, hostname, env, which, ls/dir, node, and npm.`);
+        const error = new Error(`Command not found: ${bin}. The virtual terminal is not a real OS shell; supported commands are pwd, cd, cat, echo, printf, true, false, whoami, hostname, env, which, ls/dir, node, npm, and git.`);
         console.error(error.message);
         throw error;
       }
