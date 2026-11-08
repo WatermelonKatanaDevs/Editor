@@ -52,7 +52,7 @@
     if (!modulesPromise) modulesPromise = (async()=>{
       installImportMap();
       const THREE = await import(CDN+'/build/three.module.js');
-      const [controls,gltf,obj,mtl,fbx,stl,ply,collada,tds,threeMF,amf,usd,vtk,pcd,xyz,gcode,md2,bvh,draco,ktx2,meshopt] = await Promise.all([
+      const [controls,gltf,obj,mtl,fbx,stl,ply,collada,tds,threeMF,amf,usd,vtk,pcd,xyz,gcode,md2,bvh,draco,ktx2,meshopt,roomEnv] = await Promise.all([
         import(CDN+'/examples/jsm/controls/OrbitControls.js'),
         import(CDN+'/examples/jsm/loaders/GLTFLoader.js'),
         import(CDN+'/examples/jsm/loaders/OBJLoader.js'),
@@ -73,7 +73,8 @@
         import(CDN+'/examples/jsm/loaders/BVHLoader.js'),
         import(CDN+'/examples/jsm/loaders/DRACOLoader.js'),
         import(CDN+'/examples/jsm/loaders/KTX2Loader.js'),
-        import(CDN+'/examples/jsm/libs/meshopt_decoder.module.js')
+        import(CDN+'/examples/jsm/libs/meshopt_decoder.module.js'),
+        import(CDN+'/examples/jsm/environments/RoomEnvironment.js')
       ]);
       // VRMLLoader includes Chevrotain's UMD regexp-to-ast bundle. Monaco
       // exposes a global AMD define(), which that nested bundle otherwise
@@ -87,7 +88,7 @@
       } finally {
         if (amdDefine && amdFlag) amdDefine.amd = amdFlag;
       }
-      return {THREE,OrbitControls:controls.OrbitControls,GLTFLoader:gltf.GLTFLoader,OBJLoader:obj.OBJLoader,MTLLoader:mtl.MTLLoader,FBXLoader:fbx.FBXLoader,STLLoader:stl.STLLoader,PLYLoader:ply.PLYLoader,ColladaLoader:collada.ColladaLoader,TDSLoader:tds.TDSLoader,ThreeMFLoader:threeMF.ThreeMFLoader,AMFLoader:amf.AMFLoader,VRMLLoader:vrml.VRMLLoader,USDLoader:usd.USDLoader,VTKLoader:vtk.VTKLoader,PCDLoader:pcd.PCDLoader,XYZLoader:xyz.XYZLoader,GCodeLoader:gcode.GCodeLoader,MD2Loader:md2.MD2Loader,BVHLoader:bvh.BVHLoader,DRACOLoader:draco.DRACOLoader,KTX2Loader:ktx2.KTX2Loader,MeshoptDecoder:meshopt.MeshoptDecoder};
+      return {THREE,OrbitControls:controls.OrbitControls,GLTFLoader:gltf.GLTFLoader,OBJLoader:obj.OBJLoader,MTLLoader:mtl.MTLLoader,FBXLoader:fbx.FBXLoader,STLLoader:stl.STLLoader,PLYLoader:ply.PLYLoader,ColladaLoader:collada.ColladaLoader,TDSLoader:tds.TDSLoader,ThreeMFLoader:threeMF.ThreeMFLoader,AMFLoader:amf.AMFLoader,VRMLLoader:vrml.VRMLLoader,USDLoader:usd.USDLoader,VTKLoader:vtk.VTKLoader,PCDLoader:pcd.PCDLoader,XYZLoader:xyz.XYZLoader,GCodeLoader:gcode.GCodeLoader,MD2Loader:md2.MD2Loader,BVHLoader:bvh.BVHLoader,DRACOLoader:draco.DRACOLoader,KTX2Loader:ktx2.KTX2Loader,MeshoptDecoder:meshopt.MeshoptDecoder,RoomEnvironment:roomEnv.RoomEnvironment};
     })();
     return modulesPromise;
   }
@@ -100,6 +101,7 @@
     const drop=element('div','editor-3d-drop','Drop a model, texture, material, or ZIP archive here');
     const overlay=element('div','editor-3d-loading','Loading 3D engine…');
     const side=element('aside','editor-3d-sidebar');
+    const workspace=element('div','editor-3d-workspace');
     const footer=element('div','editor-3d-footer');
     const fileInput=element('input'); fileInput.type='file';fileInput.multiple=true;fileInput.accept='.gltf,.glb,.fbx,.obj,.mtl,.stl,.ply,.dae,.3ds,.3mf,.amf,.wrl,.vrml,.usdz,.vtk,.pcd,.xyz,.gcode,.md2,.bvh,.png,.jpg,.jpeg,.webp,.ktx2,.hdr,.exr,.zip';
     fileInput.hidden=true;
@@ -114,18 +116,19 @@
     toolbar.append(addBtn,fitBtn,resetBtn,gridBtn,axesBtn,wireBtn,bgBtn,legacyHint);
     canvasHost.append(canvas,drop,overlay);
     stage.appendChild(canvasHost);
-    root.append(toolbar,stage,side,footer,fileInput);
+    workspace.append(stage,side);
+    root.append(toolbar,workspace,footer,fileInput);
     ctx.host.appendChild(root);
-    return {root,toolbar,stage,canvasHost,canvas,drop,overlay,side,footer,fileInput,addBtn,fitBtn,resetBtn,gridBtn,axesBtn,wireBtn,bgBtn};
+    return {root,toolbar,workspace,stage,canvasHost,canvas,drop,overlay,side,footer,fileInput,addBtn,fitBtn,resetBtn,gridBtn,axesBtn,wireBtn,bgBtn};
   }
   async function createViewer(ctx) {
     const ui=makeUI(ctx), {canvas,overlay,side,footer,fileInput}=ui;
     let THREE,renderer,scene,camera,controls,modelRoot=null,mixer=null,clock=null,raf=0,resizeObserver=null;
     let grid=null,axes=null,skeletonHelper=null,wireframe=false,showGrid=true,showAxes=false,background=0x202124;
     let animationActions=[],activeAction=null,animationSelect=null,playButton=null,timeSlider=null,timeLabel=null;
-    let disposed=false,modelFiles=new Map(),objectURLs=new Map(),decoderLoaders=[],selectedRoot=null,modelInfo=null,activeModelPath=ctx.file.path;
+    let disposed=false,modelFiles=new Map(),objectURLs=new Map(),decoderLoaders=[],selectedRoot=null,modelInfo=null,activeModelPath=ctx.file.path,environmentTarget=null;
     const cleanup=()=>{
-      disposed=true;cancelAnimationFrame(raf);resizeObserver?.disconnect();controls?.dispose();renderer?.dispose();for(const loader of decoderLoaders)try{loader.dispose?.();}catch(_){}
+      disposed=true;cancelAnimationFrame(raf);resizeObserver?.disconnect();controls?.dispose();environmentTarget?.dispose?.();environmentTarget=null;renderer?.dispose();for(const loader of decoderLoaders)try{loader.dispose?.();}catch(_){}
       for(const url of objectURLs.values())URL.revokeObjectURL(url);
       objectURLs.clear();
       if(renderer?.domElement?.parentNode)renderer.domElement.remove();
@@ -236,20 +239,87 @@
           const mats=new Map();
           obj.traverse(o=>{if(o.material)for(const m of Array.isArray(o.material)?o.material:[o.material])if(m)mats.set(m.uuid,m);});
           if(!mats.size){content.append(element('p','editor-3d-empty','No materials found.'));return;}
+          const sourceOf=texture=>texture?.image||texture?.source?.data||null;
+          const describeTexture=(texture,channel)=>{
+            const source=sourceOf(texture);
+            const width=source?.width||source?.videoWidth||source?.naturalWidth||0;
+            const height=source?.height||source?.videoHeight||source?.naturalHeight||0;
+            const colorSpace=texture?.colorSpace===THREE.SRGBColorSpace?'sRGB color':'linear / data';
+            const dims=width&&height?(width+' × '+height+' px'):'image dimensions unavailable';
+            return channel+' · '+dims+' · '+colorSpace;
+          };
+          const addMapRow=(card,label,texture,channel)=>{
+            const row=element('div','editor-3d-map-row'+(texture?'':' is-empty'));
+            const thumb=element('canvas','editor-3d-map-thumb');
+            thumb.width=48;thumb.height=48;
+            const thumbContext=thumb.getContext('2d');
+            if(thumbContext){
+              thumbContext.fillStyle='#252a31';thumbContext.fillRect(0,0,48,48);
+              const source=sourceOf(texture);
+              try{
+                if(source&&((source.width||source.videoWidth||source.naturalWidth)>0)){
+                  const w=source.width||source.videoWidth||source.naturalWidth;
+                  const h=source.height||source.videoHeight||source.naturalHeight;
+                  const scale=Math.min(44/w,44/h);
+                  const dw=Math.max(1,w*scale),dh=Math.max(1,h*scale);
+                  thumbContext.drawImage(source,(48-dw)/2,(48-dh)/2,dw,dh);
+                }else{
+                  thumbContext.fillStyle='#8994a1';thumbContext.font='9px sans-serif';thumbContext.textAlign='center';thumbContext.fillText(texture?'IMAGE':'NONE',24,27);
+                }
+              }catch(_){
+                thumbContext.fillStyle='#8994a1';thumbContext.font='9px sans-serif';thumbContext.textAlign='center';thumbContext.fillText('MAP',24,27);
+              }
+            }
+            const details=element('div','editor-3d-map-details');
+            const title=element('strong','',label);
+            const meta=element('small','',texture?describeTexture(texture,channel):'No texture assigned');
+            if(texture){title.title=texture.name||'Embedded / referenced texture';meta.title=texture.uuid||'';}
+            details.append(title,meta);
+            row.append(thumb,details);
+            card.appendChild(row);
+          };
+          const addFactor=(card,label,property,fallback)=>{
+            if(!(property in m))return;
+            const control=element('input');control.type='range';control.min='0';control.max='1';control.step='.01';control.value=String(m[property]??fallback);
+            control.addEventListener('input',()=>{m[property]=+control.value;});
+            const row=element('label','editor-3d-factor-row',label);
+            const value=element('span','editor-3d-factor-value',Number(control.value).toFixed(2));
+            control.addEventListener('input',()=>{value.textContent=Number(control.value).toFixed(2);});
+            row.append(control,value);card.appendChild(row);
+          };
+          let materialIndex=0;
           for(const m of mats.values()){
+            materialIndex++;
             const card=element('div','editor-3d-material');
-            card.append(element('strong','',m.name||'Material'),element('small','',m.type));
-            const color=element('input');color.type='color';color.value='#'+(m.color?.getHexString?.()||'ffffff');
-            color.addEventListener('input',()=>{if(m.color)m.color.set(color.value);});
-            const row=element('label','','Base color');row.appendChild(color);card.appendChild(row);
-            const rough=element('input');rough.type='range';rough.min='0';rough.max='1';rough.step='.01';rough.value=String(m.roughness??.7);
-            rough.addEventListener('input',()=>{if('roughness'in m)m.roughness=+rough.value;});
-            const rr=element('label','','Roughness');rr.appendChild(rough);card.appendChild(rr);
-            const metal=element('input');metal.type='range';metal.min='0';metal.max='1';metal.step='.01';metal.value=String(m.metalness??0);
-            metal.addEventListener('input',()=>{if('metalness'in m)m.metalness=+metal.value;});
-            const mr=element('label','','Metalness');mr.appendChild(metal);card.appendChild(mr);
+            card.append(element('strong','',m.name||('Material '+materialIndex)),element('small','',m.type));
+            if(m.color){
+              const color=element('input');color.type='color';color.value='#'+(m.color?.getHexString?.()||'ffffff');
+              color.addEventListener('input',()=>{m.color.set(color.value);});
+              const row=element('label','editor-3d-color-row','Base color factor');row.appendChild(color);card.appendChild(row);
+            }
+            addFactor(card,'Roughness factor','roughness',1);
+            addFactor(card,'Metalness factor','metalness',1);
+            const mapsTitle=element('div','editor-3d-maps-title','Texture maps');
+            card.appendChild(mapsTitle);
+            const packed=m.metalnessMap&&m.roughnessMap&&m.metalnessMap===m.roughnessMap;
+            if(packed){
+              addMapRow(card,'Metalness + roughness (packed)',m.metalnessMap,'Blue channel = metalness · Green channel = roughness');
+            }else{
+              addMapRow(card,'Metalness map',m.metalnessMap,'Blue channel');
+              addMapRow(card,'Roughness map',m.roughnessMap,'Green channel');
+            }
+            addMapRow(card,'Base color map',m.map,'RGB / sRGB');
+            addMapRow(card,'Normal map',m.normalMap,'Tangent-space RGB');
+            addMapRow(card,'Ambient occlusion map',m.aoMap,'Red channel');
+            addMapRow(card,'Emissive map',m.emissiveMap,'RGB / sRGB');
+            addMapRow(card,'Alpha map',m.alphaMap,'Green channel');
+            addMapRow(card,'Bump map',m.bumpMap,'Height');
+            addMapRow(card,'Displacement map',m.displacementMap,'Height');
+            addMapRow(card,'Light map',m.lightMap,'RGB lighting');
+            if(m.envMap)addMapRow(card,'Material environment map',m.envMap,'Image-based lighting');
             content.appendChild(card);
           }
+          content.append(element('p','editor-3d-material-note','PBR maps are preserved from the model. For packed metallic/roughness textures, blue controls metalness and green controls roughness. Map previews are thumbnails; rendering uses the original full-resolution textures.'));
         }
       };
       sceneTab.addEventListener('click',()=>switchTab(0));animTab.addEventListener('click',()=>switchTab(1));materialTab.addEventListener('click',()=>switchTab(2));switchTab(0);
@@ -374,6 +444,11 @@
       renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));renderer.setSize(width,height,false);
       renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
       scene=new THREE.Scene();scene.background=new THREE.Color(background);
+      const studioEnvironment=new THREE.RoomEnvironment();
+      const pmremGenerator=new THREE.PMREMGenerator(renderer);
+      environmentTarget=pmremGenerator.fromScene(studioEnvironment);
+      scene.environment=environmentTarget.texture;scene.environmentIntensity=0.85;
+      studioEnvironment.dispose();pmremGenerator.dispose();
       camera=new THREE.PerspectiveCamera(45,width/height,.01,10000);camera.position.set(3,2,4);
       controls=new THREE.OrbitControls(camera,canvas);controls.enableDamping=true;controls.dampingFactor=.075;controls.screenSpacePanning=true;
       controls.minDistance=.001;controls.maxDistance=100000;
