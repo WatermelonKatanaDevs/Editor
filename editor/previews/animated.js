@@ -251,6 +251,12 @@
     }
   }
 
+  function isImageFile(file) {
+    const type = String(file.type || '').toLowerCase();
+    const name = String(file.name || '').toLowerCase();
+    return type.startsWith('image/') || /\.(?:png|apng|gif|jpe?g|bmp|webp|avif|svg|ico|tiff?)$/i.test(name);
+  }
+
   function inferMime(file) {
     const type = String(file.type || '').toLowerCase();
     if (type.startsWith('image/')) return type;
@@ -334,6 +340,19 @@
     return new Promise((resolve, reject) => {
       canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('The browser could not encode this frame as PNG.')), 'image/png');
     });
+  }
+
+  function frameFileSync(frame, width, height, name) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(frame.data), width, height), 0, 0);
+    const dataURL = canvas.toDataURL('image/png');
+    const base64 = dataURL.slice(dataURL.indexOf(',') + 1);
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new File([bytes], name, { type: 'image/png', lastModified: Date.now() });
   }
 
   async function encodeGIF(frames, width, height, loopCount) {
@@ -514,11 +533,14 @@
         const saveCopyButton = button('Save Copy to Project', 'editor-animation-button primary');
         const saveOriginalButton = button('Overwrite Original');
         const downloadAnimationButton = button('Download Animation');
+        const saveFrameButton = button('Save Selected Frame');
+        const downloadFrameButton = button('Download Selected Frame');
         const saveFramesButton = button('Save All Frames to Project');
         const downloadZipButton = button('Download Frames ZIP');
         const exportActions = document.createElement('div');
         exportActions.className = 'editor-animation-export-actions';
-        exportActions.append(saveCopyButton, saveOriginalButton, downloadAnimationButton, saveFramesButton, downloadZipButton);
+        exportActions.append(saveCopyButton, saveOriginalButton, downloadAnimationButton,
+          saveFrameButton, downloadFrameButton, saveFramesButton, downloadZipButton);
 
         settings.append(durationLabel, durationRow, applyAllLabel, loopLabel, loop, playbackLabel, speedRow,
           outputTitle, outputName, outputFormat, exportActions);
@@ -585,12 +607,23 @@
             const scale = Math.min(64 / width, 64 / height);
             const thumbWidth = Math.max(1, Math.round(width * scale));
             const thumbHeight = Math.max(1, Math.round(height * scale));
-            const temporary = document.createElement('canvas');
-            temporary.width = width;
-            temporary.height = height;
-            temporary.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(frame.data), width, height), 0, 0);
+            const offsetX = Math.round((64 - thumbWidth) / 2);
+            const offsetY = Math.round((64 - thumbHeight) / 2);
+            const thumbData = thumbContext.createImageData(thumbWidth, thumbHeight);
+            for (let ty = 0; ty < thumbHeight; ty++) {
+              const sy = Math.min(height - 1, Math.floor((ty + 0.5) * height / thumbHeight));
+              for (let tx = 0; tx < thumbWidth; tx++) {
+                const sx = Math.min(width - 1, Math.floor((tx + 0.5) * width / thumbWidth));
+                const src = (sy * width + sx) * 4;
+                const dst = (ty * thumbWidth + tx) * 4;
+                thumbData.data[dst] = frame.data[src];
+                thumbData.data[dst + 1] = frame.data[src + 1];
+                thumbData.data[dst + 2] = frame.data[src + 2];
+                thumbData.data[dst + 3] = frame.data[src + 3];
+              }
+            }
             thumbContext.clearRect(0, 0, 64, 64);
-            thumbContext.drawImage(temporary, Math.round((64 - thumbWidth) / 2), Math.round((64 - thumbHeight) / 2), thumbWidth, thumbHeight);
+            thumbContext.putImageData(thumbData, offsetX, offsetY);
             const label = document.createElement('span');
             label.className = 'editor-animation-frame-number';
             label.textContent = String(index + 1).padStart(2, '0');
@@ -605,21 +638,20 @@
               renderTimeline();
             };
             item.addEventListener('dragstart', event => {
-              event.dataTransfer.effectAllowed = 'copyMove';
+              event.dataTransfer.effectAllowed = 'copy';
               event.dataTransfer.setData('application/x-wk-animation-frame', String(index));
               const name = originalName + '-frame-' + String(index + 1).padStart(3, '0') + '.png';
-              canvasBlob(frame, width, height).then(blob => {
-                if (!event.dataTransfer) return;
-                try {
-                  const file = new File([blob], name, { type: 'image/png', lastModified: Date.now() });
-                  event.dataTransfer.items?.add?.(file);
-                  const token = window.__editorFileDropBridge?.registerProvider?.(() => [file]) || '';
-                  if (token) {
-                    event.dataTransfer.setData('application/x-wk-editor-files', token);
-                    item._exportDragToken = token;
-                  }
-                } catch (_) {}
-              }).catch(() => {});
+              try {
+                const exportedFile = frameFileSync(frame, width, height, name);
+                event.dataTransfer.items?.add?.(exportedFile);
+                const token = window.__editorFileDropBridge?.registerProvider?.(() => [exportedFile]) || '';
+                if (token) {
+                  event.dataTransfer.setData('application/x-wk-editor-files', token);
+                  item._exportDragToken = token;
+                }
+              } catch (error) {
+                say(error?.message || 'Could not prepare this frame for dragging.', true);
+              }
             });
             item.addEventListener('dragend', () => {
               if (item._exportDragToken) window.__editorFileDropBridge?.release?.(item._exportDragToken);
@@ -694,10 +726,7 @@
 
         async function importFiles(files) {
           if (busy) return;
-          const images = Array.from(files || []).filter(file => {
-            const mime = inferMime(file);
-            return mime.startsWith('image/');
-          });
+          const images = Array.from(files || []).filter(isImageFile);
           if (!images.length) {
             say('Drop image files to add frames.', true);
             return;
@@ -731,7 +760,8 @@
 
         function setBusy(value) {
           [addButton, blankButton, duplicateButton, previousButton, nextButton, removeButton,
-            saveCopyButton, saveOriginalButton, downloadAnimationButton, saveFramesButton, downloadZipButton]
+            saveCopyButton, saveOriginalButton, downloadAnimationButton, saveFrameButton, downloadFrameButton,
+            saveFramesButton, downloadZipButton]
             .forEach(control => { control.disabled = !!value; });
         }
 
@@ -747,10 +777,9 @@
         async function encode(format) {
           if (!frames.length) throw new Error('Add at least one frame before exporting.');
           validateDimensions(width, height, frames.length);
-          const snapshot = frames.map(frame => ({ data: new Uint8ClampedArray(frame.data), duration: frame.duration }));
-          if (format === 'gif') return new Uint8Array(await encodeGIF(snapshot, width, height, currentLoopCount));
-          if (format === 'apng') return new Uint8Array(await encodeAPNG(snapshot, width, height));
-          if (format === 'webp') return new Uint8Array(await encodeWebP(snapshot, width, height, currentLoopCount));
+          if (format === 'gif') return new Uint8Array(await encodeGIF(frames, width, height, currentLoopCount));
+          if (format === 'apng') return new Uint8Array(await encodeAPNG(frames, width, height));
+          if (format === 'webp') return new Uint8Array(await encodeWebP(frames, width, height, currentLoopCount));
           throw new Error('Unsupported animation format.');
         }
 
@@ -842,6 +871,37 @@
           let number = 2, candidate;
           do { candidate = stem + '-' + number++ + extension; } while (pathExists(candidate));
           return candidate;
+        }
+
+        async function saveSelectedFrame() {
+          if (busy || !frames.length) return;
+          busy = true;
+          setBusy(true);
+          try {
+            const blob = await canvasBlob(frames[selected], width, height);
+            const bytes = new Uint8Array(await blob.arrayBuffer());
+            const base = cleanFileName(originalName || 'animation') || 'animation';
+            const path = nextAvailablePath([parentPath(ctx.file.path), base + '-frame-' + String(selected + 1).padStart(3, '0') + '.png'].filter(Boolean).join('/'));
+            writeProjectFile(path, bytes);
+            say('Saved selected frame to ' + path);
+          } catch (error) {
+            say(error?.message || 'Could not save the selected frame.', true);
+          } finally {
+            busy = false;
+            setBusy(false);
+          }
+        }
+
+        async function downloadSelectedFrame() {
+          if (busy || !frames.length) return;
+          try {
+            const blob = await canvasBlob(frames[selected], width, height);
+            downloadBlob(blob, (cleanFileName(originalName || 'animation') || 'animation') +
+              '-frame-' + String(selected + 1).padStart(3, '0') + '.png');
+            say('Downloaded selected frame as PNG.');
+          } catch (error) {
+            say(error?.message || 'Could not download the selected frame.', true);
+          }
         }
 
         async function saveAllFrames() {
@@ -937,6 +997,8 @@
         saveCopyButton.onclick = saveCopy;
         saveOriginalButton.onclick = overwriteOriginal;
         downloadAnimationButton.onclick = downloadAnimation;
+        saveFrameButton.onclick = saveSelectedFrame;
+        downloadFrameButton.onclick = downloadSelectedFrame;
         saveFramesButton.onclick = saveAllFrames;
         downloadZipButton.onclick = downloadFramesZip;
 
