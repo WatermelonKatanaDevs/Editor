@@ -2,16 +2,24 @@
   const textMimes = ['application/json','application/manifest+json','application/javascript','application/typescript','application/xml','model/gltf+json'];
   function match(file) {
     const mime = String(file.mime || '');
+    const base = String(file.name || file.path || '').split('/').pop().toLowerCase();
+    const ext = base.includes('.') ? base.split('.').pop() : '';
+    if (['map', 'txt', 'lock'].includes(ext) ||
+      ['license', 'licence', 'authors', 'author'].includes(base)) return false;
     return mime.startsWith('text/') || textMimes.includes(mime) || mime === 'image/svg+xml' || String(file.name || '').toLowerCase().endsWith('.obj');
   }
   function language(path) {
-    const ext = String(path || '').split('/').pop().split('.').pop().toLowerCase();
+    const base = String(path || '').split('/').pop().toLowerCase();
+    if (base === 'makefile' || base === 'gnumakefile') return 'makefile';
+    if (base === 'cakefile') return 'coffeescript';
+    if (base === 'readme') return 'markdown';
+    const ext = base.split('.').pop();
     return ({
       js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',jsx:'javascript',json:'json',webmanifest:'json',
-      html:'html',htm:'html',css:'css',scss:'scss',less:'less',md:'markdown',xml:'xml',yaml:'yaml',yml:'yaml',
-      py:'python',pyw:'python',java:'java',kt:'kotlin',c:'c',h:'c',cpp:'cpp',cc:'cpp',cxx:'cpp',hpp:'cpp',
+      html:'html',htm:'html',ejs:'html',jst:'html',css:'css',scss:'scss',less:'less',md:'markdown',xml:'xml',yaml:'yaml',yml:'yaml',
+      py:'python',pyw:'python',gyp:'python',gypi:'python',java:'java',kt:'kotlin',c:'c',h:'c',cpp:'cpp',cc:'cpp',cxx:'cpp',hpp:'cpp',
       sh:'shell',bash:'shell',sql:'sql',ini:'ini',toml:'ini',svg:'html',gltf:'json',frag:'glsl',vert:'glsl',glsl:'glsl',
-      hlsl:'hlsl',fx:'hlsl',wgsl:'wgsl'
+      hlsl:'hlsl',fx:'hlsl',wgsl:'wgsl',coffee:'coffeescript',patch:'diff',bnf:'bnf'
     })[ext] || 'plaintext';
   }
   const SHADER_LANGUAGES = {
@@ -100,6 +108,118 @@
     });
   }
 
+  function registerLanguage(monaco, spec) {
+    if (!monaco.languages.getLanguages().some(language => language.id === spec.id)) {
+      monaco.languages.register({ id: spec.id, extensions: spec.extensions, aliases: spec.aliases });
+    }
+    monaco.languages.setLanguageConfiguration(spec.id, spec.configuration || {
+      comments: { lineComment: '#' },
+      brackets: [['{','}'], ['[',']'], ['(',')']]
+    });
+    monaco.languages.setMonarchTokensProvider(spec.id, spec.tokenizer);
+  }
+
+  function registerBNFLanguage(monaco) {
+    registerLanguage(monaco, {
+      id: 'bnf', extensions: ['.bnf'], aliases: ['BNF', 'Backus-Naur Form'],
+      configuration: {
+        comments: { lineComment: '#' },
+        brackets: [['{','}'], ['[',']'], ['(',')']]
+      },
+      tokenizer: {
+        defaultToken: '',
+        tokenizer: {
+          root: [
+            [/^\s*#.*$/, 'comment'],
+            [/\/\*/, 'comment', '@comment'],
+            [/::=|:=/, 'keyword.operator'],
+            [/<[^>\r\n]+>/, 'type.identifier'],
+            [/[A-Z][A-Z0-9_-]*(?=\s*::=)/, 'type.identifier'],
+            [/"([^"\\]|\\.)*"/, 'string'],
+            [/'([^'\\]|\\.)*'/, 'string'],
+            [/[|*+?]/, 'operator'],
+            [/[{}()\[\]]/, '@brackets'],
+            [/[;,]/, 'delimiter'],
+            [/[a-zA-Z_][\w-]*/, 'identifier'],
+            [/\d+/, 'number']
+          ],
+          comment: [
+            [/[^*/]+/, 'comment'],
+            [/\*\//, 'comment', '@pop'],
+            [/./, 'comment']
+          ]
+        }
+      }
+    });
+  }
+
+  function registerMakefileLanguage(monaco) {
+    registerLanguage(monaco, {
+      id: 'makefile', extensions: ['.mk'], aliases: ['Makefile', 'make'],
+      configuration: {
+        comments: { lineComment: '#' },
+        brackets: [['(',')'], ['{','}']]
+      },
+      tokenizer: {
+        defaultToken: '',
+        tokenizer: {
+          root: [
+            [/^\s*#.*$/, 'comment'],
+            [/^\t.*$/, 'string.shell'],
+            [/^\s*(?:include|-include|sinclude|define|endef|export|unexport|override|private|ifdef|ifndef|ifeq|ifneq|else|endif|vpath)\b/, 'keyword'],
+            [/\$\([^)]+\)|\$\{[^}]+\}|\$\$|\$[A-Za-z@<^?]/, 'variable'],
+            [/^[^#\s][^:=]*?(?=\s*::?)/, 'type.identifier'],
+            [/::?=?|[?+!]?:=/, 'operator'],
+            [/\\$/, 'operator']
+          ]
+        }
+      }
+    });
+  }
+
+  function registerDiffLanguage(monaco) {
+    registerLanguage(monaco, {
+      id: 'diff', extensions: ['.diff', '.patch'], aliases: ['Diff', 'Patch'],
+      configuration: { comments: { lineComment: '#' }, brackets: [] },
+      tokenizer: {
+        root: [
+          [/^diff --git.*$/, 'meta'],
+          [/^index .*$/, 'comment'],
+          [/^--- .*$/, 'markup.deleted'],
+          [/^\+\+\+ .*$/, 'markup.inserted'],
+          [/^@@.*@@.*$/, 'keyword'],
+          [/^\+.*$/, 'markup.inserted'],
+          [/^-.*$/, 'markup.deleted'],
+          [/^!.*$/, 'keyword'],
+          [/^\\ No newline.*$/, 'comment']
+        ]
+      }
+    });
+  }
+
+  let coffeeLanguagePromise = null;
+  async function ensureCoffeeScript(monaco) {
+    if (coffeeLanguagePromise) return coffeeLanguagePromise;
+    coffeeLanguagePromise = new Promise((resolve, reject) => {
+      const amdRequire = window.require || (typeof require === 'function' ? require : null);
+      if (!amdRequire) return reject(new Error('Monaco language loader is unavailable'));
+      amdRequire(['vs/basic-languages/coffee/coffee'], module => {
+        try {
+          if (!monaco.languages.getLanguages().some(language => language.id === 'coffeescript')) {
+            monaco.languages.register({ id: 'coffeescript', extensions: ['.coffee'], aliases: ['CoffeeScript', 'coffee'] });
+          }
+          monaco.languages.setLanguageConfiguration('coffeescript', module.conf);
+          monaco.languages.setMonarchTokensProvider('coffeescript', module.language);
+          resolve();
+        } catch (error) { reject(error); }
+      }, reject);
+    }).catch(error => {
+      coffeeLanguagePromise = null;
+      throw error;
+    });
+    return coffeeLanguagePromise;
+  }
+
   let wgslLanguagePromise = null;
   async function ensureWGSL(monaco) {
     if (wgslLanguagePromise) return wgslLanguagePromise;
@@ -186,8 +306,21 @@
               console.warn('WGSL language registration failed; using C-like highlighting:', error);
               languageId = 'cpp';
             }
+          } else if (languageId === 'coffeescript') {
+            try {
+              await ensureCoffeeScript(monaco);
+            } catch (error) {
+              console.warn('CoffeeScript highlighting failed; using JavaScript highlighting:', error);
+              languageId = 'javascript';
+            }
           } else if (languageId === 'glsl' || languageId === 'hlsl') {
             registerShaderLanguage(monaco, languageId);
+          } else if (languageId === 'bnf') {
+            registerBNFLanguage(monaco);
+          } else if (languageId === 'makefile') {
+            registerMakefileLanguage(monaco);
+          } else if (languageId === 'diff') {
+            registerDiffLanguage(monaco);
           }
           // Set the language explicitly both before and after editor creation.
           // The second pass covers startup races where a language contribution
