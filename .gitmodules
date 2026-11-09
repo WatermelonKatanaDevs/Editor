@@ -1,0 +1,3 @@
+[submodule "vendor/blockbench"]
+	path = vendor/blockbench
+	url = https://github.com/JannisX11/blockbench.git
