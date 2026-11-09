@@ -94,6 +94,7 @@
     const reset = () => {
       root.style.removeProperty('--audio-cover-accent');
       root.style.removeProperty('--audio-cover-secondary');
+      root.style.removeProperty('--audio-cover-primary-light');
       root.style.removeProperty('--audio-cover-glow');
       root.style.removeProperty('--audio-cover-accent-ink');
     };
@@ -185,8 +186,10 @@
         const secondaryColor = toColor(secondary) ||
           'hsl(' + Math.round((primary.hue + 12) % 360) + ' 42% 70%)';
         const primaryHue = Math.round(primary.hue);
+        const primaryLight = 'hsl(' + primaryHue + ' 42% 74%)';
         root.style.setProperty('--audio-cover-accent', primaryColor);
         root.style.setProperty('--audio-cover-secondary', secondaryColor);
+        root.style.setProperty('--audio-cover-primary-light', primaryLight);
         root.style.setProperty('--audio-cover-glow', 'hsl(' + primaryHue + ' 42% 22%)');
         root.style.setProperty('--audio-cover-accent-ink', 'hsl(' + primaryHue + ' 28% 11%)');
       } catch (_) {
