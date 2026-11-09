@@ -186,6 +186,7 @@
       const deviceInput = document.createElement('input');
       deviceInput.type = 'file';
       deviceInput.hidden = true;
+      deviceButton.hidden = mode !== 'open';
       deviceInput.multiple = multiple;
       const deviceAccept = extensions.map(value =>
         value === 'image/*' ? 'image/*' : value === '*' ? '*/*' : '.' + value
@@ -291,10 +292,12 @@
           row.onclick = () => {
             if (isDir) {
               currentDir = path;
+              droppedFiles = [];
               selected.clear();
               renderList();
               return;
             }
+            droppedFiles = [];
             if (mode === 'save') {
               filename.value = label;
               selected = new Set([path]);
@@ -370,6 +373,7 @@
       upButton.addEventListener('click', () => {
         if (!currentDir) return;
         currentDir = dirname(currentDir);
+        droppedFiles = [];
         selected.clear();
         search.value = '';
         renderList();
