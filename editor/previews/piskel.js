@@ -106,7 +106,7 @@
     const iframe = document.createElement('iframe');
     iframe.className = 'editor-piskel';
     iframe.style.cssText = 'border:0;width:100%;height:100%;flex:1;min-height:0;display:block;';
-    iframe.src = new URL('editor/previews/piskel/index.html', location.href).href;
+    iframe.src = new URL('editor/previews/vendor/piskel/index.html', location.href).href;
 
     const saveStatus = document.createElement('div');
     saveStatus.className = 'editor-piskel-save-status';
