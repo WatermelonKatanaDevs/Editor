@@ -348,6 +348,27 @@
     });
   }
 
+  function rememberLoadedProject(files) {
+    const project = window.Project;
+    if (!project || !Array.isArray(files)) return;
+    const projectFile = files.find(file => extension(file.path || file.name) === 'bbmodel');
+    if (projectFile) {
+      project.save_path = normalize(projectFile.path || projectFile.name);
+      project.name = basename(project.save_path).replace(/\\.[^.]+$/, '');
+      project.saved = true;
+      return;
+    }
+    const codec = window.Format?.codec;
+    if (codec?.extension) {
+      const matching = files.find(file => extension(file.path || file.name) === String(codec.extension).toLowerCase());
+      if (matching) {
+        project.export_path = normalize(matching.path || matching.name);
+        project.export_codec = codec.id;
+        project.saved = true;
+      }
+    }
+  }
+
   async function importFile(options = {}, callback) {
     const paths = await showWorkspacePicker({
       mode: 'open',
@@ -361,6 +382,7 @@
       ? await Promise.all(paths.droppedFiles.map(file => readDroppedFile(file, options)))
       : await readWorkspaceFiles(paths, options);
     if (typeof callback === 'function') callback(files);
+    rememberLoadedProject(files);
     return files;
   }
 
@@ -554,7 +576,8 @@
       return false;
     }
     const loaded = await Promise.all(files.map(file => readDroppedFile(file, {readtype: handler.readtype})));
-    handler.cb(loaded, event);
+    await handler.cb(loaded, event);
+    rememberLoadedProject(loaded);
     return true;
   }
 
