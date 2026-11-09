@@ -16,7 +16,7 @@
     return parts.length ? parts.join('/') : null;
   }
 
-  function makeArchiveFileSystem(entries) {
+  async function makeArchiveFileSystem(entries) {
     const cache = new Map();
     const directories = new Set(['']);
     const addDirectory = path => {
@@ -56,7 +56,9 @@
       delete() { return false; },
       removeDirectory() {}
     };
-    return new FileSystem(provider, 4, true);
+    const filesystem = new FileSystem(provider, 4, true);
+    await filesystem._rebuildDirectoryIndex();
+    return filesystem;
   }
 
   function formatBytes(value) {
@@ -402,7 +404,7 @@
           const entries = [];
           for (const directory of loaded.directories || []) entries.push({ path: directory, directory: true });
           for (const file of loaded.files || []) entries.push({ path: file.path, directory: false, data: file.data });
-          archiveFileSystem = makeArchiveFileSystem(entries);
+          archiveFileSystem = await makeArchiveFileSystem(entries);
           modelPackage = inspectModelPackage(archiveFileSystem);
           if (modelPackage) {
             archiveTitle.textContent = ctx.file.name + (modelPackage.isPackage ? ' · 3D model package' : ' · contains a model');
