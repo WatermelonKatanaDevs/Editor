@@ -68,8 +68,22 @@
       frame.title = 'Blockbench';
       const url = new URL('editor/previews/vendor/blockbench/index.html', location.href);
       url.searchParams.set('wk_editor_bridge', bridgeId);
-      frame.src = url.href;
+      // Load the Editor-owned adapter after Blockbench's untouched vendor page
+      // has initialized. The adapter replaces Blockbench APIs at runtime.
+      frame.addEventListener('load', () => {
+        try {
+          const script = frame.contentDocument.createElement('script');
+          const bridgeUrl = new URL('editor/previews/blockbench-bridge.js', location.href);
+          bridgeUrl.searchParams.set('wk_editor_bridge', bridgeId);
+          script.src = bridgeUrl.href;
+          script.onerror = () => console.error('Could not load the Blockbench workspace bridge.');
+          frame.contentDocument.head.appendChild(script);
+        } catch (error) {
+          console.error('Could not inject the Blockbench workspace bridge:', error);
+        }
+      }, {once: true});
       frame.allow = 'clipboard-read; clipboard-write';
+      frame.src = url.href;
       frame.referrerPolicy = 'same-origin';
       frame.style.cssText = 'display:block;width:100%;height:100%;min-height:0;border:0;background:#121418;';
       group.viewBody.appendChild(frame);
