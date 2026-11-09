@@ -37,10 +37,10 @@
     async runCommand(cmd) {
       cmd = String(cmd || '').trim();
       if (!cmd) return;
-      if (!this.runner && this.ensureRunner) await this.ensureRunner();
-      if (!this.runner) throw new Error('Node runtime is not ready.');
       this.console.add(this.console.styledSpan('$ ' + cmd, 'log-command'));
       try {
+        if (!this.runner && this.ensureRunner) await this.ensureRunner();
+        if (!this.runner) throw new Error('Node runtime setup completed without attaching a runtime.');
         return await this.runner.terminalCommand(cmd);
       } finally {
         this.updatePrompt();
@@ -49,11 +49,6 @@
     async run() {
       const cmd = this.input?.value.trim();
       if (!cmd) return;
-      if (!this.runner && this.ensureRunner) await this.ensureRunner();
-      if (!this.runner) {
-        this.console.error('Node runtime is not ready.');
-        return;
-      }
       this.input.value = '';
       try {
         await this.runCommand(cmd);

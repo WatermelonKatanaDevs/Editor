@@ -1896,6 +1896,7 @@ window.__editorInitPromise = (async function () {
 
     try {
       await emulator.ready;
+      if (emulator.loadError) throw emulator.loadError;
       const installed = await installNodeDependencies(emulator, config);
       if (installed) {
         state.fileManager?.refresh?.();
@@ -1907,16 +1908,30 @@ window.__editorInitPromise = (async function () {
     }
   }
 
-  state.ensureNodeRuntime = async function() {
-    if (state.nodeEmulator) return state.nodeEmulator;
-    if (!state.fs || !state.browserNetwork) throw new Error('Node runtime is not ready.');
-    state.runConfig?.detect?.();
-    if (state.runConfig?.config?.serverType !== 'node') throw new Error('This project is not configured for Node.');
-    await setupRuntime(state.browserNetwork);
-    return state.nodeEmulator;
+  let runtimeSetupPromise = null;
+  state.ensureNodeRuntime = async function(terminal) {
+    if (runtimeSetupPromise) await runtimeSetupPromise;
+    if (!state.nodeEmulator) {
+      if (!state.fs || !state.browserNetwork) throw new Error('Node runtime cannot start: the workspace filesystem or browser network is not initialized.');
+      state.runConfig?.detect?.();
+      if (state.runConfig?.config?.serverType !== 'node') throw new Error('This project is not configured for Node.');
+      await setupRuntime(state.browserNetwork);
+    }
+    const runtime = state.nodeEmulator;
+    if (!runtime) throw new Error('Node runtime initialization finished without creating a runtime.');
+    if (runtime.loadError) throw runtime.loadError;
+    terminal?.attach(runtime);
+    return runtime;
   };
-  async function setupRuntime(net) {
-    if (!state.fs || !net) return;
+  function setupRuntime(net) {
+    if (runtimeSetupPromise) return runtimeSetupPromise;
+    runtimeSetupPromise = setupRuntimeInternal(net).finally(() => {
+      runtimeSetupPromise = null;
+    });
+    return runtimeSetupPromise;
+  }
+  async function setupRuntimeInternal(net) {
+    if (!state.fs || !net) throw new Error('Node runtime cannot start: the workspace filesystem or browser network is not initialized.');
     detachRuntime(net);
     const c = state.runConfig?.config || ({});
     let domain = String(c.domain || 'http://localhost:3000').trim();
@@ -1956,6 +1971,7 @@ window.__editorInitPromise = (async function () {
       });
       try {
         await emulator.ready;
+        if (emulator.loadError) throw emulator.loadError;
         // Attach terminals before automatic npm installation so its progress
         // and failures are visible instead of waiting for the runtime to finish.
         for (const t of state.terminalTabs.values()) t.attach(emulator);

@@ -21,7 +21,8 @@
     let terminal = state.terminalTabs.get(t.id);
     if (!terminal) {
       terminal = new NodeConsoleTerminal(out, input, send, prompt, async () => {
-        await state.ensureNodeRuntime?.();
+        const runtime = await state.ensureNodeRuntime?.(terminal);
+        if (runtime) terminal.attach(runtime);
       });
       state.terminalTabs.set(t.id, terminal);
     }
