@@ -1,5 +1,7 @@
 {
   "proxy": "https://proxy.watermelonkatana.workers.dev/",
   "fallbackProxy": "https://proxy.dragonfire7z.workers.dev/",
-  "github": "https://github-auth.watermelonkatana.workers.dev/"
+  "github": "https://github-auth.watermelonkatana.workers.dev/",
+  "isolationProxy": "https://proxy.watermelonkatana.workers.dev/isolate?url=",
+  "opendawUrl": "https://watermelonkatana2.onrender.com/editor/editor/previews/vendor/opendaw/"
 }
