@@ -101,10 +101,14 @@
         if (
           event.source !== frame.contentWindow ||
           event.origin !== location.origin ||
-          event.data?.type !== 'wk-blockbench-bridge-ready' ||
+          !['wk-blockbench-bridge-ready', 'wk-blockbench-bridge-error'].includes(event.data?.type) ||
           event.data?.bridgeId !== bridgeId
         ) return;
-        console.info('Blockbench workspace integration connected.');
+        if (event.data.type === 'wk-blockbench-bridge-ready') {
+          console.info('Blockbench workspace integration connected.');
+        } else {
+          console.error('Blockbench workspace bridge could not connect to the Editor workspace.');
+        }
       };
       window.addEventListener('message', bridgeReadyHandler);
 
