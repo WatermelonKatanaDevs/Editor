@@ -107,10 +107,22 @@
       }
     }
     const workspaceBridge = {
-      pickFiles:options => workspacePicker.open({
-        ...options,
-        maxFileBytes:Math.min(Number(options?.maxFileBytes) || MAX_OPEN_BYTES, MAX_OPEN_BYTES)
-      }),
+      async pickFiles(options) {
+        const files = await workspacePicker.open({
+          ...options,
+          maxFileBytes:Math.min(Number(options?.maxFileBytes) || MAX_OPEN_BYTES, MAX_OPEN_BYTES)
+        });
+        return Promise.all((files || []).map(async file => ({
+          name:file.name,
+          type:file.type || 'application/octet-stream',
+          path:file.__wkWorkspacePath || file.customRelativePath || '',
+          bytes:await file.arrayBuffer()
+        })));
+      },
+      openProjectFile(entry) {
+        if (!entry || !/\.fcproj$/i.test(entry.name || '')) throw new Error('A FilmCraft project file is required.');
+        postOpen(entry.name, fileBytes(entry.bytes), entry.path || null);
+      },
       openFiles:files => openFiles(files)
     };
 
