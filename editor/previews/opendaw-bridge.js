@@ -147,8 +147,9 @@
       accept:input.accept || '',
       multiple:!!input.multiple
     })).then(entries => {
+      if (!entries?.length) return;
       const transfer = new DataTransfer();
-      for (const entry of entries || []) transfer.items.add(makeFile(entry));
+      for (const entry of entries) transfer.items.add(makeFile(entry));
       input.files = transfer.files;
       input.dispatchEvent(new Event('change', {bubbles:true}));
     }).catch(error => console.error('openDAW shared file picker failed:', error));

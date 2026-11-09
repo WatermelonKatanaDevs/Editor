@@ -78,6 +78,7 @@
   const nativeInputClick = HTMLInputElement.prototype.click;
   const nativeAnchorClick = HTMLAnchorElement.prototype.click;
   function dispatchSelectedFiles(input, files) {
+    if (!files?.length) return;
     try {
       const transfer = new DataTransfer();
       for (const file of files || []) transfer.items.add(file);
@@ -98,7 +99,6 @@
     }).then(files => dispatchSelectedFiles(input, files || []))
       .catch(error => {
         console.error('Blockbench shared file picker failed:', error);
-        dispatchSelectedFiles(input, []);
       });
   };
   HTMLAnchorElement.prototype.click = function () {

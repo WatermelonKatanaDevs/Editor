@@ -32,14 +32,6 @@
     value:async options => choose(options || {})
   });
 
-  function emptyFileList(input) {
-    try {
-      const transfer = new DataTransfer();
-      input.files = transfer.files;
-      input.dispatchEvent(new Event('change', {bubbles:true}));
-    } catch (_) {}
-  }
-
   HTMLInputElement.prototype.click = function () {
     if (this.type !== 'file') return nativeInputClick.call(this);
     const input = this;
@@ -47,11 +39,7 @@
       title:input.getAttribute('data-wk-picker-title') || 'Open in FilmCraft',
       accept:input.accept || '',
       multiple:!!input.multiple
-    }).then(() => emptyFileList(input))
-      .catch(error => {
-        console.error('FilmCraft shared file picker failed:', error);
-        emptyFileList(input);
-      });
+    }).catch(error => console.error('FilmCraft shared file picker failed:', error));
   };
 
   window.__WKFilmCraftPickerReady = true;

@@ -62,6 +62,7 @@
   }
 
   function create(config = {}) {
+    const owner = {};
     function fs() {
       const value = typeof config.getFs === 'function' ? config.getFs() : config.fs;
       if (!value) throw new Error('The Editor workspace is not ready.');
@@ -421,7 +422,7 @@
         });
         overlay.addEventListener('mousedown', event => { if (event.target === overlay) close(null); });
         document.addEventListener('keydown', keydown, true);
-        activeDialog = {close:() => close(null), overlay};
+        activeDialog = {owner, close:() => close(null), overlay};
         document.body.append(overlay);
         draw();
         if (mode === 'save') { filename.focus(); filename.select(); }
@@ -431,7 +432,9 @@
 
     return {
       open, savePath, saveFile, writeFile, listFiles,
-      cancelActive:() => activeDialog?.close?.()
+      cancelActive:() => {
+        if (activeDialog?.owner === owner) activeDialog.close();
+      }
     };
   }
 
