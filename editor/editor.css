@@ -939,4 +939,6 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 
 /* Artwork-derived light tint keeps every player label readable and cohesive. */
 .editor-audio-player,.editor-audio-player *{color:var(--audio-cover-primary-light,#aebeb3)!important}
+.editor-audio-player .editor-audio-title,.editor-audio-player .editor-audio-artist{filter:brightness(1.12)}
+
 .editor-audio-player .editor-audio-play,.editor-audio-player .editor-audio-play *{color:var(--audio-cover-accent-ink,#102017)!important}
