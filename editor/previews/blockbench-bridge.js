@@ -109,10 +109,16 @@
       accept:input.accept || '',
       multiple:!!input.multiple,
       allowDevice:true
-    }).then(files => dispatchSelectedFiles(input, files || []))
-      .catch(error => {
-        console.error('Blockbench shared file picker failed:', error);
-      });
+    }).then(files => {
+      if (!files?.length) {
+        input.dispatchEvent(new Event('cancel'));
+        return;
+      }
+      dispatchSelectedFiles(input, files);
+    }).catch(error => {
+      if (error?.name === 'AbortError') input.dispatchEvent(new Event('cancel'));
+      else console.error('Blockbench shared file picker failed:', error);
+    });
   };
   HTMLAnchorElement.prototype.click = function () {
     if (!this.download || !String(this.href).startsWith('blob:')) {

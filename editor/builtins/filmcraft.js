@@ -112,7 +112,8 @@
           ...options,
           maxFileBytes:Math.min(Number(options?.maxFileBytes) || MAX_OPEN_BYTES, MAX_OPEN_BYTES)
         });
-        return Promise.all((files || []).map(async file => ({
+        if (!files) return null;
+        return Promise.all(files.map(async file => ({
           name:file.name,
           type:file.type || 'application/octet-stream',
           path:file.__wkWorkspacePath || file.customRelativePath || '',

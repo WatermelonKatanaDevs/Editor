@@ -22,8 +22,9 @@
       allowDevice:true,
       maxFileBytes:MAX_OPEN_BYTES
     });
+    if (!entries) throw new DOMException('The user aborted the request.', 'AbortError');
     const handles = [];
-    for (const entry of entries || []) {
+    for (const entry of entries) {
       if (/\.fcproj$/i.test(entry.name || '')) {
         await api.openProjectFile(entry);
         continue;
@@ -70,12 +71,18 @@
       });
       return Promise.all(files);
     }).then(files => {
-      if (!files.length) return;
+      if (!files.length) {
+        input.dispatchEvent(new Event('cancel'));
+        return;
+      }
       const transfer = new DataTransfer();
       for (const file of files) transfer.items.add(file);
       input.files = transfer.files;
       input.dispatchEvent(new Event('change', {bubbles:true}));
-    }).catch(error => console.error('FilmCraft shared file picker failed:', error));
+    }).catch(error => {
+      if (error?.name === 'AbortError') input.dispatchEvent(new Event('cancel'));
+      else console.error('FilmCraft shared file picker failed:', error);
+    });
   };
 
   window.__WKFilmCraftPickerReady = true;

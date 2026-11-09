@@ -101,12 +101,12 @@
         case 'writeFile': result = writeFile(args[0], args[1]); break;
         case 'pickFiles': {
           const files = await workspacePicker.open(args[0] || {});
-          result = await Promise.all((files || []).map(async file => ({
+          result = files ? await Promise.all(files.map(async file => ({
             name:file.name,
             path:file.__wkWorkspacePath || file.customRelativePath || '',
             type:file.type || 'application/octet-stream',
             bytes:await file.arrayBuffer()
-          })));
+          }))) : null;
           break;
         }
         case 'pickSavePath': result = await workspacePicker.savePath(args[0] || {}); break;

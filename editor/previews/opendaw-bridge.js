@@ -145,7 +145,8 @@
     writable:true,
     value:async options => {
       const results = await request('pickFiles', pickerOptions(options || {}));
-      return (results || []).map(entry => {
+      if (!results) throw abortError();
+      return results.map(entry => {
         const file = makeFile(entry);
         return {name:file.name,kind:'file',getFile:async() => file};
       });
@@ -160,7 +161,10 @@
       accept:input.accept || '',
       multiple:!!input.multiple
     })).then(entries => {
-      if (!entries?.length) return;
+      if (!entries?.length) {
+        input.dispatchEvent(new Event('cancel'));
+        return;
+      }
       const transfer = new DataTransfer();
       for (const entry of entries) transfer.items.add(makeFile(entry));
       input.files = transfer.files;
