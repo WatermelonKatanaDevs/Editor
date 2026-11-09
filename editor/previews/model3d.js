@@ -449,7 +449,7 @@
             const textureExt=texturePath.split('.').pop().toLowerCase();
             addResource(texturePath,bytesOf(textureData),MIME[textureExt]||'application/octet-stream');
           }
-          const textureBase=materialBase?materialBase+'/':'';
+          const textureBase=materialBase.endsWith('/')?materialBase:materialBase?materialBase+'/':'';
           const parsed=new THREE.MTLLoader(manager).parse(mtlText,textureBase);
           if(!materials)materials=parsed;
           else Object.assign(materials.materialsInfo,parsed.materialsInfo);
