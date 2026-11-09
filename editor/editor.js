@@ -871,6 +871,7 @@ window.__editorInitPromise = (async function () {
     if (record) {
       record.localGitConnected = connected;
       writeRecentProjects(recentProjects().map(item => item.id === id ? record : item));
+      window.dispatchEvent(new CustomEvent('wk-local-git-connection-changed', {detail:{id, connected}}));
     }
     return connected;
   }
@@ -883,7 +884,7 @@ window.__editorInitPromise = (async function () {
         const fs = await FileSystem.create(handle, {sync:true});
         await replaceFileSystem(fs, record.name, true, {projectId:record.id});
         await storeLocalFolderHandle(record.id, handle);
-        await updateLocalGitConnection(fs, record.id);
+        void updateLocalGitConnection(fs, record.id);
         return true;
       }
     }
@@ -2398,11 +2399,11 @@ window.__editorInitPromise = (async function () {
       const projectName = zipSource ? stripZipProjectName(name) : (name || 'Workspace');
       if (zipSource) updateRemoteLoadProgress('Starting workspace…', 97, projectName || 'Workspace');
       await replaceFileSystem(fs, projectName || 'Workspace', true);
+      closeImportModal();
       if (directoryHandleSource) {
         await storeLocalFolderHandle(state.projectId, filesystemSource);
-        await updateLocalGitConnection(fs, state.projectId);
+        void updateLocalGitConnection(fs, state.projectId);
       }
-      closeImportModal();
       if (zipSource && remoteLoadProgress) {
         updateRemoteLoadProgress('Local project ready', 100, 'Workspace loaded');
         const modal = remoteLoadProgress.modal;
@@ -3625,7 +3626,7 @@ window.__editorInitPromise = (async function () {
           button.disabled = true;
           const loaded = await loadRecentProject(record);
           if (!loaded) busy = false;
-          githubUnsubscribe?.(); modal.remove();
+          closeChooser();
         };
       });
       listEl.querySelectorAll('[data-remove]').forEach(button => {
@@ -3639,6 +3640,15 @@ window.__editorInitPromise = (async function () {
           await render();
         };
       });
+    };
+    const localGitConnectionChanged = () => {
+      if (!busy && modal.isConnected) void render();
+    };
+    window.addEventListener('wk-local-git-connection-changed', localGitConnectionChanged);
+    const closeChooser = () => {
+      window.removeEventListener('wk-local-git-connection-changed', localGitConnectionChanged);
+      githubUnsubscribe?.();
+      modal.remove();
     };
     const templatesEl = modal.querySelector('[data-templates]');
     const renderTemplates = async () => {
@@ -3654,7 +3664,7 @@ window.__editorInitPromise = (async function () {
           templatesEl.querySelectorAll('button').forEach(b => b.disabled = true);
           try {
             await createTemplateProject(template);
-            githubUnsubscribe?.(); modal.remove();
+            closeChooser();
           } catch (e) {
             busy = false;
             templatesEl.querySelectorAll('button').forEach(b => b.disabled = false);
@@ -3669,19 +3679,19 @@ window.__editorInitPromise = (async function () {
     modal.querySelector('[data-open]').onclick = () => {
       if (busy) return;
       busy = true;
-      githubUnsubscribe?.(); modal.remove();
+      closeChooser();
       openImportModal({skipGuard:true, returnToChooser:true, chooserOptions:{canClose}}).catch(logError);
     };
     modal.querySelector('[data-open-remote]').onclick = () => {
       if (busy) return;
       busy = true;
-      githubUnsubscribe?.(); modal.remove();
+      closeChooser();
       openRemoteImportModal({skipGuard:true, returnToChooser:true, chooserOptions:{canClose}}).catch(logError);
     };
     if (canClose) {
       modal.querySelector('.startup-close').onclick = () => {
         if (busy) return;
-        githubUnsubscribe?.(); modal.remove();
+        closeChooser();
       };
     }
     clearButton.onclick = async () => {
