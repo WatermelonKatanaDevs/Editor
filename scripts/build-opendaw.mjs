@@ -11,6 +11,7 @@ const sourceRoot = resolve(editorRoot, "editor/previews/vendor/opendaw-src");
 const outputRoot = resolve(editorRoot, "editor/previews/vendor/opendaw");
 const studioRoot = resolve(sourceRoot, "packages/app/studio");
 const basePath = "/editor/editor/previews/vendor/opendaw/";
+const integrationVersion = 2;
 const markerPath = resolve(outputRoot, ".wk-openDAW-build.json");
 
 function run(command, args, options = {}) {
@@ -164,7 +165,7 @@ async function main() {
       existsSync(resolve(outputRoot, "wasm-engine/wasm/engine.wasm"))) {
     try {
       const marker = JSON.parse(await readFile(markerPath, "utf8"));
-      if (marker.sourceCommit === sourceCommit && marker.basePath === basePath) {
+      if (marker.sourceCommit === sourceCommit && marker.basePath === basePath && marker.integrationVersion === integrationVersion) {
         console.log("[openDAW] Local Studio is already built from " + sourceCommit.slice(0, 10) + ".");
         return;
       }
@@ -210,6 +211,7 @@ async function main() {
     await writeFile(markerPath, JSON.stringify({
       sourceCommit:sourceCommit,
       basePath:basePath,
+      integrationVersion:integrationVersion,
       builtAt:new Date().toISOString()
     }, null, 2) + "\n");
     console.log("[openDAW] Built and staged the local Studio at " + outputRoot + ".");
