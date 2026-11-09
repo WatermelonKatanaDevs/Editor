@@ -354,7 +354,7 @@
     const projectFile = files.find(file => extension(file.path || file.name) === 'bbmodel');
     if (projectFile) {
       project.save_path = normalize(projectFile.path || projectFile.name);
-      project.name = basename(project.save_path).replace(/\\.[^.]+$/, '');
+      project.name = basename(project.save_path).replace(/\.[^.]+$/, '');
       project.saved = true;
       return;
     }
