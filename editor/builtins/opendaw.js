@@ -159,13 +159,25 @@
         const upstreamUrl = new URL(source, location.href);
         upstreamUrl.searchParams.set('wk_editor_bridge', bridgeId);
         upstreamUrl.searchParams.set('wk_editor_parent_origin', location.origin);
-        const proxyUrl = new URL(isolationEndpoint);
-        proxyUrl.searchParams.set('url', upstreamUrl.href);
+        const setupUrl = new URL('isolate', isolationEndpoint.endsWith('/') ? isolationEndpoint : isolationEndpoint + '/');
+        setupUrl.searchParams.set('url', upstreamUrl.href);
+        setupUrl.searchParams.set('id', bridgeId);
+        const setupResponse = await fetch(setupUrl.href, {method:'GET', credentials:'omit', cache:'no-store'});
+        if (!setupResponse.ok) {
+          const detail = await setupResponse.text().catch(() => '');
+          throw new Error(detail || 'Isolation setup failed (' + setupResponse.status + ').');
+        }
+        const session = await setupResponse.json();
+        if (!session?.ok || session.id !== bridgeId || typeof session.url !== 'string') {
+          throw new Error('The isolation proxy returned an invalid session.');
+        }
+        const proxyUrl = new URL(session.url);
+        if (proxyUrl.origin !== setupUrl.origin) throw new Error('The isolation proxy returned a URL on an unexpected origin.');
         frame.dataset.proxyOrigin = proxyUrl.origin;
         frame.src = proxyUrl.href;
       }).catch(error => {
         console.error('Could not configure the openDAW isolation proxy:', error);
-        showIsolationFallback(group, 'The openDAW isolation proxy configuration could not be loaded.');
+        showIsolationFallback(group, error?.message || 'The openDAW isolation proxy configuration could not be loaded.');
       });
       return frame;
     }
