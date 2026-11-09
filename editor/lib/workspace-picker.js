@@ -2,6 +2,7 @@
   'use strict';
 
   let activeDialog = null;
+  let dialogQueue = [];
   const PRIVATE_PATHS = ['.editor', '.git'];
 
   function normalizePath(value) {
@@ -155,7 +156,19 @@
     }
 
     function showDialog(options) {
-      if (activeDialog) return Promise.reject(new Error('Another Editor file picker is already open.'));
+      return new Promise((resolve, reject) => {
+        dialogQueue.push({options, owner, resolve, reject});
+        openNextDialog();
+      });
+    }
+
+    function openNextDialog() {
+      if (activeDialog || !dialogQueue.length) return;
+      const next = dialogQueue.shift();
+      showDialogNow(next.options, next.owner).then(next.resolve, next.reject);
+    }
+
+    function showDialogNow(options, dialogOwner) {
       return new Promise(resolve => {
         const mode = options.mode, multiple = mode === 'open' && options.multiple;
         const filters = options.filters, selected = new Set();
@@ -260,6 +273,7 @@
           overlay.remove();
           activeDialog = null;
           resolve(value);
+          openNextDialog();
         };
         const addDeviceFiles = incoming => {
           const items = Array.from(incoming || []);
@@ -422,7 +436,7 @@
         });
         overlay.addEventListener('mousedown', event => { if (event.target === overlay) close(null); });
         document.addEventListener('keydown', keydown, true);
-        activeDialog = {owner, close:() => close(null), overlay};
+        activeDialog = {owner:dialogOwner, close:() => close(null), overlay};
         document.body.append(overlay);
         draw();
         if (mode === 'save') { filename.focus(); filename.select(); }
@@ -433,6 +447,12 @@
     return {
       open, savePath, saveFile, writeFile, listFiles,
       cancelActive:() => {
+        const waiting = [];
+        for (const item of dialogQueue) {
+          if (item.owner === owner) item.resolve(null);
+          else waiting.push(item);
+        }
+        dialogQueue = waiting;
         if (activeDialog?.owner === owner) activeDialog.close();
       }
     };
