@@ -1879,6 +1879,7 @@ window.__editorInitPromise = (async function () {
       );
     }
 
+    const terminalTab = getBuiltin('terminal')?.getOrOpenTerminal();
     const emulator = new NodeEmulator({
       domain: String(config.domain || 'http://localhost:3000').replace(/\/+$/, ''),
       rootfolder: manifest.root,
@@ -1897,13 +1898,16 @@ window.__editorInitPromise = (async function () {
     try {
       await emulator.ready;
       if (emulator.loadError) throw emulator.loadError;
+      for (const terminal of state.terminalTabs.values()) terminal.attach(emulator);
       const installed = await installNodeDependencies(emulator, config);
       if (installed) {
+        state.nodeDependenciesError = null;
         state.fileManager?.refresh?.();
         updateStatus();
       }
       return installed;
     } finally {
+      for (const terminal of state.terminalTabs.values()) if (terminal.runner === emulator) terminal.attach(null);
       try { emulator.destroy?.(); } catch (_) {}
     }
   }
@@ -2417,6 +2421,7 @@ window.__editorInitPromise = (async function () {
         // Dependency installation is retried by setupRuntime when Run is pressed.
         // Keep the editor usable if npm is temporarily unavailable while loading.
         state.nodeDependenciesError = e;
+        for (const terminal of state.terminalTabs.values()) terminal.console?.error('Failed to pre-install Node dependencies:', e?.message || e);
         console.error('Failed to pre-install Node dependencies:', e);
       }
     }

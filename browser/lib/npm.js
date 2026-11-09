@@ -1034,24 +1034,50 @@ npm audit found ${blocking.length} package${blocking.length === 1 ? '' : 's'} wi
       if (!manifest || !lockText) throw new NpmError('npm ci requires package.json and package-lock.json.');
       let lock;
       try { lock = JSON.parse(lockText); } catch (_) { throw new NpmError('package-lock.json contains invalid JSON.', 'EBADLOCK'); }
-      this.deleteTree('node_modules');
-      const packages = lock.packages || {};
-      const entries = Object.entries(packages).filter(([path]) => path && path.split('/').includes('node_modules'));
+      const packages = lock.packages && typeof lock.packages === 'object' ? lock.packages : {};
       const packagePath = relative => {
         const parts = String(relative || '').split('/').filter(Boolean);
         let moduleIndex = -1;
         for (let i = 0; i < parts.length; i++) if (parts[i] === 'node_modules') moduleIndex = i;
         if (moduleIndex < 0 || moduleIndex === parts.length - 1) return null;
+        const installedParts = parts.slice(moduleIndex + 1);
+        let name;
+        if (installedParts[0]?.startsWith('@')) {
+          if (installedParts.length !== 2 || !installedParts[0].slice(1) || !installedParts[1]) return null;
+          name = installedParts.join('/');
+        } else {
+          if (installedParts.length !== 1 || !installedParts[0]) return null;
+          name = installedParts[0];
+        }
         return {
           parent:parts.slice(0, moduleIndex).join('/'),
-          name:parts.slice(moduleIndex + 1).join('/')
+          name
         };
       };
-      entries.sort((a, b) => a[0].split('/').filter(part => part === 'node_modules').length - b[0].split('/').filter(part => part === 'node_modules').length);
-      for (const [relative, entry] of entries) {
-        const parsed = packagePath(relative);
-        if (!parsed || !parsed.name) continue;
-        const range = entry.version || '*';
+      const entries = Object.entries(packages).map(([path, entry]) => ({
+        path,
+        entry,
+        parsed:packagePath(path)
+      })).filter(item => item.parsed && item.entry && !item.entry.link && !item.entry.inBundle && item.entry.version);
+      const directDependencies = {
+        ...(manifest.dependencies || {}),
+        ...(manifest.devDependencies || {}),
+        ...(manifest.optionalDependencies || {})
+      };
+      if (!entries.length && Object.keys(directDependencies).length) {
+        throw new NpmError('package-lock.json has no installable package entries. Regenerate it with npm install before running npm ci.', 'EBADLOCK');
+      }
+      for (const name of Object.keys(directDependencies)) {
+        if (!entries.some(item => item.parsed.name === name && !item.parsed.parent)) {
+          throw new NpmError(`package-lock.json is missing the root installation entry for '${name}'. Regenerate it with npm install.`, 'EBADLOCK');
+        }
+      }
+      this.deleteTree('node_modules');
+      const skipped = Object.keys(packages).length - entries.length;
+      if (skipped) this.output(`npm ci: skipping ${skipped} bundled, linked, or non-package lockfile entries.`);
+      entries.sort((a, b) => a.path.split('/').filter(part => part === 'node_modules').length - b.path.split('/').filter(part => part === 'node_modules').length);
+      for (const {path:relative, entry, parsed} of entries) {
+        const range = entry.version;
         this.output(`npm ci: installing ${parsed.name}@${range}`);
         try {
           const installed = await this.installResolved(parsed.name, `=${range}`, parsed.parent, { force: true });
