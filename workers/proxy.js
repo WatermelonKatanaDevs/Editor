@@ -53,6 +53,9 @@ function validateIsolatedTarget(target, workerOrigin) {
   if (target.origin === workerOrigin) throw new Error("The isolation proxy cannot proxy itself.");
 
   const hostname = target.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (!hostname.includes(".") && !hostname.includes(":")) {
+    throw new Error("Single-label and local network hosts are not allowed.");
+  }
   if (
     hostname === "localhost" ||
     hostname.endsWith(".localhost") ||
@@ -161,8 +164,11 @@ function rewriteIsolatedHtml(source, target) {
 }
 
 function rewriteIsolatedCss(source, target) {
-  return source.replace(/url\(\s*(["']?)(.*?)\1\s*\)/gi,
+  let output = source.replace(/url\(\s*(["']?)(.*?)\1\s*\)/gi,
     (match, quote, value) => "url(" + quote + rewriteIsolatedUrl(value, target) + quote + ")");
+  output = output.replace(/@import\s+(["'])(.*?)\1/gi,
+    (match, quote, value) => "@import " + quote + rewriteIsolatedUrl(value, target) + quote);
+  return output;
 }
 
 function rewriteIsolatedScript(source, target) {
