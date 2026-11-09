@@ -105,7 +105,7 @@ const patches = [
         path: resolve(studioRoot, "src/service/ProjectProfileService.ts"),
     label: "mirror project saves to Editor workspace",
     before: "export class ProjectProfileService {",
-    after: "const workspaceProjectPaths = (): Map<string, string> => {\n    const target = window as any\n    if (target.__WKOpenDAWProjectPaths instanceof Map) {return target.__WKOpenDAWProjectPaths}\n    let stored: Record<string, string> = {}\n    try {stored = JSON.parse(localStorage.getItem(\"wk-openDAW-project-paths\") || \"{}\") as Record<string, string>} catch {}\n    const paths = new Map<string, string>(Object.entries(stored))\n    target.__WKOpenDAWProjectPaths = paths\n    return paths\n}\n\nconst rememberWorkspaceProjectPath = (identity: string, path: string): void => {\n    const paths = workspaceProjectPaths()\n    paths.set(identity, path)\n    try {localStorage.setItem(\"wk-openDAW-project-paths\", JSON.stringify(Object.fromEntries(paths)))} catch {}\n}\n\nconst saveEditorWorkspaceBundle = async (profile: ProjectProfile): Promise<void> => {\n    const adapter = (window as any).__WKOpenDAWWorkspace\n    if (typeof adapter?.writeFile !== \"function\") {return}\n    const identity = UUID.toString(profile.uuid)\n    const safeName = String(profile.meta.name || \"Project\").replaceAll(\"/\", \"_\").replaceAll(String.fromCharCode(92), \"_\").trim() || \"Project\"\n    const path = workspaceProjectPaths().get(identity) || \"openDAW Projects/\" + safeName + \"-\" + identity.slice(0, 8) + \".odb\"\n    try {\n        const bundle = await ProjectBundle.encode(profile, () => {})\n        adapter.writeFile(path, new Uint8Array(bundle))\n        rememberWorkspaceProjectPath(identity, path)\n    } catch (error) {\n        console.warn(\"Could not mirror openDAW project into the Editor workspace.\", error)\n        RuntimeNotifier.notify({message: \"Could not save a bundle to the Editor workspace.\", icon: \"Warning\"})\n    }\n}\nexport class ProjectProfileService {"
+    after: "const workspaceProjectPaths = (): Map<string, string> => {\n    const target = window as any\n    if (target.__WKOpenDAWProjectPaths instanceof Map) {return target.__WKOpenDAWProjectPaths}\n    let stored: Record<string, string> = {}\n    try {stored = JSON.parse(localStorage.getItem(\"wk-openDAW-project-paths\") || \"{}\") as Record<string, string>} catch {}\n    const paths = new Map<string, string>(Object.entries(stored))\n    target.__WKOpenDAWProjectPaths = paths\n    return paths\n}\n\nconst rememberWorkspaceProjectPath = (identity: string, path: string): void => {\n    const paths = workspaceProjectPaths()\n    paths.set(identity, path)\n    try {localStorage.setItem(\"wk-openDAW-project-paths\", JSON.stringify(Object.fromEntries(paths)))} catch {}\n}\n\nconst saveEditorWorkspaceBundle = async (profile: ProjectProfile): Promise<void> => {\n    const adapter = (window as any).__WKOpenDAWWorkspace\n    if (typeof adapter?.writeFile !== \"function\") {return}\n    const identity = UUID.toString(profile.uuid)\n    const safeName = String(profile.meta.name || \"Project\").replaceAll(\"/\", \"_\").replaceAll(String.fromCharCode(92), \"_\").trim() || \"Project\"\n    const path = workspaceProjectPaths().get(identity) || \"openDAW Projects/\" + safeName + \"-\" + identity.slice(0, 8) + \".odb\"\n    try {\n        const bundle = await ProjectBundle.encode(profile, () => {})\n        await adapter.writeFile(path, new Uint8Array(bundle))\n        rememberWorkspaceProjectPath(identity, path)\n    } catch (error) {\n        console.warn(\"Could not mirror openDAW project into the Editor workspace.\", error)\n        RuntimeNotifier.notify({message: \"Could not save a bundle to the Editor workspace.\", icon: \"Warning\"})\n    }\n}\nexport class ProjectProfileService {"
   },
   {
         path: resolve(studioRoot, "src/service/ProjectProfileService.ts"),
@@ -199,6 +199,14 @@ async function main() {
     await rm(outputRoot, {recursive:true, force:true});
     await mkdir(dirname(outputRoot), {recursive:true});
     await cp(dist, outputRoot, {recursive:true});
+    const studioIndexPath = resolve(outputRoot, "index.html");
+    let studioIndex = await readFile(studioIndexPath, "utf8");
+    if (!studioIndex.includes("opendaw-bridge.js")) {
+      const bridgeScript = '<script src="../../opendaw-bridge.js" defer></script>';
+      if (!/<\\/head>/i.test(studioIndex)) throw new Error("The openDAW Studio HTML has no closing head tag for its workspace bridge.");
+      studioIndex = studioIndex.replace(/<\\/head>/i, bridgeScript + "</head>");
+      await writeFile(studioIndexPath, studioIndex);
+    }
     await writeFile(markerPath, JSON.stringify({
       sourceCommit:sourceCommit,
       basePath:basePath,
