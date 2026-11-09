@@ -132,6 +132,13 @@
     if (extensions.includes('*')) return true;
     return false;
   }
+  function isAllowedFile(file, extensions) {
+    if (!extensions.length || extensions.includes('*')) return true;
+    const ext = extension(file?.name || '');
+    if (extensions.includes(ext)) return true;
+    const type = String(file?.type || mimeFor(file?.name || '')).toLowerCase();
+    return extensions.includes('image/*') && type.startsWith('image/');
+  }
 
   let activePickerDrop = null;
   let forceSaveDialog = false;
@@ -142,14 +149,14 @@
       const extensions = allowedExtensions(options);
       const suggestedName = String(options.name || 'model').trim() || 'model';
       const suggestedExtension = extensions.find(value => value !== '*' && value !== 'image/*') || '';
-      let initialPath = normalize(options.startpath || '');
-      let currentDir = initialPath && (bridge.exists(initialPath) || extension(initialPath))
-        ? dirname(initialPath)
-        : initialPath;
-      let selected = new Set();
-      let droppedFiles = [];
+      const initialPath = normalize(options.startpath || '');
       let allFiles = [];
       try { allFiles = (bridge.listFiles() || []).map(normalize).filter(Boolean); } catch (_) {}
+      const startIsFile = !!initialPath && allFiles.some(path => path.toLowerCase() === initialPath.toLowerCase());
+      const startLooksLikeMissingFile = !!initialPath && !startIsFile && !bridge.exists(initialPath) && !!extension(initialPath);
+      let currentDir = startIsFile || startLooksLikeMissingFile ? dirname(initialPath) : initialPath;
+      let selected = new Set();
+      let droppedFiles = [];
 
       const overlay = document.createElement('div');
       overlay.className = 'wk-blockbench-picker-overlay';
@@ -164,22 +171,41 @@
 
       const toolbar = document.createElement('div');
       toolbar.style.cssText = 'padding:12px 16px;display:flex;gap:8px;align-items:center;border-bottom:1px solid #353b40;';
+      const upButton = document.createElement('button');
+      upButton.type = 'button';
+      upButton.textContent = '↑ Up';
+      upButton.title = 'Go to parent folder';
+      upButton.style.cssText = 'flex:none;border:1px solid #596168;background:#30363a;color:#e9edf0;border-radius:5px;padding:7px 10px;cursor:pointer;';
       const pathLabel = document.createElement('div');
       pathLabel.style.cssText = 'min-width:0;flex:1;color:#aeb6bd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      const deviceButton = document.createElement('button');
+      deviceButton.type = 'button';
+      deviceButton.textContent = 'From device…';
+      deviceButton.title = 'Choose files from this device';
+      deviceButton.style.cssText = 'flex:none;border:1px solid #596168;background:#30363a;color:#e9edf0;border-radius:5px;padding:7px 10px;cursor:pointer;';
+      const deviceInput = document.createElement('input');
+      deviceInput.type = 'file';
+      deviceInput.hidden = true;
+      deviceInput.multiple = multiple;
+      const deviceAccept = extensions.map(value =>
+        value === 'image/*' ? 'image/*' : value === '*' ? '*/*' : '.' + value
+      ).join(',');
+      if (deviceAccept) deviceInput.accept = deviceAccept;
       const search = document.createElement('input');
       search.type = 'search';
       search.placeholder = 'Filter workspace files';
-      search.style.cssText = 'width:190px;max-width:45%;background:#15181a;color:#eee;border:1px solid #50585e;border-radius:5px;padding:7px 9px;outline:none;';
-      toolbar.append(pathLabel, search);
+      search.style.cssText = 'width:190px;max-width:32%;min-width:110px;background:#15181a;color:#eee;border:1px solid #50585e;border-radius:5px;padding:7px 9px;outline:none;';
+      toolbar.append(upButton, pathLabel, deviceButton, search);
       panel.appendChild(toolbar);
 
       const list = document.createElement('div');
       list.style.cssText = 'overflow:auto;min-height:190px;max-height:48vh;padding:6px 8px;';
       panel.appendChild(list);
       const dropHint = document.createElement('div');
-      dropHint.textContent = 'You can also drag files here from the Editor Explorer.';
+      dropHint.textContent = 'You can also drag files here from the Editor Explorer or from your device.';
       dropHint.style.cssText = 'margin:0 16px 8px;padding:10px;border:1px dashed #59636b;border-radius:6px;text-align:center;color:#9eabb5;font-size:12px;';
       panel.appendChild(dropHint);
+      panel.appendChild(deviceInput);
 
       const status = document.createElement('div');
       status.style.cssText = 'min-height:18px;padding:0 16px 8px;color:#aeb6bd;font-size:12px;';
@@ -241,7 +267,10 @@
       }
 
       function renderList() {
-        pathLabel.textContent = '/' + currentDir;
+        pathLabel.textContent = currentDir ? '/' + currentDir + '/' : '/';
+        upButton.disabled = !currentDir;
+        upButton.style.opacity = currentDir ? '1' : '.45';
+        upButton.style.cursor = currentDir ? 'pointer' : 'default';
         list.replaceChildren();
         const query = search.value.trim().toLowerCase();
         const entries = childEntries();
@@ -324,14 +353,42 @@
         overlay,
         accept(files) {
           if (mode !== 'open' || !files?.length) return false;
-          droppedFiles = [...files];
+          const incoming = [...files];
+          const rejected = incoming.filter(file => !isAllowedFile(file, extensions));
+          if (rejected.length) {
+            status.textContent = 'Some files do not match the accepted file types.';
+            return false;
+          }
+          droppedFiles = multiple ? incoming : incoming.slice(0, 1);
           selected.clear();
-          status.textContent = droppedFiles.length + ' file(s) received from the Editor Explorer. Press Open to continue.';
+          status.textContent = droppedFiles.length + ' file(s) received. Press Open to continue.';
           confirm.disabled = false;
           confirm.style.opacity = '1';
           return true;
         }
       };
+      upButton.addEventListener('click', () => {
+        if (!currentDir) return;
+        currentDir = dirname(currentDir);
+        selected.clear();
+        search.value = '';
+        renderList();
+      });
+      deviceButton.addEventListener('click', () => deviceInput.click());
+      deviceInput.addEventListener('change', () => {
+        const incoming = Array.from(deviceInput.files || []);
+        deviceInput.value = '';
+        if (!incoming.length) return;
+        const rejected = incoming.filter(file => !isAllowedFile(file, extensions));
+        if (rejected.length) {
+          status.textContent = rejected.length + ' file(s) do not match the accepted file types.';
+          return;
+        }
+        droppedFiles = multiple ? incoming : incoming.slice(0, 1);
+        selected.clear();
+        status.textContent = droppedFiles.length + ' file(s) selected from this device. Press Open to continue.';
+        renderList();
+      });
       search.addEventListener('input', renderList);
       overlay.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); finish(null); }
