@@ -27,7 +27,7 @@
   }
 
   factories.opendaw = function (ctx) {
-    const bridgeId = 'wk-opendaw-' + (window.crypto?.randomUUID?.() || (Date.now().toString(36) + Math.random().toString(36).slice(2)));
+    let bridgeId = null;
     let channel = null;
     let connected = false;
     let disposed = false;
@@ -101,6 +101,14 @@
     }
 
     function renderOpenDAW(group) {
+      if (connectHandler) window.removeEventListener('message', connectHandler);
+      try { channel?.port1?.close(); } catch (_) {}
+      try { channel?.port2?.close(); } catch (_) {}
+      bridgeId = 'wk-opendaw-' + (window.crypto?.randomUUID?.() || (Date.now().toString(36) + Math.random().toString(36).slice(2)));
+      channel = null;
+      connected = false;
+      disposed = false;
+      connectHandler = null;
       frame = document.createElement('iframe');
       frame.className = 'builtin-opendaw-frame';
       frame.title = 'openDAW Studio';
