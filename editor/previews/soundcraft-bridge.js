@@ -11,6 +11,19 @@
 
   const nativeInputClick = HTMLInputElement.prototype.click;
   const nativeAnchorClick = HTMLAnchorElement.prototype.click;
+  const nativeCreateObjectURL = URL.createObjectURL.bind(URL);
+  const nativeRevokeObjectURL = URL.revokeObjectURL.bind(URL);
+  const downloadBlobs = new Map();
+  URL.createObjectURL = blob => {
+    const url = nativeCreateObjectURL(blob);
+    if (blob instanceof Blob) downloadBlobs.set(url, blob);
+    return url;
+  };
+  URL.revokeObjectURL = url => {
+    downloadBlobs.delete(String(url));
+    return nativeRevokeObjectURL(url);
+  };
+
 
   function dispatchFiles(input, files) {
     if (!files?.length) return;
@@ -43,10 +56,14 @@
       return nativeAnchorClick.call(this);
     }
     const anchor = this;
-    void fetch(anchor.href).then(response => {
-      if (!response.ok) throw new Error('Could not read the exported file (' + response.status + ').');
-      return response.blob();
-    }).then(blob => {
+    const storedBlob = downloadBlobs.get(anchor.href);
+    const blobPromise = storedBlob
+      ? Promise.resolve(storedBlob)
+      : fetch(anchor.href).then(response => {
+          if (!response.ok) throw new Error('Could not read the exported file (' + response.status + ').');
+          return response.blob();
+        });
+    void blobPromise.then(blob => {
       const match = /\.([^.]+)$/.exec(anchor.download || '');
       return api.saveFile({
         title:'Save from SoundCraft',
