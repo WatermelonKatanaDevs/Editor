@@ -124,6 +124,7 @@ window.__editorInitPromise = (async function () {
       confirmBeforeDelete: true,
       dimHiddenFolders: true,
       ignoreNodeModules: true,
+      hideNodeModules: false,
       hideBrowserBar: true
     }
   };

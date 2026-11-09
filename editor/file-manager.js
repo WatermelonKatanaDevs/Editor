@@ -45,6 +45,7 @@
       this.onMove = options.onMove || (() => {});
       this.onDelete = options.onDelete || (() => {});
       this.showHiddenFiles = !!options.showHiddenFiles;
+      this.hideNodeModules = !!options.hideNodeModules;
       this.readOnly = !!options.readOnly;
       this.canContextMenu = options.canContextMenu || (() => true);
       this.selectedNode = null;
@@ -104,9 +105,51 @@
       this.showHiddenFiles = !!value;
       this.refresh();
     }
+    setHideNodeModules(value) {
+      this.hideNodeModules = !!value;
+      this.refresh();
+    }
     isHiddenPath(path) {
-      const name = this.basename(path);
-      return name.startsWith('.') || name === 'node_modules';
+      return this.basename(path).startsWith('.');
+    }
+    isNodeModulesPath(path) {
+      return this.normalize(path).split('/').includes('node_modules');
+    }
+    isNodeModulesRoot(path) {
+      return this.basename(path) === 'node_modules';
+    }
+    shouldHidePath(path) {
+      return (this.hideNodeModules && this.isNodeModulesPath(path)) ||
+        (!this.showHiddenFiles && this.isHiddenPath(path));
+    }
+    loadLazyDirectory(node) {
+      if (!node?.isDir || !node.lazy || !this.fs?.readdirSync) return;
+      node.lazy = false;
+      for (const name of this.fs.readdirSync(node.path) || []) {
+        const path = node.path + '/' + name;
+        if (this.shouldHidePath(path)) continue;
+        const isDir = this.fs.isDirectorySync(path);
+        const child = isDir ? {
+          id: crypto.randomUUID(),
+          name,
+          path,
+          isDir:true,
+          hidden:this.isHiddenPath(path),
+          children:[],
+          lazy:this.isNodeModulesPath(path)
+        } : {
+          id:crypto.randomUUID(),
+          name,
+          path,
+          isDir:false,
+          hidden:this.isHiddenPath(path),
+          mime:EditorInferMime(name)
+        };
+        if (child.lazy) this.collapsedPaths.add(path);
+        node.children.push(child);
+        this.nodeByPath.set(path, child);
+        this.nodeByID.set(child.id, child);
+      }
     }
     setProjectName(name) {
       this.projectName = name || (() => 'Workspace');
@@ -156,8 +199,10 @@
           path,
           isDir: true,
           hidden: this.isHiddenPath(path),
-          children: []
+          children:[],
+          lazy:this.isNodeModulesRoot(path)
         };
+        if (node.lazy) this.collapsedPaths.add(path);
         parent.children.push(node);
         this.nodeByPath.set(path, node);
         this.nodeByID.set(node.id, node);
@@ -180,7 +225,7 @@
       if (typeof this.fs.forEachEntrySync === 'function') {
         this.fs.forEachEntrySync((raw, isDirectory) => {
           const path = this.normalize(raw);
-          if (!path || (!this.showHiddenFiles && this.isHiddenPath(path))) return;
+          if (!path || this.shouldHidePath(path)) return;
           const parts = path.split('/');
           let parent = this.root, current = '';
           for (let i = 0; i < parts.length; i++) {
@@ -189,10 +234,10 @@
             if (i === parts.length - 1 && !isDirectory) addFile(current, part, parent);
             else parent = addDir(current, part, parent);
           }
-        }, {skipDirectory:path => !this.showHiddenFiles && this.isHiddenPath(path)});
+        }, {skipDirectory:path => this.shouldHidePath(path) || this.isNodeModulesRoot(path)});
       } else {
         for (const raw of this.fs.listFilesSync().map(p => this.normalize(p)).filter(Boolean)) {
-          if (!this.showHiddenFiles && raw.split('/').some(part => part.startsWith('.') || part === 'node_modules')) continue;
+          if (this.shouldHidePath(raw) || this.isNodeModulesPath(raw)) continue;
           const parts = raw.split('/');
           let parent = this.root, current = '';
           for (let i = 0; i < parts.length; i++) {
@@ -308,20 +353,30 @@
         li.dataset.path = child.path;
         li.innerHTML = EditorRenderIcon(child.name, child.isDir);
         if (child.hidden) li.classList.add('hidden-file');
+        let nestedList = null;
+        const setCollapsed = collapsed => {
+          li.classList.toggle('collapsed', collapsed);
+          if (collapsed) this.collapsedPaths.add(child.path);
+          else {
+            this.collapsedPaths.delete(child.path);
+            if (child.lazy) {
+              this.loadLazyDirectory(child);
+              const loaded = this.renderNode(child);
+              if (nestedList) nestedList.replaceWith(loaded);
+              nestedList = loaded;
+            }
+          }
+          const arrow = li.querySelector('.arrow');
+          if (arrow) arrow.textContent = collapsed ? '▶' : '▼';
+        };
         if (child.isDir) {
           const arrow = document.createElement('span');
-          arrow.textContent = '▼';
+          arrow.textContent = this.collapsedPaths.has(child.path) ? '▶' : '▼';
           arrow.className = 'arrow';
-          if (this.collapsedPaths.has(child.path)) {
-            li.classList.add('collapsed');
-            arrow.textContent = '▶';
-          }
+          if (this.collapsedPaths.has(child.path)) li.classList.add('collapsed');
           arrow.onclick = e => {
             e.stopPropagation();
-            const collapsed = li.classList.toggle('collapsed');
-            if (collapsed) this.collapsedPaths.add(child.path);
-            else this.collapsedPaths.delete(child.path);
-            arrow.textContent = collapsed ? '▶' : '▼';
+            setCollapsed(!li.classList.contains('collapsed'));
           };
           li.prepend(arrow);
         }
@@ -338,11 +393,7 @@
         li.ondblclick = e => {
           if (child.isDir) {
             e.stopPropagation();
-            const arrow = li.querySelector('.arrow');
-            const collapsed = li.classList.toggle('collapsed');
-            if (collapsed) this.collapsedPaths.add(child.path);
-            else this.collapsedPaths.delete(child.path);
-            if (arrow) arrow.textContent = collapsed ? '▶' : '▼';
+            setCollapsed(!li.classList.contains('collapsed'));
           }
         };
         li.oncontextmenu = e => {
@@ -424,7 +475,10 @@
             : this.nodeByPath.get(this.pathBase(child.path)) || this.root;
           this.handleDrop(e, destination).catch(err => this.report(err));
         };
-        if (child.isDir) li.appendChild(this.renderNode(child));
+        if (child.isDir) {
+          nestedList = this.renderNode(child);
+          li.appendChild(nestedList);
+        }
         ul.appendChild(li);
       }
       return ul;

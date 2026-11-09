@@ -29,6 +29,7 @@
             <label class="setting-check"><input id="setting-confirm-replace" type="checkbox"><span>Confirm before replacing the workspace</span></label>
             <label class="setting-check"><input id="setting-confirm-delete" type="checkbox"><span>Confirm before deleting files and folders</span></label>
             <label class="setting-check"><input id="setting-show-hidden" type="checkbox"><span>Show hidden files and folders</span></label>
+            <label class="setting-check"><input id="setting-hide-node-modules" type="checkbox"><span>Hide node_modules in the file explorer</span></label>
           </div>
           <div class="editor-settings-section">
             <h3>Git</h3>
@@ -64,6 +65,7 @@
       const r = $('setting-confirm-replace');
       const d = $('setting-confirm-delete');
       const h = $('setting-show-hidden');
+      const hideNodeModules = $('setting-hide-node-modules');
       const ignoreNodeModules = $('setting-ignore-node-modules');
       const piskelAutoSave = $('setting-piskel-auto-save');
       const b = $('setting-hide-browser-bar');
@@ -88,6 +90,7 @@
       r.checked = !!state.behavior.confirmBeforeReplace;
       d.checked = !!state.behavior.confirmBeforeDelete;
       h.checked = !!state.behavior.showHiddenFiles;
+      hideNodeModules.checked = !!state.behavior.hideNodeModules;
       try { const stored = localStorage.getItem('node-editor.piskel.autoSave'); piskelAutoSave.checked = stored === null ? true : stored === 'true'; } catch (_) { piskelAutoSave.checked = true; }
       b.checked = !!state.behavior.hideBrowserBar;
 
@@ -98,6 +101,11 @@
       h.onchange = () => {
         state.behavior.showHiddenFiles = h.checked;
         state.fileManager?.setShowHiddenFiles(h.checked);
+        saveBehaviorSettings();
+      };
+      hideNodeModules.onchange = () => {
+        state.behavior.hideNodeModules = hideNodeModules.checked;
+        state.fileManager?.setHideNodeModules(hideNodeModules.checked);
         saveBehaviorSettings();
       };
       piskelAutoSave.onchange = () => {
