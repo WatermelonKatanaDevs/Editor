@@ -209,13 +209,23 @@
       ['application/json', 'application/javascript', 'application/typescript', 'application/xml', 'model/gltf+json'].includes(mime);
   }
 
-  async function renderArchiveFile(path, fs, manager, tab, viewer, fileNameEl, fileIconEl, ctx) {
+  async function renderArchiveFile(path, fs, manager, tab, viewer, fileNameEl, fileIconEl, ctx, hasArchive3DViewer = false) {
     if (tab._previewInstances) manager.dispose(tab);
     viewer.innerHTML = '';
     const name = path.slice(path.lastIndexOf('/') + 1);
     const file = { path, name, mime: EditorInferMime(name), id: 'archive-file:' + path };
     fileNameEl.textContent = name;
     fileIconEl.innerHTML = EditorRenderIcon(name, false);
+
+    // When this archive already exposes its own 3D Viewer tab, keep OBJ and
+    // glTF entries as source text in the archive browser instead of opening
+    // a second embedded model viewer for the same archive.
+    if (hasArchive3DViewer && /\.(?:obj|gltf)$/i.test(name)) {
+      tab.id = file.id;
+      tab.view = 'archive-model-source-text';
+      renderTextPreview(fs, path, viewer);
+      return;
+    }
 
     const view = findPreviewView(manager, file);
     if (view) {
@@ -372,6 +382,7 @@
 
         let archiveFileSystem = null;
         let modelPackage = null;
+        let hasArchive3DViewer = false;
         let innerManager = null;
         const innerTab = {};
         ctx.addCleanup(() => {
@@ -398,7 +409,7 @@
             const virtualState = Object.create(ctx.state || null);
             virtualState.fs = archiveFileSystem;
             const modelPath = modelPackage.path;
-            ctx.manager?.registerFileView?.(ctx.file, {
+            hasArchive3DViewer = !!ctx.manager?.registerFileView?.(ctx.file, {
               id: 'archive-3d-viewer',
               label: '3D Viewer',
               default: false,
@@ -437,7 +448,7 @@
             projectName: ctx.file.name,
             readOnly: true,
             onOpen: path => {
-              renderArchiveFile(path, archiveFileSystem, innerManager, innerTab, viewer, fileName, fileIcon, ctx)
+              renderArchiveFile(path, archiveFileSystem, innerManager, innerTab, viewer, fileName, fileIcon, ctx, hasArchive3DViewer)
                 .catch(error => showMessage(viewer, error?.message || 'Could not preview this file.', true));
             }
           });
