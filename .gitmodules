@@ -26,3 +26,8 @@
 	path = editor/previews/vendor/soundcraft-src
 	url = https://github.com/storytold/soundcraft.git
 	branch = main
+
+[submodule "filmcraft"]
+	path = editor/previews/vendor/filmcraft-src
+	url = https://github.com/storytold/filmcraft.git
+	branch = main

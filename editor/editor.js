@@ -3887,6 +3887,7 @@ window.__editorInitPromise = (async function () {
     // addWelcomeBuiltin('opendaw', 'openDAW Studio');
     addWelcomeBuiltin('photocraft', 'PhotoCraft Image Editor');
     addWelcomeBuiltin('soundcraft', 'SoundCraft DAW');
+    addWelcomeBuiltin('filmcraft', 'FilmCraft Video Editor');
     if (!state._lifecycleBound) {
       state._lifecycleBound = true;
       window.addEventListener('beforeunload', event => {

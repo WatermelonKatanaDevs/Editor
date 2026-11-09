@@ -10,12 +10,16 @@ on:
       # - "editor/previews/vendor/opendaw-src"
       - "editor/previews/vendor/photocraft-src"
       - "editor/previews/vendor/soundcraft-src"
+      - "editor/previews/vendor/filmcraft-src"
       # - "editor/previews/opendaw-bridge.js"
       - "editor/previews/photocraft-bridge.js"
       - "editor/previews/soundcraft-bridge.js"
       # - "scripts/build-opendaw.mjs"
       - "scripts/build-photocraft.mjs"
       - "scripts/build-soundcraft.mjs"
+      - "scripts/build-filmcraft.mjs"
+      - "editor/builtins/filmcraft.js"
+      - "editor/previews/FILMCRAFT.md"
   workflow_dispatch:
 permissions:
   contents: write
@@ -35,7 +39,7 @@ jobs:
           fetch-depth: 0
       - name: Initialize only the application build sources
         # openDAW intentionally omitted while testing SoundCraft.
-        run: git submodule update --init --recursive -- editor/previews/vendor/photocraft-src editor/previews/vendor/soundcraft-src
+        run: git submodule update --init --recursive -- editor/previews/vendor/photocraft-src editor/previews/vendor/soundcraft-src editor/previews/vendor/filmcraft-src
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -46,6 +50,8 @@ jobs:
         run: node scripts/build-photocraft.mjs
       - name: Build SoundCraft standalone app
         run: node scripts/build-soundcraft.mjs
+      - name: Build FilmCraft standalone app
+        run: node scripts/build-filmcraft.mjs
       - name: Verify standalone HTML entry points
         shell: bash
         run: |
@@ -58,15 +64,18 @@ jobs:
           grep -q 'wk-photocraft-bridge.js' editor/previews/vendor/photocraft/index.html
           test -s editor/previews/vendor/soundcraft/index.html
           grep -q 'wk-soundcraft-bridge.js' editor/previews/vendor/soundcraft/index.html
-          echo "PhotoCraft and SoundCraft standalone entry points exist and use the optional bridges."
+          test -s editor/previews/vendor/filmcraft/index.html
+          test -s editor/previews/vendor/filmcraft/filmcraft_web_bg.wasm
+          test -s editor/previews/vendor/filmcraft/audio-worklet.js
+          echo "PhotoCraft and SoundCraft bridges and the standalone FilmCraft entry point are present."
       - name: Commit built applications for GitHub Pages
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f editor/previews/vendor/photocraft editor/previews/vendor/soundcraft
+          git add -f editor/previews/vendor/photocraft editor/previews/vendor/soundcraft editor/previews/vendor/filmcraft
           if git diff --cached --quiet; then
             echo "Standalone application output is already current."
             exit 0
           fi
-          git commit -m "Build standalone PhotoCraft and SoundCraft apps"
+          git commit -m "Build standalone PhotoCraft, SoundCraft and FilmCraft apps"
           git push
