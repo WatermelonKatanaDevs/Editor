@@ -32,6 +32,7 @@
     constructor(filesystem) {
       if (!filesystem || typeof filesystem.readFileSync !== 'function') throw new Error('Git requires an initialized editor filesystem.');
       this.filesystem = filesystem;
+      this.ignoreNodeModules = false;
       this.modifiedAt = new Map();
       this.statClock = Date.now();
       const promises = {
@@ -118,7 +119,11 @@
         if (this.filesystem.existsSync(relative)) throw gitFsError('ENOTDIR', normalized);
         throw gitFsError('ENOENT', normalized);
       }
-      if (typeof this.filesystem.readdirSync === 'function') return this.filesystem.readdirSync(relative).sort();
+      if (this.ignoreNodeModules && relative.split('/').includes('node_modules')) return [];
+      if (typeof this.filesystem.readdirSync === 'function') {
+        const entries = this.filesystem.readdirSync(relative);
+        return this.ignoreNodeModules ? entries.filter(entry => entry !== 'node_modules').sort() : entries.sort();
+      }
       const prefix = relative ? relative + '/' : '';
       const entries = new Set();
       for (const file of this.filesystem.listFilesSync()) {
@@ -388,9 +393,26 @@
       return {...await this.detect(cwd), reinitialized:false};
     }
 
+    _ignoreNodeModules() {
+      try {
+        if (!this.filesystem.existsSync('.editor/settings.json')) return true;
+        const settings = JSON.parse(this.filesystem.readFileSync('.editor/settings.json', 'utf8') || '{}');
+        return settings?.ignoreNodeModules !== false;
+      } catch (_) {
+        return true;
+      }
+    }
+
     async status(cwd = '/') {
       const repository = await this._repository(cwd);
-      const matrix = await this.git.statusMatrix({fs:this.fs, dir:repository.dir});
+      const previousIgnoreNodeModules = this.adapter.ignoreNodeModules;
+      this.adapter.ignoreNodeModules = this._ignoreNodeModules();
+      let matrix;
+      try {
+        matrix = await this.git.statusMatrix({fs:this.fs, dir:repository.dir});
+      } finally {
+        this.adapter.ignoreNodeModules = previousIgnoreNodeModules;
+      }
       const changes = matrix.filter(row => row[1] !== row[2] || row[1] !== row[3]).map(row => ({
         path:row[0],
         head:row[1],
