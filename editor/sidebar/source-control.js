@@ -494,10 +494,12 @@
       try {
         const result = await getLocalGit().runSerialized(args, {cwd:'/'});
         state.markDirty?.('.git');
-        await refreshLocalStatus();
+        const refreshed = await refreshLocalStatus();
         if (refreshHistory) await loadLocalHistory();
+        if (!refreshed) return;
         showStatus((operation === 'fetch' || operation === 'pull' || operation === 'merge') && result?.output ? result.output : message);
       } catch (error) {
+        console.error('[Source Control] Running local Git command: ' + args.join(' '), error);
         if (operation === 'fetch' || operation === 'pull' || operation === 'merge') {
           state.markDirty?.('.git');
           await refreshLocalStatus();
@@ -536,7 +538,7 @@
           } catch (_) {}
         }
         localGitRepository = await service.detect('/');
-        if (token !== statusToken) return;
+        if (token !== statusToken) return false;
         renderLocalShell();
         const button = tree.querySelector('[data-local-commit]');
         if (button) {
@@ -546,12 +548,14 @@
           button.textContent = remote ? (localGitPushStatus?.ahead && !staged ? 'Push' : 'Commit & Push') : 'Commit';
         }
         if (status.clean) clearStatus();
+        return true;
       } catch (error) {
-        if (token !== statusToken) return;
+        if (token !== statusToken) return false;
         const target = tree.querySelector('[data-local-staged]');
         reportLocalGitError('Refreshing local repository status', error, target);
         const button = tree.querySelector('[data-local-commit]');
         if (button) button.disabled = true;
+        return false;
       }
     }
 
