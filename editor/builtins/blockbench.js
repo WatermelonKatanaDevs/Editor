@@ -12,10 +12,22 @@
   }
 
   factories.blockbench = function (ctx) {
-    const bridgeId = 'wk-blockbench-' + (window.crypto?.randomUUID?.() || (Date.now().toString(36) + Math.random().toString(36).slice(2)));
+    const workspacePicker = window.EditorWorkspacePicker.create({
+      getFs:() => ctx.state.fs,
+      getMime:path => ctx.mime(path),
+      canWrite:() => ctx.state.projectOwner !== false,
+      onWrite:path => {
+        ctx.markDirty(path);
+        ctx.updateStatus();
+        try { ctx.state.fileManager?.refresh?.(); } catch (_) {}
+      }
+    });
+    const bridgeId = 'wk-blockbench-' (window.crypto?.randomUUID?.() || (Date.now().toString(36) + Math.random().toString(36).slice(2)));
     window.__WKBlockbenchBridges = window.__WKBlockbenchBridges || Object.create(null);
 
     const bridge = {
+      pickFiles:options => workspacePicker.open(options),
+      savePath:options => workspacePicker.savePath(options),
       listFiles() {
         const fs = ctx.state.fs;
         if (!fs) return [];
