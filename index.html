@@ -44,7 +44,6 @@
 <script src="editor/builtins/terminal.js"></script>
 <script src="editor/builtins/run-config.js"></script>
 <script src="editor/builtins/environment.js"></script>
-<script src="editor/builtins/blockbench.js"></script>
 <script src="editor/builtins/github-repository.js"></script>
 <script src="editor/builtins/ai.js"></script>
 <script src="editor/sidebar/explorer.js"></script>
@@ -93,4 +92,4 @@
 </div><div id="tree"></div><div id="resizer"></div><div id="editorPane"><div id="editorWorkbench" class="workbench-root"></div></div></div>
 <div id="statusBar"><span id="statusLeft">FileSystem: loading…</span><span id="statusSaved">Saved: —</span><span id="statusRight">CWD: /</span></div>
 <div id="contextMenu" class="context-menu"><ul></ul></div><input id="fileUploader" type="file" multiple hidden><input id="zipInput" type="file" accept=".zip" hidden>
-<script>window.addEventListener('DOMContentLoaded',async()=>{try{await window.__editorInitPromise;await window.EditorApp.start();window.EditorApp.addWelcomeBuiltin('blockbench','Blockbench');}catch(e){console.error(e);}});</script></body></html>
+<script>window.addEventListener('DOMContentLoaded',async()=>{try{await window.__editorInitPromise;await window.EditorApp.start();}catch(e){console.error(e);}});</script></body></html>
