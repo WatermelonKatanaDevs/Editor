@@ -220,6 +220,15 @@ async function handleIsolatedProxy(request, requestUrl) {
     "x-forwarded-for", "x-forwarded-proto", "x-real-ip"
   ].forEach(name => upstreamHeaders.delete(name));
 
+  if (request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
+    upstreamHeaders.set("Origin", target.origin);
+    try {
+      return await fetch(target.href, {method:"GET", headers:upstreamHeaders});
+    } catch (error) {
+      return new Response("Isolated proxy WebSocket failed: " + (error.message || String(error)), {status:502, headers:corsHeaders});
+    }
+  }
+
   const init = {
     method:request.method,
     headers:upstreamHeaders,
