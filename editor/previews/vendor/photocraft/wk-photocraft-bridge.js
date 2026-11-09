@@ -13,6 +13,7 @@
   const nativeAnchorClick = HTMLAnchorElement.prototype.click;
 
   function dispatchFiles(input, files) {
+    if (!files?.length) return;
     try {
       const transfer = new DataTransfer();
       for (const file of files || []) transfer.items.add(file);
@@ -34,7 +35,6 @@
     }).then(files => dispatchFiles(input, files || []))
       .catch(error => {
         console.error('PhotoCraft shared file picker failed:', error);
-        dispatchFiles(input, []);
       });
   };
 
