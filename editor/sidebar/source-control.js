@@ -375,7 +375,9 @@
               : localGitPushStatus.lastPush && localGitPushStatus.lastFetch !== localGitPushStatus.lastPush
                 ? 'Fetched remote differs from last push'
                 : 'Fetched origin at ' + localGitPushStatus.lastFetch.slice(0, 7);
-      const commitDisabled = commitBusy || (connectedRemote ? (!staged.length && !hasPendingPush) : !staged.length);
+      const localIdentity = (() => { try { return JSON.parse(localStorage.getItem('editor.localGit.identity') || '{}'); } catch (_) { return {}; } })();
+      const hasLocalIdentity = !!String(localIdentity.name || '').trim() && !!String(localIdentity.email || '').trim();
+      const commitDisabled = commitBusy || (staged.length > 0 && !hasLocalIdentity) || (connectedRemote ? (!staged.length && !hasPendingPush) : !staged.length);
       const commitLabel = connectedRemote ? (hasPendingPush && !staged.length ? 'Push' : 'Commit & Push') : 'Commit';
       const renderChange = (change, area) => {
         const type = area === 'staged'
@@ -390,7 +392,7 @@
         '<div class="source-control-head"><div class="activity-sidebar-title">Source Control</div><button data-refresh title="Refresh">↻</button></div>' +
         '<section class="source-control-section"><div class="source-control-section-title">Local Repository</div>' +
         (hasRepository
-          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span><span class="source-control-local-remote-status">' + esc(remoteFetchStatus) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span>') + '</div><div class="source-control-local-branch"><select data-local-branch aria-label="Switch branch"></select><button type="button" data-local-branch-create' + (localGitRepository.head ? '' : ' disabled') + '>New Branch</button><button type="button" data-local-branch-delete' + (!localGitRepository.head ? ' disabled' : '') + '>Delete</button></div>'
+          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span><span class="source-control-local-remote-status">' + esc(remoteFetchStatus) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span>') + '</div><button type="button" class="source-control-local-identity' + (hasLocalIdentity ? ' assigned' : ' missing') + '" data-local-identity>' + (hasLocalIdentity ? 'Committing as ' + esc(localIdentity.name) + ' &lt;' + esc(localIdentity.email) + '&gt; · Edit in Profile' : 'Please assign local identity · Open Profile') + '</button><div class="source-control-local-branch"><select data-local-branch aria-label="Switch branch"></select><button type="button" data-local-branch-create' + (localGitRepository.head ? '' : ' disabled') + '>New Branch</button><button type="button" data-local-branch-delete' + (!localGitRepository.head ? ' disabled' : '') + '>Delete</button></div>'
           : persistent
             ? '<div class="source-control-local-hint">This folder is not being tracked by Git yet. Choose how to start source control.</div><div class="source-control-local-setup"><button type="button" class="source-control-create-repo" data-local-init>Initialize Local Git</button>' + (github?.isSignedIn?.() ? '<button type="button" class="source-control-create-repo" data-local-publish>Create GitHub Repository</button>' : '<button type="button" class="source-control-create-repo" data-local-github-signin>Sign in to create GitHub repository</button>') + '</div>'
             : '<div class="source-control-local-hint">Local Git requires a folder opened directly from your computer. Open a folder to keep commits in its <code>.git</code> directory.</div>') +
@@ -468,6 +470,7 @@
         void runLocalGitAction(args, button.dataset.localAction === 'stage' ? 'Staged ' + button.dataset.localPath + '.' : 'Unstaged ' + button.dataset.localPath + '.');
       }));
       tree.querySelectorAll('[data-local-diff]').forEach(button => button.addEventListener('click', () => void openLocalFileDiff(button.dataset.localDiff)));
+      tree.querySelector('[data-local-identity]')?.addEventListener('click', () => state.sidebarController?.show?.('Profile'));
       tree.querySelector('[data-local-commit]')?.addEventListener('click', () => void commitLocal());
       tree.querySelector('[data-local-publish]')?.addEventListener('click', () => void publishLocalRepository());
       tree.querySelector('[data-local-github-signin]')?.addEventListener('click', async () => { try { await github?.startLogin?.(); } catch (error) { showStatus(error.message || String(error), true); } });
@@ -722,28 +725,13 @@
     }
 
     async function ensureLocalGitIdentity(service) {
-      let name = '';
-      let email = '';
-      try { name = String((await service.runSerialized(['config', 'user.name'], {cwd:'/'})).output || '').trim(); } catch (error) {
-        if (!String(error?.message || error).includes('key not found')) throw error;
-      }
-      try { email = String((await service.runSerialized(['config', 'user.email'], {cwd:'/'})).output || '').trim(); } catch (error) {
-        if (!String(error?.message || error).includes('key not found')) throw error;
-      }
-      if (!name) {
-        name = window.prompt('Git commit author name (stored only in this repository):', '');
-        if (name == null) throw new Error('Commit cancelled. An author name is required.');
-        name = name.trim();
-        if (!name) throw new Error('An author name is required to create a commit.');
-        await service.runSerialized(['config', 'user.name', name], {cwd:'/'});
-      }
-      if (!email) {
-        email = window.prompt('Git commit author email (stored only in this repository). It does not need to be a GitHub account email:', '');
-        if (email == null) throw new Error('Commit cancelled. An author email is required.');
-        email = email.trim();
-        if (!email) throw new Error('An author email is required to create a commit.');
-        await service.runSerialized(['config', 'user.email', email], {cwd:'/'});
-      }
+      let identity = {};
+      try { identity = JSON.parse(localStorage.getItem('editor.localGit.identity') || '{}'); } catch (_) {}
+      const name = String(identity.name || '').trim();
+      const email = String(identity.email || '').trim();
+      if (!name || !email) throw new Error('Please assign a local Git identity in Profile before committing.');
+      await service.runSerialized(['config', 'user.name', name], {cwd:'/'});
+      await service.runSerialized(['config', 'user.email', email], {cwd:'/'});
     }
 
     async function commitLocal() {

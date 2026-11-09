@@ -18,8 +18,25 @@
       const user = github?.getUser?.();
       const config = github?.getConfig?.() || {workerUrl:''};
       const remember = github?.getRemember?.() || false;
+      let localIdentity = {};
+      try { localIdentity = JSON.parse(localStorage.getItem('editor.localGit.identity') || '{}'); } catch (_) {}
+      if (user) {
+        if (!String(localIdentity.name || '').trim() && String(user.name || user.login || '').trim()) localIdentity.name = String(user.name || user.login).trim();
+        if (!String(localIdentity.email || '').trim()) {
+          const login = String(user.login || '').trim();
+          const email = String(user.email || (login ? (user.id ? user.id + '+' : '') + login + '@users.noreply.github.com' : '')).trim();
+          if (email) localIdentity.email = email;
+        }
+        try { localStorage.setItem('editor.localGit.identity', JSON.stringify(localIdentity)); } catch (_) {}
+      }
       tree.innerHTML = `<div class="github-profile-sidebar">
         <div class="activity-sidebar-title">Profile</div>
+        <section class="github-profile-section">
+          <div class="github-profile-heading">Local Git Identity</div>
+          <label class="github-profile-label">Commit author name<input data-local-git-name type="text" value="${esc(localIdentity.name || '')}" placeholder="Your name" autocomplete="name"></label>
+          <label class="github-profile-label">Commit author email<input data-local-git-email type="email" value="${esc(localIdentity.email || '')}" placeholder="you@example.com" autocomplete="email"></label>
+          <div class="github-profile-hint">Used to identify your commits in every local Git repository. This is separate from your GitHub login.</div>
+        </section>
         <section class="github-profile-section">
           <div class="github-profile-heading">GitHub</div>
           ${user ? `<div class="github-user-card">${user.avatar_url ? `<img src="${esc(user.avatar_url)}" alt="">` : '<div class="github-avatar-fallback">GH</div>'}<div class="github-user-main"><strong>${esc(user.name || user.login)}</strong><span>@${esc(user.login)}</span></div></div><div class="github-profile-actions"><button data-github-profile>Open GitHub Profile</button><button data-github-signout>Sign out</button></div>${state.gitEnabled === false ? `<div class="github-profile-hint">This project was opened without Git access because you are not its owner. Connect one of your own GitHub repositories to make changes publishable.</div><button class="github-primary-button" data-github-connect>Connect GitHub repository</button>` : ''}${installation === false ? `<div class="github-profile-hint">Node Editor is not installed on this GitHub account. Install it to grant repository access.</div><button class="github-primary-button" data-github-install>Install Node Editor GitHub App</button>` : installation === null ? `<div class="github-profile-hint">Checking GitHub App installation…</div>` : ''}` : `<div class="github-profile-empty">Not signed in</div><button class="github-primary-button" data-github-install>Install Node Editor GitHub App</button><button data-github-signin>Sign in with GitHub</button>`}
@@ -62,6 +79,14 @@
         const login = encodeURIComponent(user?.login || '');
         if (login) window.open(`https://github.com/${login}`, '_blank', 'noopener');
       });
+      const localName = tree.querySelector('[data-local-git-name]');
+      const localEmail = tree.querySelector('[data-local-git-email]');
+      const saveLocalIdentity = () => {
+        const identity = {name:localName.value.trim(), email:localEmail.value.trim()};
+        try { localStorage.setItem('editor.localGit.identity', JSON.stringify(identity)); } catch (_) {}
+      };
+      localName?.addEventListener('input', saveLocalIdentity);
+      localEmail?.addEventListener('input', saveLocalIdentity);
       tree.querySelector('[data-github-remember]')?.addEventListener('change', e => github.setRemember(e.target.checked));
     }
     return {show};
