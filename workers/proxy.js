@@ -108,7 +108,7 @@ function isolatedProxyPath(target) {
   return ISOLATE_ROUTE + encodeIsolateOrigin(target.origin) + target.pathname + target.search + target.hash;
 }
 
-function rewriteIsolatedUrl(value, target) {
+function rewriteIsolatedUrl(value, target, onlyAppRoot = false) {
   const raw = String(value || "").trim();
   if (
     !raw ||
@@ -120,6 +120,9 @@ function rewriteIsolatedUrl(value, target) {
   try {
     const resolved = new URL(raw, target);
     if (resolved.origin !== target.origin) return value;
+    if (onlyAppRoot && raw.startsWith("/") && !resolved.pathname.startsWith(target.pathname.replace(/[^/]*$/, ""))) {
+      return value;
+    }
     return ISOLATE_ROUTE + encodeIsolateOrigin(resolved.origin) + resolved.pathname + resolved.search + resolved.hash;
   } catch (_) {
     return value;
@@ -173,7 +176,7 @@ function rewriteIsolatedCss(source, target) {
 
 function rewriteIsolatedScript(source, target) {
   return source.replace(/(["'])((?:https?:\/\/[^"'\s<>]+)|\/(?!\/)[^"'\s<>]+)\1/g,
-    (match, quote, value) => quote + rewriteIsolatedUrl(value, target) + quote);
+    (match, quote, value) => quote + rewriteIsolatedUrl(value, target, true) + quote);
 }
 
 async function handleIsolatedProxy(request, requestUrl) {
