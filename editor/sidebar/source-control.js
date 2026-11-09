@@ -622,8 +622,26 @@
         try {
           const service = getLocalGit();
           if (change.head !== 0) {
-            const previous = await service.runSerialized(['show', 'HEAD:' + path], {cwd:'/'});
-            diffData.localBeforeText = String(previous?.output || '');
+            // Resolve HEAD to its commit, then read the exact file blob from
+            // that commit's tree. The local Git command shim intentionally
+            // does not implement the Git CLI's "HEAD:path" revision syntax.
+            const repository = await service._repository('/');
+            const headOid = await service.git.resolveRef({
+              fs:service.fs,
+              dir:repository.dir,
+              ref:'HEAD'
+            });
+            const previousFiles = await service._walkDiff(
+              repository,
+              [service.git.TREE({ref:headOid})],
+              {pathspecs:[path]}
+            );
+            const previousFile = previousFiles.find(file => file.path === path);
+            const previousBytes = previousFile?.contents?.[0]?.bytes;
+            if (!previousBytes) {
+              throw new Error('The committed version of ' + path + ' could not be found in HEAD.');
+            }
+            diffData.localBeforeText = new TextDecoder('utf-8', {fatal:false}).decode(previousBytes);
           }
           if (type !== 'deleted') {
             const filePath = service.resolvePath('/' + path);
