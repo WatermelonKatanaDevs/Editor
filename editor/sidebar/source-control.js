@@ -478,8 +478,7 @@
       tree.querySelector('[data-local-commit]')?.addEventListener('click', () => void commitLocal());
       tree.querySelector('[data-local-publish]')?.addEventListener('click', () => void publishLocalRepository());
       tree.querySelector('[data-local-github-signin]')?.addEventListener('click', async () => { try { await github?.startLogin?.(); } catch (error) { showStatus(error.message || String(error), true); } });
-      tree.querySelectorAll('[data-local-commit-sha]').forEach(button => button.addEventListener('click', () => void restoreLocalCommit(button.dataset.localCommitSha));
-             button.addEventListener('contextmenu', event => showCommitContextMenu(event, () => openLocalCommit(button.dataset.localCommitSha))));
+      bindCommitHistory(tree.querySelector('[data-local-history]'));
     }
 
     async function loadLocalBranches() {
@@ -641,10 +640,7 @@
           const remoteHtml = remoteCommits.map(commit => '<button type="button" class="source-control-commit-row" data-remote-commit-sha="' + esc(commit.sha) + '"><div><strong>' + esc(commit.message || '(no message)') + '</strong><span>' + esc(commit.author || 'Unknown') + ' · ' + (commit.date ? new Date(commit.date).toLocaleString() : '') + '</span></div><code>' + esc(commit.sha.slice(0, 7)) + '</code></button>').join('');
           const html = localHtml + remoteHtml;
           historyEl.innerHTML = html || (remoteError ? '<div class="source-control-error">' + esc(remoteError.message || String(remoteError)) + '</div>' : '<div class="source-control-empty-inline">No commits yet.</div>');
-          historyEl.querySelectorAll('[data-local-commit-sha]').forEach(button => button.addEventListener('click', () => void restoreLocalCommit(button.dataset.localCommitSha));
-             button.addEventListener('contextmenu', event => showCommitContextMenu(event, () => openLocalCommit(button.dataset.localCommitSha))));
-          historyEl.querySelectorAll('[data-remote-commit-sha]').forEach(button => button.addEventListener('click', () => void openCommitRestore(button.dataset.remoteCommitSha));
-             button.addEventListener('contextmenu', event => showCommitContextMenu(event, () => openRemoteCommitDiff(button.dataset.remoteCommitSha))));
+           bindCommitHistory(historyEl);
           return;
         }
         historyEl.innerHTML = commits.length ? commits.map(entry => {
@@ -654,11 +650,31 @@
           const date = commit.author?.timestamp ? new Date(commit.author.timestamp * 1000).toLocaleString() : '';
           return '<button type="button" class="source-control-commit-row" data-local-commit-sha="' + esc(entry.oid) + '"><div><strong>' + esc(message) + '</strong><span>' + esc(author) + ' · ' + esc(date) + '</span></div><code>' + esc(entry.oid.slice(0, 7)) + '</code></button>';
         }).join('') : '<div class="source-control-empty-inline">No commits yet.</div>';
-        historyEl.querySelectorAll('[data-local-commit-sha]').forEach(button => button.addEventListener('click', () => void restoreLocalCommit(button.dataset.localCommitSha));
-             button.addEventListener('contextmenu', event => showCommitContextMenu(event, () => openLocalCommit(button.dataset.localCommitSha))));
+           bindCommitHistory(historyEl);
       } catch (error) {
         if (token === historyToken) historyEl.innerHTML = '<div class="source-control-error">' + esc(error.message || String(error)) + '</div>';
       }
+    }
+
+    function bindCommitHistory(historyEl) {
+      if (!historyEl || historyEl.dataset.commitEventsBound) return;
+      historyEl.dataset.commitEventsBound = 'true';
+      historyEl.addEventListener('click', event => {
+        const local = event.target.closest('[data-local-commit-sha]');
+        if (local) { void restoreLocalCommit(local.dataset.localCommitSha); return; }
+        const remote = event.target.closest('[data-remote-commit-sha]');
+        if (remote) { void openCommitRestore(remote.dataset.remoteCommitSha); return; }
+        const githubCommit = event.target.closest('[data-commit-sha]');
+        if (githubCommit) void openCommitRestore(githubCommit.dataset.commitSha);
+      });
+      historyEl.addEventListener('contextmenu', event => {
+        const local = event.target.closest('[data-local-commit-sha]');
+        if (local) { showCommitContextMenu(event, () => openLocalCommit(local.dataset.localCommitSha)); return; }
+        const remote = event.target.closest('[data-remote-commit-sha]');
+        if (remote) { showCommitContextMenu(event, () => openRemoteCommitDiff(remote.dataset.remoteCommitSha)); return; }
+        const githubCommit = event.target.closest('[data-commit-sha]');
+        if (githubCommit) showCommitContextMenu(event, () => openRemoteCommitDiff(githubCommit.dataset.commitSha));
+      });
     }
 
     function showCommitContextMenu(event, action) {
@@ -1235,8 +1251,7 @@
         const commits = await github.listCommits(selected.owner, selected.repo, selected.branch || 'main', 20);
         if (token !== historyToken) return;
         historyEl.innerHTML = commits.length ? commits.map(commit => `<button type="button" class="source-control-commit-row" data-commit-sha="${esc(commit.sha)}"><div><strong>${esc(commit.message || '(no message)')}</strong><span>${esc(commit.author)} · ${commit.date ? new Date(commit.date).toLocaleString() : ''}</span></div><code>${esc(commit.sha.slice(0, 7))}</code></button>`).join('') : '<div class="source-control-empty-inline">No commits on this branch.</div>';
-        historyEl.querySelectorAll('[data-commit-sha]').forEach(row => row.addEventListener('click', () => openCommitRestore(row.dataset.commitSha));
-           row.addEventListener('contextmenu', event => showCommitContextMenu(event, () => openRemoteCommitDiff(row.dataset.commitSha))));
+        bindCommitHistory(historyEl);
       } catch (e) {
         if (token === historyToken) historyEl.innerHTML = `<div class="source-control-error">${esc(e.message || String(e))}</div>`;
       }
