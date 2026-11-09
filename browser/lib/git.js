@@ -35,16 +35,16 @@
       this.modifiedAt = new Map();
       this.statClock = Date.now();
       const promises = {
-        readFile: (path, options) => this.readFile(path, options),
-        writeFile: (path, data, options) => this.writeFile(path, data, options),
-        unlink: path => this.unlink(path),
-        readdir: (path, options) => this.readdir(path, options),
-        mkdir: (path, options) => this.mkdir(path, options),
-        rmdir: (path, options) => this.rmdir(path, options),
-        stat: path => this.stat(path),
-        lstat: path => this.stat(path),
-        readlink: path => this.readlink(path),
-        symlink: (target, path) => this.symlink(target, path)
+        readFile: async (path, options) => this.readFile(path, options),
+        writeFile: async (path, data, options) => this.writeFile(path, data, options),
+        unlink: async path => this.unlink(path),
+        readdir: async (path, options) => this.readdir(path, options),
+        mkdir: async (path, options) => this.mkdir(path, options),
+        rmdir: async (path, options) => this.rmdir(path, options),
+        stat: async path => this.stat(path),
+        lstat: async path => this.stat(path),
+        readlink: async path => this.readlink(path),
+        symlink: async (target, path) => this.symlink(target, path)
       };
       this.fs = {promises};
     }
