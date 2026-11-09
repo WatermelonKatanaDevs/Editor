@@ -90,7 +90,7 @@
         let content = decode(bytes).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
         if (typeof data.localBeforeText === 'string') {
           oldText = data.localBeforeText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-          content = String(data.localAfterText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+          content = (data.type === 'deleted' ? oldText : String(data.localAfterText || '')).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
         }
         if (content.includes('\0') || oldText.includes('\0')) throw new Error('This file appears to be binary and cannot be shown as text.');
         const monaco = await ctx.state.ensureMonaco();
