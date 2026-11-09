@@ -27,6 +27,16 @@
   }
 
   factories.opendaw = function (ctx) {
+    const workspacePicker = window.EditorWorkspacePicker.create({
+      getFs:() => ctx.state.fs,
+      getMime:path => ctx.mime(path),
+      canWrite:() => ctx.state.projectOwner !== false,
+      onWrite:path => {
+        ctx.markDirty(path);
+        ctx.updateStatus();
+        try { ctx.state.fileManager?.refresh?.(); } catch (_) {}
+      }
+    });
     let bridgeId = null;
     let channel = null;
     let connected = false;
@@ -89,10 +99,25 @@
         case 'readFile': result = readFile(args[0]); break;
         case 'mime': result = mime(args[0]); break;
         case 'writeFile': result = writeFile(args[0], args[1]); break;
+        case 'pickFiles': {
+          const files = await workspacePicker.open(args[0] || {});
+          result = await Promise.all((files || []).map(async file => ({
+            name:file.name,
+            path:file.__wkWorkspacePath || file.customRelativePath || '',
+            type:file.type || 'application/octet-stream',
+            bytes:await file.arrayBuffer()
+          })));
+          break;
+        }
+        case 'pickSavePath': result = await workspacePicker.savePath(args[0] || {}); break;
         default: throw new Error('Unsupported Editor workspace operation.');
       }
       const response = {type:'wk-opendaw-result', id:message.id, ok:true, result};
-      const transfer = result instanceof ArrayBuffer ? [result] : [];
+      const transfer = [];
+      if (result instanceof ArrayBuffer) transfer.push(result);
+      else if (Array.isArray(result)) {
+        for (const item of result) if (item?.bytes instanceof ArrayBuffer) transfer.push(item.bytes);
+      }
       port.postMessage(response, transfer);
     }
 
@@ -194,6 +219,7 @@
 
     function dispose(tab) {
       disposed = true;
+      try { workspacePicker.cancelActive(); } catch (_) {}
       if (connectHandler) window.removeEventListener('message', connectHandler);
       try { channel?.port1?.close(); } catch (_) {}
       try { channel?.port2?.close(); } catch (_) {}
