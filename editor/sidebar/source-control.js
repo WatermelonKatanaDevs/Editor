@@ -566,6 +566,7 @@
       }
     }
 
+    // Local file diffs use the same inline Monaco renderer as remote file diffs.
     async function openLocalFileDiff(path) {
       try {
         const service = getLocalGit();
