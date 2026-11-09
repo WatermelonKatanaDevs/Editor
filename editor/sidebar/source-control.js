@@ -285,27 +285,25 @@
       const preferLocal = !!state.fs?.isPersistentDirectory && !state.gitRemote?.provider;
       try {
         localGitRepository = await detectLocalRepository();
-      } catch (error) {
-        localGitRepository = null;
-        localGitMode = preferLocal || !github?.isSignedIn?.();
+        const hasRemoteSubmodules = state.gitRemote?.provider === 'github' && (state.gitSubmodules || []).some(module => !module.removed);
+        localGitMode = !hasRemoteSubmodules && (!!localGitRepository?.isRepository || preferLocal || !github?.isSignedIn?.());
+        if (localGitMode && state.gitRemote?.provider === 'github') {
+          selected = {owner:String(state.gitRemote.owner || ''), repo:String(state.gitRemote.repo || ''), branch:String(state.gitRemote.branch || 'main')};
+          selectionProjectId = String(state.projectId || 'workspace');
+          saveConfig();
+        } else if (!localGitMode) syncSelection();
         renderShell();
-        if (localGitMode) showStatus(error.message || String(error), true);
-        return;
+        if (localGitMode) {
+          if (localGitRepository?.isRepository) {
+            await refreshLocalStatus();
+            await loadLocalHistory();
+          }
+        } else await refresh();
+      } catch (error) {
+        localGitMode = preferLocal || !!localGitRepository?.isRepository || !github?.isSignedIn?.();
+        renderShell();
+        showStatus(error?.message || String(error), true);
       }
-      const hasRemoteSubmodules = state.gitRemote?.provider === 'github' && (state.gitSubmodules || []).some(module => !module.removed);
-      localGitMode = !hasRemoteSubmodules && (!!localGitRepository?.isRepository || preferLocal || !github?.isSignedIn?.());
-      if (localGitMode && state.gitRemote?.provider === 'github') {
-        selected = {owner:String(state.gitRemote.owner || ''), repo:String(state.gitRemote.repo || ''), branch:String(state.gitRemote.branch || 'main')};
-        selectionProjectId = String(state.projectId || 'workspace');
-        saveConfig();
-      } else if (!localGitMode) syncSelection();
-      renderShell();
-      if (localGitMode) {
-        if (localGitRepository?.isRepository) {
-          await refreshLocalStatus();
-          await loadLocalHistory();
-        }
-      } else await refresh();
     }
     function esc(value) { return String(value ?? '').replace(/[&<>\"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\\':'&#39;'}[ch])); }
     function loadConfig() {
@@ -339,7 +337,7 @@
         try { state.saveProjectMetadata?.(); } catch (_) {}
       }
     }
-    function show() { void openLocalSourceControl(); }
+    function show() { void openLocalSourceControl().catch(error => { renderShell(); showStatus(error?.message || String(error), true); }); }
     function isLocalProject() { return !state.gitRemote?.provider; }
     function setLocalGitRemote(owner, repo, branch = 'main') {
       state.gitSubmodules = [];
@@ -389,7 +387,7 @@
         (hasRepository
           ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span><span class="source-control-local-remote-status">' + esc(remoteFetchStatus) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span>') + '</div><div class="source-control-local-branch"><select data-local-branch aria-label="Switch branch"></select><button type="button" data-local-branch-create' + (localGitRepository.head ? '' : ' disabled') + '>New Branch</button><button type="button" data-local-branch-delete' + (!localGitRepository.head ? ' disabled' : '') + '>Delete</button></div>'
           : persistent
-            ? '<div class="source-control-local-hint">This folder is not being tracked by Git yet.</div><button type="button" class="source-control-create-repo" data-local-init>Initialize Repository</button>'
+            ? '<div class="source-control-local-hint">This folder is not being tracked by Git yet. Choose how to start source control.</div><div class="source-control-local-setup"><button type="button" class="source-control-create-repo" data-local-init>Initialize Local Git</button>' + (github?.isSignedIn?.() ? '<button type="button" class="source-control-create-repo" data-local-publish>Create GitHub Repository</button>' : '<button type="button" class="source-control-create-repo" data-local-github-signin>Sign in to create GitHub repository</button>') + '</div>'
             : '<div class="source-control-local-hint">Local Git requires a folder opened directly from your computer. Open a folder to keep commits in its <code>.git</code> directory.</div>') +
         '</section>' +
         (hasRepository ? '<section class="source-control-section"><div class="source-control-section-title">Tags</div><div class="source-control-local-tags" data-local-tags><span class="source-control-local-hint">Loading tags…</span></div><button type="button" data-local-tag-create' + (!localGitRepository.head ? ' disabled' : '') + '>Create Tag</button></section>' : '') +
@@ -403,7 +401,7 @@
             '<textarea data-local-commit-message placeholder="Commit message" rows="3"></textarea><button class="source-control-commit" data-local-commit ' + (commitDisabled ? 'disabled' : '') + '>' + commitLabel + '</button><div data-status class="source-control-status"></div></section>' +
             '<section class="source-control-section"><div class="source-control-section-title">History</div><div data-local-history class="source-control-history"><div class="source-control-loading">Loading commits…</div></div></section>'
           : '') +
-        '</div>';
+        '<div data-status class="source-control-status"></div></div>';
       tree.querySelector('[data-refresh]')?.addEventListener('click', () => void openLocalSourceControl());
       tree.querySelector('[data-local-branch]')?.addEventListener('change', event => {
         const branch = event.currentTarget.value;
@@ -450,19 +448,26 @@
         button.disabled = true;
         button.textContent = 'Initializing…';
         try {
+          showStatus('Checking folder write permission…');
           const permission = await state.fs.requestPermission?.();
           if (permission && permission !== 'granted') throw new Error('Write permission is required to create the .git directory in this folder.');
+          showStatus('Creating the local Git repository…');
           localGitRepository = await getLocalGit().init('/', 'main');
+          if (!localGitRepository?.isRepository) throw new Error('Git initialization returned without creating a detectable repository.');
           state.markDirty?.('.git');
+          showStatus('Saving .git metadata to the selected folder…');
           await state.fs.flush?.();
           localGitStatus = {changes:[], clean:true};
           renderLocalShell();
+          showStatus('Refreshing repository status…');
           await refreshLocalStatus();
           await loadLocalHistory();
           showStatus('Initialized a local Git repository on branch main.');
         } catch (error) {
-          showStatus(error.message || String(error), true);
-          if (button.isConnected) { button.disabled = false; button.textContent = 'Initialize Repository'; }
+          renderLocalShell();
+          showStatus(error?.message || String(error), true);
+          const retryButton = tree.querySelector('[data-local-init]');
+          if (retryButton) { retryButton.disabled = false; retryButton.textContent = 'Initialize Local Git'; }
         }
       });
       tree.querySelector('[data-local-stage-all]')?.addEventListener('click', () => void runLocalGitAction(['add', '-A'], 'Staged all changes.'));
@@ -474,6 +479,7 @@
       tree.querySelectorAll('[data-local-diff]').forEach(button => button.addEventListener('click', () => void openLocalFileDiff(button.dataset.localDiff)));
       tree.querySelector('[data-local-commit]')?.addEventListener('click', () => void commitLocal());
       tree.querySelector('[data-local-publish]')?.addEventListener('click', () => void publishLocalRepository());
+      tree.querySelector('[data-local-github-signin]')?.addEventListener('click', async () => { try { await github?.startLogin?.(); } catch (error) { showStatus(error.message || String(error), true); } });
       tree.querySelectorAll('[data-local-commit-sha]').forEach(button => button.addEventListener('click', () => void openLocalCommit(button.dataset.localCommitSha)));
     }
 
@@ -665,7 +671,7 @@
     }
 
     async function publishLocalRepository() {
-      if (!github?.isSignedIn?.() || !localGitRepository?.isRepository || commitBusy) return;
+      if (!github?.isSignedIn?.() || !state.fs || commitBusy) return;
       const name = window.prompt('New GitHub repository name', String(state.projectName || 'workspace').toLowerCase().replace(/[^a-z0-9._-]+/g, '-'));
       if (name == null || !name.trim()) return;
       const privateRepo = window.confirm('Create this repository as private?');
@@ -674,6 +680,15 @@
       if (button) { button.disabled = true; button.textContent = 'Publishing…'; }
       try {
         const service = getLocalGit();
+        if (!localGitRepository?.isRepository) {
+          const permission = await state.fs.requestPermission?.();
+          if (permission && permission !== 'granted') throw new Error('Write permission is required to create the .git directory in this folder.');
+          showStatus('Initializing local Git before creating the GitHub repository…');
+          localGitRepository = await service.init('/', 'main');
+          if (!localGitRepository?.isRepository) throw new Error('Git initialization returned without creating a detectable repository.');
+          state.markDirty?.('.git');
+          await state.fs.flush?.();
+        }
         const repository = await service._repository('/');
         const account = github.getUser?.() || {};
         const login = String(account.login || 'github-user');
