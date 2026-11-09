@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -55,6 +56,24 @@ function replaceOnce(source, before, after, label) {
     throw new Error("openDAW integration patch is ambiguous: " + label);
   }
   return source.slice(0, index) + after + source.slice(index + before.length);
+}
+
+async function stageWorkspaceBridge(bridgePath, outputRoot, bridgeHash) {
+  await cp(bridgePath, resolve(outputRoot, "opendaw-bridge.js"));
+  const studioIndexPath = resolve(outputRoot, "index.html");
+  let studioIndex = await readFile(studioIndexPath, "utf8");
+  const bridgeScript = '<script src="opendaw-bridge.js?v=' + bridgeHash.slice(0, 12) + '"></script>';
+  const scriptStart = studioIndex.indexOf('<script src="opendaw-bridge.js');
+  if (scriptStart >= 0) {
+    const scriptEnd = studioIndex.indexOf("</script>", scriptStart);
+    if (scriptEnd < 0) throw new Error("The existing openDAW workspace bridge script tag is incomplete.");
+    studioIndex = studioIndex.slice(0, scriptStart) + bridgeScript + studioIndex.slice(scriptEnd + 9);
+  } else {
+    const headEnd = studioIndex.toLowerCase().lastIndexOf("</head>");
+    if (headEnd < 0) throw new Error("The openDAW Studio HTML has no closing head tag for its workspace bridge.");
+    studioIndex = studioIndex.slice(0, headEnd) + bridgeScript + studioIndex.slice(headEnd);
+  }
+  await writeFile(studioIndexPath, studioIndex);
 }
 
 const tick = String.fromCharCode(96);
@@ -161,15 +180,29 @@ async function main() {
     child.once("error", rejectPromise);
     child.once("exit", code => code === 0 ? resolvePromise(output.trim()) : rejectPromise(new Error("Could not identify the pinned openDAW source commit.")));
   });
+  const bridgePath = resolve(editorRoot, "editor/previews/opendaw-bridge.js");
+  const bridgeSource = await readFile(bridgePath, "utf8");
+  const bridgeHash = createHash("sha256").update(bridgeSource).digest("hex");
+
   if (existsSync(markerPath) && existsSync(resolve(outputRoot, "index.html")) &&
       existsSync(resolve(outputRoot, "wasm-engine/wasm/engine.wasm"))) {
     try {
       const marker = JSON.parse(await readFile(markerPath, "utf8"));
       if (marker.sourceCommit === sourceCommit && marker.basePath === basePath && marker.integrationVersion === integrationVersion) {
-        console.log("[openDAW] Local Studio is already built from " + sourceCommit.slice(0, 10) + ".");
+        if (marker.bridgeHash !== bridgeHash || !existsSync(resolve(outputRoot, "opendaw-bridge.js"))) {
+          await stageWorkspaceBridge(bridgePath, outputRoot, bridgeHash);
+          marker.bridgeHash = bridgeHash;
+          marker.builtAt = new Date().toISOString();
+          await writeFile(markerPath, JSON.stringify(marker, null, 2) + "\n");
+          console.log("[openDAW] Refreshed the workspace bridge without rebuilding Studio.");
+        } else {
+          console.log("[openDAW] Local Studio and workspace bridge are already up to date.");
+        }
         return;
       }
-    } catch (_) {}
+    } catch (error) {
+      console.warn("[openDAW] Could not reuse the existing Studio build; rebuilding:", error.message || error);
+    }
   }
 
   const env = {
@@ -200,19 +233,12 @@ async function main() {
     await rm(outputRoot, {recursive:true, force:true});
     await mkdir(dirname(outputRoot), {recursive:true});
     await cp(dist, outputRoot, {recursive:true});
-    await cp(resolve(editorRoot, "editor/previews/opendaw-bridge.js"), resolve(outputRoot, "opendaw-bridge.js"));
-    const studioIndexPath = resolve(outputRoot, "index.html");
-    let studioIndex = await readFile(studioIndexPath, "utf8");
-    if (!studioIndex.includes("opendaw-bridge.js")) {
-      const bridgeScript = '<script src="opendaw-bridge.js"></script>';
-      if (!/<\/head>/i.test(studioIndex)) throw new Error("The openDAW Studio HTML has no closing head tag for its workspace bridge.");
-      studioIndex = studioIndex.replace(/<\/head>/i, bridgeScript + "</head>");
-      await writeFile(studioIndexPath, studioIndex);
-    }
+    await stageWorkspaceBridge(bridgePath, outputRoot, bridgeHash);
     await writeFile(markerPath, JSON.stringify({
       sourceCommit:sourceCommit,
       basePath:basePath,
       integrationVersion:integrationVersion,
+      bridgeHash:bridgeHash,
       builtAt:new Date().toISOString()
     }, null, 2) + "\n");
     console.log("[openDAW] Built and staged the local Studio at " + outputRoot + ".");
