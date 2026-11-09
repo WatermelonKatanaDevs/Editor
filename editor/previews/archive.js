@@ -593,18 +593,23 @@
             event.dataTransfer.dropEffect = 'copy';
           };
 
+          const handleWorkspaceDrop = event => {
+            handleArchiveDrop(event).catch(error => {
+              archiveStatus.textContent = 'Copy failed: ' + (error?.message || String(error));
+              console.error('Could not copy archive entries into workspace:', error);
+            });
+          };
+
           if (workspaceTree) {
             workspaceTree.addEventListener('dragover', handleWorkspaceDragOver, true);
-            workspaceTree.addEventListener('drop', event => {
-              handleArchiveDrop(event).catch(error => {
-                archiveStatus.textContent = 'Copy failed: ' + (error?.message || String(error));
-                console.error('Could not copy archive entries into workspace:', error);
-              });
-            }, true);
+            workspaceTree.addEventListener('drop', handleWorkspaceDrop, true);
           }
           ctx.addCleanup(() => {
             activeArchiveDrag = null;
-            if (workspaceTree) workspaceTree.removeEventListener('dragover', handleWorkspaceDragOver, true);
+            if (workspaceTree) {
+              workspaceTree.removeEventListener('dragover', handleWorkspaceDragOver, true);
+              workspaceTree.removeEventListener('drop', handleWorkspaceDrop, true);
+            }
           });
           if (!fileCount) showMessage(viewer, 'This archive does not contain any visible files.');
           if (modelPackage) archiveStatus.textContent += ' · model available in 3D Viewer tab';
