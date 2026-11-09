@@ -6,7 +6,16 @@
       bridge = window.parent.__WKBlockbenchBridges?.[bridgeId] || null;
     }
   } catch (_) {}
-  if (!bridge) return;
+  if (!bridge) {
+    console.error('Blockbench workspace bridge could not find its parent workspace bridge.', {
+      bridgeId,
+      parentOrigin: (() => { try { return window.parent.location.origin; } catch (_) { return 'inaccessible'; } })()
+    });
+    try {
+      window.parent.postMessage({type:'wk-blockbench-bridge-error', bridgeId}, location.origin);
+    } catch (_) {}
+    return;
+  }
 
   const normalize = value => {
     const parts = [];
@@ -741,5 +750,12 @@
     }
   }, true);
 
-  console.info('WatermelonKatana Blockbench workspace integration enabled.');
+  console.info('WatermelonKatana Blockbench workspace integration enabled.', {
+    bridgeId,
+    filesystemApiReady: !!fileSystemApi,
+    blockbenchApiReady: !!blockbenchApi
+  });
+  try {
+    window.parent.postMessage({type:'wk-blockbench-bridge-ready', bridgeId}, location.origin);
+  } catch (_) {}
 })();
