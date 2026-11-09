@@ -87,7 +87,11 @@
         }
         if (disposed || !host.isConnected) return wrap;
 
-        const content = decode(bytes).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        let content = decode(bytes).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        if (typeof data.localBeforeText === 'string') {
+          oldText = data.localBeforeText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+          content = String(data.localAfterText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        }
         if (content.includes('\0') || oldText.includes('\0')) throw new Error('This file appears to be binary and cannot be shown as text.');
         const monaco = await ctx.state.ensureMonaco();
         if (disposed || !host.isConnected) return wrap;
@@ -567,32 +571,34 @@
         const service = getLocalGit();
         const change = localGitStatus?.changes.find(item => item.path === path);
         if (!change) return;
-        const outputs = [];
-        if (change.staged) {
-          const staged = await service.runSerialized(['diff', '--cached', '--', path], {cwd:'/'});
-          if (staged.output) outputs.push(staged.output);
+
+        // Compare the checked-out file directly with HEAD. This combines staged
+        // and unstaged edits into one coherent file comparison instead of
+        // displaying Git's unified-patch syntax in the editor.
+        const type = change.head === 0
+          ? 'added'
+          : change.workdir === 0
+            ? 'deleted'
+            : 'modified';
+        let beforeText = '';
+        if (change.head !== 0) {
+          const previous = await service.runSerialized(['show', 'HEAD:' + path], {cwd:'/'});
+          beforeText = String(previous.output || '');
         }
-        if (change.unstaged && !change.untracked) {
-          const unstaged = await service.runSerialized(['diff', '--', path], {cwd:'/'});
-          if (unstaged.output) outputs.push(unstaged.output);
-        }
-        if (change.untracked) {
+        let afterText = '';
+        if (type !== 'deleted') {
           const bytes = service.adapter.readFile(service.resolvePath('/' + path));
-          const isBinary = bytes.some(value => value === 0);
-          let patch = 'diff --git a/' + path + ' b/' + path + '\nnew file mode 100644\n';
-          if (isBinary) patch += 'Binary files /dev/null and b/' + path + ' differ';
-          else {
-            const text = new TextDecoder('utf-8', {fatal:false}).decode(bytes);
-            patch += '--- /dev/null\n+++ b/' + path;
-            const lines = text === '' ? [] : text.split('\n');
-            if (text.endsWith('\n')) lines.pop();
-            patch += lines.length ? '\n@@ -0,0 +1,' + lines.length + ' @@\n' + lines.map(line => '+' + line).join('\n') : '\n@@ -0,0 +0,0 @@';
-            if (text && !text.endsWith('\n')) patch += '\n\\ No newline at end of file';
-          }
-          outputs.push(patch);
+          afterText = new TextDecoder('utf-8', {fatal:false}).decode(bytes || new Uint8Array());
         }
-        const diffText = outputs.join('\n\n');
-        const tab = openDiffTab?.({title:'Diff: ' + path.split('/').pop(), diffData:{path, localDiffText:diffText || 'No text diff is available for this file.'}});
+        const tab = openDiffTab?.({
+          title:'Diff: ' + path.split('/').pop(),
+          diffData:{
+            path,
+            type,
+            localBeforeText:beforeText,
+            localAfterText:afterText
+          }
+        });
         if (!tab) showStatus('Could not open the diff viewer.', true);
       } catch (error) {
         showStatus(error.message || String(error), true);
