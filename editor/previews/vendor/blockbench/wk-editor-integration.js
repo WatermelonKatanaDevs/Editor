@@ -73,10 +73,10 @@
     const name = basename(path);
     let readtype = options.readtype;
     if (typeof readtype === 'function') readtype = readtype(name);
+    // Blockbench's browser reader treats "none" as text, unlike Electron.
+    if (readtype === 'none') readtype = 'text';
     let content;
-    if (readtype === 'none') {
-      return { name, path };
-    } else if (readtype === 'image') {
+    if (readtype === 'image') {
       content = extension(path) === 'tga'
         ? toArrayBuffer(bytes)
         : dataURL(bytes, mimeFor(path));
@@ -96,7 +96,7 @@
     const path = normalize(file.customRelativePath || file.webkitRelativePath || name);
     let readtype = options.readtype;
     if (typeof readtype === 'function') readtype = readtype(name);
-    if (readtype === 'none') return { name, path, browser_file: file };
+    if (readtype === 'none') readtype = 'text';
     const buffer = await file.arrayBuffer();
     let content;
     if (readtype === 'image') {
@@ -379,12 +379,18 @@
       startpath: options.startpath || ''
     });
     if (!paths) return;
-    const files = paths.droppedFiles
-      ? await Promise.all(paths.droppedFiles.map(file => readDroppedFile(file, options)))
-      : await readWorkspaceFiles(paths, options);
-    if (typeof callback === 'function') callback(files);
-    rememberLoadedProject(files);
-    return files;
+    try {
+      const files = paths.droppedFiles
+        ? await Promise.all(paths.droppedFiles.map(file => readDroppedFile(file, options)))
+        : await readWorkspaceFiles(paths, options);
+      if (typeof callback === 'function') callback(files);
+      rememberLoadedProject(files);
+      return files;
+    } catch (error) {
+      console.error('Blockbench workspace import failed:', error);
+      notify('Could not open workspace file: ' + (error?.message || error));
+      return [];
+    }
   }
 
   async function readFiles(paths, options = {}, callback) {
