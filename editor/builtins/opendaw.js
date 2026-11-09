@@ -146,7 +146,7 @@
       };
       window.addEventListener('message', connectHandler);
 
-      Promise.resolve(window.__workersConfigReady).then(() => {
+      Promise.resolve(window.__workersConfigReady).then(async () => {
         if (disposed) return;
         const config = window.WorkerConfig || {};
         const isolationEndpoint = String(config.isolationProxy || '').trim();
