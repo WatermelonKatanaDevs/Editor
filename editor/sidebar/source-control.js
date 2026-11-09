@@ -507,6 +507,14 @@
       }
     }
 
+    function reportLocalGitError(context, error, target) {
+      const message = error?.message || String(error);
+      const details = error?.stack || String(error);
+      const cause = error?.cause ? '\n\nCaused by:\n' + (error.cause.stack || error.cause.message || String(error.cause)) : '';
+      console.error('[Source Control] ' + context, error);
+      if (target) target.innerHTML = '<div class="source-control-error">' + esc(message) + '<details class="source-control-error-details"><summary>Technical details</summary><pre>' + esc(details + cause) + '</pre></details></div>';
+    }
+
     async function refreshLocalStatus() {
       const token = ++statusToken;
       if (!tree.querySelector('[data-local-staged]') || !localGitRepository?.isRepository) return;
@@ -541,7 +549,7 @@
       } catch (error) {
         if (token !== statusToken) return;
         const target = tree.querySelector('[data-local-staged]');
-        if (target) target.innerHTML = '<div class="source-control-error">' + esc(error.message || String(error)) + '</div>';
+        reportLocalGitError('Refreshing local repository status', error, target);
         const button = tree.querySelector('[data-local-commit]');
         if (button) button.disabled = true;
       }
