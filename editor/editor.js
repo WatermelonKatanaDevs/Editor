@@ -2585,59 +2585,26 @@ window.__editorInitPromise = (async function () {
     const zip = await JSZip.loadAsync(file, {
       onUpdate(meta) {
         const pct = 60 + ((Number(meta?.percent) || 0) / 100) * 8;
-        const currentFile = meta?.currentFile ? ` — ${meta.currentFile}` : '';
-        updateRemoteLoadProgress('Reading project archive…', pct, `${Math.round(Number(meta?.percent) || 0)}%${currentFile}`);
+        const currentFile = meta?.currentFile ? ' — ' + meta.currentFile : '';
+        updateRemoteLoadProgress('Reading project archive…', pct, Math.round(Number(meta?.percent) || 0) + '%' + currentFile);
       }
     });
-    updateRemoteLoadProgress('Reading project files…', 68, `${Object.keys(zip.files || {}).length} archive entries`);
-    const entries = [];
+    updateRemoteLoadProgress('Indexing project archive…', 68, Object.keys(zip.files || {}).length + ' archive entries');
     const topLevels = new Set();
     let hasRootFile = false;
-
+    let entryCount = 0;
     zip.forEach((relativePath, entry) => {
-      const path = relativePath.replace(/^\/+|\/+$/g, '');
+      const path = String(relativePath || '').replace(/^\/+|\/+$/g, '');
       if (!path) return;
       const parts = path.split('/');
-      if (parts.length === 1) {
-        if (!entry.dir) hasRootFile = true;
-        return;
-      }
+      if (parts.length === 1) { if (!entry.dir) hasRootFile = true; return; }
       topLevels.add(parts[0]);
-      entries.push({path, entry});
+      entryCount++;
     });
-
-    // Only remove a wrapper when the archive is unambiguously wrapped:
-    // no files at the ZIP root, and exactly one top-level folder.
-    if (hasRootFile || topLevels.size !== 1 || !entries.length) return file;
-
-    const root = [...topLevels][0];
-    if (!entries.some(item => item.path.startsWith(root + '/'))) return file;
-
-    const out = new JSZip();
-    const files = entries.filter(item => item.path.startsWith(root + '/'));
-    let cursor = 0;
-    let processed = 0;
-    const workers = Array.from({length:Math.min(8, files.length)}, async () => {
-      while (cursor < files.length) {
-        const item = files[cursor++];
-        const target = item.path.slice(root.length + 1);
-        if (target) {
-          if (item.entry.dir) out.folder(target);
-          else out.file(target, await item.entry.async('uint8array'));
-        }
-        processed++;
-        if (processed % 32 === 0) await new Promise(resolve => setTimeout(resolve, 0));
-      }
-    });
-    await Promise.all(workers);
-
-    updateRemoteLoadProgress('Rebuilding project archive…', 76, 'Removing wrapper folder');
-    const blob = await out.generateAsync({type:'blob', streamFiles:true}, meta => {
-      const value = 76 + (Number(meta?.percent) || 0) * 0.12;
-      updateRemoteLoadProgress('Rebuilding project archive…', value, `${Math.round(Number(meta?.percent) || 0)}%`);
-    });
-    updateRemoteLoadProgress('Project archive ready…', 88, formatProgressBytes(blob.size));
-    return new File([blob], file.name, {type:'application/zip'});
+    // Keep compressed entries intact and strip a wrapper folder logically in ZipProvider.
+    if (!hasRootFile && topLevels.size === 1 && entryCount) zip.__wkRootPrefix = [...topLevels][0];
+    updateRemoteLoadProgress('Project archive ready…', 88, formatProgressBytes(file?.size || 0));
+    return zip.__wkRootPrefix ? zip : file;
   }
   async function downloadGithubSubmoduleArchive(owner, repo, ref) {
     const github = window.GitHubService;

@@ -305,11 +305,15 @@
   async function loadZipContents(zip, cache, directories, options = {}) {
     const files = [];
     const ignoreNodeModules = !!options.ignoreNodeModules;
+    const stripPrefix = String(options.stripPrefix || '').replace(/^\/+|\/+$/g, '');
     zip.forEach((relativePath, file) => {
       const clean = relativePath.replace(/\/$/,'');
       if (ignoreNodeModules && clean.split('/').includes('node_modules')) return;
-      if (file.dir) directories.add(clean);
-      else files.push({path:relativePath,file});
+      if (stripPrefix && (clean === stripPrefix || !clean.startsWith(stripPrefix + '/'))) return;
+      const path = stripPrefix ? clean.slice(stripPrefix.length + 1) : clean;
+      if (!path) return;
+      if (file.dir) directories.add(path);
+      else files.push({path,file});
     });
     let cursor = 0;
     let loaded = 0;
@@ -508,34 +512,42 @@
   class ZipProvider {
     constructor(zipInstance, sync) {
       this.zip = zipInstance;
+      this.rootPrefix = String(zipInstance.__wkRootPrefix || '').replace(/^\/+|\/+$/g, '');
       this.canSave = false;
       this.sync = sync;
       this.cache = new Map();
       this.directories = new Set(['']);
     }
+    physicalPath(path) {
+      return this.rootPrefix ? this.rootPrefix + '/' + String(path || '').replace(/^\/+/, '') : path;
+    }
     async init(options = {}) {
-      await loadZipContents(this.zip, this.cache, this.directories, options);
+      await loadZipContents(this.zip, this.cache, this.directories, {...options, stripPrefix:this.rootPrefix});
     }
     write(path, binary, original) {
       this.cache.set(path, binary);
-      this.zip.file(path, original);
+      this.zip.file(this.physicalPath(path), original);
       const parts = path.split('/').filter(Boolean);
       let curr = '';
-      for (let i = 0; i < parts.length - 1; i++) { curr = curr ? curr + '/' + parts[i] : parts[i]; this.directories.add(curr); this.zip.folder(curr); }
+      for (let i = 0; i < parts.length - 1; i++) { curr = curr ? curr + '/' + parts[i] : parts[i]; this.directories.add(curr); this.zip.folder(this.physicalPath(curr)); }
     }
-    mkdir(path) { this.directories.add(path); this.zip.folder(path); }
-    removeDirectory(path) { for (const d of [...this.directories]) if (d === path || d.startsWith(path + '/')) this.directories.delete(d); this.zip.remove(path); }
+    mkdir(path) { this.directories.add(path); this.zip.folder(this.physicalPath(path)); }
+    removeDirectory(path) {
+      for (const dir of [...this.directories]) if (dir === path || dir.startsWith(path + '/')) this.directories.delete(dir);
+      this.zip.remove(this.physicalPath(path));
+    }
     delete(path) {
       const deleted = this.cache.delete(path);
-      if (deleted) this.zip.remove(path);
+      if (deleted) this.zip.remove(this.physicalPath(path));
       return deleted;
     }
     async save() {
       return await this.exportZip();
     }
     async exportZip() {
-      for (const dir of this.directories) if (dir) this.zip.folder(dir);
-      this.cache.forEach((data, path) => this.zip.file(path, data));
+      if (this.rootPrefix) this.zip.folder(this.rootPrefix);
+      for (const dir of this.directories) if (dir) this.zip.folder(this.physicalPath(dir));
+      this.cache.forEach((data, path) => this.zip.file(this.physicalPath(path), data));
       return await this.zip.generateAsync({ type: 'blob' });
     }
   }
