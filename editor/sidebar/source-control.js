@@ -395,7 +395,6 @@
             ? '<div class="source-control-local-hint">This folder is not being tracked by Git yet. Choose how to start source control.</div><div class="source-control-local-setup"><button type="button" class="source-control-create-repo" data-local-init>Initialize Local Git</button>' + (github?.isSignedIn?.() ? '<button type="button" class="source-control-create-repo" data-local-publish>Create GitHub Repository</button>' : '<button type="button" class="source-control-create-repo" data-local-github-signin>Sign in to create GitHub repository</button>') + '</div>'
             : '<div class="source-control-local-hint">Local Git requires a folder opened directly from your computer. Open a folder to keep commits in its <code>.git</code> directory.</div>') +
         '</section>' +
-        (hasRepository ? '<section class="source-control-section"><div class="source-control-section-title">Tags</div><div class="source-control-local-tags" data-local-tags><span class="source-control-local-hint">Loading tags…</span></div><button type="button" data-local-tag-create' + (!localGitRepository.head ? ' disabled' : '') + '>Create Tag</button></section>' : '') +
         (hasRepository && connectedRemote ? '<section class="source-control-section"><div class="source-control-local-remote-actions"><button type="button" class="source-control-local-fetch" data-local-fetch title="Download remote commits and objects without changing workspace files">Fetch</button><button type="button" class="source-control-local-pull" data-local-pull' + (localGitStatus?.clean ? '' : ' disabled') + ' title="Fetch and fast-forward the current branch; refuses divergent histories and local changes">Pull (FF only)</button><button type="button" class="source-control-local-pull" data-local-merge' + (localGitStatus?.clean && localGitRepository?.head ? '' : ' disabled') + ' title="Merge the fetched origin branch; conflicts abort without changing workspace files">Merge</button></div></section>' : '') +
         (!connectedRemote && hasRepository && github?.isSignedIn?.() ? '<section class="source-control-section"><button type="button" class="source-control-create-repo" data-local-publish>Publish to GitHub</button></section>' : '') +
         (hasRepository
@@ -418,7 +417,6 @@
         void runLocalGitAction(['switch', '-c', name.trim()], 'Created and switched to branch ' + name.trim() + '.');
       });
       void loadLocalBranches();
-      void loadLocalTags();
       tree.querySelector('[data-local-fetch]')?.addEventListener('click', () => {
         const remoteBranch = String(state.gitRemote?.branch || localGitRepository?.branch || 'main');
         void runLocalGitAction(['fetch', 'origin', remoteBranch], 'Fetched origin/' + remoteBranch + '.');
@@ -430,18 +428,6 @@
       tree.querySelector('[data-local-merge]')?.addEventListener('click', () => {
         const remoteBranch = String(state.gitRemote?.branch || localGitRepository?.branch || 'main');
         void runLocalGitAction(['merge', 'refs/remotes/origin/' + remoteBranch], 'Merged origin/' + remoteBranch + '.');
-      });
-      tree.querySelector('[data-local-tag-create]')?.addEventListener('click', () => {
-        const name = window.prompt('Tag name (for example, v1.0.0)');
-        if (!name || !name.trim()) return;
-        void runLocalGitAction(['tag', name.trim()], 'Created tag ' + name.trim() + '.');
-      });
-      tree.querySelector('[data-local-tags]')?.addEventListener('click', event => {
-        const button = event.target.closest('[data-local-tag-delete]');
-        if (!button) return;
-        const name = button.dataset.localTagDelete;
-        if (!window.confirm('Delete tag "' + name + '"?')) return;
-        void runLocalGitAction(['tag', '-d', name], 'Deleted tag ' + name + '.');
       });
       tree.querySelector('[data-local-branch-delete]')?.addEventListener('click', () => {
         const branch = window.prompt('Name of local branch to delete');
@@ -502,21 +488,6 @@
         select.disabled = true;
       }
     }
-
-    async function loadLocalTags() {
-      const container = tree.querySelector('[data-local-tags]');
-      if (!container || !localGitRepository?.isRepository) return;
-      try {
-        const result = await getLocalGit().runSerialized(['tag', '--list'], {cwd:'/'});
-        const tags = result.value || [];
-        container.innerHTML = tags.length
-          ? tags.map(name => '<div class="source-control-local-tag"><span>' + esc(name) + '</span><button type="button" data-local-tag-delete="' + esc(name) + '" title="Delete tag ' + esc(name) + '">Delete</button></div>').join('')
-          : '<span class="source-control-local-hint">No tags yet.</span>';
-      } catch (error) {
-        container.innerHTML = '<span class="source-control-local-hint">' + esc(error.message || 'Could not load tags') + '</span>';
-      }
-    }
-
     async function runLocalGitAction(args, message) {
       const operation = args[0];
       const refreshHistory = operation === 'pull' || operation === 'merge';
