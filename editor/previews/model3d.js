@@ -427,10 +427,30 @@
         let materials=null;
         for(const reference of materialLibraries){
           const materialPath=pathJoin(base,reference);
-          const entry=[...modelFiles.entries()].find(([path])=>path.toLowerCase()===materialPath.toLowerCase());
-          if(!entry)throw new Error('OBJ material library not found: '+materialPath);
+          let entry=[...modelFiles.entries()].find(([path])=>path.toLowerCase()===materialPath.toLowerCase());
+          if(!entry){
+            const localData=ctx.state?.fs?.readFileSync?.(materialPath,'binary');
+            if(localData==null)throw new Error('OBJ material library not found: '+materialPath);
+            const ext=materialPath.split('.').pop().toLowerCase();
+            addResource(materialPath,bytesOf(localData),MIME[ext]||'text/plain');
+            entry=[...modelFiles.entries()].find(([path])=>path.toLowerCase()===materialPath.toLowerCase());
+          }
           const materialBase=entry[0].includes('/')?entry[0].slice(0,entry[0].lastIndexOf('/')+1):'';
-          const parsed=new THREE.MTLLoader(manager).parse(new TextDecoder().decode(bytesOf(entry[1].data)),materialBase);
+          const mtlText=new TextDecoder().decode(bytesOf(entry[1].data));
+          for(const line of mtlText.split(/\r?\n/)){
+            const textureMatch=line.match(/^\s*(?:map_\w+|bump|map_bump|norm|disp|decal|refl)\s+(.+?)\s*$/i);
+            if(!textureMatch)continue;
+            const textureReference=textureMatch[1].trim().split(/\s+/).pop();
+            if(!textureReference||/^(?:data:|https?:|blob:)/i.test(textureReference))continue;
+            const texturePath=pathJoin(materialBase,textureReference);
+            if([...modelFiles.keys()].some(path=>path.toLowerCase()===texturePath.toLowerCase()))continue;
+            const textureData=ctx.state?.fs?.readFileSync?.(texturePath,'binary');
+            if(textureData==null)throw new Error('MTL texture not found: '+texturePath);
+            const textureExt=texturePath.split('.').pop().toLowerCase();
+            addResource(texturePath,bytesOf(textureData),MIME[textureExt]||'application/octet-stream');
+          }
+          const textureBase=materialBase?materialBase+'/':'';
+          const parsed=new THREE.MTLLoader(manager).parse(mtlText,textureBase);
           if(!materials)materials=parsed;
           else Object.assign(materials.materialsInfo,parsed.materialsInfo);
         }
