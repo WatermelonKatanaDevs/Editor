@@ -665,6 +665,7 @@
     }
 
     const changes = [];
+    let compared = 0;
     await withConcurrency(localPaths, 8, async item => {
       const {path, fsPath} = item;
       const data = fs.readFileSync(fsPath, 'binary');
@@ -682,6 +683,8 @@
       if (!remote) changes.push({path, fsPath, type:'added', sha, data:bytes});
       else if (remote.sha !== sha) changes.push({path, fsPath, type:'modified', sha, data:bytes, mode:remote.mode || '100644'});
       remoteFiles.delete(path);
+      compared++;
+      if (compared % 64 === 0) await new Promise(resolve => setTimeout(resolve, 0));
     });
     for (const [path, entry] of remoteFiles) changes.push({path, type:'deleted', sha:null, mode:entry.mode || '100644'});
     const order = {modified:0, added:1, deleted:2};

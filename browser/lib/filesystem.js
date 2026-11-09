@@ -273,6 +273,26 @@
     }
   }
 
+  async function loadZipContents(zip, cache, directories) {
+    const files = [];
+    zip.forEach((relativePath, file) => {
+      const clean = relativePath.replace(/\/$/,'');
+      if (file.dir) directories.add(clean);
+      else files.push({path:relativePath,file});
+    });
+    let cursor = 0;
+    let loaded = 0;
+    const workers = Array.from({length:Math.min(8, files.length)}, async () => {
+      while (cursor < files.length) {
+        const item = files[cursor++];
+        cache.set(item.path, await item.file.async('uint8array'));
+        loaded++;
+        if (loaded % 32 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    });
+    await Promise.all(workers);
+  }
+
   class DirectoryHandleProvider {
     constructor(dirHandle, sync) {
       this.dirHandle = dirHandle;
@@ -409,15 +429,7 @@
     async init() {
       const file = await this.fileHandle.getFile();
       this.zip = await JSZip.loadAsync(file);
-      const promises = [];
-      this.zip.forEach((relativePath, file) => {
-        const clean = relativePath.replace(/\/$/,'');
-        if (file.dir) this.directories.add(clean);
-        else {
-          promises.push(file.async('uint8array').then(d => this.cache.set(relativePath, d)));
-        }
-      });
-      await Promise.all(promises);
+      await loadZipContents(this.zip, this.cache, this.directories);
     }
     write(path, binary, original) {
       this.cache.set(path, binary);
@@ -471,15 +483,7 @@
       this.directories = new Set(['']);
     }
     async init() {
-      const promises = [];
-      this.zip.forEach((relativePath, file) => {
-        const clean = relativePath.replace(/\/$/,'');
-        if (file.dir) this.directories.add(clean);
-        else {
-          promises.push(file.async('uint8array').then(d => this.cache.set(relativePath, d)));
-        }
-      });
-      await Promise.all(promises);
+      await loadZipContents(this.zip, this.cache, this.directories);
     }
     write(path, binary, original) {
       this.cache.set(path, binary);

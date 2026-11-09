@@ -2614,13 +2614,22 @@ window.__editorInitPromise = (async function () {
     if (!entries.some(item => item.path.startsWith(root + '/'))) return file;
 
     const out = new JSZip();
-    for (const item of entries) {
-      if (!item.path.startsWith(root + '/')) continue;
-      const target = item.path.slice(root.length + 1);
-      if (!target) continue;
-      if (item.entry.dir) out.folder(target);
-      else out.file(target, await item.entry.async('uint8array'));
-    }
+    const files = entries.filter(item => item.path.startsWith(root + '/'));
+    let cursor = 0;
+    let processed = 0;
+    const workers = Array.from({length:Math.min(8, files.length)}, async () => {
+      while (cursor < files.length) {
+        const item = files[cursor++];
+        const target = item.path.slice(root.length + 1);
+        if (target) {
+          if (item.entry.dir) out.folder(target);
+          else out.file(target, await item.entry.async('uint8array'));
+        }
+        processed++;
+        if (processed % 32 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    });
+    await Promise.all(workers);
 
     updateRemoteLoadProgress('Rebuilding project archive…', 76, 'Removing wrapper folder');
     const blob = await out.generateAsync({type:'blob', streamFiles:true}, meta => {
