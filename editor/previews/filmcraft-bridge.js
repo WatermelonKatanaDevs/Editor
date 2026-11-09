@@ -33,7 +33,19 @@
         __wkWorkspacePath:{value:entry.path, configurable:true},
         customRelativePath:{value:entry.path, configurable:true}
       });
-      handles.push({name:file.name,kind:'file',getFile:async() => file});
+      // FilmCraft's Rust web picker downcasts each result to FileSystemFileHandle.
+      // Give this workspace-backed handle the browser interface prototype and the
+      // small surface FilmCraft actually uses, without requiring native FSA support.
+      if (typeof window.FileSystemFileHandle !== 'function') {
+        window.FileSystemFileHandle = function EditorWorkspaceFileHandle() {};
+      }
+      const handle = Object.create(window.FileSystemFileHandle.prototype);
+      Object.defineProperties(handle, {
+        name:{value:file.name, enumerable:true},
+        kind:{value:'file', enumerable:true}
+      });
+      handle.getFile = async() => file;
+      handles.push(handle);
     }
     return handles;
   }
