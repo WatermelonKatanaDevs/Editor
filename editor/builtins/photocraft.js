@@ -14,9 +14,11 @@
   }
 
   factories.photocraft = function (ctx) {
+    let pickerContainer = null;
     const id = 'wk-photocraft-' + (window.crypto?.randomUUID?.() ||
       Date.now().toString(36) + Math.random().toString(36).slice(2));
     const workspacePicker = window.EditorWorkspacePicker.create({
+      getContainer:() => pickerContainer,
       getFs:() => ctx.state.fs,
       getMime:path => ctx.mime(path),
       canWrite:() => ctx.state.projectOwner !== false,
@@ -61,6 +63,7 @@
     };
 
     function render(group) {
+      pickerContainer = group.viewBody;
       window[KEY][id] = bridge;
       const frame = document.createElement('iframe');
       frame.className = 'builtin-photocraft-frame';
@@ -76,6 +79,7 @@
     }
 
     function dispose(tab) {
+      pickerContainer = null;
       const view = tab?._viewElement;
       const frame = view?.tagName === 'IFRAME' ? view : view?.querySelector?.('iframe');
       try { frame?.removeAttribute('src'); frame?.remove(); } catch (_) {}

@@ -27,7 +27,9 @@
   }
 
   factories.opendaw = function (ctx) {
+    let pickerContainer = null;
     const workspacePicker = window.EditorWorkspacePicker.create({
+      getContainer:() => pickerContainer,
       getFs:() => ctx.state.fs,
       getMime:path => ctx.mime(path),
       canWrite:() => ctx.state.projectOwner !== false,
@@ -126,6 +128,7 @@
     }
 
     function renderOpenDAW(group) {
+      pickerContainer = group.viewBody;
       if (connectHandler) window.removeEventListener('message', connectHandler);
       try { channel?.port1?.close(); } catch (_) {}
       try { channel?.port2?.close(); } catch (_) {}
@@ -219,6 +222,7 @@
 
     function dispose(tab) {
       disposed = true;
+      pickerContainer = null;
       try { workspacePicker.cancelActive(); } catch (_) {}
       if (connectHandler) window.removeEventListener('message', connectHandler);
       try { channel?.port1?.close(); } catch (_) {}

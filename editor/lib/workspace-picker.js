@@ -3,6 +3,9 @@
 
   let activeDialog = null;
   let dialogQueue = [];
+  const DISPLAY_MODE_KEY = 'editor.workspacePicker.displayMode';
+  function getDisplayMode(){try{return localStorage.getItem(DISPLAY_MODE_KEY)==='overlay'?'overlay':'contained';}catch(_){return 'contained';}}
+  function setDisplayMode(value){const mode=value==='overlay'?'overlay':'contained';try{localStorage.setItem(DISPLAY_MODE_KEY,mode);}catch(_){}return mode;}
   const PRIVATE_PATHS = ['.editor', '.git'];
 
   function normalizePath(value) {
@@ -179,7 +182,10 @@
         let showAllFiles = !!options.allFiles, closed = false;
 
         const overlay = document.createElement('div');
-        overlay.className = 'wk-workspace-picker-overlay';
+        const displayMode = getDisplayMode();
+        const container = displayMode === 'contained' ? config.getContainer?.() : null;
+        const contained = displayMode === 'contained' && !!container?.appendChild;
+        overlay.className = 'wk-workspace-picker-overlay' + (contained ? ' is-contained' : '');
         const panel = document.createElement('section');
         panel.className = 'wk-workspace-picker';
         overlay.append(panel);
@@ -439,8 +445,8 @@
         });
         overlay.addEventListener('mousedown', event => { if (event.target === overlay) close(null); });
         document.addEventListener('keydown', keydown, true);
-        activeDialog = {owner:dialogOwner, close:() => close(null), overlay};
-        document.body.append(overlay);
+        activeDialog = {owner:dialogOwner, close:() => close(null), overlay, container:contained ? container : document.body};
+        (contained ? container : document.body).append(overlay);
         draw();
         if (mode === 'save') { filename.focus(); filename.select(); }
         else search.focus();
@@ -467,7 +473,10 @@
     style.id = 'wk-workspace-picker-style';
     style.textContent = [
       '.wk-workspace-picker-overlay{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:20px;background:#000b;color:#e8edf0;font:13px/1.45 system-ui,sans-serif;}',
+      '.wk-workspace-picker-overlay.is-contained{position:absolute;inset:0;z-index:1000;padding:12px;background:#000b;}',
       '.wk-workspace-picker{box-sizing:border-box;display:flex;flex-direction:column;width:min(760px,96vw);max-height:90vh;overflow:hidden;background:#202326;border:1px solid #485057;border-radius:9px;box-shadow:0 18px 70px #000b;}',
+      '.wk-workspace-picker-overlay.is-contained .wk-workspace-picker{width:min(760px,100%);max-height:100%;min-height:0;}',
+      '.wk-workspace-picker-overlay.is-contained .wk-workspace-picker-list{flex:1;min-height:0;max-height:none;}',
       '.wk-workspace-picker button,.wk-workspace-picker input{font:inherit;}',
       '.wk-workspace-picker button{border:1px solid #596168;background:#30363a;color:#fff;border-radius:5px;padding:7px 11px;cursor:pointer;}',
       '.wk-workspace-picker button:disabled{opacity:.42;cursor:default;}',
@@ -497,7 +506,7 @@
     document.head.append(style);
   }
 
-  window.EditorWorkspacePicker = {create, normalizePath, basename, dirname, extension};
+  window.EditorWorkspacePicker = {create, normalizePath, basename, dirname, extension, getDisplayMode, setDisplayMode};
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installStyles, {once:true});
   else installStyles();
 })();

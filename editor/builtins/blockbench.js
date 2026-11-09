@@ -12,7 +12,9 @@
   }
 
   factories.blockbench = function (ctx) {
+    let pickerContainer = null;
     const workspacePicker = window.EditorWorkspacePicker.create({
+      getContainer:() => pickerContainer,
       getFs:() => ctx.state.fs,
       getMime:path => ctx.mime(path),
       canWrite:() => ctx.state.projectOwner !== false,
@@ -76,6 +78,7 @@
     let bridgeReadyHandler = null;
 
     function renderBlockbench(group) {
+      pickerContainer = group.viewBody;
       // Builtin instances are cached by EditorApp. Re-register the bridge each
       // time the user opens a fresh Blockbench tab after closing the previous one.
       window.__WKBlockbenchBridges[bridgeId] = bridge;
@@ -134,6 +137,7 @@
     }
 
     function dispose(tab) {
+      pickerContainer = null;
       const view = tab?._viewElement;
       const frame = view?.tagName === 'IFRAME' ? view : view?.querySelector?.('iframe');
       if (bridgeReadyHandler) window.removeEventListener('message', bridgeReadyHandler);

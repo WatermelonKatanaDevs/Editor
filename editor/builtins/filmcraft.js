@@ -29,11 +29,13 @@
   factories.filmcraft = function (ctx) {
     let frame = null, shell = null, style = null, status = null, openButton = null;
     let disposed = false, ready = false, documentPath = null;
+    let pickerContainer = null;
     const bridgeId = 'wk-filmcraft-' + (window.crypto?.randomUUID?.() ||
       Date.now().toString(36) + Math.random().toString(36).slice(2));
     window.__WKFilmCraftBridges = window.__WKFilmCraftBridges || Object.create(null);
 
     const workspacePicker = window.EditorWorkspacePicker.create({
+      getContainer:() => pickerContainer,
       getFs:() => ctx.state.fs,
       getMime:path => ctx.mime(path),
       canWrite:() => ctx.state.projectOwner !== false,
@@ -153,6 +155,7 @@
       }
     }
     function render(group) {
+      pickerContainer = group.viewBody;
       disposed = false;
       ready = false;
       shell = document.createElement('div');
@@ -220,6 +223,7 @@
     }
     function dispose(tab) {
       disposed = true;
+      pickerContainer = null;
       ready = false;
       window.removeEventListener('message', onMessage);
       try { workspacePicker.cancelActive(); } catch (_) {}

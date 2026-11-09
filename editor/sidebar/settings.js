@@ -41,6 +41,11 @@
             <p class="editor-settings-note">Automatically saves Piskel changes to the image and its <code>.piskel</code> sidecar.</p>
           </div>
           <div class="editor-settings-section">
+            <h3>File Picker</h3>
+            <label>Picker display<select id="setting-picker-display-mode"><option value="contained">Contained inside the editor tab</option><option value="overlay">Overlay over the entire Editor</option></select></label>
+            <p class="editor-settings-note">Choose whether file dialogs stay within the active app tab or cover the Editor interface.</p>
+          </div>
+          <div class="editor-settings-section">
             <h3>Browser</h3>
             <label class="setting-check"><input id="setting-hide-browser-bar" type="checkbox"><span>Hide browser bar</span></label>
             <label>Default tab<input id="setting-browser-default-tab" type="text" spellcheck="false"></label>
@@ -78,6 +83,9 @@
       const clearDevTools = $('setting-browser-clear-devtools');
       const logXHR = $('setting-browser-log-xhr');
       const autoDownload = $('setting-browser-autodownload');
+      const pickerDisplayMode = $('setting-picker-display-mode');
+      pickerDisplayMode.value = window.EditorWorkspacePicker?.getDisplayMode?.() || 'contained';
+      pickerDisplayMode.onchange = () => window.EditorWorkspacePicker?.setDisplayMode?.(pickerDisplayMode.value);
 
       ignoreNodeModules.checked = state.behavior.ignoreNodeModules !== false;
       ignoreNodeModules.onchange = () => {

@@ -27,6 +27,8 @@ const picker = window.EditorWorkspacePicker.create({
 
 Supported options include `title`, `extensions`, `accept`, `types`, `multiple`, `allowDevice`, `startPath`, and `maxFileBytes`.
 
+The picker defaults to **Contained inside the editor tab**. Change this under Settings → File Picker → Picker display to use **Overlay over the entire Editor** instead. The preference is stored locally in the browser. Each integrated builtin supplies its active workbench view body as the contained host, so the picker is clipped to that app tab and does not cover the rest of the Editor.
+
 The picker lists workspace files and folders, supports folder navigation and search, MIME/extension filtering, an All files override, multiple selection, device files, and drag-and-drop from the Editor Explorer or the desktop. Save dialogs support destination folders, suggested names, default extensions, and overwrite confirmation. Read-only workspaces are protected centrally.
 
 Dialogs are serialized across app instances. Closing an app cancels only that instance's active or queued requests; it cannot close another app's picker.
