@@ -102,10 +102,11 @@
     }
     setShowHiddenFiles(value) {
       this.showHiddenFiles = !!value;
-      this.render();
+      this.refresh();
     }
     isHiddenPath(path) {
-      return this.basename(path).startsWith('.');
+      const name = this.basename(path);
+      return name.startsWith('.') || name === 'node_modules';
     }
     setProjectName(name) {
       this.projectName = name || (() => 'Workspace');
@@ -176,21 +177,29 @@
         this.nodeByPath.set(path, node);
         this.nodeByID.set(node.id, node);
       };
-      for (const raw of this.fs.listFilesSync().map(p => this.normalize(p)).filter(Boolean)) {
-        const parts = raw.split('/');
-        let parent = this.root, current = '';
-        for (let i = 0; i < parts.length; i++) {
-          const part = parts[i];
-          current = current ? current + '/' + part : part;
-          if (i === parts.length - 1) addFile(current, part, parent); else parent = addDir(current, part, parent);
-        }
-      }
-      for (const raw of (this.fs.listDirectoriesSync?.() || []).map(p => this.normalize(p)).filter(Boolean)) {
-        const parts = raw.split('/');
-        let parent = this.root, current = '';
-        for (const part of parts) {
-          current = current ? current + '/' + part : part;
-          parent = addDir(current, part, parent);
+      if (typeof this.fs.forEachEntrySync === 'function') {
+        this.fs.forEachEntrySync((raw, isDirectory) => {
+          const path = this.normalize(raw);
+          if (!path || (!this.showHiddenFiles && this.isHiddenPath(path))) return;
+          const parts = path.split('/');
+          let parent = this.root, current = '';
+          for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            current = current ? current + '/' + part : part;
+            if (i === parts.length - 1 && !isDirectory) addFile(current, part, parent);
+            else parent = addDir(current, part, parent);
+          }
+        }, {skipDirectory:path => !this.showHiddenFiles && this.isHiddenPath(path)});
+      } else {
+        for (const raw of this.fs.listFilesSync().map(p => this.normalize(p)).filter(Boolean)) {
+          if (!this.showHiddenFiles && raw.split('/').some(part => part.startsWith('.') || part === 'node_modules')) continue;
+          const parts = raw.split('/');
+          let parent = this.root, current = '';
+          for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            current = current ? current + '/' + part : part;
+            if (i === parts.length - 1) addFile(current, part, parent); else parent = addDir(current, part, parent);
+          }
         }
       }
       this.sortTree(this.root);

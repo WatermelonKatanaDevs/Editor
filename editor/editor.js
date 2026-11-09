@@ -2589,6 +2589,7 @@ window.__editorInitPromise = (async function () {
         updateRemoteLoadProgress('Reading project archive…', pct, `${Math.round(Number(meta?.percent) || 0)}%${currentFile}`);
       }
     });
+    const ignoreNodeModules = state.behavior?.ignoreNodeModules !== false;
     updateRemoteLoadProgress('Reading project files…', 68, `${Object.keys(zip.files || {}).length} archive entries`);
     const entries = [];
     const topLevels = new Set();
@@ -2596,7 +2597,7 @@ window.__editorInitPromise = (async function () {
 
     zip.forEach((relativePath, entry) => {
       const path = relativePath.replace(/^\/+|\/+$/g, '');
-      if (!path) return;
+      if (!path || (ignoreNodeModules && path.split('/').includes('node_modules'))) return;
       const parts = path.split('/');
       if (parts.length === 1) {
         if (!entry.dir) hasRootFile = true;
@@ -3087,7 +3088,7 @@ window.__editorInitPromise = (async function () {
       finishRemoteImport({returnToChooser:options.returnToChooser});
       const remote = await fetchRemoteProject(input);
       updateRemoteLoadProgress('Building workspace…', 90, 'Creating virtual file system');
-      const fs = await FileSystem.create(remote.file, {sync:false});
+      const fs = await FileSystem.create(remote.file, {sync:false, ignoreNodeModules:state.behavior?.ignoreNodeModules !== false});
       const gitSubmodules = remote.gitRemote?.provider === 'github' && remote.gitCommitSha ? await loadGithubSubmodules(fs, remote.gitRemote.owner, remote.gitRemote.repo, remote.gitCommitSha, remote.gitRemote.branch) : [];
       updateRemoteLoadProgress('Starting workspace…', 97, remote.name || 'Remote Project');
       await replaceFileSystem(fs, remote.name || 'Remote Project', true, {projectId:remote.projectId || undefined, gitRemote:remote.gitRemote || null, gitSubmodules});

@@ -657,7 +657,7 @@
       if (!path || ignoredPath(path) || inExcludedPath(path) || (ignoreNodeModules && isNodeModulesPath(path))) return;
       localPaths.push({fsPath, path});
     };
-    if (typeof fs.forEachFileSync === 'function') fs.forEachFileSync(addLocalPath);
+    if (typeof fs.forEachFileSync === 'function') fs.forEachFileSync(addLocalPath, {ignoreNodeModules});
     else for (const rawPath of fs.listFilesSync()) addLocalPath(rawPath);
     const remoteFiles = new Map();
     for (const entry of remoteTree || []) {

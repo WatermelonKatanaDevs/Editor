@@ -108,7 +108,7 @@
         throw new Error("Unsupported file system source.");
       }
 
-      await provider.init();
+      await provider.init({ignoreNodeModules:options.ignoreNodeModules === true});
       return new this(provider, mode, sync);
     }
 
@@ -214,8 +214,28 @@
       return Array.from(this.provider.cache.keys());
     }
 
-    forEachFileSync(callback) {
-      for (const path of this.provider.cache.keys()) callback(path);
+    forEachEntrySync(callback, options = {}) {
+      const stack = [''];
+      const skipDirectory = typeof options.skipDirectory === 'function' ? options.skipDirectory : null;
+      while (stack.length) {
+        const parent = stack.pop();
+        for (const name of this.children.get(parent) || []) {
+          const path = parent ? parent + '/' + name : name;
+          const isDirectory = this.directories.has(path);
+          callback(path, isDirectory);
+          if (isDirectory && !skipDirectory?.(path)) stack.push(path);
+        }
+      }
+    }
+
+    forEachFileSync(callback, options = {}) {
+      if (!options.ignoreNodeModules) {
+        for (const path of this.provider.cache.keys()) callback(path);
+        return;
+      }
+      this.forEachEntrySync((path, isDirectory) => {
+        if (!isDirectory) callback(path);
+      }, {skipDirectory:path => path.split('/').includes('node_modules')});
     }
 
     listDirectoriesSync() {
@@ -273,10 +293,12 @@
     }
   }
 
-  async function loadZipContents(zip, cache, directories) {
+  async function loadZipContents(zip, cache, directories, options = {}) {
     const files = [];
+    const ignoreNodeModules = !!options.ignoreNodeModules;
     zip.forEach((relativePath, file) => {
       const clean = relativePath.replace(/\/$/,'');
+      if (ignoreNodeModules && clean.split('/').includes('node_modules')) return;
       if (file.dir) directories.add(clean);
       else files.push({path:relativePath,file});
     });
@@ -482,8 +504,8 @@
       this.cache = new Map();
       this.directories = new Set(['']);
     }
-    async init() {
-      await loadZipContents(this.zip, this.cache, this.directories);
+    async init(options = {}) {
+      await loadZipContents(this.zip, this.cache, this.directories, options);
     }
     write(path, binary, original) {
       this.cache.set(path, binary);
