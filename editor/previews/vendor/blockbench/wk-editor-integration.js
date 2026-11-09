@@ -455,14 +455,16 @@
     }
     if (!path) return;
     if (options.custom_writer) {
-      await new Promise((resolve, reject) => {
-        try {
-          options.custom_writer(options.content, path, result => {
-            if (typeof callback === 'function') callback(result || path);
-            resolve();
-          });
-        } catch (error) { reject(error); }
-      });
+      // Match Blockbench's own web implementation: custom writers may be
+      // no-op callbacks used only to choose a path (e.g. save-path form fields).
+      try {
+        options.custom_writer(options.content, path);
+        if (typeof callback === 'function') callback(path);
+      } catch (error) {
+        console.error('Blockbench workspace custom writer failed:', error);
+        notify('Could not save file: ' + (error?.message || error));
+        return;
+      }
     } else {
       await writeFile(path, options, savedPath => {
         const project = window.Project;
@@ -609,6 +611,25 @@
     if (pickerDrop) {
       activePickerDrop.accept(files);
       return;
+    }
+    // File fields in Blockbench's own dialogs have a dedicated drop listener.
+    // Re-dispatch with real File objects so those fields can consume Explorer
+    // drops through the same patched Filesystem.read() path as external drops.
+    const formInput = event.target?.closest?.('.form_bar_file .input_wrapper');
+    if (formInput && typeof DataTransfer === 'function' && typeof DragEvent === 'function') {
+      try {
+        const transfer = new DataTransfer();
+        files.forEach(file => transfer.items.add(file));
+        const forwarded = new DragEvent('drop', {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: transfer
+        });
+        formInput.dispatchEvent(forwarded);
+        return;
+      } catch (error) {
+        console.warn('Could not forward workspace files to Blockbench dialog field:', error);
+      }
     }
     try {
       const handled = await handleWorkspaceDrop(files, event);
