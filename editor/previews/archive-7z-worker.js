@@ -39,12 +39,16 @@ async function unpack(buffer, extension) {
   if (typeof self.SevenZip !== 'function') throw new Error('The 7-Zip WebAssembly module could not be loaded.');
   postMessage({ type: 'progress', message: 'Starting 7-Zip…' });
 
+  const listingOutput = [];
+  const extractionOutput = [];
+  let outputTarget = listingOutput;
+  const captureOutput = line => outputTarget.push(String(line));
   const module = await self.SevenZip({
     noInitialRun: true,
     noExitRuntime: true,
     locateFile: path => new URL('../../browser/external/' + path, self.location.href).href,
-    print: () => {},
-    printErr: () => {}
+    print: captureOutput,
+    printErr: captureOutput
   });
 
   const FS = module.FS;
@@ -54,9 +58,6 @@ async function unpack(buffer, extension) {
   const inputPath = '/wk-archive/input.' + safeExtension;
   FS.writeFile(inputPath, new Uint8Array(buffer));
 
-  const listingOutput = [];
-  module.print = line => listingOutput.push(String(line));
-  module.printErr = line => listingOutput.push(String(line));
   const listStatus = module.callMain(['l', '-slt', inputPath]);
   if (listStatus !== 0) {
     throw new Error(listingOutput.join('\n').trim() || '7-Zip could not read this archive.');
@@ -82,11 +83,10 @@ async function unpack(buffer, extension) {
   }
 
   postMessage({ type: 'progress', message: 'Extracting ' + declaredFiles + ' files…' });
-  module.print = () => {};
-  module.printErr = line => listingOutput.push(String(line));
+  outputTarget = extractionOutput;
   const extractStatus = module.callMain(['x', '-y', '-bd', '-o/wk-archive/out', inputPath]);
   if (extractStatus !== 0) {
-    const detail = listingOutput.slice(-8).join('\n').trim();
+    const detail = extractionOutput.slice(-8).join('\n').trim();
     throw new Error(detail || '7-Zip could not extract this archive.');
   }
 
