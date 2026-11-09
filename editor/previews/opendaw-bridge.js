@@ -1,13 +1,90 @@
 (() => {
-  const bridgeId = new URLSearchParams(location.search).get('wk_editor_bridge');
-  let bridge = null;
+  const params = new URLSearchParams(location.search);
+  const bridgeId = params.get('wk_editor_bridge');
+  const parentOrigin = params.get('wk_editor_parent_origin');
+  let port = null;
+  let requestId = 0;
+  const pending = new Map();
+  let resolvePort;
+  const portReady = new Promise(resolve => { resolvePort = resolve; });
+
+  function showIsolationRequired() {
+    const show = () => {
+      const panel = document.createElement('section');
+      panel.style.cssText = 'box-sizing:border-box;position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:28px;background:#101214;color:#e6e9ed;text-align:center;font:13px/1.55 system-ui,sans-serif;';
+      const heading = document.createElement('h2');
+      heading.textContent = 'openDAW needs per-frame isolation';
+      heading.style.cssText = 'margin:0;font-size:18px;font-weight:650;';
+      const message = document.createElement('p');
+      message.textContent = 'This browser does not support the Document Isolation Policy required by openDAW. The rest of the Editor remains available.';
+      message.style.cssText = 'max-width:560px;margin:0;color:#aab2bc;';
+      panel.append(heading, message);
+      document.body.appendChild(panel);
+    };
+    if (document.body) show();
+    else document.addEventListener('DOMContentLoaded', show, {once:true});
+  }
+
+  if (!bridgeId || !parentOrigin || window.parent === window) return;
   try {
-    if (bridgeId && window.parent !== window) bridge = window.parent.__WKOpenDAWBridges?.[bridgeId] || null;
-  } catch (_) {}
-  if (!bridge) {
-    console.warn('openDAW workspace bridge was not found.');
+    if (new URL(parentOrigin).origin !== parentOrigin) return;
+  } catch (_) { return; }
+
+  if (!window.crossOriginIsolated) {
+    window.parent.postMessage({type:'wk-opendaw-unavailable', bridgeId}, parentOrigin);
+    showIsolationRequired();
     return;
   }
+
+  const onPort = event => {
+    if (
+      event.source !== window.parent ||
+      event.origin !== parentOrigin ||
+      event.data?.type !== 'wk-opendaw-port' ||
+      event.data?.bridgeId !== bridgeId ||
+      event.ports?.length !== 1
+    ) return;
+    window.removeEventListener('message', onPort);
+    port = event.ports[0];
+    port.addEventListener('message', messageEvent => {
+      const message = messageEvent.data;
+      if (message?.type !== 'wk-opendaw-result') return;
+      const task = pending.get(message.id);
+      if (!task) return;
+      pending.delete(message.id);
+      if (message.ok) task.resolve(message.result);
+      else task.reject(new Error(message.error || 'The Editor workspace request failed.'));
+    });
+    port.start();
+    resolvePort(port);
+  };
+  window.addEventListener('message', onPort);
+  window.parent.postMessage({type:'wk-opendaw-connect', bridgeId}, parentOrigin);
+
+  function request(method, ...args) {
+    return portReady.then(activePort => new Promise((resolve, reject) => {
+      const id = ++requestId;
+      const transfer = [];
+      if (method === 'writeFile' && args[1] instanceof Uint8Array) {
+        const bytes = args[1].slice();
+        args[1] = bytes.buffer;
+        transfer.push(bytes.buffer);
+      } else if (method === 'writeFile' && args[1] instanceof ArrayBuffer) {
+        args[1] = args[1].slice(0);
+        transfer.push(args[1]);
+      }
+      pending.set(id, {resolve, reject});
+      activePort.postMessage({type:'wk-opendaw-request', id, method, args}, transfer);
+    }));
+  }
+
+  const bridge = {
+    listFiles:() => request('listFiles'),
+    exists:path => request('exists', path),
+    readFile:path => request('readFile', path),
+    mime:path => request('mime', path),
+    writeFile:(path, bytes) => request('writeFile', path, bytes)
+  };
 
   const normalize = value => {
     const parts = [];
@@ -53,7 +130,8 @@
   };
   const allowed = (path, extensions) => !extensions.size || extensions.has(extension(path));
   const makeFile = async path => {
-    const file = new File([bridge.readFile(path)], basename(path), {type:bridge.mime(path) || 'application/octet-stream'});
+    const [bytes, mime] = await Promise.all([bridge.readFile(path), bridge.mime(path)]);
+    const file = new File([bytes], basename(path), {type:mime || 'application/octet-stream'});
     Object.defineProperty(file, '__wkWorkspacePath', {value:normalize(path), configurable:true});
     return file;
   };
@@ -62,11 +140,11 @@
     button.style.cssText = 'border:1px solid #596168;background:#30363a;color:#fff;border-radius:5px;padding:7px 11px;cursor:pointer;font:inherit;';
   }
 
-  function openPicker(options = {}) {
+  async function openPicker(options = {}) {
+    const allFiles = (await bridge.listFiles() || []).map(normalize).filter(Boolean);
     return new Promise((resolve, reject) => {
       const multiple = options.multiple === true;
       const extensions = acceptedExtensions(options);
-      const allFiles = (bridge.listFiles() || []).map(normalize).filter(Boolean);
       const selected = new Set();
       let currentDir = '';
       let finished = false;
@@ -235,7 +313,7 @@
     value:async options => {
       const suggestedName = String(options?.suggestedName || 'untitled').trim() || 'untitled';
       const extensions = acceptedExtensions(options);
-      const allFiles = (bridge.listFiles() || []).map(normalize).filter(Boolean);
+      const allFiles = (await bridge.listFiles() || []).map(normalize).filter(Boolean);
       const dirs = new Set(['']);
       for (const path of allFiles) {
         const parts = path.split('/');
@@ -346,7 +424,7 @@
         nameInput.select();
       });
 
-      if (bridge.exists(path) && !window.confirm('"' + path + '" already exists. Replace it?')) throw abortError();
+      if (await bridge.exists(path) && !window.confirm('"' + path + '" already exists. Replace it?')) throw abortError();
       return {
         kind:'file',
         name:basename(path),
@@ -375,13 +453,14 @@
             },
             async close() {
               if(aborted) throw new Error('The file writer was aborted.');
-              bridge.writeFile(path,bytes);
+              await bridge.writeFile(path,bytes);
             },
             async abort() {aborted=true;bytes=new Uint8Array(0);}
           };
         },
         async getFile() {
-          return new File([bridge.readFile(path)],basename(path),{type:bridge.mime(path)});
+          const [bytes,mime] = await Promise.all([bridge.readFile(path),bridge.mime(path)]);
+          return new File([bytes],basename(path),{type:mime || 'application/octet-stream'});
         }
       };
     }
