@@ -266,6 +266,7 @@
     let branches = [];
     let selected = loadConfig();
     let refreshToken = 0;
+    let sourceLoadToken = 0;
     let branchLoadToken = 0;
     let statusToken = 0;
     let historyToken = 0;
@@ -292,30 +293,38 @@
       return await getLocalGit().detect('/');
     }
     async function openLocalSourceControl() {
+      const token = ++sourceLoadToken;
       const preferLocal = !!state.fs?.supportsLocalGit && !state.gitRemote?.provider;
-      localGitMode = preferLocal || !!localGitRepository?.isRepository || !github?.isSignedIn?.();
-      if (localGitMode) {
-        renderShell();
-        showStatus('Checking the selected folder for a Git repository…');
-      }
+      const hasRemoteSubmodules = state.gitRemote?.provider === 'github' && (state.gitSubmodules || []).some(module => !module.removed);
+      localGitMode = !hasRemoteSubmodules && (preferLocal || !!localGitRepository?.isRepository || !github?.isSignedIn?.());
+      if (!localGitMode) syncSelection();
+
+      // Paint the sidebar before doing any Git or GitHub work. Remote projects
+      // used to wait for local-repository detection before rendering anything.
+      renderShell();
+      if (localGitMode && !localGitRepository?.isRepository) showStatus('Checking the selected folder for a Git repository…');
+
       try {
         localGitRepository = await detectLocalRepository();
-        const hasRemoteSubmodules = state.gitRemote?.provider === 'github' && (state.gitSubmodules || []).some(module => !module.removed);
-        localGitMode = !hasRemoteSubmodules && (!!localGitRepository?.isRepository || preferLocal || !github?.isSignedIn?.());
-        if (localGitMode && state.gitRemote?.provider === 'github') {
-          selected = {owner:String(state.gitRemote.owner || ''), repo:String(state.gitRemote.repo || ''), branch:String(state.gitRemote.branch || 'main')};
-          selectionProjectId = String(state.projectId || 'workspace');
-          saveConfig();
-        } else if (!localGitMode) syncSelection();
-        renderShell();
+        if (token !== sourceLoadToken) return;
+        const detectedLocalMode = !hasRemoteSubmodules && (!!localGitRepository?.isRepository || preferLocal || !github?.isSignedIn?.());
+        if (detectedLocalMode !== localGitMode) {
+          localGitMode = detectedLocalMode;
+          if (!localGitMode) syncSelection();
+          renderShell();
+        } else if (localGitMode) renderLocalShell();
+
         if (localGitMode) {
           if (localGitRepository?.isRepository) {
-            await refreshLocalStatus();
-            await loadLocalHistory();
-          }
-        } else await refresh();
+            showStatus('Loading repository status…');
+            void refreshLocalStatus().then(() => loadLocalHistory());
+          } else clearStatus();
+          return;
+        }
+        if (github?.isSignedIn?.()) void loadRemoteData(false);
       } catch (error) {
-        localGitMode = preferLocal || !!localGitRepository?.isRepository || !github?.isSignedIn?.();
+        if (token !== sourceLoadToken) return;
+        localGitMode = !hasRemoteSubmodules && (preferLocal || !!localGitRepository?.isRepository || !github?.isSignedIn?.());
         renderShell();
         showStatus(error?.message || String(error), true);
       }
@@ -413,8 +422,8 @@
         (hasRepository
           ? '<section class="source-control-section"><div class="source-control-section-title">Changes</div>' +
             '<div class="source-control-local-bulk"><button type="button" data-local-stage-all ' + (unstaged.length ? '' : 'disabled') + '>Stage All</button><button type="button" data-local-unstage-all ' + (staged.length ? '' : 'disabled') + '>Unstage All</button></div>' +
-            '<div class="source-control-local-group"><div class="source-control-local-group-title">Staged Changes <span>' + staged.length + '</span></div><div data-local-staged>' + (staged.length ? staged.map(change => renderChange(change, 'staged')).join('') : '<div class="source-control-clean">No staged changes</div>') + '</div></div>' +
-            '<div class="source-control-local-group"><div class="source-control-local-group-title">Changes <span>' + unstaged.length + '</span></div><div data-local-unstaged>' + (unstaged.length ? unstaged.map(change => renderChange(change, 'unstaged')).join('') : '<div class="source-control-clean">No unstaged changes</div>') + '</div></div>' +
+            '<div class="source-control-local-group"><div class="source-control-local-group-title">Staged Changes <span>' + staged.length + '</span></div><div data-local-staged>' + (staged.length ? staged.map(change => renderChange(change, 'staged')).join('') : localGitStatus ? '<div class="source-control-clean">No staged changes</div>' : '<div class="source-control-loading">Checking repository status…</div>') + '</div></div>' +
+            '<div class="source-control-local-group"><div class="source-control-local-group-title">Changes <span>' + unstaged.length + '</span></div><div data-local-unstaged>' + (unstaged.length ? unstaged.map(change => renderChange(change, 'unstaged')).join('') : localGitStatus ? '<div class="source-control-clean">No unstaged changes</div>' : '<div class="source-control-loading">Checking repository status…</div>') + '</div></div>' +
             '<textarea data-local-commit-message placeholder="Commit message" rows="3"></textarea><button class="source-control-commit" data-local-commit ' + (commitDisabled ? 'disabled' : '') + '>' + commitLabel + '</button></section>' +
             '<section class="source-control-section"><div class="source-control-section-title">History</div><div data-local-history class="source-control-history"><div class="source-control-loading">Loading commits…</div></div></section>'
           : '') +
@@ -536,11 +545,10 @@
       if (!tree.querySelector('[data-local-staged]') || !localGitRepository?.isRepository) return;
       try {
         const service = getLocalGit();
-        const status = await service.status('/');
+        const [status, pushStatus] = await Promise.all([service.status('/'), service.pushStatus('/')]);
         if (token !== statusToken) return;
         localGitStatus = status;
-        localGitPushStatus = await service.pushStatus('/');
-        if (token !== statusToken) return;
+        localGitPushStatus = pushStatus;
         if (!state.gitRemote?.provider && localGitPushStatus.remoteUrl) {
           try {
             const remote = service._parseGitHubRemote(localGitPushStatus.remoteUrl);
@@ -551,7 +559,7 @@
             state.saveProjectMetadata?.();
           } catch (_) {}
         }
-        localGitRepository = await service.detect('/');
+        localGitRepository = {...localGitRepository, isRepository:true, root:status.root, branch:status.branch, head:status.head, bare:false};
         if (token !== statusToken) return false;
         renderLocalShell();
         const button = tree.querySelector('[data-local-commit]');
@@ -1060,7 +1068,7 @@
         }
       });
     }
-    async function loadRepositories(force = false) {
+    async function loadRepositories(force = false, loadSelectedData = true, shouldRender = true) {
       if (!github.isSignedIn()) return;
       try {
         syncSelection();
@@ -1068,11 +1076,11 @@
         repos = await github.listRepositories();
         if (selected.repo && !repos.some(r => r.fullName === `${selected.owner}/${selected.repo}`)) selected = {owner:'', repo:'', branch:'main'};
         saveConfig();
-        renderShell();
-        if (selected.repo) await loadBranches(false);
+        if (shouldRender) renderShell();
+        if (selected.repo && loadSelectedData) await loadBranches(false);
       } catch (e) { showStatus(e.message || String(e), true); }
     }
-    async function loadBranches(force = false) {
+    async function loadBranches(force = false, loadSelectedData = true, shouldRender = true) {
       if (!selected.repo || !selected.owner) return;
       if (!force && branches.length) return;
       const token = ++branchLoadToken;
@@ -1083,40 +1091,57 @@
         branches = loaded.length ? loaded : [branch || 'main'];
         if (!branches.includes(selected.branch)) selected.branch = branches[0];
         saveConfig();
-        renderShell();
-        await refreshStatus();
-        await loadHistory();
+        if (shouldRender) renderShell();
+        if (loadSelectedData) await Promise.all([refreshStatus(), loadHistory()]);
       } catch (e) {
         if (token !== branchLoadToken || selected.owner !== owner || selected.repo !== repo) return;
         if (e?.status === 409 || e?.status === 404) {
           branches = [selected.branch || 'main'];
-          renderShell();
-          await refreshStatus();
-          await loadHistory();
+          if (shouldRender) renderShell();
+          if (loadSelectedData) await Promise.all([refreshStatus(), loadHistory()]);
           return;
         }
         showStatus(e.message || String(e), true);
       }
     }
+    async function loadRemoteData(force = false) {
+      if (!github?.isSignedIn?.()) { renderShell(); return; }
+      syncSelection();
+      if (!selected.repo) {
+        await loadRepositories(force, false, false);
+        renderShell();
+        return;
+      }
+
+      // Load repository and branch metadata together, but defer the one
+      // sidebar rebuild until both are ready. The changes/history elements
+      // must exist in their final shell before their own async reads begin.
+      await Promise.all([
+        loadRepositories(force, false, false),
+        loadBranches(force, false, false)
+      ]);
+      renderShell();
+      if (!selected.repo) return;
+      await Promise.all([refreshStatus(), loadHistory()]);
+    }
+
     async function refresh() {
       if (localGitMode) {
+        const token = ++sourceLoadToken;
         try {
           localGitRepository = await detectLocalRepository();
-          if (!localGitRepository?.isRepository) { renderLocalShell(); return; }
+          if (token !== sourceLoadToken) return;
           renderLocalShell();
-          await refreshLocalStatus();
-          await loadLocalHistory();
-        } catch (error) { showStatus(error.message || String(error), true); }
+          if (localGitRepository?.isRepository) {
+            void refreshLocalStatus().then(() => loadLocalHistory());
+          } else clearStatus();
+        } catch (error) { if (token === sourceLoadToken) showStatus(error.message || String(error), true); }
         return;
       }
       const token = ++refreshToken;
       try {
         if (!github?.isSignedIn?.()) { renderShell(); return; }
-        await loadRepositories(true);
-        if (token !== refreshToken || !selected.repo) return;
-        if (!branches.length) await loadBranches(false);
-        await refreshStatus();
-        await loadHistory();
+        await loadRemoteData(true);
       } catch (e) { if (token === refreshToken) showStatus(e.message || String(e), true); }
     }
     async function refreshStatus() {
