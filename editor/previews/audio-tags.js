@@ -430,6 +430,31 @@
       : writeMp3(value, metadata || {}, parsed || { frames: [], end: 0 }, picture, replacePicture);
   }
 
+  function preserveMetadata(value, sourceParsed, kind) {
+    const bytes = bytesOf(value);
+    if (!sourceParsed) return new Uint8Array(bytes);
+    const metadata = sourceParsed.tags || {};
+    const frames = sourceParsed.frames || [];
+    const hasMetadata = Object.values(metadata).some(value => String(value || '').trim()) ||
+      frames.length > 0 || !!sourceParsed.picture?.data?.length;
+    if (!hasMetadata) return new Uint8Array(bytes);
+
+    if (kind === 'wav') {
+      // Keep AudioMass's newly rendered WAVE chunks, but carry over the
+      // original ID3 frames into the output as an ID3 RIFF chunk.
+      const output = parseWav(bytes);
+      return writeWav(bytes, metadata, { ...output, frames }, null, false);
+    }
+
+    // Replace an ID3 header AudioMass may have emitted, preserving the
+    // newly encoded MPEG frames while restoring the original metadata.
+    const outputTag = parseID3(bytes, 0);
+    return writeMp3(bytes, metadata, {
+      frames,
+      end: outputTag?.end || 0
+    }, null, false);
+  }
+
   function readImageMime(data) {
     const bytes = bytesOf(data);
     if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
@@ -442,6 +467,7 @@
   window.EditorAudioTags = {
     read,
     write,
+    preserveMetadata,
     readImageMime,
     parseID3,
     parseWav,
