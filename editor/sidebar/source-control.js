@@ -713,8 +713,7 @@
       try {
         const service = getLocalGit();
         const repository = await service._repository('/');
-        await service.git.checkout({fs:service.fs, dir:repository.dir, ref:oid, force:true, noUpdateHead:true});
-        await service.adapter.flush();
+        await service.runSerialized(['restore-commit', oid], {cwd:'/'});
         state.markDirty?.('.git');
         state.refreshExplorer?.();
         localGitRepository = await service.detect('/');

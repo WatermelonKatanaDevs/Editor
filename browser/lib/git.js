@@ -1020,6 +1020,13 @@
         const result = await this._stage(repository, rows);
         return {output:result.added + result.removed ? 'Staged ' + (result.added + result.removed) + ' file(s).' : 'No changes to stage.', value:result};
       }
+      if (operation === 'restore-commit') {
+        const oid = command[1];
+        if (!oid || command.length !== 2) throw new Error('git restore-commit: specify one commit SHA.');
+        const repository = await this._repository(cwd);
+        await this.git.checkout({fs:this.fs, dir:repository.dir, ref:oid, force:true, noUpdateHead:true});
+        return {output:'Restored working tree and index to ' + oid.slice(0, 7) + ' without moving HEAD.', value:{oid, root:repository.root}};
+      }
       if (operation === 'restore' || operation === 'reset') {
         let staged = operation === 'reset';
         let source = 'HEAD';
