@@ -1,0 +1,3435 @@
+import{l as n}from"./editor.main.37bc801b-9cab-4fe6-acdf-414fb02a69a5.js";import{e as u}from"./editor.main.37bc801b-9cab-4fe6-acdf-414fb02a69a5.js";import{T as t}from"./main.37bc801b-9cab-4fe6-acdf-414fb02a69a5.js";import"./VideoOverlay.37bc801b-9cab-4fe6-acdf-414fb02a69a5.js";const a=`type seconds = number;
+
+type bipolar = number;
+
+type int = number;
+
+type Nullable<T> = T | null;
+
+type float = number;
+
+type unitValue = number;
+
+declare enum Mixing {
+    Linear = 0,
+    EqualPower = 1
+}
+
+declare enum ClassicWaveform {
+    sine = 0,
+    triangle = 1,
+    saw = 2,
+    square = 3
+}
+
+declare enum VoicingMode {
+    Monophonic = 0,
+    Polyphonic = 1
+}
+
+type ppqn = number;
+
+type Interpolation = {
+    type: "none";
+} | {
+    type: "linear";
+} | {
+    type: "curve";
+    slope: unitValue;
+};
+
+declare const Interpolation: {
+    readonly None: {
+        readonly type: "none";
+    };
+    readonly Linear: {
+        readonly type: "linear";
+    };
+    readonly Curve: (slope: unitValue) => {
+        readonly type: "linear";
+    } | {
+        readonly type: "curve";
+        readonly slope: number;
+    };
+};
+
+declare enum TransientPlayMode {
+    Once = 0,
+    Repeat = 1,
+    Pingpong = 2
+}
+
+type AudioData = {
+    sampleRate: number;
+    numberOfFrames: number;
+    numberOfChannels: number;
+    frames: ReadonlyArray<Float32Array<SharedArrayBuffer>>;
+};
+
+declare namespace AudioData {
+    const count: () => number;
+    const create: (sampleRate: number, numberOfFrames: number, numberOfChannels: number) => AudioData;
+}
+
+declare namespace Chord {
+    const Major: ReadonlyArray<int>;
+    const Minor: ReadonlyArray<int>;
+    const Minor7: ReadonlyArray<int>;
+    const Minor9: ReadonlyArray<int>;
+    const Dominant7: ReadonlyArray<int>;
+    const NoteLabels: string[];
+    const compile: (scale: ReadonlyArray<int>, root: int, variation: int, n: int) => ReadonlyArray<int>;
+    const toString: (midiNote: int) => string;
+}
+
+declare class FFT {
+    #private;
+    static reverse(i: int): number;
+    constructor(n: int);
+    process(real: Float32Array, imag: Float32Array): void;
+    inverse(real: Float32Array, imag: Float32Array): void;
+}
+
+type samples = number;
+
+type bpm = number;
+
+declare const PPQN: {
+    readonly Bar: number;
+    readonly Quarter: 960;
+    readonly SemiQuaver: number;
+    readonly fromSignature: (nominator: int, denominator: int) => number;
+    readonly toParts: (ppqn: ppqn, nominator?: int, denominator?: int) => {
+        readonly bars: number;
+        readonly beats: number;
+        readonly semiquavers: number;
+        readonly ticks: number;
+    };
+    readonly secondsToPulses: (seconds: seconds, bpm: bpm) => ppqn;
+    readonly pulsesToSeconds: (pulses: ppqn, bpm: bpm) => seconds;
+    readonly secondsToBpm: (seconds: seconds, pulses: ppqn) => bpm;
+    readonly samplesToPulses: (samples: samples, bpm: bpm, sampleRate: number) => ppqn;
+    readonly pulsesToSamples: (pulses: ppqn, bpm: bpm, sampleRate: number) => number;
+    readonly toString: (pulses: ppqn, nominator?: int, denominator?: int) => string;
+};
+
+declare const midiToHz: (note?: number, baseFrequency?: number) => number;
+
+declare const dbToGain: (db: number) => number;
+
+declare const gainToDb: (gain: number) => number;
+
+declare namespace WavFile {
+    export const decodeFloats: (buffer: ArrayBuffer) => AudioData;
+    type AudioBufferLike = {
+        readonly sampleRate: number;
+        readonly length: number;
+        readonly numberOfChannels: number;
+        getChannelData(channel: number): Float32Array;
+    };
+    /**
+     * Encode the audio as a 16-bit PCM WAV file. Float samples are clamped
+     * to [-1, 1] and scaled to int16. Same input shape as \`encodeFloats\`
+     * (\`AudioData\` or \`AudioBufferLike\`); output is a complete RIFF/WAVE
+     * ArrayBuffer ready to drop into a Blob or pass to importers expecting
+     * standard 16-bit WAV.
+     */
+    export const encodeInts16: (audio: AudioData | AudioBufferLike, maxLength?: int) => ArrayBuffer;
+    export const encodeInts24: (audio: AudioData | AudioBufferLike, maxLength?: int) => ArrayBuffer;
+    export const encodeFloats: (audio: AudioData | AudioBufferLike, maxLength?: int) => ArrayBuffer;
+    export {};
+}
+
+declare enum AudioSendRouting {
+    Pre = 0,
+    Post = 1
+}
+
+/**
+ * A sample known to the studio. Obtain one via {@link Api.addSample} or {@link Api.listSamples}.
+ */
+interface Sample {
+    /** Unique id of the sample (uuid string) */
+    readonly uuid: string;
+    /** Display name */
+    readonly name: string;
+    /** Length in seconds */
+    readonly duration: seconds;
+    /** Detected or assigned tempo (0 = unknown, plays in seconds when placed on the timeline) */
+    readonly bpm: number;
+    /** Sample rate in Hz */
+    readonly sample_rate: number;
+}
+
+/**
+ * Reference to a soundfont (.sf2) file known to the studio
+ */
+interface SoundfontFile {
+    /** Unique id of the file (uuid string) */
+    readonly uuid: string;
+    /** Display name */
+    readonly name: string;
+}
+
+/**
+ * Recursive partial used for construction props. Functions and read-only references are ignored.
+ * @internal
+ */
+type DeepPartial<T> = {
+    [K in keyof T]?: T[K] extends (...args: never[]) => unknown ? never : T[K] extends ReadonlyArray<infer E> ? ReadonlyArray<DeepPartial<E>> : T[K] extends object ? DeepPartial<T[K]> : T[K];
+};
+
+/** @internal building block of {@link ParameterPath} */
+type Primitive = number | boolean;
+
+/** @internal building block of {@link ParameterPath} */
+type Reference = {
+    readonly uuid: string;
+};
+
+/** @internal building block of {@link ParameterPath} */
+type Shallower = [
+    never,
+    0,
+    1,
+    2
+];
+
+/**
+ * All automatable parameter paths of an object, e.g. \`"cutoff"\`, \`"lfo.rate"\`, \`"oscillators.0.volume"\`.
+ * Used by {@link AudioUnit.addValueTrack} and {@link Modulator.assign}. The editor completes valid paths.
+ * @internal
+ */
+type ParameterPath<T> = ParameterPathAt<T, 3>;
+
+/** @internal building block of {@link ParameterPath} */
+type ParameterPathAt<T, D extends number> = D extends 0 ? never : {
+    [K in keyof T & string]: T[K] extends (...args: never[]) => unknown ? never : T[K] extends Reference ? never : T[K] extends Primitive ? K : T[K] extends ReadonlyArray<infer E> ? E extends Primitive ? \`\${K}.\${number}\` : E extends Reference ? never : \`\${K}.\${number}.\${ParameterPathAt<E, Shallower[D]>}\` : T[K] extends object ? \`\${K}.\${ParameterPathAt<T[K], Shallower[D]>}\` : never;
+}[keyof T & string];
+
+// ---------------------------------------------------------------------------------------------------------
+// Sends
+// ---------------------------------------------------------------------------------------------------------
+/**
+ * A send tap from a unit's channel strip to an aux or group bus
+ */
+interface Send {
+    /** Unique id */
+    readonly uuid: string;
+    /** The unit this send originates from */
+    readonly audioUnit: AnyAudioUnit;
+    /** The bus receiving the signal */
+    readonly target: AuxAudioUnit | GroupAudioUnit;
+    /** Send amount in dB (-inf to 0) */
+    amount: number;
+    /** Pan position (-1.0 = left, 0.0 = center, 1.0 = right) */
+    pan: bipolar;
+    /** Pre-fader or post-fader tap */
+    mode: "pre" | "post";
+    /** Order in the send list */
+    readonly index: int;
+    /** Remove this send */
+    remove(): void;
+}
+
+/**
+ * Units that can send their signal to buses
+ */
+interface Sendable {
+    /** All sends of this unit ordered by index */
+    readonly sends: ReadonlyArray<Send>;
+    /**
+     * Add a send to an auxiliary or group unit
+     * @param target - The destination unit
+     * @param props - Send configuration ({@link Send})
+     * @example
+     * \`\`\`ts
+     * const reverb = project.addAuxUnit({label: "Reverb"})
+     * reverb.addAudioEffect("Reverb", {decay: 0.7})
+     * synth.addSend(reverb, {amount: -12})
+     * \`\`\`
+     */
+    addSend(target: AuxAudioUnit | GroupAudioUnit, props?: Partial<Pick<Send, "amount" | "pan" | "mode">>): Send;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Devices
+// ---------------------------------------------------------------------------------------------------------
+/**
+ * Common surface of instruments and effects
+ */
+interface Device {
+    /** Unique id */
+    readonly uuid: string;
+    /** Custom label */
+    label: string;
+    /** Enable or bypass the device */
+    enabled: boolean;
+    /** Collapse the device editor in the studio */
+    minimized: boolean;
+    /** Remove this device from its host */
+    remove(): void;
+}
+
+/**
+ * A MIDI or audio effect sitting in a chain
+ */
+interface Effect extends Device {
+    /** Position in the effect chain (0 = first) */
+    readonly index: int;
+    /** Move this effect to another position in its chain */
+    move(index: int): void;
+}
+
+/**
+ * Effect processing notes before they reach the instrument
+ */
+interface MIDIEffect extends Effect {
+    /** Effect type identifier */
+    readonly key: keyof MIDIEffects;
+    /** The audio unit this effect belongs to */
+    readonly audioUnit: AnyAudioUnit;
+}
+
+/**
+ * Effect processing the audio signal after the instrument
+ */
+interface AudioEffect extends Effect {
+    /** Effect type identifier */
+    readonly key: keyof AudioEffects;
+    /** The audio unit this effect belongs to */
+    readonly audioUnit: AnyAudioUnit;
+}
+
+/**
+ * Anything the studio can tap as a sidechain source: a unit's channel strip, an instrument, an effect, a Playfield slot or a composite layer
+ */
+type SideChainSource = AnyAudioUnit | AnyInstrument | AnyAudioEffect | PlayfieldSlot | InstrumentCompositeLayer | AudioEffectCompositeEntry;
+
+/**
+ * Effects that can listen to an external detection source
+ */
+interface SideChainable {
+    /** External detection source (null = the effect listens to its own input) */
+    sideChain: Nullable<SideChainSource>;
+}
+
+// ---- MIDI effects
+/**
+ * Generates rhythmic note sequences from held chords
+ */
+interface ArpeggioEffect extends MIDIEffect {
+    /** Always "Arpeggio" */
+    readonly key: "Arpeggio";
+    /**
+     * Walk through the held notes (default 0): 0 Up, 1 Down, 2 UpDown, 3 DownUp, 4 Up & Down, 5 Down & Up,
+     * 6 Converge, 7 Diverge, 8 Con & Diverge, 9 Pinky Up, 10 Pinky UpDown, 11 Thumb Up, 12 Thumb UpDown,
+     * 13 Random, 14 Random Other, 15 Shuffle, 16 Random Once, 17 Walk
+     */
+    mode: int;
+    /** Octave range (1 to 5, default 1) */
+    octaves: int;
+    /** Step rate index (0-16): 1/1, 1/2, 1/3, 1/4, 3/16, 1/6, 1/8, 3/32, 1/12, 1/16, 3/64, 1/24, 1/32, 1/48, 1/64, 1/96, 1/128 (default 9 = 1/16) */
+    rate: int;
+    /** Note length relative to the step (0.0 to 2.0, default 1.0) */
+    gate: float;
+    /** Repeats per step (1 to 16, default 1) */
+    repeat: int;
+    /** Velocity change per repeat (-1.0 to 1.0, default 0.0) */
+    velocity: bipolar;
+    /** Note order: 0 = as played, 1 = by pitch (default 0) */
+    order: int;
+    /** Keep playing the last notes after they are released (default false) */
+    hold: boolean;
+    /** Restart the pattern: 0 = never, 1 = on the first note, 2 = every bar, 3 = every beat (default 0) */
+    retrigger: int;
+    /** Steps the walk starts later (0 to 15, default 0) */
+    offset: int;
+    /** While playing, a chord on the project's chord track replaces the held notes (default false) */
+    followChords: boolean;
+    /** Seed of the random walks and the step chance (0 to 999999, default 0) */
+    seed: int;
+    /** Number of steps the sequencer plays (1 to 64, default 16) */
+    patternLength: int;
+    /** The 64 sequencer steps */
+    readonly steps: ReadonlyArray<ArpeggioStep>;
+}
+
+/**
+ * One step of the Arpeggio sequencer
+ */
+interface ArpeggioStep {
+    /** 0 = note, 1 = rest, 2 = tie (extends the previous note), 3 = chord (plays every held note) (default 0) */
+    kind: int;
+    /** Velocity in percent (0 to 100, default 100) */
+    velocity: int;
+    /** Gate in percent, multiplies the device gate (0 to 200, default 100) */
+    gate: int;
+    /** Semitones (-12 to 12, default 0) */
+    transpose: int;
+    /** Octaves (-2 to 2, default 0) */
+    octave: int;
+    /** Chance to play in percent (0 to 100, default 100) */
+    chance: int;
+    /** Equal hits within the step (1 to 7, default 1) */
+    ratchet: int;
+}
+
+/**
+ * Shifts the pitch of incoming notes
+ */
+interface PitchEffect extends MIDIEffect {
+    /** Always "Pitch" */
+    readonly key: "Pitch";
+    /** Octave shift (-7 to 7, default 0) */
+    octaves: int;
+    /** Semitone shift (-36 to 36, default 0) */
+    semiTones: int;
+    /** Cent shift (-50 to 50, default 0) */
+    cents: float;
+}
+
+/**
+ * Passes a key range and transposes the passing notes or sets them to one key
+ */
+interface NoteFilterEffect extends MIDIEffect {
+    /** Always "NoteFilter" */
+    readonly key: "NoteFilter";
+    /** Lowest passing key, included (0 to 127, default 0) */
+    min: int;
+    /** Highest passing key, included (0 to 127, default 127) */
+    max: int;
+    /** false adds {@link transpose}, true plays every passing note as {@link targetKey} (default false) */
+    set: boolean;
+    /** Semitones added when {@link set} is false, a result outside 0 to 127 is ignored (-127 to 127, default 0) */
+    transpose: int;
+    /** Key every passing note plays as when {@link set} is true (0 to 127, default 60) */
+    targetKey: int;
+}
+
+/**
+ * Moves every note onto the nearest key of a scale (ties go down), or through a custom grid
+ */
+interface ScaleMatrixEffect extends MIDIEffect {
+    /** Always "ScaleMatrix" */
+    readonly key: "ScaleMatrix";
+    /** Root pitch class (0 to 11, 0 = C, default 0) */
+    root: int;
+    /**
+     * Scale (0 to 15, default 0): Major, Natural Minor, Harmonic Minor, Melodic Minor, Dorian, Phrygian, Lydian,
+     * Mixolydian, Locrian, Pentatonic Major, Pentatonic Minor, Blues, Whole Tone, Diminished, Augmented, 15 Custom
+     */
+    scale: int;
+    /** Uses the key of the project's key track at the note's position instead of root and scale (default false) */
+    follow: boolean;
+    /** The custom grid, used when scale is 15: per note above the root its offset in semitones (-6 to 11), 12 mutes it */
+    readonly custom: ReadonlyArray<int>;
+    /** Replace the custom grid, up to 12 offsets starting at the root */
+    setCustom(offsets: ReadonlyArray<int>): void;
+}
+
+/**
+ * Reshapes note velocities
+ */
+interface VelocityEffect extends MIDIEffect {
+    /** Always "Velocity" */
+    readonly key: "Velocity";
+    /** Velocity all notes are pulled towards (0.0 to 1.0, default 0.5) */
+    magnetPosition: unitValue;
+    /** Pull strength (0.0 to 1.0, default 0.0) */
+    magnetStrength: unitValue;
+    /** Random seed (default 2048) */
+    randomSeed: int;
+    /** Random amount (0.0 to 1.0, default 0.0) */
+    randomAmount: unitValue;
+    /** Constant offset (-1.0 to 1.0, default 0.0) */
+    offset: bipolar;
+    /** Dry/wet mix (0.0 to 1.0, default 1.0) */
+    mix: unitValue;
+}
+
+/**
+ * Shuffle / swing
+ */
+interface ZeitgeistEffect extends MIDIEffect {
+    /** Always "Zeitgeist" */
+    readonly key: "Zeitgeist";
+    /** The groove driving this effect, null when set to none */
+    readonly groove: Nullable<AnyGroove>;
+}
+
+/**
+ * Scriptable MIDI effect. See {@link ScriptDevice}
+ */
+interface SpielwerkEffect extends MIDIEffect, ScriptDevice {
+    /** Always "Spielwerk" */
+    readonly key: "Spielwerk";
+}
+
+/**
+ * MIDI effect types by key. Use the keys with {@link MIDIEffectHost.addMIDIEffect}
+ */
+interface MIDIEffects {
+    /** {@link ArpeggioEffect} */
+    "Arpeggio": ArpeggioEffect;
+    /** {@link PitchEffect} */
+    "Pitch": PitchEffect;
+    /** {@link NoteFilterEffect} */
+    "NoteFilter": NoteFilterEffect;
+    /** {@link ScaleMatrixEffect} */
+    "ScaleMatrix": ScaleMatrixEffect;
+    /** {@link VelocityEffect} */
+    "Velocity": VelocityEffect;
+    /** {@link ZeitgeistEffect} */
+    "Zeitgeist": ZeitgeistEffect;
+    /** {@link SpielwerkEffect} */
+    "Spielwerk": SpielwerkEffect;
+}
+
+/**
+ * Any MIDI effect
+ */
+type AnyMIDIEffect = MIDIEffects[keyof MIDIEffects];
+
+// ---- Audio effects
+/**
+ * Pitch correction towards a key and scale
+ */
+interface AutotuneEffect extends AudioEffect {
+    /** Always "Autotune" */
+    readonly key: "Autotune";
+    /** Key (0-11): C, C#, D, D#, E, F, F#, G, G#, A, A#, B (default 0) */
+    scaleKey: int;
+    /** Scale (0-7): Chromatic, Major, Minor, Major Pentatonic, Minor Pentatonic, Blues, Dorian, Mixolydian (default 1) */
+    scale: int;
+    /** Correction amount (0.0 to 1.0, default 1.0) */
+    amount: unitValue;
+    /** Retune speed (0.0 to 1.0, default 0.5) */
+    retune: unitValue;
+    /** Pitch shift in semitones (-12 to 12, default 0) */
+    shift: float;
+    /** Smoothing (0.0 to 1.0, default 0.6) */
+    smooth: unitValue;
+    /** Uses the key of the project's key track instead of scaleKey and scale (default false) */
+    follow: boolean;
+}
+
+/**
+ * Dynamic range compressor
+ */
+interface CompressorEffect extends AudioEffect, SideChainable {
+    /** Always "Compressor" */
+    readonly key: "Compressor";
+    /** Look ahead detection (default false) */
+    lookahead: boolean;
+    /** Automatic makeup gain (default true) */
+    automakeup: boolean;
+    /** Program dependent attack (default false) */
+    autoattack: boolean;
+    /** Program dependent release (default false) */
+    autorelease: boolean;
+    /** Input gain in dB (-30 to 30, default 0) */
+    inputGain: float;
+    /** Threshold in dB (-60 to 0, default -10) */
+    threshold: float;
+    /** Ratio (1 to 24, default 2) */
+    ratio: float;
+    /** Knee in dB (0 to 24, default 0) */
+    knee: float;
+    /** Attack in ms (0 to 100, default 0) */
+    attack: float;
+    /** Release in ms (5 to 1500, default 25) */
+    release: float;
+    /** Makeup gain in dB (-40 to 40, default 0) */
+    makeup: float;
+    /** Dry/wet mix (0.0 to 1.0, default 1.0) */
+    mix: unitValue;
+}
+
+/**
+ * Convolution reverb using an impulse response sample
+ */
+interface ConvolverEffect extends AudioEffect {
+    /** Always "Convolver" */
+    readonly key: "Convolver";
+    /** Impulse response sample (null = none) */
+    impulse: Nullable<Sample>;
+    /** Wet level in dB (default -3) */
+    wet: float;
+    /** Dry level in dB (default 0) */
+    dry: float;
+    /** Pre-delay in seconds (0.0 to 0.5, default 0.0) */
+    preDelay: float;
+    /** Normalize the impulse response (default true) */
+    normalize: boolean;
+    /** Play the impulse response reversed (default false) */
+    reverse: boolean;
+}
+
+/**
+ * Bit crusher
+ */
+interface CrusherEffect extends AudioEffect {
+    /** Always "Crusher" */
+    readonly key: "Crusher";
+    /** Sample rate reduction (0.0 to 1.0, default 0.0) */
+    crush: unitValue;
+    /** Bit depth (1 to 16, default 16) */
+    bits: int;
+    /** Boost in dB (0 to 24, default 0) */
+    boost: float;
+    /** Dry/wet mix (0.0 to 1.0, default 1.0) */
+    mix: float;
+}
+
+/**
+ * Dense algorithmic reverb based on Dattorro's design
+ */
+interface DattorroReverbEffect extends AudioEffect {
+    /** Always "DattorroReverb" */
+    readonly key: "DattorroReverb";
+    /** Pre-delay in ms (0 to 1000, default 0) */
+    preDelay: float;
+    /** Input bandwidth (0.0 to 1.0, default 0.9999) */
+    bandwidth: unitValue;
+    /** Input diffusion 1 (0.0 to 1.0, default 0.75) */
+    inputDiffusion1: unitValue;
+    /** Input diffusion 2 (0.0 to 1.0, default 0.625) */
+    inputDiffusion2: unitValue;
+    /** Decay (0.0 to 1.0, default 0.75) */
+    decay: unitValue;
+    /** Decay diffusion 1 (0.0 to 1.0, default 0.7) */
+    decayDiffusion1: unitValue;
+    /** Decay diffusion 2 (0.0 to 1.0, default 0.5) */
+    decayDiffusion2: unitValue;
+    /** High frequency damping (0.0 to 1.0, default 0.005) */
+    damping: unitValue;
+    /** Modulation rate (0.0 to 1.0, default 0.5) */
+    excursionRate: unitValue;
+    /** Modulation depth (0.0 to 1.0, default 0.7) */
+    excursionDepth: unitValue;
+    /** Wet level in dB (default -6) */
+    wet: float;
+    /** Dry level in dB (default 0) */
+    dry: float;
+}
+
+/**
+ * Stereo delay with tempo-synced times
+ */
+interface DelayEffect extends AudioEffect {
+    /** Always "Delay" */
+    readonly key: "Delay";
+    /** Delay time index (0-20): Off, 1/128, 1/96, 1/64, 1/48, 1/32, 1/24, 3/64, 1/16, 1/12, 3/32, 1/8, 1/6, 3/16, 1/4, 5/16, 1/3, 3/8, 7/16, 1/2, 1/1 (default 13 = 3/16) */
+    delay: int;
+    /** Additional delay time in ms (0 to 1000, default 0) */
+    delayMillis: float;
+    /** Pre-delay left, same index table as delay (default 8 = 1/16) */
+    preSyncTimeLeft: int;
+    /** Pre-delay left in ms (0 to 1000, default 0) */
+    preMillisTimeLeft: float;
+    /** Pre-delay right, same index table as delay (default 0 = Off) */
+    preSyncTimeRight: int;
+    /** Pre-delay right in ms (0 to 1000, default 0) */
+    preMillisTimeRight: float;
+    /** Feedback (0.0 to 1.0, default 0.5) */
+    feedback: unitValue;
+    /** Cross-channel feedback (0.0 to 1.0, default 1.0) */
+    cross: unitValue;
+    /** LFO speed in Hz (0.1 to 5, default 0.1) */
+    lfoSpeed: float;
+    /** LFO depth in ms (0 to 50, default 0) */
+    lfoDepth: float;
+    /** Feedback filter (-1.0 = lowpass, 0.0 = off, 1.0 = highpass, default 0.0) */
+    filter: bipolar;
+    /** Wet level in dB (default -6) */
+    wet: float;
+    /** Dry level in dB (default 0) */
+    dry: float;
+}
+
+/**
+ * Wavefolder distortion
+ */
+interface FoldEffect extends AudioEffect {
+    /** Always "Fold" */
+    readonly key: "Fold";
+    /** Drive in dB (0 to 30, default 0) */
+    drive: float;
+    /** Oversampling (0 = off, 1 = 2x, 2 = 4x, default 0) */
+    overSampling: 0 | 1 | 2;
+    /** Output volume in dB (-18 to 0, default 0) */
+    volume: float;
+}
+
+/**
+ * Noise gate
+ */
+interface GateEffect extends AudioEffect, SideChainable {
+    /** Always "Gate" */
+    readonly key: "Gate";
+    /** Threshold in dB (-80 to 0, default -6) */
+    threshold: float;
+    /** Hysteresis in dB (0 to 24, default 0) */
+    return: float;
+    /** Attack in ms (0 to 1000, default 1) */
+    attack: float;
+    /** Hold in ms (0 to 500, default 50) */
+    hold: float;
+    /** Release in ms (1 to 2000, default 100) */
+    release: float;
+    /** Closed gain in dB (-72 to 0, default -72) */
+    floor: float;
+    /** Invert (opens below threshold, default false) */
+    inverse: boolean;
+}
+
+/**
+ * Brickwall limiter with automatic makeup gain
+ */
+interface MaximizerEffect extends AudioEffect {
+    /** Always "Maximizer" */
+    readonly key: "Maximizer";
+    /** Look ahead (default true) */
+    lookahead: boolean;
+    /** Threshold in dB (-24 to 0, default 0) */
+    threshold: float;
+}
+
+/**
+ * Neural amp modeler (model is chosen in the studio)
+ */
+interface NeuralAmpEffect extends AudioEffect {
+    /** Always "NeuralAmp" */
+    readonly key: "NeuralAmp";
+    /** Input gain in dB (default 0) */
+    inputGain: float;
+    /** Output gain in dB (default 0) */
+    outputGain: float;
+    /** Sum to mono before the model (default true) */
+    mono: boolean;
+    /** Dry/wet mix (0.0 to 1.0, default 1.0) */
+    mix: unitValue;
+}
+
+/**
+ * High/low-pass band of the Revamp equalizer
+ */
+interface RevampPass {
+    /** Enable the band */
+    enabled: boolean;
+    /** Frequency in Hz (20 to 20000) */
+    frequency: float;
+    /** Filter order (0 to 3 = 6, 12, 18, 24 dB/oct) */
+    order: 0 | 1 | 2 | 3;
+    /** Resonance (0.01 to 10) */
+    q: float;
+}
+
+/**
+ * Shelf band of the Revamp equalizer
+ */
+interface RevampShelf {
+    /** Enable the band */
+    enabled: boolean;
+    /** Frequency in Hz (20 to 20000) */
+    frequency: float;
+    /** Gain in dB (-24 to 24) */
+    gain: float;
+}
+
+/**
+ * Bell band of the Revamp equalizer
+ */
+interface RevampBell {
+    /** Enable the band */
+    enabled: boolean;
+    /** Frequency in Hz (20 to 20000) */
+    frequency: float;
+    /** Gain in dB (-24 to 24) */
+    gain: float;
+    /** Resonance (0.01 to 10) */
+    q: float;
+}
+
+/**
+ * Graphical equalizer with seven bands
+ */
+interface RevampEffect extends AudioEffect {
+    /** Always "Revamp" */
+    readonly key: "Revamp";
+    /** High-pass band */
+    readonly highPass: RevampPass;
+    /** Low shelf band */
+    readonly lowShelf: RevampShelf;
+    /** Low bell band */
+    readonly lowBell: RevampBell;
+    /** Mid bell band */
+    readonly midBell: RevampBell;
+    /** High bell band */
+    readonly highBell: RevampBell;
+    /** High shelf band */
+    readonly highShelf: RevampShelf;
+    /** Low-pass band */
+    readonly lowPass: RevampPass;
+}
+
+/**
+ * Free reverb
+ */
+interface ReverbEffect extends AudioEffect {
+    /** Always "Reverb" */
+    readonly key: "Reverb";
+    /** Decay (0.0 to 1.0, default 0.5) */
+    decay: unitValue;
+    /** Pre-delay in seconds (0.001 to 0.5, default 0.001) */
+    preDelay: float;
+    /** Damping (0.0 to 1.0, default 0.5) */
+    damp: unitValue;
+    /** Filter (-1.0 = lowpass, 0.0 = off, 1.0 = highpass, default 0.0) */
+    filter: bipolar;
+    /** Wet level in dB (default -3) */
+    wet: float;
+    /** Dry level in dB (default 0) */
+    dry: float;
+}
+
+/**
+ * Stereo imaging tool
+ */
+interface StereoToolEffect extends AudioEffect {
+    /** Always "StereoTool" */
+    readonly key: "StereoTool";
+    /** Volume in dB (-72 to 12, default 0) */
+    volume: float;
+    /** Pan (-1.0 to 1.0, default 0.0) */
+    panning: bipolar;
+    /** Stereo width (-1.0 = mono, 0.0 = unchanged, 1.0 = wide, default 0.0) */
+    stereo: bipolar;
+    /** Invert left channel phase (default false) */
+    invertL: boolean;
+    /** Invert right channel phase (default false) */
+    invertR: boolean;
+    /** Swap channels (default false) */
+    swap: boolean;
+    /** Panning law */
+    panningMixing: Mixing;
+}
+
+/**
+ * Routes the signal at its chain position into a group or auxiliary bus (a 1:1 cable, unity into the bus).
+ * \`pass\` is the level the chain continues at: -inf (default) means the unit sounds only through the bus,
+ * 0 dB keeps a full copy on the chain. No target, or a disabled sink, sends nothing.
+ */
+interface SinkEffect extends AudioEffect {
+    /** Always "Sink" */
+    readonly key: "Sink";
+    /** The bus receiving the signal, null = nothing is sent */
+    target: Nullable<GroupAudioUnit | AuxAudioUnit>;
+    /** Level the signal continues down the chain at, in dB (-inf to 0, default -inf) */
+    pass: float;
+}
+
+/**
+ * Tremolo and auto-pan
+ */
+interface TidalEffect extends AudioEffect {
+    /** Always "Tidal" */
+    readonly key: "Tidal";
+    /** Waveform slope (-1.0 to 1.0, default -0.25) */
+    slope: bipolar;
+    /** Waveform symmetry (0.0 to 1.0, default 0.5) */
+    symmetry: unitValue;
+    /** Rate in cycles per bar (0 to 16, default 3) */
+    rate: float;
+    /** Depth (0.0 to 1.0, default 0.75) */
+    depth: unitValue;
+    /** Phase offset in degrees (-180 to 180, default 0) */
+    offset: float;
+    /** Phase offset between channels in degrees (-180 to 180, default 0; 180 = auto-pan) */
+    channelOffset: float;
+}
+
+/**
+ * Classic analysis/synthesis vocoder
+ */
+interface VocoderEffect extends AudioEffect, SideChainable {
+    /** Always "Vocoder" */
+    readonly key: "Vocoder";
+    /** Lowest carrier band in Hz (20 to 20000, default 100) */
+    carrierMinFreq: float;
+    /** Highest carrier band in Hz (20 to 20000, default 12000) */
+    carrierMaxFreq: float;
+    /** Lowest modulator band in Hz (20 to 20000, default 100) */
+    modulatorMinFreq: float;
+    /** Highest modulator band in Hz (20 to 20000, default 12000) */
+    modulatorMaxFreq: float;
+    /** Filter Q at the lowest band (1 to 60, default 20) */
+    qStart: float;
+    /** Filter Q at the highest band (1 to 60, default 2) */
+    qEnd: float;
+    /** Envelope attack in ms (0.1 to 100, default 5) */
+    envAttack: float;
+    /** Envelope release in ms (1 to 1000, default 30) */
+    envRelease: float;
+    /** Output gain in dB (-20 to 20, default 0) */
+    gain: float;
+    /** Dry/wet mix (0.0 to 1.0, default 1.0) */
+    mix: unitValue;
+    /** Number of bands (8, 12 or 16, default 16) */
+    bandCount: 8 | 12 | 16;
+    /** Modulator source when no sidechain is set (default "noise-pink") */
+    modulatorSource: "noise-pink" | "noise-white" | "input";
+}
+
+/**
+ * Nonlinear waveshaping distortion
+ */
+interface WaveshaperEffect extends AudioEffect {
+    /** Always "Waveshaper" */
+    readonly key: "Waveshaper";
+    /** Transfer function (default "hardclip") */
+    equation: "hardclip" | "cubicSoft" | "tanh" | "sigmoid" | "arctan" | "asymmetric";
+    /** Input gain in dB (0 to 40, default 0) */
+    inputGain: float;
+    /** Output gain in dB (-24 to 24, default 0) */
+    outputGain: float;
+    /** Dry/wet mix (0.0 to 1.0, default 1.0) */
+    mix: unitValue;
+}
+
+/**
+ * Scriptable audio effect. See {@link ScriptDevice}
+ */
+interface WerkstattEffect extends AudioEffect, ScriptDevice {
+    /** Always "Werkstatt" */
+    readonly key: "Werkstatt";
+}
+
+/**
+ * One entry (layer) of a parallel effect composite hosting its own effect chain
+ */
+interface AudioEffectCompositeEntry extends AudioEffectHost {
+    /** Unique id */
+    readonly uuid: string;
+    /** The composite this entry belongs to */
+    readonly composite: AudioEffectCompositeEffect | StereoSplitEffect | FrequencySplitEffect;
+    /** Position in the composite */
+    readonly index: int;
+    /** Entry gain in dB (default 0) */
+    gain: float;
+    /** Mute the entry */
+    mute: boolean;
+    /** Solo the entry */
+    solo: boolean;
+    /** Pan (-1.0 to 1.0, default 0.0) */
+    pan: bipolar;
+    /** Remove the entry (only possible on {@link AudioEffectCompositeEffect}) */
+    remove(): void;
+}
+
+/**
+ * Runs several effect chains in parallel and mixes them back
+ */
+interface AudioEffectCompositeEffect extends AudioEffect {
+    /** Always "Composite" */
+    readonly key: "Composite";
+    /** Dry level in dB (default -inf) */
+    dry: float;
+    /** Wet level in dB (default 0) */
+    wet: float;
+    /** All entries ordered by index */
+    readonly entries: ReadonlyArray<AudioEffectCompositeEntry>;
+    /** Add a parallel entry */
+    addEntry(props?: Partial<Pick<AudioEffectCompositeEntry, "gain" | "mute" | "solo" | "pan">>): AudioEffectCompositeEntry;
+}
+
+/**
+ * Processes left and right channels through their own chains (entries are fixed: 0 = left, 1 = right)
+ */
+interface StereoSplitEffect extends AudioEffect {
+    /** Always "StereoSplit" */
+    readonly key: "StereoSplit";
+    /** Dry level in dB (default -inf) */
+    dry: float;
+    /** Wet level in dB (default 0) */
+    wet: float;
+    /** Fixed entries: [left, right] */
+    readonly entries: ReadonlyArray<AudioEffectCompositeEntry>;
+}
+
+/**
+ * Splits the signal into four frequency bands, each with its own chain (Low, Low Mid, High Mid, High)
+ */
+interface FrequencySplitEffect extends AudioEffect {
+    /** Always "FrequencySplit" */
+    readonly key: "FrequencySplit";
+    /** Dry level in dB (default -inf) */
+    dry: float;
+    /** Wet level in dB (default 0) */
+    wet: float;
+    /** Crossover Low / Low Mid in Hz (20 to 20000, default 200) */
+    crossover1: float;
+    /** Crossover Low Mid / High Mid in Hz (20 to 20000, default 1000) */
+    crossover2: float;
+    /** Crossover High Mid / High in Hz (20 to 20000, default 5000) */
+    crossover3: float;
+    /** Fixed entries: [Low, Low Mid, High Mid, High] */
+    readonly entries: ReadonlyArray<AudioEffectCompositeEntry>;
+}
+
+/**
+ * Audio effect types by key. Use the keys with {@link AudioEffectHost.addAudioEffect}
+ */
+interface AudioEffects {
+    /** {@link AutotuneEffect} */
+    "Autotune": AutotuneEffect;
+    /** {@link CompressorEffect} */
+    "Compressor": CompressorEffect;
+    /** {@link ConvolverEffect} */
+    "Convolver": ConvolverEffect;
+    /** {@link CrusherEffect} */
+    "Crusher": CrusherEffect;
+    /** {@link DattorroReverbEffect} */
+    "DattorroReverb": DattorroReverbEffect;
+    /** {@link DelayEffect} */
+    "Delay": DelayEffect;
+    /** {@link FoldEffect} */
+    "Fold": FoldEffect;
+    /** {@link GateEffect} */
+    "Gate": GateEffect;
+    /** {@link MaximizerEffect} */
+    "Maximizer": MaximizerEffect;
+    /** {@link NeuralAmpEffect} */
+    "NeuralAmp": NeuralAmpEffect;
+    /** {@link RevampEffect} */
+    "Revamp": RevampEffect;
+    /** {@link ReverbEffect} */
+    "Reverb": ReverbEffect;
+    /** {@link StereoToolEffect} */
+    "StereoTool": StereoToolEffect;
+    /** {@link TidalEffect} */
+    "Tidal": TidalEffect;
+    /** {@link VocoderEffect} */
+    "Vocoder": VocoderEffect;
+    /** {@link WaveshaperEffect} */
+    "Waveshaper": WaveshaperEffect;
+    /** {@link WerkstattEffect} */
+    "Werkstatt": WerkstattEffect;
+    /** {@link SinkEffect} */
+    "Sink": SinkEffect;
+    /** {@link AudioEffectCompositeEffect} */
+    "Composite": AudioEffectCompositeEffect;
+    /** {@link StereoSplitEffect} */
+    "StereoSplit": StereoSplitEffect;
+    /** {@link FrequencySplitEffect} */
+    "FrequencySplit": FrequencySplitEffect;
+}
+
+/**
+ * Any audio effect
+ */
+type AnyAudioEffect = AudioEffects[keyof AudioEffects];
+
+// ---- Effect hosts
+/**
+ * Anything with a MIDI effect chain (units, Playfield slots, instrument composite layers)
+ */
+interface MIDIEffectHost {
+    /** MIDI effects ordered by index */
+    readonly midiEffects: ReadonlyArray<AnyMIDIEffect>;
+    /**
+     * Add a MIDI effect
+     * @param key - Effect type
+     * @param props - Initial parameter values
+     * @param index - Insert position (default: end of chain)
+     * @example
+     * \`\`\`ts
+     * synth.addMIDIEffect("Arpeggio", {rate: 9, octaves: 2})
+     * \`\`\`
+     */
+    addMIDIEffect<K extends keyof MIDIEffects>(key: K, props?: DeepPartial<MIDIEffects[K]>, index?: int): MIDIEffects[K];
+}
+
+/**
+ * Anything with an audio effect chain (units, Playfield slots, instrument composite layers, composite entries)
+ */
+interface AudioEffectHost {
+    /** Audio effects ordered by index */
+    readonly audioEffects: ReadonlyArray<AnyAudioEffect>;
+    /**
+     * Add an audio effect
+     * @param key - Effect type
+     * @param props - Initial parameter values
+     * @param index - Insert position (default: end of chain)
+     * @example
+     * \`\`\`ts
+     * synth.addAudioEffect("Delay", {delay: 13, feedback: 0.4, wet: -9})
+     * const composite = synth.addAudioEffect("Composite")
+     * composite.addEntry({label: "Crushed"}).addAudioEffect("Crusher", {bits: 8})
+     * \`\`\`
+     */
+    addAudioEffect<K extends keyof AudioEffects>(key: K, props?: DeepPartial<AudioEffects[K]>, index?: int): AudioEffects[K];
+}
+
+// ---- Script devices (Werkstatt, Apparat, Spielwerk)
+/**
+ * A \`// @param\` declared by a script
+ */
+interface ScriptParameter {
+    /** Parameter name as declared in the script */
+    readonly label: string;
+    /** Declaration order */
+    readonly index: int;
+    /** Current value (in the declared range) */
+    value: float;
+    /** Default value from the declaration */
+    readonly defaultValue: float;
+}
+
+/**
+ * A \`// @sample\` declared by a script
+ */
+interface ScriptSample {
+    /** Sample slot name as declared in the script */
+    readonly label: string;
+    /** Declaration order */
+    readonly index: int;
+    /** Assigned sample (null = none) */
+    sample: Nullable<Sample>;
+}
+
+/**
+ * Common surface of the scriptable devices Werkstatt, Apparat and Spielwerk
+ */
+interface ScriptDevice {
+    /** The script source. Setting it re-declares the parameters and samples from its \`// @param\` / \`// @sample\` lines */
+    code: string;
+    /** Declared parameters */
+    readonly parameters: ReadonlyArray<ScriptParameter>;
+    /** Declared sample slots */
+    readonly samples: ReadonlyArray<ScriptSample>;
+    /** Find a parameter by its declared name */
+    parameter(label: string): ScriptParameter;
+    /** Find a sample slot by its declared name */
+    sample(label: string): ScriptSample;
+}
+
+// ---- Instruments
+/**
+ * The sound source of an instrument unit
+ */
+interface Instrument extends Device {
+    /** Instrument type identifier */
+    readonly key: keyof Instruments;
+    /** The audio unit this instrument belongs to */
+    readonly audioUnit: InstrumentAudioUnit;
+    /** Icon name (see IconSymbol) */
+    icon: string;
+    /**
+     * Removes the whole audio unit. Use {@link InstrumentAudioUnit.setInstrument} to swap the instrument.
+     * An instrument inside an {@link InstrumentCompositeLayer} removes that layer instead
+     */
+    remove(): void;
+}
+
+/**
+ * Vaporisateur oscillator
+ */
+interface VaporisateurOscillator {
+    /** Waveform */
+    waveform: ClassicWaveform;
+    /** Volume in dB (osc 1 default -6, osc 2 default -inf) */
+    volume: float;
+    /** Octave offset (-3 to 3, default 0) */
+    octave: int;
+    /** Fine-tuning in cents (-1200 to 1200, default 0) */
+    tune: float;
+}
+
+/**
+ * Vaporisateur LFO
+ */
+interface VaporisateurLFO {
+    /** Waveform */
+    waveform: ClassicWaveform;
+    /** Rate in Hz (0.0001 to 30, default 1.0) */
+    rate: float;
+    /** Sync the rate to the tempo (default false) */
+    sync: boolean;
+    /** Modulation amount to pitch (-1.0 to 1.0, default 0.0) */
+    targetTune: bipolar;
+    /** Modulation amount to filter cutoff (-1.0 to 1.0, default 0.0) */
+    targetCutoff: bipolar;
+    /** Modulation amount to volume (-1.0 to 1.0, default 0.0) */
+    targetVolume: bipolar;
+}
+
+/**
+ * Vaporisateur noise generator
+ */
+interface VaporisateurNoise {
+    /** Attack in seconds (0.001 to 5.0) */
+    attack: float;
+    /** Hold in seconds (0.001 to 5.0) */
+    hold: float;
+    /** Release in seconds (0.001 to 5.0) */
+    release: float;
+    /** Volume in dB (default -inf) */
+    volume: float;
+}
+
+/**
+ * Classic subtractive synthesizer
+ */
+interface Vaporisateur extends Instrument {
+    /** Always "Vaporisateur" */
+    readonly key: "Vaporisateur";
+    /** Filter cutoff in Hz (20 to 20000, default 8000) */
+    cutoff: float;
+    /** Filter resonance (0.01 to 10, default 0.1) */
+    resonance: float;
+    /** Filter order (1 to 4 poles, default 1) */
+    filterOrder: 1 | 2 | 3 | 4;
+    /** Filter envelope amount (-1.0 to 1.0, default 0.0) */
+    filterEnvelope: bipolar;
+    /** Filter keyboard tracking (-1.0 to 1.0, default 0.0) */
+    filterKeyboard: bipolar;
+    /** Envelope attack in seconds (0.001 to 5.0, default 0.005) */
+    attack: float;
+    /** Envelope decay in seconds (0.001 to 5.0, default 0.1) */
+    decay: float;
+    /** Envelope sustain level (0.0 to 1.0, default 0.5) */
+    sustain: unitValue;
+    /** Envelope release in seconds (0.001 to 5.0, default 0.5) */
+    release: float;
+    /** Monophonic or polyphonic */
+    voicingMode: VoicingMode;
+    /** Glide time (0.0 to 1.0, default 0.0) */
+    glideTime: unitValue;
+    /** Unison voices (1, 3 or 5, default 1) */
+    unisonCount: 1 | 3 | 5;
+    /** Unison detune in cents (1 to 1200, default 30) */
+    unisonDetune: float;
+    /** Unison stereo spread (0.0 to 1.0, default 1.0) */
+    unisonStereo: unitValue;
+    /** The LFO */
+    readonly lfo: VaporisateurLFO;
+    /** Two oscillators */
+    readonly oscillators: ReadonlyArray<VaporisateurOscillator>;
+    /** The noise generator */
+    readonly noise: VaporisateurNoise;
+}
+
+/**
+ * One slot (pad) of the Playfield drum machine
+ */
+interface PlayfieldSlot extends MIDIEffectHost, AudioEffectHost {
+    /** Unique id */
+    readonly uuid: string;
+    /** The Playfield this slot belongs to */
+    readonly playfield: Playfield;
+    /** The sample played by this slot */
+    readonly sample: Sample;
+    /** MIDI note triggering this slot (0 to 127) */
+    note: int;
+    /** Icon name */
+    icon: string;
+    /** Enable the slot */
+    enabled: boolean;
+    /** Collapse the slot editor */
+    minimized: boolean;
+    /** Mute the slot */
+    mute: boolean;
+    /** Solo the slot */
+    solo: boolean;
+    /** Exclusive: a new hit stops any other exclusive slot (hi-hat choke) */
+    exclude: boolean;
+    /** Polyphonic playback (overlapping hits) */
+    polyphone: boolean;
+    /** Gate mode: 0 = Off (play to end), 1 = On (stop on note-off), 2 = Loop */
+    gate: 0 | 1 | 2;
+    /** Pitch in cents (-1200 to 1200, default 0) */
+    pitch: float;
+    /** Sample start (0.0 to 1.0, default 0.0) */
+    sampleStart: unitValue;
+    /** Sample end (0.0 to 1.0, default 1.0) */
+    sampleEnd: unitValue;
+    /** Attack in seconds (0.001 to 5.0, default 0.001) */
+    attack: float;
+    /** Release in seconds (0.001 to 5.0, default 0.02) */
+    release: float;
+    /** Volume in dB (default 0) */
+    volume: float;
+    /** Pan (-1.0 to 1.0, default 0.0) */
+    panning: bipolar;
+    /** Remove the slot */
+    remove(): void;
+}
+
+/**
+ * Drum machine playing one sample per note
+ */
+interface Playfield extends Instrument {
+    /** Always "Playfield" */
+    readonly key: "Playfield";
+    /** All slots ordered by note */
+    readonly slots: ReadonlyArray<PlayfieldSlot>;
+    /** Slot at the given note (null = empty) */
+    slot(note: int): Nullable<PlayfieldSlot>;
+    /**
+     * Assign a sample to a note. Replaces an existing slot at that note.
+     * @param sample - The sample to play
+     * @param props - Slot settings (\`note\` defaults to the next free note starting at 60)
+     * @example
+     * \`\`\`ts
+     * const samples = await openDAW.listSamples()
+     * const drums = project.addInstrumentUnit("Playfield", {label: "Drums"})
+     * drums.instrument.addSample(samples[0], {note: 36})
+     * \`\`\`
+     */
+    addSample(sample: Sample, props?: Partial<Omit<PlayfieldSlot, "uuid" | "playfield" | "sample" | "midiEffects" | "audioEffects" | "addMIDIEffect" | "addAudioEffect" | "remove">>): PlayfieldSlot;
+}
+
+/**
+ * Instruments that can live in a layer of an {@link InstrumentComposite}: everything that plays notes inside the unit
+ */
+type LayerInstruments = Omit<Instruments, "Tape">;
+
+/**
+ * One layer of an {@link InstrumentComposite}: an instrument with its own MIDI and audio effect chains and its own strip
+ */
+interface InstrumentCompositeLayer extends MIDIEffectHost, AudioEffectHost {
+    /** Unique id */
+    readonly uuid: string;
+    /** The composite this layer belongs to */
+    readonly composite: InstrumentComposite;
+    /** Position in the composite */
+    readonly index: int;
+    /** The instrument this layer plays */
+    readonly instrument: LayerInstruments[keyof LayerInstruments];
+    /** Layer gain in dB (default 0) */
+    gain: float;
+    /** Pan (-1.0 to 1.0, default 0.0) */
+    pan: bipolar;
+    /** Mute the layer (it keeps running, unmuting is instant) */
+    mute: boolean;
+    /** Solo the layer */
+    solo: boolean;
+    /** Collapse the layer editor */
+    minimized: boolean;
+    /**
+     * Replace the layer's instrument. The layer keeps its strip and its effect chains
+     * @param key - Instrument type
+     * @param props - Instrument settings
+     */
+    setInstrument<K extends keyof LayerInstruments>(key: K, props?: DeepPartial<LayerInstruments[K]>): LayerInstruments[K];
+    /** Remove the layer with its instrument and effects */
+    remove(): void;
+}
+
+/**
+ * Plays several instruments at once from the same notes, each in its own layer
+ */
+interface InstrumentComposite extends Instrument {
+    /** Always "InstrumentComposite" */
+    readonly key: "InstrumentComposite";
+    /** All layers ordered by index */
+    readonly layers: ReadonlyArray<InstrumentCompositeLayer>;
+    /**
+     * Add a layer playing the given instrument
+     * @param key - Instrument type (everything except Tape)
+     * @param props - Instrument settings
+     * @param layer - Layer settings
+     * @example
+     * \`\`\`ts
+     * const stack = project.addInstrumentUnit("InstrumentComposite", {label: "Stack"}).instrument
+     * stack.addLayer("Vaporisateur", {label: "Pad"}).addAudioEffect("Reverb")
+     * stack.addLayer("Nano", undefined, {gain: -6, pan: -0.5})
+     * \`\`\`
+     */
+    addLayer<K extends keyof LayerInstruments>(key: K, props?: DeepPartial<LayerInstruments[K]>, layer?: Partial<Pick<InstrumentCompositeLayer, "gain" | "pan" | "mute" | "solo" | "minimized">>): InstrumentCompositeLayer & {
+        /** The instrument this layer plays, typed by the given key */
+        readonly instrument: LayerInstruments[K];
+    };
+}
+
+/**
+ * Minimal sampler
+ */
+interface Nano extends Instrument {
+    /** Always "Nano" */
+    readonly key: "Nano";
+    /** The sample (null = none) */
+    sample: Nullable<Sample>;
+    /** Volume in dB (default -3) */
+    volume: float;
+    /** Octave shift (-3 to 3, default 0) */
+    octave: int;
+    /** Fine tune in cents (-1200 to 1200, default 0) */
+    tune: float;
+    /** The MIDI note that plays the sample at its native rate (0 to 127, default 60) */
+    rootKey: int;
+    /** Attack in seconds (0.001 to 5, default 0.003) */
+    attack: float;
+    /** Release in seconds (0.001 to 8, default 0.1) */
+    release: float;
+    /** Region start as a fraction of the sample (default 0). A start past the end plays backwards. */
+    sampleStart: unitValue;
+    /** Region end as a fraction of the sample (default 1) */
+    sampleEnd: unitValue;
+    /** Cycle the loop range while a note holds (default false) */
+    loop: boolean;
+    /** Loop crossfade in seconds (0.001 to 1, default 0.05) */
+    loopFade: float;
+    /** Loop start as a fraction of the sample, clamped inside the region (default 0) */
+    loopStart: unitValue;
+    /** Loop end as a fraction of the sample, clamped inside the region (default 1) */
+    loopEnd: unitValue;
+    /** Pan (-1.0 to 1.0, default 0.0) */
+    panning: bipolar;
+    /** Several notes at once (default true). Mono fades the sounding note out in 5 ms on each new note. */
+    polyphone: boolean;
+    /** Ignore the note-off and play to the region end (default false). A loop still ends on the note-off. */
+    oneShot: boolean;
+    /** Every note plays at the root key, ignoring the played key (default false). */
+    fixedPitch: boolean;
+}
+
+/**
+ * Soundfont (.sf2) player
+ */
+interface Soundfont extends Instrument {
+    /** Always "Soundfont" */
+    readonly key: "Soundfont";
+    /** The soundfont file (null = none) */
+    file: Nullable<SoundfontFile>;
+    /** Preset index within the soundfont (0 to 65535) */
+    presetIndex: int;
+}
+
+/**
+ * A MIDI CC parameter of the MIDI output device
+ */
+interface MIDIOutputParameter {
+    /** Unique id */
+    readonly uuid: string;
+    /** Custom label */
+    label: string;
+    /** MIDI controller number (0 to 127, default 64) */
+    controller: int;
+    /** Value (0.0 to 1.0) */
+    value: unitValue;
+    /** Remove the parameter */
+    remove(): void;
+}
+
+/**
+ * Sends notes to an external MIDI device
+ */
+interface MIDIOutput extends Instrument {
+    /** Always "MIDIOutput" */
+    readonly key: "MIDIOutput";
+    /** MIDI channel (0 to 15) */
+    channel: int;
+    /** Automatable CC parameters */
+    readonly parameters: ReadonlyArray<MIDIOutputParameter>;
+    /** Add a CC parameter */
+    addParameter(props?: Partial<Pick<MIDIOutputParameter, "label" | "controller" | "value">>): MIDIOutputParameter;
+}
+
+/**
+ * Tape audio player (hosts audio tracks)
+ */
+interface Tape extends Instrument {
+    /** Always "Tape" */
+    readonly key: "Tape";
+    /** Flutter (0.0 to 1.0, default 0.2) */
+    flutter: unitValue;
+    /** Wow (0.0 to 1.0, default 0.05) */
+    wow: unitValue;
+    /** Noise (0.0 to 1.0, default 0.02) */
+    noise: unitValue;
+    /** Saturation (0.0 to 1.0, default 0.5) */
+    saturation: unitValue;
+}
+
+/**
+ * Neon vibrato
+ */
+interface NeonVibrato {
+    /** Waveform: 0 = Triangle, 1 = Saw Up, 2 = Saw Down, 3 = Square */
+    wave: 0 | 1 | 2 | 3;
+    /** Delay (0 to 99) */
+    delay: float;
+    /** Rate (0 to 99) */
+    rate: float;
+    /** Depth (0 to 99) */
+    depth: float;
+}
+
+/**
+ * One of the two Neon oscillator lines
+ */
+interface NeonLine {
+    /** First waveform (0-7): Saw, Square, Pulse, Double Sine, Saw-Pulse, Resonance Saw, Resonance Triangle, Resonance Trapezoid */
+    wave1: int;
+    /** Second waveform (0 = off, 1-8 = the waves above) */
+    wave2: int;
+    /** DCW key follow (0 to 9) */
+    dcwKeyFollow: float;
+    /** DCA key follow (0 to 9) */
+    dcaKeyFollow: float;
+}
+
+/**
+ * One 8-stage Neon envelope (rates and levels in the CZ 0-99 domain)
+ */
+interface NeonEnvelope {
+    /** Rate of stage 1 (0 to 99) */
+    rate1: float;
+    /** Rate of stage 2 (0 to 99) */
+    rate2: float;
+    /** Rate of stage 3 (0 to 99) */
+    rate3: float;
+    /** Rate of stage 4 (0 to 99) */
+    rate4: float;
+    /** Rate of stage 5 (0 to 99) */
+    rate5: float;
+    /** Rate of stage 6 (0 to 99) */
+    rate6: float;
+    /** Rate of stage 7 (0 to 99) */
+    rate7: float;
+    /** Rate of stage 8 (0 to 99) */
+    rate8: float;
+    /** Level of stage 1 (0 to 99) */
+    level1: float;
+    /** Level of stage 2 (0 to 99) */
+    level2: float;
+    /** Level of stage 3 (0 to 99) */
+    level3: float;
+    /** Level of stage 4 (0 to 99) */
+    level4: float;
+    /** Level of stage 5 (0 to 99) */
+    level5: float;
+    /** Level of stage 6 (0 to 99) */
+    level6: float;
+    /** Level of stage 7 (0 to 99) */
+    level7: float;
+    /** Level of stage 8 (0 to 99) */
+    level8: float;
+    /** Sustain stage (1 to 8, 0 = none) */
+    sustain: int;
+    /** End stage (1 to 8) */
+    end: int;
+}
+
+/**
+ * CZ-style phase distortion synthesizer
+ */
+interface Neon extends Instrument {
+    /** Always "Neon" */
+    readonly key: "Neon";
+    /** Line select (0-3): 1, 2, 1+1', 1+2' */
+    lineSelect: 0 | 1 | 2 | 3;
+    /** Modulation (0-2): Off, Ring, Noise */
+    modulation: 0 | 1 | 2;
+    /** Octave (-3 to 3) */
+    octave: int;
+    /** Detune of the primed line in cents (-4800 to 4800) */
+    detune: float;
+    /** Glide time (0.0 to 1.0) */
+    glideTime: unitValue;
+    /** Master tune in cents (-1200 to 1200) */
+    tune: float;
+    /** Monophonic or polyphonic */
+    voicingMode: VoicingMode;
+    /** The vibrato */
+    readonly vibrato: NeonVibrato;
+    /** Two lines */
+    readonly lines: ReadonlyArray<NeonLine>;
+    /** Six envelopes in fixed order: line1 pitch, line1 DCW, line1 DCA, line2 pitch, line2 DCW, line2 DCA */
+    readonly envelopes: ReadonlyArray<NeonEnvelope>;
+}
+
+/**
+ * One Tubular operator (DX7 panel values, hardware ranges)
+ */
+interface TubularOperator {
+    /** Envelope rate 1 (0 to 99) */
+    rate1: int;
+    /** Envelope rate 2 (0 to 99) */
+    rate2: int;
+    /** Envelope rate 3 (0 to 99) */
+    rate3: int;
+    /** Envelope rate 4 (0 to 99) */
+    rate4: int;
+    /** Envelope level 1 (0 to 99) */
+    level1: int;
+    /** Envelope level 2 (0 to 99) */
+    level2: int;
+    /** Envelope level 3 (0 to 99) */
+    level3: int;
+    /** Envelope level 4 (0 to 99) */
+    level4: int;
+    /** Keyboard level scaling break point (0 to 99, 0 = A-1) */
+    breakPoint: int;
+    /** Level scaling depth left of the break point (0 to 99) */
+    leftDepth: int;
+    /** Level scaling depth right of the break point (0 to 99) */
+    rightDepth: int;
+    /** Left curve: 0 = -LIN, 1 = -EXP, 2 = +EXP, 3 = +LIN */
+    leftCurve: 0 | 1 | 2 | 3;
+    /** Right curve: 0 = -LIN, 1 = -EXP, 2 = +EXP, 3 = +LIN */
+    rightCurve: 0 | 1 | 2 | 3;
+    /** Keyboard rate scaling (0 to 7) */
+    rateScaling: int;
+    /** Amplitude modulation sensitivity (0 to 3) */
+    ampModSens: int;
+    /** Key velocity sensitivity (0 to 7) */
+    velocitySens: int;
+    /** Output level (0 to 99) */
+    outputLevel: int;
+    /** Oscillator mode: 0 = ratio, 1 = fixed */
+    mode: 0 | 1;
+    /** Frequency coarse (0 to 31) */
+    coarse: int;
+    /** Frequency fine (0 to 99) */
+    fine: int;
+    /** Detune (0 to 14, 7 = centre) */
+    detune: int;
+    /** Operator switch: 0 = off, 1 = on */
+    enabled: 0 | 1;
+}
+
+/**
+ * The Tubular LFO
+ */
+interface TubularLfo {
+    /** Speed (0 to 99) */
+    speed: int;
+    /** Delay (0 to 99) */
+    delay: int;
+    /** Pitch modulation depth (0 to 99) */
+    pmDepth: int;
+    /** Amplitude modulation depth (0 to 99) */
+    amDepth: int;
+    /** Key sync: 0 = off, 1 = on */
+    sync: 0 | 1;
+    /** Waveform: 0 = triangle, 1 = saw down, 2 = saw up, 3 = square, 4 = sine, 5 = sample & hold */
+    wave: 0 | 1 | 2 | 3 | 4 | 5;
+}
+
+/**
+ * The Tubular pitch envelope
+ */
+interface TubularPitchEnvelope {
+    /** Rate 1 (0 to 99) */
+    rate1: int;
+    /** Rate 2 (0 to 99) */
+    rate2: int;
+    /** Rate 3 (0 to 99) */
+    rate3: int;
+    /** Rate 4 (0 to 99) */
+    rate4: int;
+    /** Level 1 (0 to 99, 50 = no shift) */
+    level1: int;
+    /** Level 2 (0 to 99, 50 = no shift) */
+    level2: int;
+    /** Level 3 (0 to 99, 50 = no shift) */
+    level3: int;
+    /** Level 4 (0 to 99, 50 = no shift) */
+    level4: int;
+}
+
+/**
+ * Six-operator FM synthesizer, DX7 compatible
+ */
+interface Tubular extends Instrument {
+    /** Always "Tubular" */
+    readonly key: "Tubular";
+    /** Low-pass cutoff (0.0 to 1.0, 1.0 = bypassed) */
+    cutoff: unitValue;
+    /** Low-pass resonance (0.0 to 1.0) */
+    resonance: unitValue;
+    /** Volume (0.0 to 1.0) */
+    volume: unitValue;
+    /** Monophonic or polyphonic */
+    voicingMode: VoicingMode;
+    /** Master tune in cents (-100 to 100) */
+    tune: float;
+    /** Algorithm (0 to 31, the panel shows 1 to 32) */
+    algorithm: int;
+    /** Feedback (0 to 7) */
+    feedback: int;
+    /** Oscillator key sync: 0 = off, 1 = on */
+    oscKeySync: 0 | 1;
+    /** The LFO */
+    readonly lfo: TubularLfo;
+    /** Pitch modulation sensitivity (0 to 7) */
+    pitchModSens: int;
+    /** Transpose (0 to 48, 24 = C3) */
+    transpose: int;
+    /** The pitch envelope */
+    readonly pitchEnvelope: TubularPitchEnvelope;
+    /** Six operators in panel order OP1..OP6 */
+    readonly operators: ReadonlyArray<TubularOperator>;
+}
+
+/**
+ * One step of a Cubed pattern
+ */
+interface CubedStep {
+    /** MIDI note (0 to 127) */
+    note: int;
+    /** Step plays */
+    active: boolean;
+    /** Slide into the next step */
+    slide: boolean;
+    /** Accent */
+    accent: boolean;
+}
+
+/**
+ * One of the 16 Cubed patterns
+ */
+interface CubedPattern {
+    /** Number of steps played (1 to 64) */
+    length: int;
+    /** 64 steps */
+    readonly steps: ReadonlyArray<CubedStep>;
+    /** Replace the steps from the beginning and set the length */
+    setSteps(steps: ReadonlyArray<Partial<CubedStep>>): void;
+}
+
+/**
+ * 303-style acid bassline synthesizer with a built-in sequencer
+ */
+interface Cubed extends Instrument {
+    /** Always "Cubed" */
+    readonly key: "Cubed";
+    /** Tuning in cents (-1200 to 1200, default 0) */
+    tuning: float;
+    /** Cutoff (0.0 to 1.0, default 0.0) */
+    cutoff: unitValue;
+    /** Resonance (0.0 to 1.0, default 1.0) */
+    resonance: unitValue;
+    /** Envelope modulation (0.0 to 1.0, default 1.0) */
+    envMod: unitValue;
+    /** Decay (0.0 to 1.0, default 0.5) */
+    decay: unitValue;
+    /** Accent (0.0 to 1.0, default 1.0) */
+    accent: unitValue;
+    /** Volume in dB (default -12) */
+    volume: float;
+    /** Waveform: 0 = saw, 1 = square */
+    waveform: 0 | 1;
+    /** Active pattern (0 to 15) */
+    patternIndex: int;
+    /** 16 patterns */
+    readonly patterns: ReadonlyArray<CubedPattern>;
+    /** The groove its pattern plays through, null for none. Set a groove of the project or null. */
+    groove: Nullable<AnyGroove>;
+}
+
+/**
+ * Scriptable instrument. See {@link ScriptDevice}
+ */
+interface Apparat extends Instrument, ScriptDevice {
+    /** Always "Apparat" */
+    readonly key: "Apparat";
+}
+
+/**
+ * Instrument types by key. Use the keys with {@link Project.addInstrumentUnit}
+ */
+interface Instruments {
+    /** {@link Vaporisateur} */
+    "Vaporisateur": Vaporisateur;
+    /** {@link Playfield} */
+    "Playfield": Playfield;
+    /** {@link Nano} */
+    "Nano": Nano;
+    /** {@link Soundfont} */
+    "Soundfont": Soundfont;
+    /** {@link MIDIOutput} */
+    "MIDIOutput": MIDIOutput;
+    /** {@link Tape} */
+    "Tape": Tape;
+    /** {@link Neon} */
+    "Neon": Neon;
+    /** {@link Tubular} */
+    "Tubular": Tubular;
+    /** {@link Cubed} */
+    "Cubed": Cubed;
+    /** {@link Apparat} */
+    "Apparat": Apparat;
+    /** {@link InstrumentComposite} */
+    "InstrumentComposite": InstrumentComposite;
+}
+
+/**
+ * Any instrument
+ */
+type AnyInstrument = Instruments[keyof Instruments];
+
+/**
+ * Any instrument or effect
+ */
+type AnyDevice = AnyInstrument | AnyMIDIEffect | AnyAudioEffect;
+
+/**
+ * Anything with automatable parameters
+ */
+type Automatable = AnyDevice | AnyAudioUnit | Send | PlayfieldSlot | InstrumentCompositeLayer | AudioEffectCompositeEntry | ScriptParameter | MIDIOutputParameter | GrooveShuffle | AnyModulator | Modulation;
+
+// ---------------------------------------------------------------------------------------------------------
+// Audio units
+// ---------------------------------------------------------------------------------------------------------
+/**
+ * The four unit kinds
+ */
+type AudioUnitKind = "instrument" | "auxiliary" | "group" | "output";
+
+/**
+ * A channel in the mixer: devices, tracks, volume, pan and routing
+ */
+interface AudioUnit extends MIDIEffectHost, AudioEffectHost {
+    /** Unique id */
+    readonly uuid: string;
+    /** Unit type identifier */
+    readonly kind: AudioUnitKind;
+    /** Custom label */
+    label: string;
+    /** Output routing (null = unplugged). Defaults to the primary output */
+    output: Nullable<OutputAudioUnit | GroupAudioUnit | AuxAudioUnit>;
+    /** Volume in dB (-96 to 6, default 0) */
+    volume: float;
+    /** Pan (-1.0 = left, 0.0 = center, 1.0 = right) */
+    panning: bipolar;
+    /** Mute */
+    mute: boolean;
+    /** Solo */
+    solo: boolean;
+    /** Position in the project (instruments first, then aux, groups, output) */
+    readonly index: int;
+    /** All tracks ordered by index */
+    readonly tracks: ReadonlyArray<AnyTrack>;
+    /** Note tracks */
+    readonly noteTracks: ReadonlyArray<NoteTrack>;
+    /** Audio tracks */
+    readonly audioTracks: ReadonlyArray<AudioTrack>;
+    /** Automation tracks */
+    readonly valueTracks: ReadonlyArray<ValueTrack>;
+    /** Add a note track (only meaningful for note instruments) */
+    addNoteTrack(props?: Partial<Pick<Track, "enabled">>, index?: int): NoteTrack;
+    /** Add an audio track (only meaningful for audio instruments like Tape) */
+    addAudioTrack(props?: Partial<Pick<Track, "enabled">>, index?: int): AudioTrack;
+    /**
+     * Add an automation track for a parameter
+     * @param target - Any automatable object (this unit, a device, a send, ...)
+     * @param parameter - Parameter path, e.g. \`"cutoff"\` or \`"lfo.rate"\`
+     * @example
+     * \`\`\`ts
+     * const lane = synth.addValueTrack(synth.instrument, "cutoff")
+     * lane.addRegion({duration: PPQN.Bar * 4}).addEvents([
+     *     {position: 0, value: 0.2},
+     *     {position: PPQN.Bar * 4, value: 0.9}
+     * ])
+     * \`\`\`
+     */
+    addValueTrack<T extends Automatable>(target: T, parameter: ParameterPath<T>, props?: Partial<Pick<Track, "enabled">>, index?: int): ValueTrack;
+    /** The automation track controlling a parameter, if any */
+    valueTrack<T extends Automatable>(target: T, parameter: ParameterPath<T>): Nullable<ValueTrack>;
+    /** Remove this unit including all its tracks and devices (the output cannot be removed) */
+    remove(): void;
+}
+
+/**
+ * Unit hosting an instrument, created with {@link Project.addInstrumentUnit}
+ */
+interface InstrumentAudioUnit<K extends keyof Instruments = keyof Instruments> extends AudioUnit, Sendable {
+    /** Always "instrument" */
+    readonly kind: "instrument";
+    /** The instrument */
+    readonly instrument: Instruments[K];
+    /**
+     * Replace the instrument with another type (keeps effects and automation, and keeps note or audio tracks
+     * unless the new instrument takes the other input, which replaces them with one empty track)
+     * @example
+     * \`\`\`ts
+     * const nano = synth.setInstrument("Nano", {release: 0.5})
+     * \`\`\`
+     */
+    setInstrument<N extends keyof Instruments>(key: N, props?: DeepPartial<Instruments[N]>): Instruments[N];
+}
+
+/**
+ * Common surface of aux, group and output units
+ */
+interface BusAudioUnit extends AudioUnit {
+    /** Icon name (see IconSymbol) */
+    icon: string;
+    /** CSS color of the bus */
+    color: string;
+}
+
+/**
+ * Send effect bus, fed by {@link Sendable.addSend}
+ */
+interface AuxAudioUnit extends BusAudioUnit, Sendable {
+    /** Always "auxiliary" */
+    readonly kind: "auxiliary";
+}
+
+/**
+ * Group bus, fed by routing a unit's {@link AudioUnit.output} to it or by sends
+ */
+interface GroupAudioUnit extends BusAudioUnit, Sendable {
+    /** Always "group" */
+    readonly kind: "group";
+}
+
+/**
+ * The primary output. Exactly one per project, cannot be removed
+ */
+interface OutputAudioUnit extends BusAudioUnit {
+    /** Always "output" */
+    readonly kind: "output";
+}
+
+/**
+ * Any unit
+ */
+type AnyAudioUnit = InstrumentAudioUnit | AuxAudioUnit | GroupAudioUnit | OutputAudioUnit;
+
+/**
+ * Settings accepted when creating a unit
+ */
+type AudioUnitProps = Partial<Pick<AudioUnit, "label" | "volume" | "panning" | "mute" | "solo" | "output">>;
+
+/**
+ * Settings accepted when creating a bus unit
+ */
+type BusAudioUnitProps = AudioUnitProps & Partial<Pick<BusAudioUnit, "icon" | "color">>;
+
+// ---------------------------------------------------------------------------------------------------------
+// Timeline
+// ---------------------------------------------------------------------------------------------------------
+/**
+ * The three track types
+ */
+type TrackType = "notes" | "audio" | "value";
+
+/**
+ * Lane of a unit holding regions (arrangement) and clips (launcher)
+ */
+interface Track {
+    /** Unique id */
+    readonly uuid: string;
+    /** Track type */
+    readonly type: TrackType;
+    /** The audio unit or modulator this track belongs to */
+    readonly owner: AnyAudioUnit | AnyModulator;
+    /** The audio unit this track belongs to (null for modulator automation lanes) */
+    readonly audioUnit: Nullable<AnyAudioUnit>;
+    /** Enable or disable the track */
+    enabled: boolean;
+    /** Keep the track out of piano mode */
+    excludePianoMode: boolean;
+    /** Position within the owner */
+    readonly index: int;
+    /** Remove this track including its regions and clips */
+    remove(): void;
+}
+
+/**
+ * Content placed on the arrangement timeline
+ */
+interface Region {
+    /** Unique id */
+    readonly uuid: string;
+    /** Start position in PPQN */
+    position: ppqn;
+    /** Length in PPQN (seconds for non-synced audio regions) */
+    duration: number;
+    /** End position (position + duration) */
+    readonly complete: number;
+    /** Mute the region */
+    mute: boolean;
+    /** Custom label */
+    label: string;
+    /** Color hue (0 to 360) */
+    hue: int;
+    /** Remove the region */
+    remove(): void;
+}
+
+/**
+ * Region repeating its content every \`loopDuration\`
+ */
+interface LoopableRegion extends Region {
+    /** Loop cycle length in PPQN (seconds for non-synced audio regions) */
+    loopDuration: number;
+    /** Loop start offset in PPQN (seconds for non-synced audio regions) */
+    loopOffset: number;
+}
+
+/**
+ * Clip launch settings
+ */
+interface ClipPlayback {
+    /** Loop the clip (default true) */
+    loop: boolean;
+    /** Play backwards */
+    reverse: boolean;
+    /** Speed index */
+    speed: int;
+    /** Launch quantisation index */
+    quantise: int;
+    /** Trigger mode index */
+    trigger: int;
+}
+
+/**
+ * Content in the clip launcher
+ */
+interface Clip {
+    /** Unique id */
+    readonly uuid: string;
+    /** Slot index in the clip launcher */
+    index: int;
+    /** Length in PPQN (seconds for non-synced audio clips) */
+    duration: number;
+    /** Mute the clip */
+    mute: boolean;
+    /** Custom label */
+    label: string;
+    /** Color hue (0 to 360) */
+    hue: int;
+    /** Launch settings */
+    readonly launch: ClipPlayback;
+    /** Remove the clip */
+    remove(): void;
+}
+
+/**
+ * A single note
+ */
+interface NoteEvent {
+    /** Unique id */
+    readonly uuid: string;
+    /** Start position in PPQN relative to the region or clip */
+    position: ppqn;
+    /** Length in PPQN (at least 1) */
+    duration: ppqn;
+    /** MIDI pitch (0 to 127, 60 = middle C) */
+    pitch: int;
+    /** Velocity (0.0 to 1.0) */
+    velocity: unitValue;
+    /** Fine-tuning in cents (-50 to 50) */
+    cents: float;
+    /** Repeat count (1 to 128) */
+    playCount: int;
+    /** Repeat timing curve (-1.0 to 1.0) */
+    playCurve: bipolar;
+    /** Probability in percent (0 to 100) */
+    chance: int;
+    /** Remove the note */
+    remove(): void;
+}
+
+/**
+ * Settings accepted by {@link NoteEventOwner.addEvent}
+ */
+type NoteEventProps = Partial<Pick<NoteEvent, "position" | "duration" | "pitch" | "velocity" | "cents" | "playCount" | "playCurve" | "chance">>;
+
+/**
+ * Common surface of note regions and clips
+ */
+interface NoteEventOwner {
+    /** All notes sorted by position */
+    readonly events: ReadonlyArray<NoteEvent>;
+    /** Add a note (defaults: position 0, duration 1/16, pitch 60, velocity 100/127) */
+    addEvent(props?: NoteEventProps): NoteEvent;
+    /**
+     * Add many notes at once
+     * @example
+     * \`\`\`ts
+     * region.addEvents([60, 64, 67].map((pitch, index) => ({position: index * PPQN.Quarter, duration: PPQN.Quarter, pitch})))
+     * \`\`\`
+     */
+    addEvents(events: ReadonlyArray<NoteEventProps>): ReadonlyArray<NoteEvent>;
+    /** Remove all notes */
+    clearEvents(): void;
+}
+
+/**
+ * Region holding notes
+ */
+interface NoteRegion extends LoopableRegion, NoteEventOwner {
+    /** The note track this region belongs to */
+    readonly track: NoteTrack;
+    /** The groove its notes play through, running on from where its loop starts, null for none. Set a groove of the project or null. */
+    groove: Nullable<AnyGroove>;
+}
+
+/**
+ * Clip holding notes
+ */
+interface NoteClip extends Clip, NoteEventOwner {
+    /** The note track this clip belongs to */
+    readonly track: NoteTrack;
+    /** The groove its notes play through, running on the timeline grid the clip repeats on, null for none. Set a groove of the project or null. */
+    groove: Nullable<AnyGroove>;
+}
+
+/**
+ * Region props. Pass \`mirror\` to share the notes of another region (a linked copy).
+ */
+type NoteRegionProps = Partial<Pick<NoteRegion, "position" | "duration" | "loopDuration" | "loopOffset" | "mute" | "label" | "hue">> & {
+    /** Share the notes of another region or clip (linked copy) */
+    mirror?: NoteRegion | NoteClip;
+};
+
+/**
+ * Clip props. Pass \`mirror\` to share the notes of another region or clip (a linked copy)
+ */
+type NoteClipProps = Partial<Pick<NoteClip, "index" | "duration" | "mute" | "label" | "hue">> & {
+    /** Launch settings */
+    launch?: Partial<ClipPlayback>;
+    /** Share the notes of another region or clip (linked copy) */
+    mirror?: NoteRegion | NoteClip;
+};
+
+/**
+ * Track holding note regions and clips
+ */
+interface NoteTrack extends Track {
+    /** Always "notes" */
+    readonly type: "notes";
+    /** All regions sorted by position */
+    readonly regions: ReadonlyArray<NoteRegion>;
+    /** All clips sorted by slot index */
+    readonly clips: ReadonlyArray<NoteClip>;
+    /**
+     * Add a region (default duration one bar). Throws if it overlaps an existing region
+     * @example
+     * \`\`\`ts
+     * const region = synth.noteTracks[0].addRegion({duration: PPQN.Bar * 2, loopDuration: PPQN.Bar})
+     * region.addEvent({position: 0, duration: PPQN.Quarter, pitch: 60})
+     * \`\`\`
+     */
+    addRegion(props?: NoteRegionProps): NoteRegion;
+    /** Add a clip (default: next free slot, one bar) */
+    addClip(props?: NoteClipProps): NoteClip;
+}
+
+/**
+ * One automation point
+ */
+interface ValueEvent {
+    /** Unique id */
+    readonly uuid: string;
+    /** Position in PPQN relative to the region or clip */
+    position: ppqn;
+    /** Normalized parameter value (0.0 to 1.0) */
+    value: unitValue;
+    /** Interpolation towards the next event */
+    interpolation: Interpolation;
+    /** Remove the event */
+    remove(): void;
+}
+
+/**
+ * Settings accepted by {@link ValueEventOwner.addEvent}
+ */
+type ValueEventProps = Partial<Pick<ValueEvent, "position" | "value" | "interpolation">>;
+
+/**
+ * Common surface of automation regions and clips
+ */
+interface ValueEventOwner {
+    /** All events sorted by position */
+    readonly events: ReadonlyArray<ValueEvent>;
+    /** Add an automation point (defaults: position 0, value 0, linear). Two points at the same position form a step */
+    addEvent(props?: ValueEventProps): ValueEvent;
+    /** Add many points at once */
+    addEvents(events: ReadonlyArray<ValueEventProps>): ReadonlyArray<ValueEvent>;
+    /** Remove all points */
+    clearEvents(): void;
+}
+
+/**
+ * Region holding automation points
+ */
+interface ValueRegion extends LoopableRegion, ValueEventOwner {
+    /** The automation track this region belongs to */
+    readonly track: ValueTrack;
+    /** The groove its curve plays through, running on from where its loop starts, null for none. Set a groove of the project or null. */
+    groove: Nullable<AnyGroove>;
+}
+
+/**
+ * Clip holding automation points
+ */
+interface ValueClip extends Clip, ValueEventOwner {
+    /** The automation track this clip belongs to */
+    readonly track: ValueTrack;
+    /** The groove its curve plays through, running on the timeline grid the clip repeats on, null for none. Set a groove of the project or null. */
+    groove: Nullable<AnyGroove>;
+}
+
+/**
+ * Region props. Pass \`mirror\` to share the points of another region or clip (a linked copy)
+ */
+type ValueRegionProps = Partial<Pick<ValueRegion, "position" | "duration" | "loopDuration" | "loopOffset" | "mute" | "label" | "hue">> & {
+    /** Share the points of another region or clip (linked copy) */
+    mirror?: ValueRegion | ValueClip;
+};
+
+/**
+ * Clip props. Pass \`mirror\` to share the points of another region or clip (a linked copy)
+ */
+type ValueClipProps = Partial<Pick<ValueClip, "index" | "duration" | "mute" | "label" | "hue">> & {
+    /** Launch settings */
+    launch?: Partial<ClipPlayback>;
+    /** Share the points of another region or clip (linked copy) */
+    mirror?: ValueRegion | ValueClip;
+};
+
+/**
+ * Automation track bound to one parameter, created with {@link AudioUnit.addValueTrack}
+ */
+interface ValueTrack extends Track {
+    /** Always "value" */
+    readonly type: "value";
+    /** The object owning the automated parameter */
+    readonly target: Automatable;
+    /** The automated parameter path */
+    readonly parameter: string;
+    /** All regions sorted by position */
+    readonly regions: ReadonlyArray<ValueRegion>;
+    /** All clips sorted by slot index */
+    readonly clips: ReadonlyArray<ValueClip>;
+    /** Add a region (default duration one bar). Throws if it overlaps an existing region */
+    addRegion(props?: ValueRegionProps): ValueRegion;
+    /** Add a clip (default: next free slot, one bar) */
+    addClip(props?: ValueClipProps): ValueClip;
+}
+
+/**
+ * How audio follows the tempo:
+ * - \`"no-sync"\`: plays at its original speed, durations are in seconds
+ * - \`"pitch"\`: repitches to fit the tempo (classic sampler stretch)
+ * - \`"timestretch"\`: transient based time-stretch keeping the pitch
+ * - \`"signalsmith"\`: spectral time-stretch with independent transpose
+ */
+type AudioPlayback = "no-sync" | "pitch" | "timestretch" | "signalsmith";
+
+/**
+ * Fade in/out of an audio region
+ */
+interface AudioFading {
+    /** Fade-in length in PPQN */
+    in: number;
+    /** Fade-out length in PPQN */
+    out: number;
+    /** Fade-in curve (0.0 to 1.0, default 0.75) */
+    inSlope: unitValue;
+    /** Fade-out curve (0.0 to 1.0, default 0.25) */
+    outSlope: unitValue;
+}
+
+/**
+ * Common surface of audio regions and clips
+ */
+interface AudioContent {
+    /** The sample */
+    readonly sample: Sample;
+    /** Tempo following mode (fixed at creation) */
+    readonly playback: AudioPlayback;
+    /** Gain in dB (default 0) */
+    gain: float;
+    /** Waveform display offset in seconds */
+    waveformOffset: seconds;
+    /** Time-stretch transient mode (only \`"timestretch"\`) */
+    transientPlayMode: TransientPlayMode;
+    /** Playback rate (only \`"timestretch"\`, default 1.0) */
+    playbackRate: float;
+    /** Transpose in semitones (only \`"signalsmith"\`, -24 to 24) */
+    transpose: float;
+}
+
+/**
+ * Region playing a sample
+ */
+interface AudioRegion extends LoopableRegion, AudioContent {
+    /** The audio track this region belongs to */
+    readonly track: AudioTrack;
+    /** Fade in and out */
+    readonly fading: AudioFading;
+}
+
+/**
+ * Clip playing a sample
+ */
+interface AudioClip extends Clip, AudioContent {
+    /** The audio track this clip belongs to */
+    readonly track: AudioTrack;
+}
+
+/**
+ * Settings accepted by {@link AudioTrack.addRegion}
+ */
+type AudioRegionProps = Partial<Pick<AudioRegion, "position" | "duration" | "loopDuration" | "loopOffset" | "mute" | "label" | "hue" | "gain" | "waveformOffset" | "playback" | "transientPlayMode" | "playbackRate" | "transpose">> & {
+    /** Fade in and out */
+    fading?: Partial<AudioFading>;
+};
+
+/**
+ * Settings accepted by {@link AudioTrack.addClip}
+ */
+type AudioClipProps = Partial<Pick<AudioClip, "index" | "duration" | "mute" | "label" | "hue" | "gain" | "waveformOffset" | "playback" | "transientPlayMode" | "playbackRate" | "transpose">> & {
+    /** Launch settings */
+    launch?: Partial<ClipPlayback>;
+};
+
+/**
+ * Track holding audio regions and clips (Tape units)
+ */
+interface AudioTrack extends Track {
+    /** Always "audio" */
+    readonly type: "audio";
+    /** All regions sorted by position */
+    readonly regions: ReadonlyArray<AudioRegion>;
+    /** All clips sorted by slot index */
+    readonly clips: ReadonlyArray<AudioClip>;
+    /**
+     * Add an audio region. Default playback is \`"pitch"\` when the sample has a tempo, otherwise \`"no-sync"\`.
+     * Default duration is the sample length. Throws if it overlaps an existing region
+     * @example
+     * \`\`\`ts
+     * const tape = project.addInstrumentUnit("Tape", {label: "Loop"})
+     * tape.audioTracks[0].addRegion(sample, {position: PPQN.Bar, playback: "timestretch"})
+     * \`\`\`
+     */
+    addRegion(sample: Sample, props?: AudioRegionProps): AudioRegion;
+    /** Add an audio clip (default: next free slot) */
+    addClip(sample: Sample, props?: AudioClipProps): AudioClip;
+}
+
+/**
+ * Any track
+ */
+type AnyTrack = NoteTrack | AudioTrack | ValueTrack;
+
+/**
+ * Any region
+ */
+type AnyRegion = NoteRegion | AudioRegion | ValueRegion;
+
+/**
+ * Any clip
+ */
+type AnyClip = NoteClip | AudioClip | ValueClip;
+
+// ---- Global timeline
+/**
+ * Arrangement marker
+ */
+interface Marker {
+    /** Unique id */
+    readonly uuid: string;
+    /** Position in PPQN */
+    position: ppqn;
+    /** Label */
+    label: string;
+    /** Color hue (0 to 360) */
+    hue: int;
+    /** Play count before continuing (0 = infinite, 1 = normal) */
+    plays: int;
+    /** Remove the marker */
+    remove(): void;
+}
+
+/**
+ * Settings accepted by {@link Project.addMarker}
+ */
+type MarkerProps = Partial<Pick<Marker, "position" | "label" | "hue" | "plays">>;
+
+/**
+ * A tempo change
+ */
+interface TempoEvent {
+    /** Unique id */
+    readonly uuid: string;
+    /** Position in PPQN */
+    position: ppqn;
+    /** Tempo in bpm (30 to 1000) */
+    bpm: number;
+    /** Interpolation towards the next event */
+    interpolation: Interpolation;
+    /** Remove the event */
+    remove(): void;
+}
+
+/**
+ * Settings accepted by {@link TempoTrack.addEvent}
+ */
+type TempoEventProps = Partial<Pick<TempoEvent, "position" | "bpm" | "interpolation">>;
+
+/**
+ * Tempo automation of the project
+ */
+interface TempoTrack {
+    /** Enable tempo automation */
+    enabled: boolean;
+    /** Lower display bound in bpm */
+    minBpm: int;
+    /** Upper display bound in bpm */
+    maxBpm: int;
+    /** All events sorted by position */
+    readonly events: ReadonlyArray<TempoEvent>;
+    /** Add a tempo change */
+    addEvent(props?: TempoEventProps): TempoEvent;
+    /** Remove all events */
+    clearEvents(): void;
+}
+
+/**
+ * A time signature change
+ */
+interface SignatureEvent {
+    /** Unique id */
+    readonly uuid: string;
+    /** Absolute position in PPQN (derived from the bars since the previous change) */
+    readonly position: ppqn;
+    /** Bars since the previous signature change (at least 1) */
+    relativePosition: int;
+    /** Beats per bar (1 to 31) */
+    numerator: int;
+    /** Beat unit (power of two, 1 to 32) */
+    denominator: int;
+    /** Order */
+    readonly index: int;
+    /** Remove the event */
+    remove(): void;
+}
+
+/**
+ * Time signature changes of the project
+ */
+interface SignatureTrack {
+    /** Enable signature changes */
+    enabled: boolean;
+    /** All events in order */
+    readonly events: ReadonlyArray<SignatureEvent>;
+    /** Add a signature change at the bar closest to the position */
+    addEvent(position: ppqn, numerator: int, denominator: int): SignatureEvent;
+    /** Remove all events */
+    clearEvents(): void;
+}
+
+/**
+ * A key change on the key track
+ */
+interface KeyEvent {
+    /** Unique id */
+    readonly uuid: string;
+    /** Position in PPQN, the key applies from here to the next key change */
+    position: ppqn;
+    /** Root pitch class (0 to 11, 0 = C) */
+    root: int;
+    /** Scale as a 12-bit mask, bit i set when the note i semitones above the root is in the scale (Major = 0b101010110101) */
+    scale: int;
+    /** Remove the event */
+    remove(): void;
+}
+
+/**
+ * Settings accepted by {@link KeyTrack.addEvent}
+ */
+type KeyEventProps = Partial<Pick<KeyEvent, "position" | "root" | "scale">>;
+
+/**
+ * A key, as returned by {@link KeyTrack.keyAt}
+ */
+type Key = Readonly<{
+    /** Root pitch class (0 to 11, 0 = C) */
+    root: int;
+    /** Scale as a 12-bit mask, see {@link KeyEvent.scale} */
+    scale: int;
+}>;
+
+/**
+ * The key of the song: a project key plus key changes along the timeline
+ */
+interface KeyTrack {
+    /** Enable the key changes. Without them the project key applies everywhere */
+    enabled: boolean;
+    /** Root pitch class of the project key (0 to 11), applies before the first key change */
+    root: int;
+    /** Scale mask of the project key, applies before the first key change */
+    scale: int;
+    /** All key changes sorted by position */
+    readonly events: ReadonlyArray<KeyEvent>;
+    /** Add a key change. Root and scale default to the key that applies at the position */
+    addEvent(props?: KeyEventProps): KeyEvent;
+    /** The key at a position */
+    keyAt(position: ppqn): Key;
+    /** Remove all key changes */
+    clearEvents(): void;
+}
+
+/**
+ * A chord on the chord track, a step of the key at its position
+ */
+interface ChordEvent {
+    /** Unique id */
+    readonly uuid: string;
+    /** Position in PPQN */
+    position: ppqn;
+    /** Duration in PPQN */
+    duration: ppqn;
+    /** Step of the key (1 to 7) */
+    degree: int;
+    /** Lowers (-1) or raises (1) the root by a semitone (default 0) */
+    shift: int;
+    /** Fixed chord type as a 12-bit mask above the root, 0 stacks the notes from the scale (default 0) */
+    shape: int;
+    /** Notes stacked from the scale: 3 triad, 4 7th, 5 9th (default 3) */
+    notes: int;
+    /** How many of the lowest notes move an octave up (0 to 4, default 0) */
+    inversion: int;
+    /** Remove the event */
+    remove(): void;
+}
+
+/**
+ * Settings accepted by {@link ChordTrack.addEvent}
+ */
+type ChordEventProps = Partial<Pick<ChordEvent, "position" | "duration" | "degree" | "shift" | "shape" | "notes" | "inversion">>;
+
+/**
+ * A resolved chord, as returned by {@link ChordTrack.chordAt}
+ */
+type ResolvedChord = Readonly<{
+    /** Root pitch class (0 to 11) */
+    root: int;
+    /** Semitones above the root as voiced, inversion included. Play a note as 60 + root + note */
+    notes: ReadonlyArray<int>;
+    /** Display name, for example "Am7" or "C/E" */
+    name: string;
+}>;
+
+/**
+ * The chord progression of the song, as steps of the key
+ */
+interface ChordTrack {
+    /** Enable the chords */
+    enabled: boolean;
+    /** All chords sorted by position */
+    readonly events: ReadonlyArray<ChordEvent>;
+    /** Add a chord (one bar on step 1 by default). Chords it covers are shortened or removed */
+    addEvent(props?: ChordEventProps): ChordEvent;
+    /** The chord sounding at a position in the key that applies there, null where no chord sits */
+    chordAt(position: ppqn): Nullable<ResolvedChord>;
+    /** Remove all chords */
+    clearEvents(): void;
+}
+
+/**
+ * Transport loop range
+ */
+interface LoopArea {
+    /** Loop enabled */
+    enabled: boolean;
+    /** Loop start in PPQN */
+    from: ppqn;
+    /** Loop end in PPQN */
+    to: ppqn;
+}
+
+/**
+ * Beats per bar and beat unit
+ */
+interface TimeSignature {
+    /** Beats per bar (1 to 31) */
+    numerator: int;
+    /** Beat unit (power of two, 1 to 32) */
+    denominator: int;
+}
+
+/**
+ * Groove types
+ */
+type GrooveKind = "Shuffle" | "Power" | "S-Curve" | "Random" | "Offset" | "Stack";
+
+/**
+ * Common surface of all grooves
+ */
+interface Groove {
+    /** The groove type */
+    readonly kind: GrooveKind;
+    /** Custom label */
+    label: string;
+}
+
+/**
+ * Shuffle / swing groove
+ */
+interface GrooveShuffle extends Groove {
+    /** Always "Shuffle" */
+    readonly kind: "Shuffle";
+    /** Shuffle amount (0.0 to 1.0, default 0.6) */
+    amount: unitValue;
+    /** Shuffle grid in PPQN (default 1/8) */
+    duration: ppqn;
+}
+
+/**
+ * Power or S-curve groove
+ */
+interface GrooveFunction extends Groove {
+    /** "Power" or "S-Curve" */
+    readonly kind: "Power" | "S-Curve";
+    /** Amount (0.0 to 1.0, default 0.75): 0.5 is straight, below bends the inverse curve */
+    amount: unitValue;
+    /** Cell duration in PPQN (default 1/4) */
+    duration: ppqn;
+}
+
+/**
+ * Random groove
+ */
+interface GrooveRandom extends Groove {
+    /** Always "Random" */
+    readonly kind: "Random";
+    /** Amount (0.0 to 1.0, default 0.75): 0.5 is straight, below bends the inverse curve */
+    amount: unitValue;
+    /** Cell duration in PPQN (default 1 bar) */
+    duration: ppqn;
+    /** Random seed (0 to 999999, default 1) */
+    seed: int;
+    /** Roughness (0.0 to 1.0, default 1.0) */
+    roughness: unitValue;
+    /** Steps per cell (2 to 64, default 64) */
+    steps: int;
+}
+
+/**
+ * Moves every position by a fixed number of ticks
+ */
+interface GrooveOffset extends Groove {
+    /** Always "Offset" */
+    readonly kind: "Offset";
+    /** Ticks (-480 to 480, an eighth note either way, default 0): negative plays earlier */
+    offset: int;
+}
+
+/**
+ * A groove chaining its members in order
+ */
+interface GrooveStack extends Groove {
+    /** Always "Stack" */
+    readonly kind: "Stack";
+    /** The members in the order they apply */
+    readonly members: ReadonlyArray<AnyGroove>;
+}
+
+/**
+ * Any groove
+ */
+type AnyGroove = GrooveShuffle | GrooveFunction | GrooveRandom | GrooveOffset | GrooveStack;
+
+/**
+ * Descriptive project metadata
+ */
+interface ProjectMeta {
+    /** Artist */
+    artist: string;
+    /** Description */
+    description: string;
+    /** Tags */
+    tags: ReadonlyArray<string>;
+    /** Free text notes */
+    notepad: string;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Modulators
+// ---------------------------------------------------------------------------------------------------------
+/**
+ * An assignment of a modulator to a parameter
+ */
+interface Modulation {
+    /** Unique id */
+    readonly uuid: string;
+    /** The modulator driving this assignment */
+    readonly source: AnyModulator;
+    /** The object owning the modulated parameter */
+    readonly target: Automatable;
+    /** The modulated parameter path */
+    readonly parameter: string;
+    /** Modulation depth (-1.0 to 1.0) */
+    depth: bipolar;
+    /** Enable the assignment */
+    enabled: boolean;
+    /** Remove the assignment */
+    remove(): void;
+}
+
+/**
+ * Common surface of all modulators, created with {@link Project.addModulator}
+ */
+interface Modulator {
+    /** Unique id */
+    readonly uuid: string;
+    /** Modulator type identifier */
+    readonly kind: keyof Modulators;
+    /** Custom label */
+    label: string;
+    /** Enable the modulator */
+    enabled: boolean;
+    /** Order in the modulator list */
+    readonly index: int;
+    /** Bipolar output (-1 to 1) instead of unipolar (0 to 1) (default true) */
+    bipolar: boolean;
+    /** Output amount (0.0 to 1.0, default 1.0) */
+    amount: unitValue;
+    /** All assignments */
+    readonly modulations: ReadonlyArray<Modulation>;
+    /** Automation lanes of this modulator's own parameters and assignment depths */
+    readonly valueTracks: ReadonlyArray<ValueTrack>;
+    /**
+     * Add an automation lane for one of this modulator's parameters or an assignment depth
+     * @param target - This modulator or one of its modulations
+     * @param parameter - Parameter path, e.g. \`"rateAbsolute"\` or \`"depth"\`
+     */
+    addValueTrack<T extends AnyModulator | Modulation>(target: T, parameter: ParameterPath<T>, props?: Partial<Pick<Track, "enabled">>): ValueTrack;
+    /**
+     * Assign this modulator to a parameter
+     * @param target - Any modulatable object (a device, a unit, ...)
+     * @param parameter - Parameter path, e.g. \`"cutoff"\`
+     * @param depth - Modulation depth (-1.0 to 1.0, default 0.25)
+     * @example
+     * \`\`\`ts
+     * const lfo = project.addModulator("LFO", {rateSync: 6})
+     * lfo.assign(synth.instrument, "cutoff", 0.5)
+     * \`\`\`
+     */
+    assign<T extends Automatable>(target: T, parameter: ParameterPath<T>, depth?: bipolar): Modulation;
+    /** Remove this modulator including its assignments */
+    remove(): void;
+}
+
+/**
+ * Low frequency oscillator
+ */
+interface LfoModulator extends Modulator {
+    /** Always "LFO" */
+    readonly kind: "LFO";
+    /** Shape (0-4): Sine, Triangle, Saw up, Saw down, Square */
+    shape: 0 | 1 | 2 | 3 | 4;
+    /** Synced rate index (0 = free running, 1-12): 8 bars, 4 bars, 2 bars, 1 bar, 1/2, 1/4, 1/6, 1/8, 1/12, 1/16, 1/24, 1/32 (default 4) */
+    rateSync: int;
+    /** Free running rate in Hz (0 to 10, used when rateSync is 0) */
+    rateAbsolute: float;
+    /** Phase offset (0.0 to 1.0) */
+    phase: unitValue;
+    /** Curve exponent (-1.0 to 1.0) */
+    exponent: bipolar;
+}
+
+/**
+ * Step sequencer
+ */
+interface StepsModulator extends Modulator {
+    /** Always "Steps" */
+    readonly kind: "Steps";
+    /** Number of steps (1 to 64, default 16) */
+    count: int;
+    /** Synced step rate index (see {@link LfoModulator.rateSync}, default 10 = 1/16) */
+    rateSync: int;
+    /** Free running rate in Hz (0 to 10, used when rateSync is 0) */
+    rateAbsolute: float;
+    /** Phase offset (0.0 to 1.0) */
+    phase: unitValue;
+    /** Smoothing between steps (0.0 to 1.0) */
+    smooth: unitValue;
+    /** Direction (0-4): Forward, Backward, Ping-Pong, Alternate, Random */
+    direction: 0 | 1 | 2 | 3 | 4;
+    /** 64 step values (0.0 to 1.0) */
+    readonly steps: ReadonlyArray<unitValue>;
+    /** Replace the steps from the beginning and set the count */
+    setSteps(values: ReadonlyArray<unitValue>): void;
+}
+
+/**
+ * Manual macro control
+ */
+interface MacroModulator extends Modulator {
+    /** Always "Macro" */
+    readonly kind: "Macro";
+    /** Value (0.0 to 1.0, default 0.5) */
+    value: unitValue;
+}
+
+/**
+ * Random generator
+ */
+interface RandomModulator extends Modulator {
+    /** Always "Random" */
+    readonly kind: "Random";
+    /** Repeat after n values (0 = never, 1 to 64) */
+    loop: int;
+    /** Synced rate index (see {@link LfoModulator.rateSync}, default 10 = 1/16) */
+    rateSync: int;
+    /** Free running rate in Hz (0 to 10, used when rateSync is 0) */
+    rateAbsolute: float;
+    /** Phase offset (0.0 to 1.0) */
+    phase: unitValue;
+    /** Smoothing (0.0 to 1.0) */
+    smooth: unitValue;
+    /** Random seed (0 to 999999) */
+    seed: int;
+    /** Quantise to n levels (0 = continuous, 1 to 32) */
+    levels: int;
+}
+
+/**
+ * Modulator types by kind. Use the kinds with {@link Project.addModulator}
+ */
+interface Modulators {
+    /** {@link LfoModulator} */
+    "LFO": LfoModulator;
+    /** {@link StepsModulator} */
+    "Steps": StepsModulator;
+    /** {@link MacroModulator} */
+    "Macro": MacroModulator;
+    /** {@link RandomModulator} */
+    "Random": RandomModulator;
+}
+
+/**
+ * Any modulator
+ */
+type AnyModulator = Modulators[keyof Modulators];
+
+// ---------------------------------------------------------------------------------------------------------
+// Project
+// ---------------------------------------------------------------------------------------------------------
+/**
+ * A project under construction or the one open in the studio. Hand it back with {@link Project.openInStudio}
+ */
+interface Project {
+    /** Project name */
+    name: string;
+    /** Tempo in bpm (30 to 1000) */
+    bpm: number;
+    /** Time signature. Assign an object or set its fields */
+    timeSignature: TimeSignature;
+    /** Tuning reference in Hz (400 to 480, default 440) */
+    baseFrequency: float;
+    /** Project length in PPQN */
+    duration: ppqn;
+    /** Loop range */
+    readonly loop: LoopArea;
+    /** Project metadata */
+    readonly meta: ProjectMeta;
+    /** The global groove, a shuffle unless its type was changed */
+    readonly groove: AnyGroove;
+    /** The project's groove list, the global groove included */
+    readonly grooves: ReadonlyArray<AnyGroove>;
+    /** Primary output unit */
+    readonly output: OutputAudioUnit;
+    /** All units ordered by index */
+    readonly audioUnits: ReadonlyArray<AnyAudioUnit>;
+    /** Instrument units */
+    readonly instrumentUnits: ReadonlyArray<InstrumentAudioUnit>;
+    /** Auxiliary (send effect) units */
+    readonly auxUnits: ReadonlyArray<AuxAudioUnit>;
+    /** Group (bus) units */
+    readonly groupUnits: ReadonlyArray<GroupAudioUnit>;
+    /** Find a unit by its label */
+    findAudioUnit(label: string): Nullable<AnyAudioUnit>;
+    /**
+     * Add an instrument unit. It comes with one default track matching the instrument.
+     * @param key - Instrument type
+     * @param props - Unit settings
+     * @param instrument - Initial instrument parameters
+     * @example
+     * \`\`\`ts
+     * const synth = project.addInstrumentUnit("Vaporisateur", {label: "Lead", volume: -6}, {cutoff: 2400, resonance: 0.4})
+     * \`\`\`
+     */
+    addInstrumentUnit<K extends keyof Instruments>(key: K, props?: AudioUnitProps, instrument?: DeepPartial<Instruments[K]>): InstrumentAudioUnit<K>;
+    /** Add an auxiliary (send effect) unit */
+    addAuxUnit(props?: BusAudioUnitProps): AuxAudioUnit;
+    /** Add a group (bus) unit */
+    addGroupUnit(props?: BusAudioUnitProps): GroupAudioUnit;
+    /** Timeline markers sorted by position */
+    readonly markers: ReadonlyArray<Marker>;
+    /** Add a marker */
+    addMarker(props?: MarkerProps): Marker;
+    /** Tempo automation */
+    readonly tempoTrack: TempoTrack;
+    /** Time signature changes */
+    readonly signatureTrack: SignatureTrack;
+    /** The key of the song and its key changes */
+    readonly keyTrack: KeyTrack;
+    /** The chord progression */
+    readonly chordTrack: ChordTrack;
+    /** All modulators ordered by index */
+    readonly modulators: ReadonlyArray<AnyModulator>;
+    /**
+     * Add a modulator
+     * @example
+     * \`\`\`ts
+     * const steps = project.addModulator("Steps", {count: 8, rateSync: 10})
+     * steps.setSteps([1, 0, 0.5, 0, 1, 0, 0.5, 0.25])
+     * \`\`\`
+     */
+    addModulator<K extends keyof Modulators>(kind: K, props?: DeepPartial<Modulators[K]>): Modulators[K];
+    /** Open the project in the studio (replaces the current project). Throws if the project is invalid */
+    openInStudio(): void;
+    /**
+     * Render this project (including unapplied edits) to audio. Does not require {@link openInStudio}. Throws if the project is invalid
+     * @example
+     * \`\`\`ts
+     * const audio = await project.mixdown()
+     * await openDAW.saveFile(WavFile.encodeFloats(audio), \`\${project.name}.wav\`, "audio/wav")
+     * \`\`\`
+     */
+    mixdown(options?: MixdownOptions): Promise<AudioData>;
+}
+
+/**
+ * Options for {@link Project.mixdown}
+ */
+interface MixdownOptions {
+    /** Render sample rate in Hz (default 48000) */
+    sampleRate?: int;
+}
+
+/**
+ * The global \`openDAW\` object, entry point of every script
+ */
+interface Api {
+    /**
+     * Create a new empty project
+     * @example
+     * \`\`\`ts
+     * const project = openDAW.newProject("Hello")
+     * project.bpm = 120
+     * project.openInStudio()
+     * \`\`\`
+     */
+    newProject(name?: string): Project;
+    /** Whether a project is open in the studio */
+    hasProject(): Promise<boolean>;
+    /**
+     * Load the project currently open in the studio for modification. Call {@link Project.openInStudio} to apply. Throws if none is open
+     * @example
+     * \`\`\`ts
+     * const project = await openDAW.getProject()
+     * project.audioUnits.forEach(unit => unit.mute = false)
+     * project.openInStudio()
+     * \`\`\`
+     */
+    getProject(): Promise<Project>;
+    /** Show an info dialog in the studio and wait until it is closed */
+    showInfo(headline: string, message: string): Promise<void>;
+    /**
+     * Create a sample in the studio from raw audio data
+     * @example
+     * \`\`\`ts
+     * const audio = AudioData.create(sampleRate, sampleRate, 1)
+     * audio.frames[0].forEach((_, index) => audio.frames[0][index] = Math.sin(index * 440 / sampleRate * Math.PI * 2) * 0.5)
+     * const sample = await openDAW.addSample(audio, "Sine")
+     * \`\`\`
+     */
+    addSample(data: AudioData, name: string): Promise<Sample>;
+    /** All samples available in the studio (stock and user samples) */
+    listSamples(): Promise<ReadonlyArray<Sample>>;
+    /**
+     * Offer a file for download. The studio asks for confirmation, then shows the save dialog
+     * @param data - File content
+     * @param fileName - Suggested name including extension
+     * @param mimeType - Content type (default "application/octet-stream")
+     * @example
+     * \`\`\`ts
+     * const audio = await project.mixdown()
+     * await openDAW.saveFile(WavFile.encodeFloats(audio), "mixdown.wav", "audio/wav")
+     * \`\`\`
+     */
+    saveFile(data: ArrayBuffer | ArrayBufferView, fileName: string, mimeType?: string): Promise<void>;
+}
+
+declare const openDAW: Api
+
+declare const sampleRate: number
+
+declare const baseFrequency: number`,o=`// noinspection JSUnusedGlobalSymbols
+
+interface ArrayBuffer {
+    readonly byteLength: number
+    slice(begin: number, end?: number): ArrayBuffer
+}
+
+interface SharedArrayBuffer {
+    readonly byteLength: number
+    slice(begin: number, end?: number): SharedArrayBuffer
+}
+
+type ArrayBufferLike = ArrayBuffer | SharedArrayBuffer
+
+declare class TypedArray {
+    readonly buffer: ArrayBufferLike
+    readonly byteOffset: number
+    readonly byteLength: number
+    readonly length: number
+    [index: number]: number | bigint
+    copyWithin(target: number, start: number, end?: number): this
+    every(callbackfn: (value: any, index: number, array: this) => boolean): boolean
+    fill(value: any, start?: number, end?: number): this
+    filter(callbackfn: (value: any, index: number, array: this) => boolean): this
+    find(callbackfn: (value: any, index: number, array: this) => boolean): any
+    findIndex(callbackfn: (value: any, index: number, array: this) => boolean): number
+    forEach(callbackfn: (value: any, index: number, array: this) => void): void
+    includes(value: any, fromIndex?: number): boolean
+    indexOf(value: any, fromIndex?: number): number
+    join(separator?: string): string
+    lastIndexOf(value: any, fromIndex?: number): number
+    map(callbackfn: (value: any, index: number, array: this) => any): this
+    reduce(callbackfn: (prev: any, curr: any, index: number, array: this) => any): any
+    reduceRight(callbackfn: (prev: any, curr: any, index: number, array: this) => any): any
+    reverse(): this
+    set(array: ArrayLike<any>, offset?: number): void
+    slice(start?: number, end?: number): this
+    some(callbackfn: (value: any, index: number, array: this) => boolean): boolean
+    sort(compareFn?: (a: any, b: any) => number): this
+    subarray(begin?: number, end?: number): this
+    toLocaleString(): string
+    toString(): string
+    values(): IterableIterator<any>
+    keys(): IterableIterator<number>
+    entries(): IterableIterator<[number, any]>
+    [Symbol.iterator](): IterableIterator<any>
+}
+
+declare class Int8Array extends TypedArray {
+    [index: number]: number
+    constructor(length: number)
+    constructor(array: ArrayLike<number> | ArrayBuffer)
+}
+
+declare class Uint8Array extends TypedArray {
+    [index: number]: number;
+    constructor(length: number);
+    constructor(array: ArrayLike<number> | ArrayBuffer)
+}
+
+declare class Uint8ClampedArray extends TypedArray {
+    [index: number]: number;
+    constructor(length: number);
+    constructor(array: ArrayLike<number> | ArrayBuffer)
+}
+
+declare class Int16Array extends TypedArray {
+    [index: number]: number;
+    constructor(length: number);
+    constructor(array: ArrayLike<number> | ArrayBuffer)
+}
+
+declare class Uint16Array extends TypedArray {
+    [index: number]: number;
+    constructor(length: number);
+    constructor(array: ArrayLike<number> | ArrayBuffer)
+}
+
+declare class Int32Array extends TypedArray {
+    [index: number]: number;
+    constructor(length: number);
+    constructor(array: ArrayLike<number> | ArrayBuffer)
+}
+
+declare class Uint32Array extends TypedArray {
+    [index: number]: number;
+    constructor(length: number);
+    constructor(array: ArrayLike<number> | ArrayBuffer)
+}
+
+declare class Float32Array<TBuffer extends ArrayBufferLike = ArrayBuffer> extends TypedArray {
+    [index: number]: number;
+    readonly buffer: TBuffer
+    constructor(length: number);
+    constructor(array: ArrayLike<number> | ArrayBuffer)
+}
+
+declare class Float64Array extends TypedArray {
+    [index: number]: number;
+    constructor(length: number);
+    constructor(array: ArrayLike<number> | ArrayBuffer)
+}
+
+declare class BigInt64Array extends TypedArray {
+    [index: number]: bigint;
+    constructor(length: number);
+    constructor(array: ArrayLike<bigint> | ArrayBuffer)
+}
+
+declare class BigUint64Array extends TypedArray {
+    [index: number]: bigint;
+    constructor(length: number);
+    constructor(array: ArrayLike<bigint> | ArrayBuffer)
+}
+
+declare class Array<T> {
+    readonly length: number
+    [index: number]: T
+
+    constructor()
+    constructor(length: number)
+    constructor(...items: T[])
+
+    at(index: number): T | undefined
+    concat(...items: (T | ConcatArray<T>)[]): T[]
+    copyWithin(target: number, start: number, end?: number): this
+    entries(): IterableIterator<[number, T]>
+    every(callbackfn: (value: T, index: number, array: T[]) => boolean): boolean
+    fill(value: T, start?: number, end?: number): this
+    filter(callbackfn: (value: T, index: number, array: T[]) => boolean): T[]
+    find(callbackfn: (value: T, index: number, array: T[]) => boolean): T | undefined
+    findIndex(callbackfn: (value: T, index: number, array: T[]) => boolean): number
+    flat<U>(this: U[][], depth?: number): U[]
+    flatMap<U>(callbackfn: (value: T, index: number, array: T[]) => U | readonly U[]): U[]
+    forEach(callbackfn: (value: T, index: number, array: T[]) => void): void
+    includes(value: T, fromIndex?: number): boolean
+    indexOf(value: T, fromIndex?: number): number
+    join(separator?: string): string
+    keys(): IterableIterator<number>
+    lastIndexOf(value: T, fromIndex?: number): number
+    map<U>(callbackfn: (value: T, index: number, array: T[]) => U): U[]
+    pop(): T | undefined
+    push(...items: T[]): number
+    reduce(callbackfn: (prev: T, curr: T, index: number, array: T[]) => T): T
+    reduce<U>(callbackfn: (prev: U, curr: T, index: number, array: T[]) => U, initialValue: U): U
+    reduceRight(callbackfn: (prev: T, curr: T, index: number, array: T[]) => T): T
+    reverse(): this
+    shift(): T | undefined
+    slice(start?: number, end?: number): T[]
+    some(callbackfn: (value: T, index: number, array: T[]) => boolean): boolean
+    sort(compareFn?: (a: T, b: T) => number): this
+    splice(start: number, deleteCount?: number, ...items: T[]): T[]
+    toLocaleString(): string
+    toString(): string
+    unshift(...items: T[]): number
+    values(): IterableIterator<T>
+    [Symbol.iterator](): IterableIterator<T>
+    [Symbol.unscopables](): Record<string, boolean>
+}
+
+interface ConcatArray<T> {
+    readonly length: number
+    [n: number]: T
+    concat(...items: ConcatArray<T>[]): T[]
+}
+
+interface PromiseLike<T> {
+    then<R1 = T, R2 = never>(onfulfilled?: ((value: T) => R1 | PromiseLike<R1>) | null,
+                             onrejected?: ((reason: any) => R2 | PromiseLike<R2>) | null): PromiseLike<R1 | R2>
+}
+
+interface Promise<T> {
+    then<R1 = T, R2 = never>(onfulfilled?: ((value: T) => R1 | PromiseLike<R1>) | null,
+                             onrejected?: ((reason: any) => R2 | PromiseLike<R2>) | null): Promise<R1 | R2>
+    catch<R = never>(onrejected?: ((reason: any) => R | PromiseLike<R>) | null): Promise<T | R>
+    finally(onfinally?: (() => void) | null): Promise<T>
+}
+
+interface PromiseConstructor {
+    readonly prototype: Promise<unknown>;
+    new<T>(executor: (resolve: (value: T | PromiseLike<T>) => void, reject: (reason?: any) => void) => void): Promise<T>;
+    all<T extends readonly unknown[] | []>(values: T): Promise<{ -readonly [P in keyof T]: Awaited<T[P]>; }>;
+    race<T extends readonly unknown[] | []>(values: T): Promise<Awaited<T[number]>>;
+    reject<T = never>(reason?: any): Promise<T>;
+    resolve(): Promise<void>;
+    resolve<T>(value: T): Promise<Awaited<T>>;
+    resolve<T>(value: T | PromiseLike<T>): Promise<Awaited<T>>;
+}
+
+declare var Promise: PromiseConstructor
+
+declare function setInterval(handler: TimerHandler, timeout?: number, ...arguments: any[]): number;
+declare function setTimeout(handler: TimerHandler, timeout?: number, ...arguments: any[]): number;
+
+interface IteratorYieldResult<TYield> {
+    done?: false
+    value: TYield
+}
+
+interface IteratorReturnResult<TReturn> {
+    done: true
+    value: TReturn
+}
+
+type IteratorResult<T, TReturn = any> = IteratorYieldResult<T> | IteratorReturnResult<TReturn>
+
+interface Iterator<T, TReturn = any, TNext = undefined> {
+    next(...args: [] | [TNext]): IteratorResult<T, TReturn>
+    return?(value?: TReturn): IteratorResult<T, TReturn>
+    throw?(e?: any): IteratorResult<T, TReturn>
+}
+
+interface Iterable<T, TReturn = any, TNext = any> {
+    [Symbol.iterator](): Iterator<T, TReturn, TNext>
+}
+
+interface IterableIterator<T, TReturn = any, TNext = any> extends Iterator<T, TReturn, TNext> {
+    [Symbol.iterator](): IterableIterator<T, TReturn, TNext>
+}
+
+interface SymbolConstructor {
+    readonly iterator: symbol
+    readonly unscopables: symbol
+}
+
+declare var Symbol: SymbolConstructor
+
+type Partial<T> = { [P in keyof T]?: T[P] }
+type Required<T> = { [P in keyof T]-?: T[P] }
+type Readonly<T> = { readonly [P in keyof T]: T[P] }
+type Pick<T, K extends keyof T> = { [P in K]: T[P] }
+type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>
+type Record<K extends keyof any, T> = { [P in K]: T }
+type Exclude<T, U> = T extends U ? never : T
+type Extract<T, U> = T extends U ? T : never
+type NonNullable<T> = T extends null | undefined ? never : T
+type ReturnType<T extends (...args: any) => any> = T extends (...args: any) => infer R ? R : any
+type Parameters<T extends (...args: any) => any> = T extends (...args: infer P) => any ? P : never
+type Awaited<T> = T extends null | undefined ? T : T extends object & {
+    then(onfulfilled: infer F, ...args: infer _): any
+} ? F extends ((value: infer V, ...args: infer _) => any) ? Awaited<V> : never : T
+
+interface ReadonlyArray<T> {
+    readonly length: number
+    readonly [n: number]: T
+    concat(...items: (T | ConcatArray<T>)[]): T[]
+    every(callbackfn: (value: T, index: number, array: readonly T[]) => boolean): boolean
+    filter(callbackfn: (value: T, index: number, array: readonly T[]) => boolean): T[]
+    find(callbackfn: (value: T, index: number, array: readonly T[]) => boolean): T | undefined
+    findIndex(callbackfn: (value: T, index: number, array: readonly T[]) => boolean): number
+    forEach(callbackfn: (value: T, index: number, array: readonly T[]) => void): void
+    includes(value: T, fromIndex?: number): boolean
+    indexOf(value: T, fromIndex?: number): number
+    join(separator?: string): string
+    lastIndexOf(value: T, fromIndex?: number): number
+    at(index: number): T | undefined
+    flatMap<U>(callbackfn: (value: T, index: number, array: readonly T[]) => U | readonly U[]): U[]
+    map<U>(callbackfn: (value: T, index: number, array: readonly T[]) => U): U[]
+    reduce(callbackfn: (prev: T, curr: T, index: number, array: readonly T[]) => T): T
+    reduce<U>(callbackfn: (prev: U, curr: T, index: number, array: readonly T[]) => U, initialValue: U): U
+    reduceRight(callbackfn: (prev: T, curr: T, index: number, array: readonly T[]) => T): T
+    slice(start?: number, end?: number): T[]
+    some(callbackfn: (value: T, index: number, array: readonly T[]) => boolean): boolean
+    [Symbol.iterator](): IterableIterator<T>
+}
+interface Math {
+    readonly PI: number
+    readonly E: number
+    abs(x: number): number
+    acos(x: number): number
+    asin(x: number): number
+    atan(x: number): number
+    atan2(y: number, x: number): number
+    ceil(x: number): number
+    cos(x: number): number
+    exp(x: number): number
+    floor(x: number): number
+    log(x: number): number
+    log2(x: number): number
+    log10(x: number): number
+    max(...values: number[]): number
+    min(...values: number[]): number
+    pow(x: number, y: number): number
+    random(): number
+    round(x: number): number
+    sign(x: number): number
+    sin(x: number): number
+    sqrt(x: number): number
+    tan(x: number): number
+    tanh(x: number): number
+    trunc(x: number): number
+    hypot(...values: number[]): number
+    cbrt(x: number): number
+    imul(a: number, b: number): number
+    fround(x: number): number
+}
+
+declare const Math: Math
+
+interface NumberConstructor {
+    readonly MAX_SAFE_INTEGER: number
+    readonly MIN_SAFE_INTEGER: number
+    readonly MAX_VALUE: number
+    readonly MIN_VALUE: number
+    readonly EPSILON: number
+    readonly POSITIVE_INFINITY: number
+    readonly NEGATIVE_INFINITY: number
+    readonly NaN: number
+    isFinite(value: unknown): boolean
+    isInteger(value: unknown): boolean
+    isNaN(value: unknown): boolean
+    isSafeInteger(value: unknown): boolean
+    parseFloat(text: string): number
+    parseInt(text: string, radix?: number): number
+    (value?: unknown): number
+}
+
+declare const Number: NumberConstructor
+
+interface StringConstructor {
+    (value?: unknown): string
+    fromCharCode(...codes: number[]): string
+}
+
+declare const String: StringConstructor
+
+interface BooleanConstructor {
+    (value?: unknown): boolean
+}
+
+declare const Boolean: BooleanConstructor
+
+interface ObjectConstructor {
+    keys(object: object): string[]
+    values<T>(object: { [key: string]: T } | ArrayLike<T>): T[]
+    entries<T>(object: { [key: string]: T } | ArrayLike<T>): [string, T][]
+    assign<T extends object, U>(target: T, source: U): T & U
+    freeze<T>(object: T): Readonly<T>
+}
+
+declare const Object: ObjectConstructor
+
+interface JSON {
+    parse(text: string): any
+    stringify(value: unknown, replacer?: null, space?: string | number): string
+}
+
+declare const JSON: JSON
+
+interface Console {
+    log(...data: unknown[]): void
+    info(...data: unknown[]): void
+    warn(...data: unknown[]): void
+    error(...data: unknown[]): void
+    debug(...data: unknown[]): void
+    table(data: unknown): void
+}
+
+declare const console: Console
+
+declare class Error {
+    readonly name: string
+    readonly message: string
+    readonly stack?: string
+    constructor(message?: string)
+}
+
+declare class RangeError extends Error {}
+
+declare class TypeError extends Error {}
+
+declare class Date {
+    constructor()
+    constructor(value: number | string)
+    static now(): number
+    getTime(): number
+    toISOString(): string
+    toString(): string
+}
+
+declare const Infinity: number
+declare const NaN: number
+declare function isNaN(value: number): boolean
+declare function isFinite(value: number): boolean
+declare function parseFloat(text: string): number
+declare function parseInt(text: string, radix?: number): number
+
+interface Object {}
+interface Function {}
+interface CallableFunction extends Function {}
+interface NewableFunction extends Function {}
+interface IArguments {}
+interface RegExp {}
+interface Boolean {}
+interface Number {
+    toFixed(fractionDigits?: number): string
+    toString(radix?: number): string
+}
+interface String {
+    readonly length: number
+    charAt(index: number): string
+    charCodeAt(index: number): number
+    indexOf(search: string, position?: number): number
+    includes(search: string, position?: number): boolean
+    startsWith(search: string, position?: number): boolean
+    endsWith(search: string, position?: number): boolean
+    slice(start?: number, end?: number): string
+    split(separator: string, limit?: number): string[]
+    toLowerCase(): string
+    toUpperCase(): string
+    trim(): string
+    padStart(maxLength: number, fillString?: string): string
+    padEnd(maxLength: number, fillString?: string): string
+    repeat(count: number): string
+    replace(search: string, replacement: string): string
+    [index: number]: string
+}
+interface ArrayLike<T> {
+    readonly length: number
+    readonly [n: number]: T
+}
+interface TemplateStringsArray extends ReadonlyArray<string> {}
+type TimerHandler = string | Function
+
+interface Map<K, V> {
+    readonly size: number
+    clear(): void
+    delete(key: K): boolean
+    forEach(callbackfn: (value: V, key: K, map: Map<K, V>) => void): void
+    get(key: K): V | undefined
+    has(key: K): boolean
+    set(key: K, value: V): this
+    keys(): IterableIterator<K>
+    values(): IterableIterator<V>
+    entries(): IterableIterator<[K, V]>
+    [Symbol.iterator](): IterableIterator<[K, V]>
+}
+
+interface MapConstructor {
+    new <K, V>(entries?: Iterable<readonly [K, V]> | null): Map<K, V>
+}
+
+declare const Map: MapConstructor
+
+interface Set<T> {
+    readonly size: number
+    add(value: T): this
+    clear(): void
+    delete(value: T): boolean
+    forEach(callbackfn: (value: T, value2: T, set: Set<T>) => void): void
+    has(value: T): boolean
+    values(): IterableIterator<T>
+    [Symbol.iterator](): IterableIterator<T>
+}
+
+interface SetConstructor {
+    new <T>(values?: Iterable<T> | null): Set<T>
+}
+
+declare const Set: SetConstructor
+`,e=n.typescript.typescriptDefaults;e.setEagerModelSync(!0);e.setCompilerOptions({target:n.typescript.ScriptTarget.ES2020,module:n.typescript.ModuleKind.ESNext,moduleResolution:n.typescript.ModuleResolutionKind.NodeJs,allowJs:!0,noLib:!0,checkJs:!1,strict:!0,jsx:n.typescript.JsxEmit.Preserve,noEmit:!1,esModuleInterop:!0,allowSyntheticDefaultImports:!0,moduleDetection:3});e.setDiagnosticsOptions({noSemanticValidation:!1,noSyntaxValidation:!1,noSuggestionDiagnostics:!1,onlyVisible:!1,diagnosticCodesToIgnore:[t]});e.addExtraLib(o,"file:///library.d.ts");e.addExtraLib(a,"ts:opendaw.d.ts");export{u as monaco};
+//# sourceMappingURL=monaco-setup.37bc801b-9cab-4fe6-acdf-414fb02a69a5.js.map

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebCLAP</title>
+    <style>
+        html, body {margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000}
+        iframe {display: block; border: none; width: 100%; height: 100%}
+        p {margin: 1em; color: #999; font: 12px sans-serif}
+    </style>
+</head>
+<body>
+<script>
+    // host frame on the plugin origin: owns the service worker, embeds the page, relays messages and keys
+    const MIME = {
+        html: "text/html", js: "text/javascript", mjs: "text/javascript", css: "text/css", json: "application/json",
+        wasm: "application/wasm", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+        svg: "image/svg+xml", webp: "image/webp", woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", txt: "text/plain"
+    }
+    const files = new Map()
+    // the studio side of the channel arrives with wclap-frame-ready, only the embedding window receives it
+    const channel = new MessageChannel()
+    const state = {
+        uuid: "", pageDirectory: "", inner: null, pointer: false, hovered: false, transparent: false, dragging: false,
+        reportsWheel: false
+    }
+
+    const post = message => channel.port1.postMessage(message)
+    const fail = message => {
+        document.body.replaceChildren(Object.assign(document.createElement("p"), {textContent: message}))
+        post({type: "wclap-error", message})
+    }
+
+    // the service worker passes the URL's path, percent-encoded ("Bright%20Ambience.srgfx"), the bundle has file names
+    const decoded = path => {
+        try {return decodeURIComponent(path)} catch {return path}
+    }
+    const resolve = path => {
+        const clean = decoded(path.split("?")[0]).replace(/^\/+/, "")
+        const file = files.get(clean) ?? files.get(`${state.pageDirectory}${clean}`)
+        if (file === undefined) {return null}
+        const extension = clean.split(".").pop()?.toLowerCase() ?? ""
+        return {bytes: file.slice(), type: MIME[extension] ?? "application/octet-stream"}
+    }
+
+    const registerWorker = async () => {
+        if (!("serviceWorker" in navigator)) {throw new Error("service workers are not available")}
+        const registration = await navigator.serviceWorker.register("./wclap-sw.js", {scope: "./wclap/"})
+        const worker = registration.active ?? registration.waiting ?? registration.installing
+        if (worker === null) {throw new Error("service worker registration has no worker")}
+        await new Promise((resolve, reject) => {
+            if (worker.state === "activated") {resolve(); return}
+            worker.addEventListener("statechange", () => {
+                if (worker.state === "activated") {resolve()}
+                if (worker.state === "redundant") {reject(new Error("service worker became redundant"))}
+            })
+        })
+        navigator.serviceWorker.addEventListener("message", event => {
+            const data = event.data
+            const port = event.ports[0]
+            if (!port || data?.type !== "wclap-resource" || data.uuid !== state.uuid) {return}
+            const resource = resolve(data.path)
+            if (resource === null) {port.postMessage(null)} else {port.postMessage(resource, [resource.bytes.buffer])}
+        })
+        worker.postMessage({type: "wclap-host"})
+    }
+
+    // only while the plugin reports a hovered parameter, otherwise the page keeps its own behaviour
+    const forwardPointer = () => {
+        const target = state.inner?.contentWindow
+        if (!state.pointer || !target || target.__wclapPointer) {return}
+        target.__wclapPointer = true
+        target.addEventListener("contextmenu", event => {
+            if (!state.hovered) {return}
+            event.preventDefault()
+            event.stopPropagation()
+            post({type: "wclap-contextmenu", x: event.clientX, y: event.clientY})
+        }, {capture: true})
+        target.addEventListener("dblclick", event => {
+            if (!state.hovered) {return}
+            event.preventDefault()
+            event.stopPropagation()
+            post({type: "wclap-dblclick", x: event.clientX, y: event.clientY})
+        }, {capture: true})
+    }
+
+    const forwardInput = inner => {
+        const target = inner.contentWindow
+        if (target === null) {return}
+        for (const kind of ["keydown", "keyup"]) {
+            target.addEventListener(kind, event => {
+                const element = event.target
+                const tag = typeof element?.tagName === "string" ? element.tagName : ""
+                if (tag === "INPUT" || tag === "TEXTAREA" || element?.isContentEditable === true) {return}
+                // plain keys reach the page as well (software keyboard notes play in both), shortcuts only the studio
+                if (event.metaKey || event.ctrlKey) {event.preventDefault()}
+                post({
+                    type: "wclap-key", kind,
+                    init: {
+                        key: event.key, code: event.code, metaKey: event.metaKey, ctrlKey: event.ctrlKey,
+                        shiftKey: event.shiftKey, altKey: event.altKey, repeat: event.repeat
+                    }
+                })
+            }, {capture: true})
+        }
+        // never the browser's own menu, the page's handlers still see the event
+        target.addEventListener("contextmenu", event => event.preventDefault(), {capture: true})
+        // a wheel the page did not prevent scrolls the window, unless the page reports its unused wheels itself
+        target.addEventListener("wheel", event => {
+            if (!event.isTrusted || event.defaultPrevented || state.reportsWheel) {return}
+            post({type: "wclap-wheel", deltaX: event.deltaX, deltaY: event.deltaY, deltaMode: event.deltaMode})
+        })
+    }
+
+    // Chrome may lose the release outside the frame, the next buttonless move delivers it to the page
+    const releaseLostButtons = inner => {
+        const target = inner.contentWindow
+        if (target === null) {return}
+        for (const [down, up, move, Event] of [
+            ["mousedown", "mouseup", "mousemove", target.MouseEvent],
+            ["pointerdown", "pointerup", "pointermove", target.PointerEvent]]) {
+            const pressed = {active: false}
+            target.addEventListener(down, event => {
+                if (event.pointerType === undefined || event.pointerType === "mouse") {pressed.active = true}
+            }, {capture: true})
+            target.addEventListener(up, () => {pressed.active = false}, {capture: true})
+            target.addEventListener(move, event => {
+                if (!pressed.active || event.buttons !== 0) {return}
+                pressed.active = false
+                event.stopImmediatePropagation()
+                const {clientX, clientY, screenX, screenY} = event
+                const pointer = up === "pointerup" ? {pointerId: event.pointerId, pointerType: "mouse", isPrimary: true} : {}
+                const init = {bubbles: true, cancelable: true, composed: true, clientX, clientY, screenX, screenY, button: 0, buttons: 0}
+                ;(event.target ?? target.document).dispatchEvent(new Event(up, {...init, ...pointer}))
+            }, {capture: true})
+        }
+    }
+
+    // Chrome stops sending a mouse drag to the frame once it leaves it, unless the page holds pointer capture. A page
+    // that follows its drags on `window` without capturing (Cmajor's knobs) would freeze at the frame's edge: when such
+    // a drag leaves the page, capture the pointer on the element it started at. Inside the page nothing changes (a
+    // drag across piano keys still moves from key to key).
+    const captureLeavingDrags = inner => {
+        const target = inner.contentWindow
+        if (target === null) {return}
+        const setPointerCapture = target.Element.prototype.setPointerCapture
+        const drag = {pointerId: -1, element: null, captured: false}
+        target.Element.prototype.setPointerCapture = function (pointerId) {
+            if (pointerId === drag.pointerId) {drag.captured = true}
+            return setPointerCapture.call(this, pointerId)
+        }
+        target.addEventListener("pointerdown", event => {
+            if (event.pointerType !== "mouse") {return}
+            drag.pointerId = event.pointerId
+            drag.element = event.target
+            drag.captured = false
+        }, {capture: true})
+        target.addEventListener("pointerout", event => {
+            if (event.pointerId !== drag.pointerId || event.relatedTarget !== null || event.buttons === 0
+                || drag.captured || drag.element === null || !drag.element.isConnected) {return}
+            drag.captured = true
+            try {setPointerCapture.call(drag.element, event.pointerId)} catch {}
+        }, {capture: true})
+        for (const kind of ["pointerup", "pointercancel"]) {
+            target.addEventListener(kind, event => {
+                if (event.pointerId !== drag.pointerId) {return}
+                drag.pointerId = -1
+                drag.element = null
+            }, {capture: true})
+        }
+    }
+
+    // a transparent frame (the device panel) shows the studio where the page draws nothing, the page's colour scheme
+    // must match the frame's or the browser paints an opaque backdrop
+    const matchColorScheme = inner => {
+        const document = inner.contentDocument
+        if (!state.transparent || document === null) {return}
+        inner.style.colorScheme = getComputedStyle(document.documentElement).colorScheme
+    }
+
+    // a sample dragged from the studio arrives as positions and finally a file, replayed as a native file drag
+    const dragEvent = (type, x, y, file) => {
+        const inner = state.inner
+        const target = inner?.contentWindow
+        const document = inner?.contentDocument
+        if (!target || !document) {return}
+        const dataTransfer = new target.DataTransfer()
+        dataTransfer.items.add(file)
+        const element = document.elementFromPoint(x, y) ?? document.documentElement
+        element.dispatchEvent(new target.DragEvent(type, {
+            bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, dataTransfer, relatedTarget: null
+        }))
+    }
+    const dragOver = ({x, y}, file) => {
+        if (!state.dragging) {dragEvent("dragenter", x, y, file)}
+        state.dragging = true
+        dragEvent("dragover", x, y, file)
+    }
+
+    const open = async ({uuid, page, files: list, transparent}) => {
+        state.uuid = uuid
+        state.transparent = transparent === true
+        if (state.transparent) {
+            document.documentElement.style.colorScheme = "dark"
+            document.documentElement.style.background = document.body.style.background = "transparent"
+        }
+        const path = page.split("?")[0]
+        state.pageDirectory = path.includes("/") ? path.substring(0, path.lastIndexOf("/") + 1) : ""
+        files.clear()
+        for (const {path, bytes} of list) {files.set(path, bytes)}
+        await registerWorker()
+        const inner = document.createElement("iframe")
+        inner.addEventListener("load", () => {
+            matchColorScheme(inner)
+            forwardInput(inner)
+            releaseLostButtons(inner)
+            captureLeavingDrags(inner)
+            forwardPointer()
+        })
+        inner.src = `./wclap/${uuid}/${page}`
+        state.inner = inner
+        document.body.replaceChildren(inner)
+    }
+
+    window.addEventListener("message", event => {
+        const inner = state.inner
+        if (inner === null || event.source !== inner.contentWindow) {return}
+        const data = event.data
+        const bytes = data instanceof ArrayBuffer ? data
+            : ArrayBuffer.isView(data) ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) : null
+        if (bytes !== null) {post({type: "wclap-message", bytes})}
+        // a file for one of the plugin's sample slots (opendaw.samples/1), or none to empty it: the studio keeps it
+        const sample = data?.webclapSample
+        if (bytes === null && typeof sample === "object" && sample !== null && Number.isInteger(sample.key)) {
+            post({type: "wclap-sample", key: sample.key, ...(sample.file instanceof File ? {file: sample.file} : {})})
+        }
+        // a wheel event the page did not use (juce-webclap-plugins pages send them): the window may scroll
+        const wheel = data?.webclapWheel
+        if (bytes === null && typeof wheel === "object" && wheel !== null
+            && Number.isFinite(wheel.deltaX) && Number.isFinite(wheel.deltaY) && Number.isFinite(wheel.deltaMode)) {
+            state.reportsWheel = true
+            post({type: "wclap-wheel", deltaX: wheel.deltaX, deltaY: wheel.deltaY, deltaMode: wheel.deltaMode})
+        }
+    })
+    channel.port1.addEventListener("message", event => {
+        const inner = state.inner
+        const data = event.data
+        if (data?.type === "wclap-open") {
+            open(data).catch(error => fail(`The plugin page could not start: ${error.message ?? error}`))
+        } else if (data?.type === "wclap-message" && inner !== null && inner.contentWindow !== null) {
+            inner.contentWindow.postMessage(data.bytes, "*")
+        } else if (data?.type === "wclap-hovered") {
+            state.hovered = data.hovered === true
+            state.pointer = state.pointer || state.hovered
+            forwardPointer()
+        } else if (data?.type === "wclap-drag" && inner !== null) {
+            dragOver(data, new File([], `${data.name}.wav`, {type: "audio/wav"}))
+        } else if (data?.type === "wclap-drag-leave" && inner !== null && state.dragging) {
+            state.dragging = false
+            dragEvent("dragleave", -1, -1, new File([], "", {type: "audio/wav"}))
+        } else if (data?.type === "wclap-drop" && inner !== null && data.file instanceof File) {
+            dragOver(data, data.file)
+            state.dragging = false
+            dragEvent("drop", data.x, data.y, data.file)
+        }
+    })
+    window.addEventListener("contextmenu", event => event.preventDefault())
+    channel.port1.start()
+    window.parent.postMessage({type: "wclap-frame-ready"}, "*", [channel.port2])
+</script>
+</body>
+</html>
