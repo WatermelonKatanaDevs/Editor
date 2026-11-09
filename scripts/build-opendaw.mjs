@@ -11,7 +11,7 @@ const sourceRoot = resolve(editorRoot, "editor/previews/vendor/opendaw-src");
 const outputRoot = resolve(editorRoot, "editor/previews/vendor/opendaw");
 const studioRoot = resolve(sourceRoot, "packages/app/studio");
 const basePath = "/editor/editor/previews/vendor/opendaw/";
-const integrationVersion = 2;
+const integrationVersion = 3;
 const markerPath = resolve(outputRoot, ".wk-openDAW-build.json");
 
 function run(command, args, options = {}) {
@@ -203,7 +203,7 @@ async function main() {
     const studioIndexPath = resolve(outputRoot, "index.html");
     let studioIndex = await readFile(studioIndexPath, "utf8");
     if (!studioIndex.includes("opendaw-bridge.js")) {
-      const bridgeScript = '<script src="../../opendaw-bridge.js" defer></script>';
+      const bridgeScript = '<script src="../../opendaw-bridge.js"></script>';
       if (!/<\/head>/i.test(studioIndex)) throw new Error("The openDAW Studio HTML has no closing head tag for its workspace bridge.");
       studioIndex = studioIndex.replace(/<\/head>/i, bridgeScript + "</head>");
       await writeFile(studioIndexPath, studioIndex);
