@@ -29,6 +29,9 @@
   factories.filmcraft = function (ctx) {
     let frame = null, shell = null, style = null, status = null, openButton = null;
     let disposed = false, ready = false, documentPath = null;
+    const bridgeId = 'wk-filmcraft-' + (window.crypto?.randomUUID?.() ||
+      Date.now().toString(36) + Math.random().toString(36).slice(2));
+    window.__WKFilmCraftBridges = window.__WKFilmCraftBridges || Object.create(null);
 
     const workspacePicker = window.EditorWorkspacePicker.create({
       getFs:() => ctx.state.fs,
@@ -45,22 +48,6 @@
       if (!status) return;
       status.textContent = message;
       status.style.color = isError ? '#ff9b9b' : '#aeb8c1';
-    }
-    function currentFs() {
-      if (!ctx.state.fs) throw new Error('The Editor workspace is not ready.');
-      return ctx.state.fs;
-    }
-    function availablePath(path, overwritePath) {
-      const fs = currentFs();
-      if (!fs.existsSync(path) || path === overwritePath) return path;
-      const dot = path.lastIndexOf('.'), slash = path.lastIndexOf('/');
-      const stem = dot > slash ? path.slice(0, dot) : path;
-      const ext = dot > slash ? path.slice(dot) : '';
-      for (let n = 2; n < 10000; n++) {
-        const candidate = stem + ' (' + n + ')' + ext;
-        if (!fs.existsSync(candidate)) return candidate;
-      }
-      throw new Error('Could not find an unused workspace filename for ' + path);
     }
     function postOpen(name, bytes, sourcePath) {
       if (!ready || !frame?.contentWindow) throw new Error('FilmCraft is not ready yet.');
@@ -97,20 +84,20 @@
         const name = safeName(message.name || 'FilmCraft Export');
         const bytes = fileBytes(message.bytes);
         let path;
-        if (message.saveAs === true) {
+        const isCurrentDocument = documentPath && baseName(documentPath) === name;
+        if (message.saveAs === true || !isCurrentDocument) {
+          const startPath = message.saveAs === true
+            ? (documentPath ? documentPath.split('/').slice(0, -1).join('/') : '')
+            : 'FilmCraft Exports';
           path = await workspacePicker.savePath({
-            title:'Save from FilmCraft',
-            suggestedName:name
+            title:message.saveAs === true ? 'Save FilmCraft Project As' : 'Save FilmCraft Export',
+            suggestedName:name,
+            startPath
           });
           if (!path) return;
-          if (isProject(name)) documentPath = path;
-        } else if (documentPath && baseName(documentPath) === name) {
-          path = documentPath;
-        } else if (isProject(name) && !documentPath) {
-          path = availablePath(name, null);
-          documentPath = path;
+          if (message.saveAs === true && isProject(name)) documentPath = path;
         } else {
-          path = availablePath('FilmCraft Exports/' + name, null);
+          path = documentPath;
         }
         workspacePicker.writeFile(path, bytes);
         setStatus('Saved to workspace: ' + path, false);
@@ -119,6 +106,14 @@
         setStatus('Save failed: ' + (error?.message || String(error)), true);
       }
     }
+    const workspaceBridge = {
+      pickFiles:options => workspacePicker.open({
+        ...options,
+        maxFileBytes:Math.min(Number(options?.maxFileBytes) || MAX_OPEN_BYTES, MAX_OPEN_BYTES)
+      }),
+      openFiles:files => openFiles(files)
+    };
+
     function onMessage(event) {
       if (disposed || event.source !== frame?.contentWindow || event.origin !== location.origin) return;
       const message = event.data;
@@ -180,8 +175,30 @@
       frame.allow = 'autoplay; fullscreen; clipboard-read; clipboard-write';
       frame.referrerPolicy = 'same-origin';
       window.addEventListener('message', onMessage);
+      window.__WKFilmCraftBridges[bridgeId] = workspaceBridge;
       const url = new URL(APP_PATH, location.href);
       url.searchParams.set('host', 'parent');
+      url.searchParams.set('wk_editor_bridge', bridgeId);
+      const bridgeUrl = new URL('editor/previews/filmcraft-bridge.js', location.href);
+      const injectedDocuments = new WeakSet();
+      frame.addEventListener('load', () => {
+        try {
+          const childWindow = frame.contentWindow;
+          const childDocument = frame.contentDocument;
+          if (!childWindow || !childDocument?.head ||
+              childWindow.location.origin !== location.origin ||
+              childWindow.location.pathname !== url.pathname ||
+              injectedDocuments.has(childDocument)) return;
+          injectedDocuments.add(childDocument);
+          const script = childDocument.createElement('script');
+          script.src = bridgeUrl.href;
+          script.onload = () => console.info('FilmCraft shared workspace picker bridge loaded.');
+          script.onerror = () => console.error('Could not load FilmCraft shared picker bridge:', bridgeUrl.href);
+          childDocument.head.appendChild(script);
+        } catch (error) {
+          console.error('Could not inject FilmCraft shared picker bridge:', error);
+        }
+      });
       frame.src = url.href;
       frameWrap.append(frame);
       shell.append(toolbar, frameWrap);
@@ -193,6 +210,7 @@
       ready = false;
       window.removeEventListener('message', onMessage);
       try { workspacePicker.cancelActive(); } catch (_) {}
+      try { delete window.__WKFilmCraftBridges?.[bridgeId]; } catch (_) {}
       const view = tab?._viewElement;
       const target = view?.tagName === 'IFRAME' ? view : view?.querySelector?.('iframe');
       try { target?.removeAttribute('src'); target?.remove(); } catch (_) {}
