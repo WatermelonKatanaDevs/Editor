@@ -105,9 +105,9 @@
       this.showHiddenFiles = !!value;
       this.refresh();
     }
-    setHideNodeModules(value) {
+    setHideNodeModules(value, refresh = true) {
       this.hideNodeModules = !!value;
-      this.refresh();
+      if (refresh) this.refresh();
     }
     isHiddenPath(path) {
       return this.basename(path).startsWith('.');

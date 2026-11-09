@@ -2306,6 +2306,7 @@ window.__editorInitPromise = (async function () {
       }
     }
     getBuiltin('environment')?.load();
+    state.fileManager.setHideNodeModules?.(state.behavior.hideNodeModules, false);
     state.fileManager.setFileSystem(fs);
     state.fileManager.setDimHiddenFolders?.(state.behavior.dimHiddenFolders);
     state.fileManager.refresh();
