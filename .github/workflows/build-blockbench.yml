@@ -7,6 +7,10 @@ on:
       - "blockbench/**"
   workflow_dispatch:
 
+concurrency:
+  group: blockbench-web-build
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -63,5 +67,6 @@ jobs:
             echo "Blockbench build is already up to date."
           else
             git commit -m "Build Blockbench web app"
+            git pull --rebase origin main
             git push
           fi
