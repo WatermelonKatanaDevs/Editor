@@ -283,6 +283,11 @@
     }
     async function openLocalSourceControl() {
       const preferLocal = !!state.fs?.isPersistentDirectory && !state.gitRemote?.provider;
+      localGitMode = preferLocal || !!localGitRepository?.isRepository || !github?.isSignedIn?.();
+      if (localGitMode) {
+        renderShell();
+        showStatus('Checking the selected folder for a Git repository…');
+      }
       try {
         localGitRepository = await detectLocalRepository();
         const hasRemoteSubmodules = state.gitRemote?.provider === 'github' && (state.gitSubmodules || []).some(module => !module.removed);
@@ -398,7 +403,7 @@
             '<div class="source-control-local-bulk"><button type="button" data-local-stage-all ' + (unstaged.length ? '' : 'disabled') + '>Stage All</button><button type="button" data-local-unstage-all ' + (staged.length ? '' : 'disabled') + '>Unstage All</button></div>' +
             '<div class="source-control-local-group"><div class="source-control-local-group-title">Staged Changes <span>' + staged.length + '</span></div><div data-local-staged>' + (staged.length ? staged.map(change => renderChange(change, 'staged')).join('') : '<div class="source-control-clean">No staged changes</div>') + '</div></div>' +
             '<div class="source-control-local-group"><div class="source-control-local-group-title">Changes <span>' + unstaged.length + '</span></div><div data-local-unstaged>' + (unstaged.length ? unstaged.map(change => renderChange(change, 'unstaged')).join('') : '<div class="source-control-clean">No unstaged changes</div>') + '</div></div>' +
-            '<textarea data-local-commit-message placeholder="Commit message" rows="3"></textarea><button class="source-control-commit" data-local-commit ' + (commitDisabled ? 'disabled' : '') + '>' + commitLabel + '</button><div data-status class="source-control-status"></div></section>' +
+            '<textarea data-local-commit-message placeholder="Commit message" rows="3"></textarea><button class="source-control-commit" data-local-commit ' + (commitDisabled ? 'disabled' : '') + '>' + commitLabel + '</button></section>' +
             '<section class="source-control-section"><div class="source-control-section-title">History</div><div data-local-history class="source-control-history"><div class="source-control-loading">Loading commits…</div></div></section>'
           : '') +
         '<div data-status class="source-control-status"></div></div>';
