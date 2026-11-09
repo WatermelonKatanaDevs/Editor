@@ -1,6 +1,7 @@
 (function () {
   const FILE_SAVED_EVENT = 'editor-audio-file-saved';
   const AUDIO_EXTENSION = /\.(aac|aif|aiff|flac|m4a|mp3|oga|ogg|opus|wav|wave|webm)$/i;
+  let tagFormSequence = 0;
   const FIELDS = [
     ['title', 'Title', 'text'],
     ['artist', 'Artist', 'text'],
@@ -475,6 +476,9 @@
     layout.className = 'editor-audio-editor-layout';
     const form = document.createElement('form');
     form.className = 'editor-audio-fields';
+    // The Save button lives in the footer, outside this form. Associate it
+    // explicitly so clicking it (and implicit Enter submission) fires submit.
+    form.id = 'editor-audio-fields-' + (++tagFormSequence);
     const inputs = {};
 
     for (const [key, label, type] of FIELDS) {
@@ -726,6 +730,7 @@
       : 'Tags are saved as ID3v2.4 with UTF-8 text and embedded cover artwork.';
     const save = document.createElement('button');
     save.type = 'submit';
+    save.setAttribute('form', form.id);
     save.className = 'editor-audio-save-button';
     save.textContent = 'Save tags';
     footer.append(status, save);
