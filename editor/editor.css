@@ -935,3 +935,8 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .source-control-local-identity{display:block;width:100%;margin:7px 0 0;padding:7px 8px;text-align:left;background:#292929;border:1px solid #414141;border-radius:2px;color:#bbb;font:10px sans-serif;cursor:pointer;overflow-wrap:anywhere}.source-control-local-identity:hover{background:#343434;color:var(--editor-text)}.source-control-local-identity.missing{border-color:#75534a;color:#e0b2a7}.source-control-local-identity.assigned{color:#9abf9a}
 
 .source-control-commit-context-menu{position:fixed;z-index:100000;min-width:182px;padding:3px;background:var(--editor-surface,#242424);border:1px solid var(--editor-border,#444);border-radius:3px;box-shadow:0 4px 14px #0008}.source-control-commit-context-menu button{display:block;width:100%;padding:7px 9px;text-align:left;background:transparent;border:0;border-radius:2px;color:var(--editor-text,#ddd);font:11px sans-serif;cursor:pointer}.source-control-commit-context-menu button:hover{background:var(--editor-hover,#343434)}
+
+
+/* Artwork-derived light tint keeps every player label readable and cohesive. */
+.editor-audio-player,.editor-audio-player *{color:var(--audio-cover-primary-light,#aebeb3)!important}
+.editor-audio-player .editor-audio-play,.editor-audio-player .editor-audio-play *{color:var(--audio-cover-accent-ink,#102017)!important}
