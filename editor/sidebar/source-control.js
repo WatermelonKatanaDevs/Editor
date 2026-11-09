@@ -277,7 +277,7 @@
       if (typeof window.LocalGitService !== 'function') throw new Error('Local Git support has not loaded.');
       if (!localGitInstance || localGitFilesystem !== state.fs) {
         localGitFilesystem = state.fs;
-        localGitInstance = new window.LocalGitService(state.fs);
+        localGitInstance = new window.LocalGitService(state.fs, {onWrite:() => state.markDirty?.('.git')});
       }
       return localGitInstance;
     }
@@ -286,7 +286,7 @@
       return await getLocalGit().detect('/');
     }
     async function openLocalSourceControl() {
-      const preferLocal = !!state.fs?.isPersistentDirectory && !state.gitRemote?.provider;
+      const preferLocal = !!state.fs?.supportsLocalGit && !state.gitRemote?.provider;
       localGitMode = preferLocal || !!localGitRepository?.isRepository || !github?.isSignedIn?.();
       if (localGitMode) {
         renderShell();
@@ -360,6 +360,7 @@
     function renderLocalShell() {
       tree.classList.remove('activity-collapsed');
       const persistent = !!state.fs?.isPersistentDirectory;
+      const localGitAvailable = !!state.fs?.supportsLocalGit;
       const hasRepository = !!localGitRepository?.isRepository;
       const connectedRemote = state.gitRemote?.provider === 'github' ? state.gitRemote : null;
       const changes = localGitStatus?.changes || [];
@@ -396,10 +397,10 @@
         '<div class="source-control-head"><div class="activity-sidebar-title">Source Control</div><button data-refresh title="Refresh">↻</button></div>' +
         '<section class="source-control-section"><div class="source-control-section-title">Local Repository</div>' +
         (hasRepository
-          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span><span class="source-control-local-remote-status">' + esc(remoteFetchStatus) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Temporary workspace storage') + '</span>') + '</div><button type="button" class="source-control-local-identity' + (hasLocalIdentity ? ' assigned' : ' missing') + '" data-local-identity>' + (hasLocalIdentity ? 'Committing as ' + esc(localIdentity.name) + ' &lt;' + esc(localIdentity.email) + '&gt; · Edit in Profile' : 'Please assign local identity · Open Profile') + '</button><div class="source-control-local-branch"><select data-local-branch aria-label="Switch branch"></select><button type="button" data-local-branch-create' + (localGitRepository.head ? '' : ' disabled') + '>New Branch</button><button type="button" data-local-branch-delete' + (!localGitRepository.head ? ' disabled' : '') + '>Delete</button></div>'
-          : persistent
-            ? '<div class="source-control-local-hint">This folder is not being tracked by Git yet. Choose how to start source control.</div><div class="source-control-local-setup"><button type="button" class="source-control-create-repo" data-local-init>Initialize Local Git</button>' + (github?.isSignedIn?.() ? '<button type="button" class="source-control-create-repo" data-local-publish>Create GitHub Repository</button>' : '<button type="button" class="source-control-create-repo" data-local-github-signin>Sign in to create GitHub repository</button>') + '</div>'
-            : '<div class="source-control-local-hint">Local Git requires a folder opened directly from your computer. Open a folder to keep commits in its <code>.git</code> directory.</div>') +
+          ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span><span class="source-control-local-remote-status">' + esc(remoteFetchStatus) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Stored in project ZIP; export the project to keep its Git history') + '</span>') + '</div><button type="button" class="source-control-local-identity' + (hasLocalIdentity ? ' assigned' : ' missing') + '" data-local-identity>' + (hasLocalIdentity ? 'Committing as ' + esc(localIdentity.name) + ' &lt;' + esc(localIdentity.email) + '&gt; · Edit in Profile' : 'Please assign local identity · Open Profile') + '</button><div class="source-control-local-branch"><select data-local-branch aria-label="Switch branch"></select><button type="button" data-local-branch-create' + (localGitRepository.head ? '' : ' disabled') + '>New Branch</button><button type="button" data-local-branch-delete' + (!localGitRepository.head ? ' disabled' : '') + '>Delete</button></div>'
+          : localGitAvailable
+            ? '<div class="source-control-local-hint">' + (persistent ? 'This folder is not being tracked by Git yet. Choose how to start source control.' : 'This project can keep Git history inside its virtual filesystem. Export the project as a ZIP to carry that history with it.') + '</div><div class="source-control-local-setup"><button type="button" class="source-control-create-repo" data-local-init>Initialize Local Git</button>' + (github?.isSignedIn?.() ? '<button type="button" class="source-control-create-repo" data-local-publish>Create GitHub Repository</button>' : '<button type="button" class="source-control-create-repo" data-local-github-signin>Sign in to create GitHub repository</button>') + '</div>'
+            : '<div class="source-control-local-hint">Local Git is unavailable for this read-only project source.</div>') +
         '</section>' +
         (hasRepository && connectedRemote ? '<section class="source-control-section"><div class="source-control-local-remote-actions"><button type="button" class="source-control-local-fetch" data-local-fetch title="Download remote commits and objects without changing workspace files">Fetch</button><button type="button" class="source-control-local-pull" data-local-pull' + (localGitStatus?.clean ? '' : ' disabled') + ' title="Fetch and fast-forward the current branch; refuses divergent histories and local changes">Pull (FF only)</button><button type="button" class="source-control-local-pull" data-local-merge' + (localGitStatus?.clean && localGitRepository?.head ? '' : ' disabled') + ' title="Merge the fetched origin branch; conflicts abort without changing workspace files">Merge</button></div></section>' : '') +
         (!connectedRemote && hasRepository && github?.isSignedIn?.() ? '<section class="source-control-section"><button type="button" class="source-control-create-repo" data-local-publish>Publish to GitHub</button></section>' : '') +

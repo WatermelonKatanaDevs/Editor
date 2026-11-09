@@ -29,9 +29,10 @@
   }
 
   class GitFileSystemAdapter {
-    constructor(filesystem) {
+    constructor(filesystem, onWrite) {
       if (!filesystem || typeof filesystem.readFileSync !== 'function') throw new Error('Git requires an initialized editor filesystem.');
       this.filesystem = filesystem;
+      this.onWrite = typeof onWrite === 'function' ? onWrite : null;
       this.ignoreNodeModules = false;
       this.modifiedAt = new Map();
       this.statClock = Date.now();
@@ -91,6 +92,7 @@
         this.filesystem.writeFileSync(relative, new Uint8Array(bytes));
       }
       this.modifiedAt.set(normalized, Date.now());
+      this.onWrite?.(relative);
     }
 
     unlink(path) {
@@ -99,6 +101,7 @@
       if (this.filesystem.isDirectorySync(relative)) throw gitFsError('EISDIR', normalized);
       if (!this.filesystem.deleteFileSync(relative)) throw gitFsError('ENOENT', normalized);
       this.modifiedAt.delete(normalized);
+      this.onWrite?.(relative);
     }
 
     readlink(path) {
@@ -353,7 +356,7 @@
       if (!library || typeof library.init !== 'function') throw new Error('The isomorphic-git library has not loaded.');
       this.git = library;
       this.filesystem = filesystem;
-      this.adapter = new GitFileSystemAdapter(filesystem);
+      this.adapter = new GitFileSystemAdapter(filesystem, options.onWrite);
       this.fs = this.adapter.fs;
       this.rootfolder = String(options.rootfolder || '').replace(/^\/+|\/+$/g, '');
       this.queue = Promise.resolve();

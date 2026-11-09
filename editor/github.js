@@ -665,7 +665,7 @@
     }
 
     const changes = [];
-    for (const item of localPaths) {
+    await withConcurrency(localPaths, 8, async item => {
       const {path, fsPath} = item;
       const data = fs.readFileSync(fsPath, 'binary');
       if (data == null) throw new Error(`Workspace file could not be read while comparing: ${fsPath}`);
@@ -677,12 +677,12 @@
       // independent and only suppresses untracked local additions; a file already
       // tracked by Git remains comparable even if it later becomes ignored.
       const ignoreDecision = gitIgnoreDecision(path, rules);
-      if (!remote && ignoreDecision === true) continue;
+      if (!remote && ignoreDecision === true) return;
 
       if (!remote) changes.push({path, fsPath, type:'added', sha, data:bytes});
       else if (remote.sha !== sha) changes.push({path, fsPath, type:'modified', sha, data:bytes, mode:remote.mode || '100644'});
       remoteFiles.delete(path);
-    }
+    });
     for (const [path, entry] of remoteFiles) changes.push({path, type:'deleted', sha:null, mode:entry.mode || '100644'});
     const order = {modified:0, added:1, deleted:2};
     changes.sort((a,b) => (order[a.type] - order[b.type]) || a.path.localeCompare(b.path));

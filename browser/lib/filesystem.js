@@ -13,6 +13,10 @@
       return this.sourceMode === 1 && !!this.provider?.dirHandle;
     }
 
+    get supportsLocalGit() {
+      return typeof this.provider?.write === 'function' && typeof this.provider?.delete === 'function';
+    }
+
     _normalize(path) {
       const parts = String(path ?? '').replace(/\\/g,'/').split('/').filter(Boolean);
       const out = [];

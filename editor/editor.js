@@ -2187,7 +2187,7 @@ window.__editorInitPromise = (async function () {
   }
   async function initializeGitHubWorkspaceRepository(fs, remote) {
     if (!fs || remote?.provider !== 'github' || !remote.owner || !remote.repo || typeof window.LocalGitService !== 'function') return;
-    const service = new window.LocalGitService(fs);
+    const service = new window.LocalGitService(fs, {onWrite:() => state.markDirty?.('.git')});
     let detected = await service.detect('/');
     if (!detected.isRepository) {
       await service.init('/', remote.branch || 'main');
@@ -2195,7 +2195,13 @@ window.__editorInitPromise = (async function () {
       const login = String(account.login || 'github-user');
       await service.runSerialized(['config', 'user.name', String(account.name || login)], {cwd:'/'});
       await service.runSerialized(['config', 'user.email', String(account.email || (account.id ? account.id + '+' : '') + login + '@users.noreply.github.com')], {cwd:'/'});
-      await service.runSerialized(['add', '-A'], {cwd:'/'});
+      const previousIgnoreNodeModules = service.adapter.ignoreNodeModules;
+      service.adapter.ignoreNodeModules = service._ignoreNodeModules();
+      try {
+        await service.runSerialized(['add', '-A'], {cwd:'/'});
+      } finally {
+        service.adapter.ignoreNodeModules = previousIgnoreNodeModules;
+      }
       const status = await service.status('/');
       if (status.changes.some(change => change.staged)) {
         await service.runSerialized(['commit', '-m', 'GitHub workspace baseline'], {cwd:'/'});
