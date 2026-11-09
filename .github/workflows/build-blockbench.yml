@@ -1,0 +1,67 @@
+name: Build Blockbench web app
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "blockbench/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Editor and Blockbench
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: vendor/blockbench/package-lock.json
+
+      - name: Build Blockbench for the web
+        working-directory: vendor/blockbench
+        run: |
+          npm ci --ignore-scripts
+          npm run build-web
+
+      - name: Assemble standalone app
+        run: |
+          mkdir -p blockbench
+          rsync -a --delete \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='node_modules' \
+            --exclude='electron' \
+            --exclude='build.js' \
+            --exclude='build/' \
+            --exclude='scripts/' \
+            --exclude='types/' \
+            --exclude='package.json' \
+            --exclude='package-lock.json' \
+            --exclude='README.md' \
+            --exclude='CONTRIBUTING.md' \
+            --exclude='CODE_OF_CONDUCT.MD' \
+            --exclude='tsconfig.json' \
+            --exclude='typedoc.*' \
+            vendor/blockbench/ blockbench/
+
+      - name: Commit built web app
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add blockbench/
+          if git diff --cached --quiet; then
+            echo "Blockbench build is already up to date."
+          else
+            git commit -m "Build Blockbench web app"
+            git push
+          fi
