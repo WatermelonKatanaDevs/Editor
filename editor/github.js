@@ -413,6 +413,23 @@
       throw e;
     }
   }
+  async function getCommitDiff(owner, repo, commitSha) {
+    const commit = await publicRequest('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/commits/' + encodeURIComponent(commitSha));
+    const files = Array.isArray(commit?.files) ? commit.files : [];
+    if (!files.length) return 'Commit ' + commitSha + '\\nNo file patches were returned by GitHub.';
+    return files.map(file => {
+      const path = String(file.filename || 'unknown');
+      const previousPath = String(file.previous_filename || path);
+      const lines = ['diff --git a/' + previousPath + ' b/' + path];
+      if (file.status === 'added') lines.push('new file mode 100644');
+      else if (file.status === 'removed') lines.push('deleted file mode 100644');
+      else if (file.status === 'renamed') lines.push('rename from ' + previousPath, 'rename to ' + path);
+      if (file.patch) lines.push('--- ' + (file.status === 'added' ? '/dev/null' : 'a/' + previousPath), '+++ ' + (file.status === 'removed' ? '/dev/null' : 'b/' + path), file.patch);
+      else lines.push('Binary file changed or GitHub omitted this patch.');
+      return lines.join('\\n');
+    }).join('\\n\\n');
+  }
+
   async function getCommitState(owner, repo, commitSha) {
     const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
     const commit = await publicRequest(`${repoPath}/git/commits/${encodeURIComponent(commitSha)}`);
@@ -1030,6 +1047,7 @@
   root.getCommitState = getCommitState;
   root.readBlob = readBlob;
   root.listCommits = listCommits;
+  root.getCommitDiff = getCommitDiff;
   root.compareWorkingTree = compareWorkingTree;
   root.commitAndPush = commitAndPush;
   root.gitBlobSha = gitBlobSha;

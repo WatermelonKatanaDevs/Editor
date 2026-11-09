@@ -118,6 +118,7 @@
         if (this.filesystem.existsSync(relative)) throw gitFsError('ENOTDIR', normalized);
         throw gitFsError('ENOENT', normalized);
       }
+      if (typeof this.filesystem.readdirSync === 'function') return this.filesystem.readdirSync(relative).sort();
       const prefix = relative ? relative + '/' : '';
       const entries = new Set();
       for (const file of this.filesystem.listFilesSync()) {

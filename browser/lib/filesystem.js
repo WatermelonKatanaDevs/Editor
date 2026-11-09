@@ -5,13 +5,7 @@
       this.provider = provider;
       this.sourceMode = sourceMode;
       this.sync = syncEnabled;
-      this.directories = new Set(['']);
-      for (const path of this.provider.directories || []) this._addParentDirectories(path);
-      for (const rawPath of this.provider.cache?.keys?.() || []) {
-        const path = this._normalize(rawPath);
-        const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-        if (parent) this._addParentDirectories(parent);
-      }
+      this._rebuildDirectoryIndex();
       this.provider.directories = this.directories;
     }
 
@@ -30,13 +24,41 @@
       return out.join('/');
     }
 
+    _rebuildDirectoryIndex() {
+      this.directories = new Set(['']);
+      this.children = new Map([['', new Set()]]);
+      for (const path of this.provider.directories || []) this._addParentDirectories(path);
+      for (const rawPath of this.provider.cache?.keys?.() || []) {
+        const path = this._normalize(rawPath);
+        const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+        if (parent) this._addParentDirectories(parent);
+        const name = parent ? path.slice(parent.length + 1) : path;
+        if (name) this._addDirectoryChild(parent, name);
+      }
+    }
+
+    _addDirectoryChild(parent, name) {
+      let children = this.children.get(parent);
+      if (!children) this.children.set(parent, children = new Set());
+      children.add(name);
+    }
+
     _addParentDirectories(path) {
       const parts = this._normalize(path).split('/').filter(Boolean);
       let curr = '';
       for (const part of parts) {
+        const parent = curr;
         curr = curr ? curr + '/' + part : part;
         this.directories.add(curr);
+        this._addDirectoryChild(parent, part);
+        if (!this.children.has(curr)) this.children.set(curr, new Set());
       }
+    }
+
+    readdirSync(path) {
+      const normalized = this._normalize(path);
+      if (!this.directories.has(normalized)) return null;
+      return Array.from(this.children.get(normalized) || []);
     }
 
     static async empty(options = { sync: false }) {
@@ -95,7 +117,9 @@
 
     writeFileSync(path, content) {
       path = this._normalize(path);
-      this._addParentDirectories(path.includes('/') ? path.slice(0,path.lastIndexOf('/')) : '');
+      const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+      this._addParentDirectories(parent);
+      this._addDirectoryChild(parent, parent ? path.slice(parent.length + 1) : path);
       let binary = content;
       if (typeof content === 'string') binary = new TextEncoder().encode(content);
       this.provider.write(path, binary, content);
@@ -110,7 +134,13 @@
 
     deleteFileSync(path) {
       path = this._normalize(path);
-      return this.provider.delete(path);
+      const deleted = this.provider.delete(path);
+      if (deleted) {
+        const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+        const name = parent ? path.slice(parent.length + 1) : path;
+        this.children.get(parent)?.delete(name);
+      }
+      return deleted;
     }
 
     moveSync(source, destination) {
@@ -132,6 +162,7 @@
         }
         for (const path of files) this.deleteFileSync(path);
         for (const path of dirs.sort((a,b) => b.length - a.length)) this.directories.delete(path);
+        this._rebuildDirectoryIndex();
         this.provider.directories = this.directories;
         this.provider.removeDirectory?.(source);
       } else {
@@ -153,8 +184,15 @@
         if (file === path || file.startsWith(prefix)) { this.provider.delete(file); changed = true; }
       }
       for (const dir of [...this.directories]) {
-        if (dir === path || dir.startsWith(prefix)) { this.directories.delete(dir); changed = true; }
+        if (dir === path || dir.startsWith(prefix)) {
+          this.directories.delete(dir);
+          this.children.delete(dir);
+          changed = true;
+        }
       }
+      const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+      const name = parent ? path.slice(parent.length + 1) : path;
+      this.children.get(parent)?.delete(name);
       this.provider.directories = this.directories;
       this.provider.removeDirectory?.(path);
       return changed;
@@ -217,13 +255,7 @@
       await provider.init();
       this.provider = provider;
       this.sourceMode = 2;
-      this.directories = new Set(['']);
-      for (const path of provider.directories || []) this._addParentDirectories(path);
-      for (const rawPath of provider.cache.keys()) {
-        const path = this._normalize(rawPath);
-        const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-        if (parent) this._addParentDirectories(parent);
-      }
+      this._rebuildDirectoryIndex();
       this.provider.directories = this.directories;
       return true;
     }
