@@ -158,7 +158,7 @@ function rewriteIsolatedHtml(source, target) {
   }
 
   // Inline scripts and JSON configuration often contain root-relative asset paths.
-  output = output.replace(/(["'])((?:https?:\/\/[^"'\s<>]+)|\/(?!\/)[^"'\s<>]*)\1/g,
+  output = output.replace(/(["'])((?:https?:\/\/[^"'\s<>]+)|\/(?!\/)[^"'\s<>]+)\1/g,
     (match, quote, value) => quote + rewriteIsolatedUrl(value, target) + quote);
   return output;
 }
@@ -172,7 +172,7 @@ function rewriteIsolatedCss(source, target) {
 }
 
 function rewriteIsolatedScript(source, target) {
-  return source.replace(/(["'])((?:https?:\/\/[^"'\s<>]+)|\/(?!\/)[^"'\s<>]*)\1/g,
+  return source.replace(/(["'])((?:https?:\/\/[^"'\s<>]+)|\/(?!\/)[^"'\s<>]+)\1/g,
     (match, quote, value) => quote + rewriteIsolatedUrl(value, target) + quote);
 }
 
