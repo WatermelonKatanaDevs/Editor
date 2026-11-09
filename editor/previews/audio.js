@@ -730,6 +730,22 @@
     save.textContent = 'Save tags';
     footer.append(status, save);
 
+    const refreshFromFile = event => {
+      if (event?.detail?.path !== ctx.file.path || event?.detail?.source === 'audio-tags') return;
+      try {
+        parsed = window.EditorAudioTags.read(ctx.readBinary(), format);
+        for (const [key] of FIELDS) inputs[key].value = parsed.tags?.[key] || '';
+        cover = parsed.picture ? { ...parsed.picture, data: new Uint8Array(parsed.picture.data) } : null;
+        replaceCover = false;
+        removeCover.disabled = !cover;
+        renderCover();
+        status.textContent = 'Reloaded saved tags from ' + ctx.file.name;
+      } catch (error) {
+        status.textContent = error?.message || 'Could not reload saved audio tags.';
+      }
+    };
+    window.addEventListener(FILE_SAVED_EVENT, refreshFromFile);
+
     form.addEventListener('submit', event => {
       event.preventDefault();
       if (save.disabled) return;
@@ -749,7 +765,7 @@
         ctx.markDirty(ctx.file.path);
         parsed = window.EditorAudioTags.read(updated, format);
         replaceCover = false;
-        window.dispatchEvent(new CustomEvent(FILE_SAVED_EVENT, { detail: { path: ctx.file.path } }));
+        window.dispatchEvent(new CustomEvent(FILE_SAVED_EVENT, { detail: { path: ctx.file.path, source: 'audio-tags' } }));
         status.textContent = 'Saved into ' + ctx.file.name;
         save.textContent = 'Saved';
       } catch (error) {
@@ -764,6 +780,7 @@
     ctx.host.appendChild(root);
     renderCover();
     ctx.addCleanup(() => {
+      window.removeEventListener(FILE_SAVED_EVENT, refreshFromFile);
       if (coverObjectURL) URL.revokeObjectURL(coverObjectURL);
     });
   }
