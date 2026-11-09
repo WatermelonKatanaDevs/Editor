@@ -13,7 +13,7 @@
     go: 'text/x-go', kt: 'text/x-kotlin', kts: 'text/x-kotlin', swift: 'text/x-swift',
     dart: 'text/x-dart', lua: 'text/x-lua', pl: 'text/x-perl', pm: 'text/x-perl',
     r: 'text/x-r', scala: 'text/x-scala', xhtml: 'application/xhtml+xml', xml: 'application/xml', yml: 'text/yaml',
-    sh: 'text/x-shellscript', bash: 'text/x-shellscript', coffee: 'text/x-coffeescript',
+    sh: 'text/x-shellscript', bash: 'text/x-shellscript', nix: 'text/x-nix', coffee: 'text/x-coffeescript',
     patch: 'text/x-diff', bnf: 'text/x-bnf',
     bin: 'application/octet-stream', node: 'application/octet-stream', lock: 'text/plain',
     png: 'image/png', apng: 'image/apng', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',

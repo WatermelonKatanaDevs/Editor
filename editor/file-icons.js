@@ -79,6 +79,7 @@
       'yml': 'text/yaml',
       'sh': 'text/x-shellscript',
       'bash': 'text/x-shellscript',
+      'nix': 'text/x-nix',
       'coffee': 'text/x-coffeescript',
       'patch': 'text/x-diff',
       'bnf': 'text/x-bnf',
@@ -119,6 +120,7 @@
     if (ext === 'cc') return badgeIcon('C++', '#1769aa', '#ffffff', 13);
     if (ext === 'gyp' || ext === 'gypi') return badgeIcon('GYP', '#e68a32', '#ffffff', 12);
     if (ext === 'yml') return badgeIcon('YAML', '#cb3434', '#ffffff', 11);
+    if (ext === 'nix') return badgeIcon('NIX', '#5277c3', '#ffffff', 12);
     if (ext === 'sh' || ext === 'bash') return badgeIcon('>_', '#263b2d', '#a8e6b2', 13);
     const deviconByExtension = {
       py:'python',pyw:'python',java:'java',c:'c',h:'c',cpp:'cpp',cc:'cpp',cxx:'cpp',hpp:'cpp',hxx:'cpp',
