@@ -6,12 +6,16 @@ on:
       - ".github/workflows/build-standalone-apps.yml"
       - ".github/workflows/build-photocraft.yml"
       - ".gitmodules"
-      - "editor/previews/vendor/opendaw-src"
+      # openDAW is paused for now; retain the source/build files for easy re-enabling.
+      # - "editor/previews/vendor/opendaw-src"
       - "editor/previews/vendor/photocraft-src"
-      - "editor/previews/opendaw-bridge.js"
+      - "editor/previews/vendor/soundcraft-src"
+      # - "editor/previews/opendaw-bridge.js"
       - "editor/previews/photocraft-bridge.js"
-      - "scripts/build-opendaw.mjs"
+      - "editor/previews/soundcraft-bridge.js"
+      # - "scripts/build-opendaw.mjs"
       - "scripts/build-photocraft.mjs"
+      - "scripts/build-soundcraft.mjs"
   workflow_dispatch:
 permissions:
   contents: write
@@ -30,33 +34,39 @@ jobs:
           submodules: false
           fetch-depth: 0
       - name: Initialize only the application build sources
-        run: git submodule update --init --recursive -- editor/previews/vendor/opendaw-src editor/previews/vendor/photocraft-src
+        # openDAW intentionally omitted while testing SoundCraft.
+        run: git submodule update --init --recursive -- editor/previews/vendor/photocraft-src editor/previews/vendor/soundcraft-src
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Build openDAW standalone app
-        run: node scripts/build-opendaw.mjs
+      # - name: Build openDAW standalone app
+      #   run: node scripts/build-opendaw.mjs
       - name: Build PhotoCraft standalone app
         run: node scripts/build-photocraft.mjs
+      - name: Build SoundCraft standalone app
+        run: node scripts/build-soundcraft.mjs
       - name: Verify standalone HTML entry points
         shell: bash
         run: |
           set -euo pipefail
-          test -s editor/previews/vendor/opendaw/index.html
+          # openDAW is paused; leave its existing output untouched.
+          # test -s editor/previews/vendor/opendaw/index.html
           test -s editor/previews/vendor/photocraft/index.html
-          grep -q '<base href="./">' editor/previews/vendor/opendaw/index.html
-          grep -q 'opendaw-bridge.js' editor/previews/vendor/opendaw/index.html
+          # grep -q '<base href="./">' editor/previews/vendor/opendaw/index.html
+          # grep -q 'opendaw-bridge.js' editor/previews/vendor/opendaw/index.html
           grep -q 'wk-photocraft-bridge.js' editor/previews/vendor/photocraft/index.html
-          echo "Both standalone entry points exist and use the optional bridges."
+          test -s editor/previews/vendor/soundcraft/index.html
+          grep -q 'wk-soundcraft-bridge.js' editor/previews/vendor/soundcraft/index.html
+          echo "PhotoCraft and SoundCraft standalone entry points exist and use the optional bridges."
       - name: Commit built applications for GitHub Pages
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f editor/previews/vendor/opendaw editor/previews/vendor/photocraft
+          git add -f editor/previews/vendor/photocraft editor/previews/vendor/soundcraft
           if git diff --cached --quiet; then
             echo "Standalone application output is already current."
             exit 0
           fi
-          git commit -m "Build standalone openDAW and PhotoCraft apps"
+          git commit -m "Build standalone PhotoCraft and SoundCraft apps"
           git push

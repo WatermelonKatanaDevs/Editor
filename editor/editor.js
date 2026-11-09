@@ -3883,8 +3883,10 @@ window.__editorInitPromise = (async function () {
     await window.__workersConfigReady?.catch?.(() => {});
     await window.GitHubService?.init?.();
     bindUI();
-    addWelcomeBuiltin('opendaw', 'openDAW Studio');
+    // openDAW is temporarily paused; keep its registration here for easy re-enabling.
+    // addWelcomeBuiltin('opendaw', 'openDAW Studio');
     addWelcomeBuiltin('photocraft', 'PhotoCraft Image Editor');
+    addWelcomeBuiltin('soundcraft', 'SoundCraft DAW');
     if (!state._lifecycleBound) {
       state._lifecycleBound = true;
       window.addEventListener('beforeunload', event => {

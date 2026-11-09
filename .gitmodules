@@ -21,3 +21,8 @@
 	path = editor/previews/vendor/piskel-src
 	url = https://github.com/piskelapp/piskel-embed.git
 	branch = master
+
+[submodule "soundcraft"]
+	path = editor/previews/vendor/soundcraft-src
+	url = https://github.com/storytold/soundcraft.git
+	branch = main
