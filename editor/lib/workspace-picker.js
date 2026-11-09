@@ -165,7 +165,10 @@
     function openNextDialog() {
       if (activeDialog || !dialogQueue.length) return;
       const next = dialogQueue.shift();
-      showDialogNow(next.options, next.owner).then(next.resolve, next.reject);
+      showDialogNow(next.options, next.owner).then(
+        value => { next.resolve(value); openNextDialog(); },
+        error => { next.reject(error); openNextDialog(); }
+      );
     }
 
     function showDialogNow(options, dialogOwner) {
