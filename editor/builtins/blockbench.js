@@ -59,29 +59,55 @@
       }
     };
 
+    let activeFrame = null;
+    let bridgeReadyHandler = null;
+
     function renderBlockbench(group) {
       // Builtin instances are cached by EditorApp. Re-register the bridge each
       // time the user opens a fresh Blockbench tab after closing the previous one.
       window.__WKBlockbenchBridges[bridgeId] = bridge;
       const frame = document.createElement('iframe');
+      activeFrame = frame;
       frame.className = 'builtin-blockbench-frame';
       frame.title = 'Blockbench';
       const url = new URL('editor/previews/vendor/blockbench/index.html', location.href);
       url.searchParams.set('wk_editor_bridge', bridgeId);
-      // Load the Editor-owned adapter after Blockbench's untouched vendor page
-      // has initialized. The adapter replaces Blockbench APIs at runtime.
+      const bridgeUrl = new URL('editor/previews/blockbench-bridge.js', location.href);
+      bridgeUrl.searchParams.set('wk_editor_bridge', bridgeId);
+      const injectedDocuments = new WeakSet();
+
+      // Ignore the iframe's initial about:blank document. Keep listening for
+      // load events and inject only into the actual Blockbench page.
       frame.addEventListener('load', () => {
         try {
-          const script = frame.contentDocument.createElement('script');
-          const bridgeUrl = new URL('editor/previews/blockbench-bridge.js', location.href);
-          bridgeUrl.searchParams.set('wk_editor_bridge', bridgeId);
+          const childWindow = frame.contentWindow;
+          const childDocument = frame.contentDocument;
+          if (!childWindow || !childDocument?.head) return;
+          if (childWindow.location.origin !== location.origin || childWindow.location.pathname !== url.pathname) return;
+          if (injectedDocuments.has(childDocument)) return;
+          injectedDocuments.add(childDocument);
+
+          const script = childDocument.createElement('script');
           script.src = bridgeUrl.href;
-          script.onerror = () => console.error('Could not load the Blockbench workspace bridge.');
-          frame.contentDocument.head.appendChild(script);
+          script.onload = () => console.info('Blockbench workspace bridge script loaded.');
+          script.onerror = () => console.error('Could not load the Blockbench workspace bridge:', bridgeUrl.href);
+          childDocument.head.appendChild(script);
         } catch (error) {
           console.error('Could not inject the Blockbench workspace bridge:', error);
         }
-      }, {once: true});
+      });
+
+      bridgeReadyHandler = event => {
+        if (
+          event.source !== frame.contentWindow ||
+          event.origin !== location.origin ||
+          event.data?.type !== 'wk-blockbench-bridge-ready' ||
+          event.data?.bridgeId !== bridgeId
+        ) return;
+        console.info('Blockbench workspace integration connected.');
+      };
+      window.addEventListener('message', bridgeReadyHandler);
+
       frame.allow = 'clipboard-read; clipboard-write';
       frame.src = url.href;
       frame.referrerPolicy = 'same-origin';
@@ -93,8 +119,11 @@
     function dispose(tab) {
       const view = tab?._viewElement;
       const frame = view?.tagName === 'IFRAME' ? view : view?.querySelector?.('iframe');
+      if (bridgeReadyHandler) window.removeEventListener('message', bridgeReadyHandler);
+      bridgeReadyHandler = null;
       try { frame?.removeAttribute('src'); } catch (_) {}
       try { frame?.remove(); } catch (_) {}
+      if (activeFrame === frame) activeFrame = null;
       try { delete window.__WKBlockbenchBridges?.[bridgeId]; } catch (_) {}
     }
 
