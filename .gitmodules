@@ -2,3 +2,7 @@
 	path = editor/previews/vendor/audiomass
 	url = https://github.com/pkalogiros/AudioMass.git
 	branch = production
+[submodule "opendaw"]
+	path = editor/previews/vendor/opendaw-src
+	url = https://github.com/andremichelle/openDAW.git
+	branch = main

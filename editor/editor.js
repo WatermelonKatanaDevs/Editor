@@ -3939,6 +3939,7 @@ window.__editorInitPromise = (async function () {
     await window.__workersConfigReady?.catch?.(() => {});
     await window.GitHubService?.init?.();
     bindUI();
+    addWelcomeBuiltin('opendaw', 'openDAW Studio');
     if (!state._lifecycleBound) {
       state._lifecycleBound = true;
       window.addEventListener('beforeunload', event => {
