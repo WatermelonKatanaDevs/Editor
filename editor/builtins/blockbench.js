@@ -59,9 +59,10 @@
       }
     };
 
-    window.__WKBlockbenchBridges[bridgeId] = bridge;
-
     function renderBlockbench(group) {
+      // Builtin instances are cached by EditorApp. Re-register the bridge each
+      // time the user opens a fresh Blockbench tab after closing the previous one.
+      window.__WKBlockbenchBridges[bridgeId] = bridge;
       const frame = document.createElement('iframe');
       frame.className = 'builtin-blockbench-frame';
       frame.title = 'Blockbench';
@@ -76,7 +77,8 @@
     }
 
     function dispose(tab) {
-      const frame = tab?._viewElement?.querySelector?.('iframe');
+      const view = tab?._viewElement;
+      const frame = view?.tagName === 'IFRAME' ? view : view?.querySelector?.('iframe');
       try { frame?.removeAttribute('src'); } catch (_) {}
       try { frame?.remove(); } catch (_) {}
       try { delete window.__WKBlockbenchBridges?.[bridgeId]; } catch (_) {}
