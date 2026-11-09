@@ -1,0 +1,4 @@
+[submodule "audiomass"]
+	path = editor/previews/vendor/audiomass
+	url = https://github.com/pkalogiros/AudioMass.git
+	branch = production
