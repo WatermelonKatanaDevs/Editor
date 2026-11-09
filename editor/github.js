@@ -657,7 +657,7 @@
       if (!path || ignoredPath(path) || inExcludedPath(path) || (ignoreNodeModules && isNodeModulesPath(path))) return;
       localPaths.push({fsPath, path});
     };
-    if (typeof fs.forEachFile === 'function') await fs.forEachFile(addLocalPath, {ignoreNodeModules});
+    if (typeof fs.forEachFile === 'function') await fs.forEachFile(addLocalPath, {ignoreNodeModules, ignoreGitMetadata:true});
     else if (typeof fs.forEachFileSync === 'function') fs.forEachFileSync(addLocalPath, {ignoreNodeModules});
     else for (const rawPath of fs.listFilesSync()) addLocalPath(rawPath);
     const remoteFiles = new Map();

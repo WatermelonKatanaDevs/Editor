@@ -34,8 +34,8 @@
       this.filesystem = filesystem;
       this.onWrite = typeof onWrite === 'function' ? onWrite : null;
       this.ignoreNodeModules = false;
-      this.modifiedAt = new Map();
-      this.statClock = Date.now();
+      this.modifiedAt = filesystem.modifiedAt || new Map();
+      this.statClock = Number(filesystem.statClock) || Date.now();
       const promises = {
         readFile: async (path, options) => this.readFile(path, options),
         writeFile: async (path, data, options) => this.writeFile(path, data, options),
@@ -91,7 +91,6 @@
         else bytes = new TextEncoder().encode(String(data ?? ''));
         this.filesystem.writeFileSync(relative, new Uint8Array(bytes));
       }
-      this.modifiedAt.set(normalized, Date.now());
       this.onWrite?.(relative);
     }
 
@@ -100,7 +99,6 @@
       const relative = this.relative(normalized);
       if (this.filesystem.isDirectorySync(relative)) throw gitFsError('EISDIR', normalized);
       if (!this.filesystem.deleteFileSync(relative)) throw gitFsError('ENOENT', normalized);
-      this.modifiedAt.delete(normalized);
       this.onWrite?.(relative);
     }
 
@@ -177,8 +175,18 @@
       // FileSystem caches bytes but does not retain browser File.lastModified values.
       // Use a monotonic timestamp so isomorphic-git never trusts a stale stat cache
       // after the editor changes a same-sized file outside this adapter.
-      const modified = new Date(Math.max(Date.now(), ++this.statClock, this.modifiedAt.get(normalized) || 0));
-      this.statClock = modified.getTime();
+      const mtime = typeof this.filesystem.getModifiedTime === 'function'
+        ? this.filesystem.getModifiedTime(relative)
+        : (() => {
+          let value = this.modifiedAt.get(normalized);
+          if (value == null) {
+            value = Math.max(Date.now(), this.statClock + 1);
+            this.statClock = value;
+            this.modifiedAt.set(normalized, value);
+          }
+          return value;
+        })();
+      const modified = new Date(mtime);
       return {
         dev: 0,
         ino: 0,
@@ -360,6 +368,7 @@
       this.fs = this.adapter.fs;
       this.rootfolder = String(options.rootfolder || '').replace(/^\/+|\/+$/g, '');
       this.queue = Promise.resolve();
+      this.statusCache = null;
     }
 
     resolvePath(path = '/') {
@@ -408,8 +417,15 @@
 
     async status(cwd = '/') {
       const repository = await this._repository(cwd);
+      const ignoreNodeModules = this._ignoreNodeModules();
+      const revision = Number(this.filesystem.revision) || 0;
+      const cached = this.statusCache;
+      if (cached && cached.cwd === cwd && cached.root === repository.root && cached.revision === revision && cached.ignoreNodeModules === ignoreNodeModules) {
+        return {...cached.value, changes:cached.value.changes.map(change => ({...change}))};
+      }
+
       const previousIgnoreNodeModules = this.adapter.ignoreNodeModules;
-      this.adapter.ignoreNodeModules = this._ignoreNodeModules();
+      this.adapter.ignoreNodeModules = ignoreNodeModules;
       let matrix;
       try {
         matrix = await this.git.statusMatrix({fs:this.fs, dir:repository.dir});
@@ -429,7 +445,15 @@
       let head = null;
       try { branch = await this.git.currentBranch({fs:this.fs, dir:repository.dir, fullname:false}); } catch (_) {}
       try { head = await this.git.resolveRef({fs:this.fs, dir:repository.dir, ref:'HEAD'}); } catch (_) {}
-      return {root:repository.root, branch, head, changes, clean:changes.length === 0};
+      const value = {root:repository.root, branch, head, changes, clean:changes.length === 0};
+      this.statusCache = {
+        cwd,
+        root:repository.root,
+        revision:Number(this.filesystem.revision) || 0,
+        ignoreNodeModules,
+        value
+      };
+      return {...value, changes:changes.map(change => ({...change}))};
     }
 
 

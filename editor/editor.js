@@ -2324,7 +2324,7 @@ window.__editorInitPromise = (async function () {
     } else if (!openFirst) {
       applyProjectLayout(false);
     } else if (!restoreWorkspaceLayout(loadWorkspaceLayout())) {
-      const first = fs.listFilesSync().find(p => isText(p) && !p.endsWith('.piskel')) || fs.listFilesSync()[0];
+      const first = fs.findFileSync?.(p => isText(p) && !p.endsWith('.piskel')) || fs.findFileSync?.(() => true) || fs.listFilesSync()[0];
       const type = state.runConfig.config.serverType === 'node' ? 'node' : 'static';
       if (type === 'static' && fs.existsSync('index.html')) {
         setupDefaultStaticLayout();
@@ -2593,14 +2593,22 @@ window.__editorInitPromise = (async function () {
     const topLevels = new Set();
     let hasRootFile = false;
     let entryCount = 0;
-    zip.forEach((relativePath, entry) => {
+    let scanned = 0;
+    const entries = zip.files || {};
+    for (const relativePath in entries) {
+      if (!Object.prototype.hasOwnProperty.call(entries, relativePath)) continue;
+      const entry = entries[relativePath];
       const path = String(relativePath || '').replace(/^\/+|\/+$/g, '');
-      if (!path) return;
+      if (!path) continue;
       const parts = path.split('/');
-      if (parts.length === 1) { if (!entry.dir) hasRootFile = true; return; }
-      topLevels.add(parts[0]);
-      entryCount++;
-    });
+      if (parts.length === 1) {
+        if (!entry.dir) hasRootFile = true;
+      } else {
+        topLevels.add(parts[0]);
+        entryCount++;
+      }
+      if (++scanned % 1024 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+    }
     // Keep compressed entries intact and strip a wrapper folder logically in ZipProvider.
     if (!hasRootFile && topLevels.size === 1 && entryCount) zip.__wkRootPrefix = [...topLevels][0];
     updateRemoteLoadProgress('Project archive ready…', 88, formatProgressBytes(file?.size || 0));

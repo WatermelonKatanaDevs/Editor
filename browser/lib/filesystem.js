@@ -5,8 +5,12 @@
       this.provider = provider;
       this.sourceMode = sourceMode;
       this.sync = syncEnabled;
-      this._rebuildDirectoryIndex();
-      this.provider.directories = this.directories;
+      this.modifiedAt = provider.modifiedAt || new Map();
+      this.provider.modifiedAt = this.modifiedAt;
+      this.statClock = Number(provider.statClock) || Date.now();
+      this.revision = 0;
+      this.directories = new Set(['']);
+      this.children = new Map([['', new Set()]]);
     }
 
     get isPersistentDirectory() {
@@ -28,17 +32,25 @@
       return out.join('/');
     }
 
-    _rebuildDirectoryIndex() {
+    async _rebuildDirectoryIndex() {
       this.directories = new Set(['']);
       this.children = new Map([['', new Set()]]);
-      for (const path of this.provider.directories || []) this._addParentDirectories(path);
+      let processed = 0;
+      for (const path of this.provider.directories || []) {
+        this._addParentDirectories(path);
+        if (++processed % 1024 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+      }
       for (const rawPath of this.provider.cache?.keys?.() || []) {
         const path = this._normalize(rawPath);
-        const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-        if (parent) this._addParentDirectories(parent);
-        const name = parent ? path.slice(parent.length + 1) : path;
+        if (!path) continue;
+        const separator = path.lastIndexOf('/');
+        const parent = separator >= 0 ? path.slice(0, separator) : '';
+        if (parent && !this.directories.has(parent)) this._addParentDirectories(parent);
+        const name = separator >= 0 ? path.slice(separator + 1) : path;
         if (name) this._addDirectoryChild(parent, name);
+        if (++processed % 1024 === 0) await new Promise(resolve => setTimeout(resolve, 0));
       }
+      this.provider.directories = this.directories;
     }
 
     _addDirectoryChild(parent, name) {
@@ -59,6 +71,26 @@
       }
     }
 
+    _touchModifiedTime(path) {
+      path = this._normalize(path);
+      this.statClock = Math.max(Date.now(), this.statClock + 1);
+      this.provider.statClock = this.statClock;
+      this.modifiedAt.set(path, this.statClock);
+      return this.statClock;
+    }
+
+    getModifiedTime(path) {
+      path = this._normalize(path);
+      if (!this.modifiedAt.has(path)) this._touchModifiedTime(path);
+      return this.modifiedAt.get(path);
+    }
+
+    findFileSync(predicate) {
+      if (typeof predicate !== 'function') return null;
+      for (const path of this.provider.cache.keys()) if (predicate(path)) return path;
+      return null;
+    }
+
     readdirSync(path) {
       const normalized = this._normalize(path);
       if (!this.directories.has(normalized)) return null;
@@ -69,7 +101,9 @@
       if (typeof JSZip === 'undefined') throw new Error('JSZip library required.');
       const provider = new ZipProvider(new JSZip(), false);
       await provider.init();
-      return new this(provider, 4, options.sync !== false);
+      const filesystem = new this(provider, 4, options.sync !== false);
+      await filesystem._rebuildDirectoryIndex();
+      return filesystem;
     }
 
     static async create(source, options = { sync: true }) {
@@ -109,7 +143,9 @@
       }
 
       await provider.init({ignoreNodeModules:options.ignoreNodeModules === true});
-      return new this(provider, mode, sync);
+      const filesystem = new this(provider, mode, sync);
+      await filesystem._rebuildDirectoryIndex();
+      return filesystem;
     }
 
     readFileSync(path, encoding = 'binary') {
@@ -127,6 +163,8 @@
       let binary = content;
       if (typeof content === 'string') binary = new TextEncoder().encode(content);
       this.provider.write(path, binary, content);
+      this._touchModifiedTime(path);
+      this.revision++;
     }
 
     mkdirSync(path) {
@@ -134,12 +172,15 @@
       if (!path) return;
       this._addParentDirectories(path);
       this.provider.mkdir?.(path);
+      this.revision++;
     }
 
     deleteFileSync(path) {
       path = this._normalize(path);
       const deleted = this.provider.delete(path);
       if (deleted) {
+        this.modifiedAt.delete(path);
+        this.revision++;
         const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
         const name = parent ? path.slice(parent.length + 1) : path;
         this.children.get(parent)?.delete(name);
@@ -185,15 +226,21 @@
       let changed = false;
       const prefix = path + '/';
       for (const file of [...this.provider.cache.keys()]) {
-        if (file === path || file.startsWith(prefix)) { this.provider.delete(file); changed = true; }
+        if (file === path || file.startsWith(prefix)) {
+          this.provider.delete(file);
+          this.modifiedAt.delete(file);
+          changed = true;
+        }
       }
       for (const dir of [...this.directories]) {
         if (dir === path || dir.startsWith(prefix)) {
           this.directories.delete(dir);
           this.children.delete(dir);
+          this.modifiedAt.delete(dir);
           changed = true;
         }
       }
+      if (changed) this.revision++;
       const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
       const name = parent ? path.slice(parent.length + 1) : path;
       this.children.get(parent)?.delete(name);
@@ -228,23 +275,40 @@
       }
     }
 
+    _shouldSkipDirectory(path, options = {}) {
+      return (options.ignoreNodeModules && path.split('/').includes('node_modules')) ||
+        (options.ignoreGitMetadata && (path === '.git' || path.startsWith('.git/')));
+    }
+
     forEachFileSync(callback, options = {}) {
-      if (!options.ignoreNodeModules) {
+      if (!options.ignoreNodeModules && !options.ignoreGitMetadata) {
         for (const path of this.provider.cache.keys()) callback(path);
         return;
       }
       this.forEachEntrySync((path, isDirectory) => {
         if (!isDirectory) callback(path);
-      }, {skipDirectory:path => path.split('/').includes('node_modules')});
+      }, {skipDirectory:path => this._shouldSkipDirectory(path, options)});
+    }
+
+    async forEachEntry(callback, options = {}) {
+      const stack = [''];
+      let visited = 0;
+      while (stack.length) {
+        const parent = stack.pop();
+        for (const name of this.children.get(parent) || []) {
+          const path = parent ? parent + '/' + name : name;
+          const isDirectory = this.directories.has(path);
+          callback(path, isDirectory);
+          if (isDirectory && !this._shouldSkipDirectory(path, options)) stack.push(path);
+          if (++visited % 512 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+        }
+      }
     }
 
     async forEachFile(callback, options = {}) {
-      const ignoreNodeModules = !!options.ignoreNodeModules;
-      let count = 0;
-      for (const path of this.provider.cache.keys()) {
-        if (!ignoreNodeModules || !path.split('/').includes('node_modules')) callback(path);
-        if (++count % 256 === 0) await new Promise(resolve => setTimeout(resolve, 0));
-      }
+      await this.forEachEntry((path, isDirectory) => {
+        if (!isDirectory) callback(path);
+      }, options);
     }
 
     listDirectoriesSync() {
@@ -306,15 +370,20 @@
     const files = [];
     const ignoreNodeModules = !!options.ignoreNodeModules;
     const stripPrefix = String(options.stripPrefix || '').replace(/^\/+|\/+$/g, '');
-    zip.forEach((relativePath, file) => {
+    let scanned = 0;
+    const entries = zip.files || {};
+    for (const relativePath in entries) {
+      if (!Object.prototype.hasOwnProperty.call(entries, relativePath)) continue;
+      const file = entries[relativePath];
       const clean = relativePath.replace(/\/$/,'');
-      if (ignoreNodeModules && clean.split('/').includes('node_modules')) return;
-      if (stripPrefix && (clean === stripPrefix || !clean.startsWith(stripPrefix + '/'))) return;
+      if (ignoreNodeModules && clean.split('/').includes('node_modules')) continue;
+      if (stripPrefix && (clean === stripPrefix || !clean.startsWith(stripPrefix + '/'))) continue;
       const path = stripPrefix ? clean.slice(stripPrefix.length + 1) : clean;
-      if (!path) return;
+      if (!path) continue;
       if (file.dir) directories.add(path);
       else files.push({path,file});
-    });
+      if (++scanned % 1024 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+    }
     let cursor = 0;
     let loaded = 0;
     const workers = Array.from({length:Math.min(8, files.length)}, async () => {
@@ -322,7 +391,7 @@
         const item = files[cursor++];
         cache.set(item.path, await item.file.async('uint8array'));
         loaded++;
-        if (loaded % 32 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+        if (loaded % 8 === 0) await new Promise(resolve => setTimeout(resolve, 0));
       }
     });
     await Promise.all(workers);
