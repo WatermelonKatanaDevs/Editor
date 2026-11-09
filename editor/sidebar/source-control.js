@@ -72,6 +72,12 @@
         return ops;
       };
       try {
+        if (data.ready && typeof data.ready.then === 'function') {
+          status.textContent = 'Loading diff…';
+          await data.ready;
+          if (disposed || !host.isConnected) return wrap;
+          if (data.loadError) throw new Error(data.loadError);
+        }
         let bytes = data.newBytes || new Uint8Array();
         let oldText = '';
         if (data.type === 'deleted') {
@@ -567,44 +573,71 @@
       }
     }
 
-    // Local file diffs use the same inline Monaco renderer as remote file diffs.
+    // Local file diffs open their workbench tab before any Git reads begin.
+    // This keeps a slow object lookup from making the Diff button appear inert.
     async function openLocalFileDiff(path) {
-      try {
-        const service = getLocalGit();
-        const change = localGitStatus?.changes.find(item => item.path === path);
-        if (!change) return;
-
-        // Compare the checked-out file directly with HEAD. This combines staged
-        // and unstaged edits into one coherent file comparison instead of
-        // displaying Git's unified-patch syntax in the editor.
-        const type = change.head === 0
-          ? 'added'
-          : change.workdir === 0
-            ? 'deleted'
-            : 'modified';
-        let beforeText = '';
-        if (change.head !== 0) {
-          const previous = await service.runSerialized(['show', 'HEAD:' + path], {cwd:'/'});
-          beforeText = String(previous.output || '');
-        }
-        let afterText = '';
-        if (type !== 'deleted') {
-          const bytes = service.adapter.readFile(service.resolvePath('/' + path));
-          afterText = new TextDecoder('utf-8', {fatal:false}).decode(bytes || new Uint8Array());
-        }
-        const tab = openDiffTab?.({
-          title:'Diff: ' + path.split('/').pop(),
-          diffData:{
-            path,
-            type,
-            localBeforeText:beforeText,
-            localAfterText:afterText
-          }
-        });
-        if (!tab) showStatus('Could not open the diff viewer.', true);
-      } catch (error) {
-        showStatus(error.message || String(error), true);
+      const change = localGitStatus?.changes?.find(item => item.path === path);
+      if (!change) {
+        showStatus('This file is no longer listed as changed. Refresh Source Control and try again.', true);
+        return;
       }
+
+      const type = change.head === 0
+        ? 'added'
+        : change.workdir === 0
+          ? 'deleted'
+          : 'modified';
+
+      const diffData = {
+        path,
+        type,
+        localBeforeText:'',
+        localAfterText:'',
+        loadError:'',
+        ready:null
+      };
+      let finishLoading;
+      diffData.ready = new Promise(resolve => { finishLoading = resolve; });
+
+      try {
+        const createDiffTab = typeof openDiffTab === 'function' ? openDiffTab : state.openDiffTab;
+        if (typeof createDiffTab !== 'function') {
+          throw new Error('The workbench diff-tab opener is unavailable.');
+        }
+        const tab = createDiffTab({
+          title:'Diff: ' + path.split('/').pop(),
+          diffData
+        });
+        if (!tab) throw new Error('The workbench did not create a diff tab.');
+      } catch (error) {
+        finishLoading();
+        console.error('[Source Control] Opening local diff tab', error);
+        showStatus(error?.message || String(error), true);
+        return;
+      }
+
+      // The tab now exists and its renderer is waiting on diffData.ready.
+      // Load HEAD and working-tree contents afterwards.
+      void (async () => {
+        try {
+          const service = getLocalGit();
+          if (change.head !== 0) {
+            const previous = await service.runSerialized(['show', 'HEAD:' + path], {cwd:'/'});
+            diffData.localBeforeText = String(previous?.output || '');
+          }
+          if (type !== 'deleted') {
+            const filePath = service.resolvePath('/' + path);
+            const bytes = await service.adapter.readFile(filePath);
+            if (bytes == null) throw new Error('The current workspace file could not be read: ' + path);
+            diffData.localAfterText = new TextDecoder('utf-8', {fatal:false}).decode(bytes);
+          }
+        } catch (error) {
+          diffData.loadError = error?.message || String(error);
+          console.error('[Source Control] Loading local file diff for ' + path, error);
+        } finally {
+          finishLoading();
+        }
+      })();
     }
 
     async function loadLocalHistory() {
