@@ -3884,6 +3884,7 @@ window.__editorInitPromise = (async function () {
     await window.GitHubService?.init?.();
     bindUI();
     addWelcomeBuiltin('opendaw', 'openDAW Studio');
+    addWelcomeBuiltin('photocraft', 'PhotoCraft Image Editor');
     if (!state._lifecycleBound) {
       state._lifecycleBound = true;
       window.addEventListener('beforeunload', event => {
