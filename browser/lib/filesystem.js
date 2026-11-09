@@ -210,6 +210,10 @@
       return Array.from(this.provider.cache.keys());
     }
 
+    forEachFileSync(callback) {
+      for (const path of this.provider.cache.keys()) callback(path);
+    }
+
     listDirectoriesSync() {
       return Array.from(this.directories).filter(Boolean);
     }

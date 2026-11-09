@@ -610,7 +610,7 @@
   }
 
   function isNodeModulesPath(path) {
-    return String(path || '').replace(/^\/+/, '').split('/').includes('node_modules');
+    return /(^|\/)node_modules(?:\/|$)/.test(String(path || '').replace(/^\/+/, ''));
   }
 
   function isNodeModulesIgnoredBySetting(fs) {
@@ -649,11 +649,16 @@
     // Keep both the repository-relative Git path and the actual workspace
     // path. For submodules pathPrefix is stripped for Git comparisons, but
     // filesystem reads must still use the prefixed workspace path.
-    const localPaths = fs.listFilesSync()
-      .map(rawPath => String(rawPath).replace(/^\/+/, ''))
-      .filter(fsPath => fsPath && (!prefix || fsPath.startsWith(prefix + '/')))
-      .map(fsPath => ({fsPath, path:prefix ? fsPath.slice(prefix.length + 1) : fsPath}))
-      .filter(item => item.path && !ignoredPath(item.path) && !inExcludedPath(item.path) && !(ignoreNodeModules && isNodeModulesPath(item.path)));
+    const localPaths = [];
+    const addLocalPath = rawPath => {
+      const fsPath = String(rawPath).replace(/^\/+/, '');
+      if (!fsPath || (prefix && !fsPath.startsWith(prefix + '/'))) return;
+      const path = prefix ? fsPath.slice(prefix.length + 1) : fsPath;
+      if (!path || ignoredPath(path) || inExcludedPath(path) || (ignoreNodeModules && isNodeModulesPath(path))) return;
+      localPaths.push({fsPath, path});
+    };
+    if (typeof fs.forEachFileSync === 'function') fs.forEachFileSync(addLocalPath);
+    else for (const rawPath of fs.listFilesSync()) addLocalPath(rawPath);
     const remoteFiles = new Map();
     for (const entry of remoteTree || []) {
       if (entry?.type === 'blob' && entry.path && !ignoredPath(entry.path) && !inExcludedPath(entry.path) && !(ignoreNodeModules && isNodeModulesPath(entry.path))) remoteFiles.set(entry.path, entry);
