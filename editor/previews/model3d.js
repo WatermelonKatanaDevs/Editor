@@ -1,6 +1,7 @@
 (function () {
   const THREE_VERSION = '0.186.0';
-  const CDN = 'https://cdn.jsdelivr.net/npm/three@' + THREE_VERSION;
+  const previewScriptURL = document.currentScript?.src || new URL('editor/previews/model3d.js', document.baseURI).href;
+  const CDN = new URL('./vendor/threejs/', previewScriptURL).href.replace(/\/$/, '');
   const EXTENSIONS = /\.(?:gltf|glb|fbx|obj|stl|ply|dae|3ds|3mf|amf|wrl|vrml|usd|usda|usdc|usdz|vtk|pcd|xyz|gcode|md2|bvh)$/i;
   const MIME = {
     gltf:'model/gltf+json',glb:'model/gltf-binary',fbx:'application/octet-stream',obj:'text/plain',
@@ -42,7 +43,7 @@
     map.textContent = JSON.stringify({imports:{
       'three':CDN+'/build/three.module.js',
       'three/addons/':CDN+'/examples/jsm/',
-      'fflate':'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js'
+      'fflate':CDN+'/examples/jsm/libs/fflate.module.js'
     }});
     document.head.appendChild(map);
     window.__editorThreeImportMap = true;
