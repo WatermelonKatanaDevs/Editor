@@ -1956,9 +1956,13 @@ window.__editorInitPromise = (async function () {
       });
       try {
         await emulator.ready;
+        // Attach terminals before automatic npm installation so its progress
+        // and failures are visible instead of waiting for the runtime to finish.
+        for (const t of state.terminalTabs.values()) t.attach(emulator);
         await installNodeDependencies(emulator, c);
         if (net.replaceRuntimeEndpoint) net.replaceRuntimeEndpoint(emulator.endpoint); else net.prependEndpoint(emulator.endpoint);
       } catch (e) {
+        for (const t of state.terminalTabs.values()) if (t.runner === emulator) t.attach(null);
         try {
           net.removeEndpoint?.(emulator.endpoint);
           emulator.destroy?.();
@@ -1966,7 +1970,6 @@ window.__editorInitPromise = (async function () {
         state.nodeEmulator = null;
         throw e;
       }
-      for (const t of state.terminalTabs.values()) t.attach(emulator);
     }
     // A runtime restart invalidates WebSocket backends created by the old runtime.
     // Keep the PeerServer itself alive, but make existing peer sockets reconnect
@@ -1998,20 +2001,26 @@ window.__editorInitPromise = (async function () {
     if (c.serverType === 'node') {
       terminal = getBuiltin('terminal')?.getOrOpenTerminal();
     }
-    await setupRuntime(net);
-    if (c.serverType === 'node') {
-      if (!state.nodeEmulator) throw new Error('Node runtime is not ready.');
-      terminal = terminal || getBuiltin('terminal')?.getOrOpenTerminal();
-      const terminalView = state.terminalTabs.get(terminal.id);
-      terminalView?.attach(state.nodeEmulator);
-      if (c.nodeCommand) {
-        await terminalView?.runCommand(c.nodeCommand);
+    try {
+      await setupRuntime(net);
+      if (c.serverType === 'node') {
+        if (!state.nodeEmulator) throw new Error('Node runtime is not ready.');
+        terminal = terminal || getBuiltin('terminal')?.getOrOpenTerminal();
+        const terminalView = state.terminalTabs.get(terminal.id);
+        terminalView?.attach(state.nodeEmulator);
+        if (c.nodeCommand) await terminalView?.runCommand(c.nodeCommand);
+        const serverReady = await state.nodeEmulator.waitForServer?.(10000, 50);
+        if (!serverReady) throw new Error('Node command finished, but no listening server was created.');
       }
-      const serverReady = await state.nodeEmulator.waitForServer?.(10000, 50);
-      if (!serverReady) throw new Error('Node command finished, but no listening server was created.');
+      await getBuiltin('browser')?.ensure();
+      await getBuiltin('browser')?.navigatePreview();
+    } catch (error) {
+      if (terminal && c.serverType === 'node') {
+        const terminalView = state.terminalTabs.get(terminal.id);
+        if (terminalView && terminalView.runner !== state.nodeEmulator) terminalView.console?.error(error?.message || error);
+      }
+      throw error;
     }
-    await getBuiltin('browser')?.ensure();
-    await getBuiltin('browser')?.navigatePreview();
   }
   function onMove(oldPath, newPath, isDir) {
     for (const g of getAllWorkbenchGroups()) for (const t of g.tabs) {

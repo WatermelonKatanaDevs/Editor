@@ -1036,16 +1036,30 @@ npm audit found ${blocking.length} package${blocking.length === 1 ? '' : 's'} wi
       try { lock = JSON.parse(lockText); } catch (_) { throw new NpmError('package-lock.json contains invalid JSON.', 'EBADLOCK'); }
       this.deleteTree('node_modules');
       const packages = lock.packages || {};
-      const entries = Object.entries(packages).filter(([path]) => path && path.startsWith('node_modules/'));
-      entries.sort((a, b) => a[0].split('/node_modules/').length - b[0].split('/node_modules/').length);
+      const entries = Object.entries(packages).filter(([path]) => path && path.split('/').includes('node_modules'));
+      const packagePath = relative => {
+        const parts = String(relative || '').split('/').filter(Boolean);
+        let moduleIndex = -1;
+        for (let i = 0; i < parts.length; i++) if (parts[i] === 'node_modules') moduleIndex = i;
+        if (moduleIndex < 0 || moduleIndex === parts.length - 1) return null;
+        return {
+          parent:parts.slice(0, moduleIndex).join('/'),
+          name:parts.slice(moduleIndex + 1).join('/')
+        };
+      };
+      entries.sort((a, b) => a[0].split('/').filter(part => part === 'node_modules').length - b[0].split('/').filter(part => part === 'node_modules').length);
       for (const [relative, entry] of entries) {
-        const marker = '/node_modules/';
-        const idx = relative.lastIndexOf(marker);
-        const parent = idx < 0 ? '' : relative.slice(0, idx).replace(/\/node_modules$/, '');
-        const name = relative.slice(idx + marker.length);
-        if (!name || name.includes('/node_modules/')) continue;
+        const parsed = packagePath(relative);
+        if (!parsed || !parsed.name) continue;
         const range = entry.version || '*';
-        await this.installResolved(name, `=${range}`, parent, { force: true });
+        this.output(`npm ci: installing ${parsed.name}@${range}`);
+        try {
+          const installed = await this.installResolved(parsed.name, `=${range}`, parsed.parent, { force: true });
+          if (!installed) throw new NpmError(`Unable to install '${parsed.name}@${range}'.`);
+        } catch (error) {
+          this.error(`npm ERR! Failed to install ${parsed.name}@${range}: ${error?.message || error}`);
+          throw error;
+        }
       }
       this.onFileSystemChange?.();
       this.output(`npm ci complete (${entries.length} packages).`);
