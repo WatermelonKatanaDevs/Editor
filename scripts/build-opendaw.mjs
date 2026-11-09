@@ -203,8 +203,8 @@ async function main() {
     let studioIndex = await readFile(studioIndexPath, "utf8");
     if (!studioIndex.includes("opendaw-bridge.js")) {
       const bridgeScript = '<script src="../../opendaw-bridge.js" defer></script>';
-      if (!/<\\/head>/i.test(studioIndex)) throw new Error("The openDAW Studio HTML has no closing head tag for its workspace bridge.");
-      studioIndex = studioIndex.replace(/<\\/head>/i, bridgeScript + "</head>");
+      if (!/<\/head>/i.test(studioIndex)) throw new Error("The openDAW Studio HTML has no closing head tag for its workspace bridge.");
+      studioIndex = studioIndex.replace(/<\/head>/i, bridgeScript + "</head>");
       await writeFile(studioIndexPath, studioIndex);
     }
     await writeFile(markerPath, JSON.stringify({
