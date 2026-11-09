@@ -1,5 +1,5 @@
 (function () {
-  const AUDIO_EXTENSION = /\.(aac|aif|aiff|flac|m4a|mp3|oga|ogg|opus|wav|wave|webm)$/i;
+  const FILE_SAVED_EVENT = 'editor-audio-file-saved';
   const MIME_EXTENSION = {
     'audio/mpeg': 'mp3', 'audio/mp3': 'mp3',
     'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/vnd.wave': 'wav',
@@ -50,14 +50,18 @@
     return byExtension[ext] || 'application/octet-stream';
   }
 
-  function exportPath(ctx, downloadName, blob) {
+  function exportExtension(downloadName, blob, fallback) {
+    const requestedName = String(downloadName || '').replace(/\\/g, '/').split('/').pop().trim();
+    const requestedExtension = fileExtension(requestedName);
+    const mime = String(blob?.type || '').split(';')[0].toLowerCase();
+    return MIME_EXTENSION[mime] || requestedExtension || fallback || 'wav';
+  }
+
+  function exportPath(ctx, downloadName, extension) {
     const sourceName = fileName(ctx.file);
     const sourceBase = fileBase(sourceName);
     const sourceExtension = fileExtension(sourceName);
     const requestedName = String(downloadName || '').replace(/\\/g, '/').split('/').pop().trim();
-    const requestedExtension = fileExtension(requestedName);
-    const mime = String(blob?.type || '').split(';')[0].toLowerCase();
-    const extension = MIME_EXTENSION[mime] || requestedExtension || sourceExtension || 'wav';
     let outputBase = fileBase(requestedName);
     if (!outputBase || /^(audiomass-output|output)$/i.test(outputBase)) outputBase = sourceBase;
     outputBase = outputBase
@@ -105,6 +109,7 @@
     let audioApp = null;
     let onLoaded = null;
     let onUnloaded = null;
+    let onFileSaved = null;
     let originalCreateObjectURL = null;
     let originalAnchorClick = null;
     let originalRevokeObjectURL = null;
@@ -118,15 +123,44 @@
       status.style.color = isError ? '#ff9b9b' : '#ddd';
     }
 
+    function readSourceTags() {
+      try {
+        const bytes = toBytes(ctx.readBinary(), window);
+        const mime = contentType(ctx.file);
+        const kind = fileExtension(fileName(ctx.file)) === 'wav' || mime.includes('wav') ? 'wav' : 'mp3';
+        return window.EditorAudioTags?.read(bytes, kind) || null;
+      } catch (error) {
+        console.warn('AudioMass could not read source audio metadata:', error);
+        return null;
+      }
+    }
+
+    let sourceTags = null;
+
     async function saveExport(blob, downloadName) {
       try {
         const buffer = await blob.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
+        let bytes = new Uint8Array(buffer);
         if (!bytes.length) throw new Error('AudioMass produced an empty export.');
-        const path = exportPath(ctx, downloadName, blob);
+        const extension = exportExtension(downloadName, blob, fileExtension(fileName(ctx.file)));
+        if (window.EditorAudioTags && (extension === 'mp3' || extension === 'wav')) {
+          sourceTags = sourceTags || readSourceTags();
+          bytes = window.EditorAudioTags.preserveMetadata(
+            bytes,
+            sourceTags,
+            extension === 'wav' ? 'wav' : 'mp3'
+          );
+        }
+        const path = exportPath(ctx, downloadName, extension);
         ctx.writeBinary(bytes, path);
         ctx.markDirty(path);
-        if (path !== ctx.file.path) ctx.state.fileManager?.refresh?.();
+        if (path !== ctx.file.path) {
+          ctx.state.fileManager?.refresh?.();
+        } else {
+          window.dispatchEvent(new CustomEvent(FILE_SAVED_EVENT, {
+            detail: { path, source: 'audio-edit' }
+          }));
+        }
         setStatus((path === ctx.file.path ? 'Saved changes to ' : 'Created ') + path);
       } catch (error) {
         setStatus(error?.message || 'Could not save the AudioMass export.', true);
@@ -181,6 +215,7 @@
       if (audioApp?.stopListeningFor && onUnloaded) {
         try { audioApp.stopListeningFor('DidUnloadFile', onUnloaded); } catch (_) {}
       }
+      if (onFileSaved) window.removeEventListener(FILE_SAVED_EVENT, onFileSaved);
       try {
         const win = iframe.contentWindow;
         if (win?.URL?.createObjectURL === patchedCreateObjectURL && originalCreateObjectURL) {
@@ -210,6 +245,20 @@
         onUnloaded = function () { setStatus('Loading audio…'); };
         audioApp.listenFor('DidLoadFile', onLoaded);
         audioApp.listenFor('DidUnloadFile', onUnloaded);
+        sourceTags = readSourceTags();
+        onFileSaved = function (event) {
+          if (disposed || event?.detail?.path !== ctx.file.path ||
+            event?.detail?.source === 'audio-edit') return;
+          try {
+            sourceTags = readSourceTags();
+            const updatedBytes = toBytes(ctx.readBinary(), win);
+            setStatus('Reloading updated audio…');
+            audioApp.engine.LoadArrayBuffer(new win.Blob([updatedBytes], { type: contentType(ctx.file) }));
+          } catch (error) {
+            setStatus(error?.message || 'Could not reload the updated audio.', true);
+          }
+        };
+        window.addEventListener(FILE_SAVED_EVENT, onFileSaved);
 
         const bytes = toBytes(ctx.readBinary(), win);
         const blob = new win.Blob([bytes], { type: contentType(ctx.file) });
@@ -231,19 +280,28 @@
     ctx.addCleanup(cleanup);
   }
 
-  window.EditorPreviewProviders = window.EditorPreviewProviders || [];
-  window.EditorPreviewProviders.push({
-    id: 'audiomass',
-    match(file) {
-      const mime = String(file?.mime || '').toLowerCase();
-      const name = String(file?.name || file?.path || '');
-      return mime.startsWith('audio/') || AUDIO_EXTENSION.test(name);
-    },
-    views: [{
-      id: 'audiomass',
-      label: 'AudioMass',
-      priority: 135,
+  const providers = window.EditorPreviewProviders = window.EditorPreviewProviders || [];
+  const audioProvider = providers.find(provider => provider.id === 'audio');
+  if (audioProvider) {
+    audioProvider.views.push({
+      id: 'audio-edit',
+      label: 'Edit Audio',
+      priority: 90,
       create
-    }]
-  });
+    });
+  } else {
+    providers.push({
+      id: 'audio',
+      match(file) {
+        return String(file?.mime || '').toLowerCase().startsWith('audio/') ||
+          /\.(aac|aif|aiff|flac|m4a|mp3|oga|ogg|opus|wav|wave|webm)$/i.test(String(file?.name || file?.path || ''));
+      },
+      views: [{
+        id: 'audio-edit',
+        label: 'Edit Audio',
+        priority: 90,
+        create
+      }]
+    });
+  }
 })();
