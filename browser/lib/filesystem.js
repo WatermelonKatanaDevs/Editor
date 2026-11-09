@@ -545,10 +545,10 @@
       return await this.exportZip();
     }
     async exportZip() {
-      if (this.rootPrefix) this.zip.folder(this.rootPrefix);
-      for (const dir of this.directories) if (dir) this.zip.folder(this.physicalPath(dir));
-      this.cache.forEach((data, path) => this.zip.file(this.physicalPath(path), data));
-      return await this.zip.generateAsync({ type: 'blob' });
+      const zip = this.rootPrefix ? new JSZip() : this.zip;
+      for (const dir of this.directories) if (dir) zip.folder(dir);
+      this.cache.forEach((data, path) => zip.file(path, data));
+      return await zip.generateAsync({ type: 'blob' });
     }
   }
 
