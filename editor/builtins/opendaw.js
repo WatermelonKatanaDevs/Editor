@@ -171,8 +171,10 @@
         if (!session?.ok || session.id !== bridgeId || typeof session.url !== 'string') {
           throw new Error('The isolation proxy returned an invalid session.');
         }
-        const proxyUrl = new URL(session.url);
+        const proxyUrl = new URL('create', session.url);
         if (proxyUrl.origin !== setupUrl.origin) throw new Error('The isolation proxy returned a URL on an unexpected origin.');
+        proxyUrl.searchParams.set('wk_editor_bridge', bridgeId);
+        proxyUrl.searchParams.set('wk_editor_parent_origin', location.origin);
         frame.dataset.proxyOrigin = proxyUrl.origin;
         frame.src = proxyUrl.href;
       }).catch(error => {
