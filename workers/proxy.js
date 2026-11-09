@@ -174,10 +174,15 @@ function rewriteIsolatedHtml(source, base, sessionId) {
 }
 
 function rewriteIsolatedCss(source, base, sessionId) {
+  const rewriteAbsolute = value => {
+    const raw = String(value || "").trim();
+    if (!raw.startsWith("/") && !/^https?:\/\//i.test(raw)) return value;
+    return getIsolatedTargetUrl(raw, base, sessionId);
+  };
   let output = source.replace(/url\(\s*(["']?)(.*?)\1\s*\)/gi,
-    (match, quote, value) => "url(" + quote + getIsolatedTargetUrl(value, base, sessionId) + quote + ")");
+    (match, quote, value) => "url(" + quote + rewriteAbsolute(value) + quote + ")");
   output = output.replace(/@import\s+(["'])(.*?)\1/gi,
-    (match, quote, value) => "@import " + quote + getIsolatedTargetUrl(value, base, sessionId) + quote);
+    (match, quote, value) => "@import " + quote + rewriteAbsolute(value) + quote);
   return output;
 }
 
