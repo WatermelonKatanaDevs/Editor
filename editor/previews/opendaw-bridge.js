@@ -52,7 +52,11 @@
     return result;
   };
   const allowed = (path, extensions) => !extensions.size || extensions.has(extension(path));
-  const makeFile = async path => new File([bridge.readFile(path)], basename(path), {type:bridge.mime(path) || 'application/octet-stream'});
+  const makeFile = async path => {
+    const file = new File([bridge.readFile(path)], basename(path), {type:bridge.mime(path) || 'application/octet-stream'});
+    Object.defineProperty(file, '__wkWorkspacePath', {value:normalize(path), configurable:true});
+    return file;
+  };
 
   function styleButton(button) {
     button.style.cssText = 'border:1px solid #596168;background:#30363a;color:#fff;border-radius:5px;padding:7px 11px;cursor:pointer;font:inherit;';
@@ -383,5 +387,10 @@
     }
   });
 
-  console.info('openDAW is connected to the Editor workspace file system.');
+  window.__WKOpenDAWWorkspace = {
+    listFiles:() => bridge.listFiles(),
+    readFile:path => bridge.readFile(path),
+    writeFile:(path,bytes) => bridge.writeFile(path,bytes)
+  };
+    console.info('openDAW is connected to the Editor workspace file system.');
 })();

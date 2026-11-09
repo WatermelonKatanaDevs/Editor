@@ -102,6 +102,30 @@ const patches = [
     after: '    get path(): string {\n        const base = document.querySelector("base")?.getAttribute("href") || "/"\n        const path = location.pathname\n        if (base !== "/" && path.startsWith(base)) {\n            const relative = path.slice(base.length)\n            return relative.length === 0 ? "/" : "/" + relative\n        }\n        return path\n    }'
   },
   {
+        path: resolve(studioRoot, "src/service/ProjectProfileService.ts"),
+    label: "mirror project saves to Editor workspace",
+    before: "export class ProjectProfileService {",
+    after: "const workspaceProjectPaths = (): Map<string, string> => {\n    const target = window as any\n    if (target.__WKOpenDAWProjectPaths instanceof Map) {return target.__WKOpenDAWProjectPaths}\n    let stored: Record<string, string> = {}\n    try {stored = JSON.parse(localStorage.getItem(\"wk-openDAW-project-paths\") || \"{}\") as Record<string, string>} catch {}\n    const paths = new Map<string, string>(Object.entries(stored))\n    target.__WKOpenDAWProjectPaths = paths\n    return paths\n}\n\nconst rememberWorkspaceProjectPath = (identity: string, path: string): void => {\n    const paths = workspaceProjectPaths()\n    paths.set(identity, path)\n    try {localStorage.setItem(\"wk-openDAW-project-paths\", JSON.stringify(Object.fromEntries(paths)))} catch {}\n}\n\nconst saveEditorWorkspaceBundle = async (profile: ProjectProfile): Promise<void> => {\n    const adapter = (window as any).__WKOpenDAWWorkspace\n    if (typeof adapter?.writeFile !== \"function\") {return}\n    const identity = UUID.toString(profile.uuid)\n    const safeName = String(profile.meta.name || \"Project\").replaceAll(\"/\", \"_\").replaceAll(String.fromCharCode(92), \"_\").trim() || \"Project\"\n    const path = workspaceProjectPaths().get(identity) || \"openDAW Projects/\" + safeName + \"-\" + identity.slice(0, 8) + \".odb\"\n    try {\n        const bundle = await ProjectBundle.encode(profile)\n        adapter.writeFile(path, new Uint8Array(bundle))\n        rememberWorkspaceProjectPath(identity, path)\n    } catch (error) {\n        console.warn(\"Could not mirror openDAW project into the Editor workspace.\", error)\n        RuntimeNotifier.notify({message: \"Could not save a bundle to the Editor workspace.\", icon: \"Warning\"})\n    }\n}\nexport class ProjectProfileService {"
+  },
+  {
+        path: resolve(studioRoot, "src/service/ProjectProfileService.ts"),
+    label: "mirror normal saves",
+    before: "            if (status === \"rejected\") {\n                console.warn(error)\n                RuntimeNotifier.notify({\n                    message: \"Could not save project (storage temporarily unavailable). Please try again.\",\n                    icon: \"Warning\"\n                })\n            }\n        })",
+    after: "            if (status === \"rejected\") {\n                console.warn(error)\n                RuntimeNotifier.notify({\n                    message: \"Could not save project (storage temporarily unavailable). Please try again.\",\n                    icon: \"Warning\"\n                })\n            } else {\n                await saveEditorWorkspaceBundle(profile)\n            }\n        })"
+  },
+  {
+        path: resolve(studioRoot, "src/service/ProjectProfileService.ts"),
+    label: "mirror save-as projects",
+    before: "            optProfile.ifSome(profile => this.#profile.wrap(profile))",
+    after: "            const savedProfile = optProfile.unwrapOrNull()\n            if (savedProfile !== null) {\n                this.#profile.wrap(savedProfile)\n                await saveEditorWorkspaceBundle(savedProfile)\n            }"
+  },
+  {
+        path: resolve(studioRoot, "src/service/ProjectProfileService.ts"),
+    label: "remember imported workspace bundle path",
+    before: "            const profile = await ProjectBundle.decode(this.#env, arrayBuffer, exclude)\n            this.#profile.wrap(profile)",
+    after: "            const profile = await ProjectBundle.decode(this.#env, arrayBuffer, exclude)\n            const workspacePath = (file as File & {__wkWorkspacePath?: string}).__wkWorkspacePath\n            if (workspacePath) {rememberWorkspaceProjectPath(UUID.toString(profile.uuid), workspacePath)}\n            this.#profile.wrap(profile)"
+  },
+  {
     path: resolve(studioRoot, "src/ui/App.tsx"),
     label: "nested live favicon",
     before: 'favicon.href = isDefined(owner.getValue()) ? "/favicon-live.svg" : "/favicon.svg"',
