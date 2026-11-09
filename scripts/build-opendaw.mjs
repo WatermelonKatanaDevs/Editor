@@ -75,7 +75,7 @@ const patches = [
     path: resolve(sourceRoot, "packages/lib/jsx/src/routes.ts"),
     label: "nested route helper",
     before: "    // Pushes a new history entry, so the browser's back button returns to the previous path.\n    navigateTo(path: string): boolean {",
-    after: '    private static toBasePath(path: string): string {\n        const base = import.meta.env.BASE_URL\n        if (base === "/" || path === base || path.startsWith(base)) {return path}\n        return base + path.replace(/^\\/+/, "")\n    }\n\n    // Pushes a new history entry, so the browser\'s back button returns to the previous path.\n    navigateTo(path: string): boolean {'
+    after: '    private static toBasePath(path: string): string {\n        const base = document.querySelector("base")?.getAttribute("href") || "/"\n        if (base === "/" || path === base || path.startsWith(base)) {return path}\n        return base + path.replace(/^\\/+/, "")\n    }\n\n    // Pushes a new history entry, so the browser\'s back button returns to the previous path.\n    navigateTo(path: string): boolean {'
   },
   {
     path: resolve(sourceRoot, "packages/lib/jsx/src/routes.ts"),
@@ -93,13 +93,19 @@ const patches = [
     path: resolve(sourceRoot, "packages/lib/jsx/src/routes.ts"),
     label: "nested route pathname",
     before: '    get path(): string {return location.pathname}',
-    after: '    get path(): string {\n        const base = import.meta.env.BASE_URL\n        const path = location.pathname\n        if (base !== "/" && path.startsWith(base)) {\n            const relative = path.slice(base.length)\n            return relative.length === 0 ? "/" : "/" + relative\n        }\n        return path\n    }'
+    after: '    get path(): string {\n        const base = document.querySelector("base")?.getAttribute("href") || "/"\n        const path = location.pathname\n        if (base !== "/" && path.startsWith(base)) {\n            const relative = path.slice(base.length)\n            return relative.length === 0 ? "/" : "/" + relative\n        }\n        return path\n    }'
   },
   {
     path: resolve(studioRoot, "src/ui/App.tsx"),
     label: "nested live favicon",
     before: 'favicon.href = isDefined(owner.getValue()) ? "/favicon-live.svg" : "/favicon.svg"',
     after: 'favicon.href = isDefined(owner.getValue()) ? import.meta.env.BASE_URL + "favicon-live.svg" : import.meta.env.BASE_URL + "favicon.svg"'
+  },
+  {
+    path: resolve(studioRoot, "index.html"),
+    label: "nested document base",
+    before: "<head>",
+    after: '<head>\n    <base href="%BASE_URL%">'
   },
   {
     path: resolve(studioRoot, "index.html"),
