@@ -27,8 +27,10 @@ jobs:
       - name: Check out Editor and pinned application sources
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
           fetch-depth: 0
+      - name: Initialize only the application build sources
+        run: git submodule update --init --recursive -- editor/previews/vendor/opendaw-src editor/previews/vendor/photocraft-src
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:

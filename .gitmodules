@@ -11,3 +11,13 @@
 	path = editor/previews/vendor/photocraft-src
 	url = https://github.com/storytold/photocraft.git
 	branch = main
+
+[submodule "blockbench"]
+	path = editor/previews/vendor/blockbench-src
+	url = https://github.com/JannisX11/blockbench.git
+	branch = master
+
+[submodule "piskel"]
+	path = editor/previews/vendor/piskel-src
+	url = https://github.com/piskelapp/piskel-embed.git
+	branch = master
