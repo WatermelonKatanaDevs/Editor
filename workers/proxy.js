@@ -28,6 +28,7 @@ const CORSFIX_RETRY_STATUSES = new Set([
 
 
 const ISOLATION_ROUTE = "/isolation/";
+const ISOLATED_ASSET_ORIGIN = "https://assets.opendaw.studio";
 const ISOLATION_POLICY = "isolate-and-credentialless";
 const ISOLATION_SESSION_TTL = 86400;
 
@@ -131,6 +132,10 @@ function getIsolatedTargetUrl(value, base, sessionId) {
 
   try {
     const resolved = new URL(raw, base);
+    if (resolved.origin === ISOLATED_ASSET_ORIGIN) {
+      const assetPath = resolved.pathname.slice(1);
+      return isolationAssetPath(sessionId, "__opendaw_assets/" + assetPath, resolved.search) + resolved.hash;
+    }
     if (resolved.origin !== base.origin || !resolved.pathname.startsWith(base.pathname)) return value;
     const relative = resolved.pathname.slice(base.pathname.length);
     return isolationAssetPath(sessionId, relative, resolved.search) + resolved.hash;
@@ -258,13 +263,20 @@ async function handleIsolationAsset(request, requestUrl, env) {
 
   let base;
   let target;
+  const isOpenDawAsset = relativePath.startsWith("__opendaw_assets/");
   try {
     base = new URL(session.baseUrl);
-    target = relativePath ? new URL(relativePath, base) : base;
-    if (requestUrl.search) target.search = requestUrl.search;
-    if (target.origin !== session.origin || !target.pathname.startsWith(session.basePath)) {
-      throw new Error("The requested path is outside this isolation session's base directory.");
+    if (isOpenDawAsset) {
+      if (request.method !== "GET" && request.method !== "HEAD") throw new Error("Only GET and HEAD are allowed for openDAW assets.");
+      target = new URL(relativePath.slice("__opendaw_assets/".length), ISOLATED_ASSET_ORIGIN + "/");
+      if (target.origin !== ISOLATED_ASSET_ORIGIN) throw new Error("Invalid openDAW asset path.");
+    } else {
+      target = relativePath ? new URL(relativePath, base) : base;
+      if (target.origin !== session.origin || !target.pathname.startsWith(session.basePath)) {
+        throw new Error("The requested path is outside this isolation session's base directory.");
+      }
     }
+    if (requestUrl.search) target.search = requestUrl.search;
     validateIsolatedTarget(target, requestUrl.origin);
   } catch (error) {
     return new Response(error.message || "Invalid isolated asset path.", {status:403, headers:corsHeaders});
@@ -304,7 +316,7 @@ async function handleIsolationAsset(request, requestUrl, env) {
 
   // openDAW uses client-side routes. If an extensionless route is reloaded,
   // serve the Studio app shell instead of returning a static-host 404.
-  if (upstream.status === 404 && request.method === "GET" && relativePath && !relativePath.split("/").pop().includes(".")) {
+  if (!isOpenDawAsset && upstream.status === 404 && request.method === "GET" && relativePath && !relativePath.split("/").pop().includes(".")) {
     try {
       target = new URL(base.href);
       upstream = await fetch(target.href, {...init, body:undefined});
@@ -324,7 +336,9 @@ async function handleIsolationAsset(request, requestUrl, env) {
   if (location && upstream.status >= 300 && upstream.status < 400) {
     try {
       const redirectedTarget = new URL(location, target);
-      if (redirectedTarget.origin === base.origin && redirectedTarget.pathname.startsWith(session.basePath)) {
+      if (isOpenDawAsset && redirectedTarget.origin === ISOLATED_ASSET_ORIGIN) {
+        responseHeaders.set("Location", isolationAssetPath(id, "__opendaw_assets/" + redirectedTarget.pathname.slice(1), redirectedTarget.search) + redirectedTarget.hash);
+      } else if (redirectedTarget.origin === base.origin && redirectedTarget.pathname.startsWith(session.basePath)) {
         const redirectedPath = redirectedTarget.pathname.slice(session.basePath.length);
         responseHeaders.set("Location", isolationAssetPath(id, redirectedPath, redirectedTarget.search) + redirectedTarget.hash);
       } else {
