@@ -416,10 +416,26 @@
         });
       }else if(ext==='fbx'){const result=new THREE.FBXLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength), '');object=result;animations=result.animations||[];}
       else if(ext==='obj'){
-        const mtlEntry=[...modelFiles.entries()].find(([k])=>k.toLowerCase()===name.replace(/\.obj$/i,'.mtl').toLowerCase()||k.split('/').pop().toLowerCase()===name.split('/').pop().replace(/\.obj$/i,'.mtl').toLowerCase());
+        const objText=text();
+        const base=name.includes('/')?name.slice(0,name.lastIndexOf('/')+1):'';
+        const materialLibraries=[];
+        for(const line of objText.split(/\r?\n/)){
+          const match=line.match(/^\s*mtllib\s+(.+?)\s*$/i);
+          if(match)materialLibraries.push(...match[1].trim().split(/\s+/));
+        }
         const loader=new THREE.OBJLoader(manager);
-        if(mtlEntry){const creator=new THREE.MTLLoader(manager).parse(new TextDecoder().decode(bytesOf(mtlEntry[1].data)),'');creator.preload();loader.setMaterials(creator);}
-        object=loader.parse(text());
+        let materials=null;
+        for(const reference of materialLibraries){
+          const materialPath=pathJoin(base,reference);
+          const entry=[...modelFiles.entries()].find(([path])=>path.toLowerCase()===materialPath.toLowerCase());
+          if(!entry)throw new Error('OBJ material library not found: '+materialPath);
+          const materialBase=entry[0].includes('/')?entry[0].slice(0,entry[0].lastIndexOf('/')+1):'';
+          const parsed=new THREE.MTLLoader(manager).parse(new TextDecoder().decode(bytesOf(entry[1].data)),materialBase);
+          if(!materials)materials=parsed;
+          else Object.assign(materials.materialsInfo,parsed.materialsInfo);
+        }
+        if(materials){materials.preload();loader.setMaterials(materials);}
+        object=loader.parse(objText);
       }else if(ext==='stl'){const geometry=new THREE.STLLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));object=addPrimitiveGeometry(geometry,'STL model');}
       else if(ext==='ply'){const geometry=new THREE.PLYLoader(manager).parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));geometry.computeVertexNormals();object=addPrimitiveGeometry(geometry,'PLY model');}
       else if(ext==='dae'){const result=new THREE.ColladaLoader(manager).parse(text(),'');object=result.scene;animations=result.animations||[];}

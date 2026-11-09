@@ -242,9 +242,8 @@
     const cache = fs?.provider?.cache;
     if (!cache?.keys) return null;
     const paths = [...cache.keys()].map(String);
-    const candidates = paths.filter(path => /\.(?:gltf|glb)$/i.test(path));
+    const candidates = paths.filter(path => /\.(?:gltf|glb|obj)$/i.test(path));
     if (!candidates.length) return null;
-
     const normalizeReference = (modelPath, uri) => {
       let decoded = String(uri || '').split(/[?#]/)[0];
       try { decoded = decodeURIComponent(decoded); } catch (_) {}
@@ -254,8 +253,7 @@
       const result = [];
       for (const piece of pieces) {
         if (!piece || piece === '.') continue;
-        if (piece === '..') result.pop();
-        else result.push(piece);
+        if (piece === '..') result.pop(); else result.push(piece);
       }
       return result.join('/');
     };
@@ -269,44 +267,49 @@
       if (ext === 'gltf') {
         try {
           const json = JSON.parse(new TextDecoder().decode(modelBytes));
-          const uris = [
-            ...(json.buffers || []).map(item => item?.uri),
-            ...(json.images || []).map(item => item?.uri)
-          ].filter(uri => typeof uri === 'string' && !/^(?:data:|https?:|blob:)/i.test(uri));
+          const uris = [...(json.buffers || []).map(item => item?.uri), ...(json.images || []).map(item => item?.uri)]
+            .filter(uri => typeof uri === 'string' && !/^(?:data:|https?:|blob:)/i.test(uri));
           refs = [...new Set(uris.map(uri => normalizeReference(modelPath, uri)))];
-        } catch (error) {
-          parseError = error?.message || 'The glTF JSON could not be parsed.';
-        }
+        } catch (error) { parseError = error?.message || 'The glTF JSON could not be parsed.'; }
+      } else if (ext === 'obj') {
+        try {
+          const text = new TextDecoder().decode(modelBytes);
+          const libraries = [];
+          for (const line of text.split(/\r?\n/)) {
+            const match = line.match(/^\s*mtllib\s+(.+?)\s*$/i);
+            if (match) libraries.push(...match[1].trim().split(/\s+/));
+          }
+          const mtlPaths = [...new Set(libraries.map(uri => normalizeReference(modelPath, uri)))];
+          refs.push(...mtlPaths);
+          for (const mtlPath of mtlPaths) {
+            const actualPath = pathLookup.get(mtlPath.toLowerCase());
+            if (!actualPath) continue;
+            const mtlText = new TextDecoder().decode(fs.readFileSync(actualPath, 'binary'));
+            for (const line of mtlText.split(/\r?\n/)) {
+              const match = line.match(/^\s*(?:map_\w+|bump|map_bump|norm|disp|decal|refl)\s+(.+?)\s*$/i);
+              if (!match) continue;
+              const texture = match[1].trim().split(/\s+/).pop();
+              if (texture && !/^(?:data:|https?:|blob:)/i.test(texture)) refs.push(normalizeReference(actualPath, texture));
+            }
+          }
+          refs = [...new Set(refs)];
+        } catch (error) { parseError = error?.message || 'The OBJ/MTL files could not be parsed.'; }
       } else {
         const bytes = modelBytes instanceof Uint8Array ? modelBytes : new Uint8Array(modelBytes || []);
-        if (bytes.length < 4 || String.fromCharCode(...bytes.subarray(0, 4)) !== 'glTF') {
-          parseError = 'The .glb file does not have a valid glTF binary header.';
-        }
+        if (bytes.length < 4 || String.fromCharCode(...bytes.subarray(0, 4)) !== 'glTF') parseError = 'The .glb file does not have a valid glTF binary header.';
       }
       const resolvedRefs = refs.map(path => pathLookup.get(path.toLowerCase())).filter(Boolean);
       const unresolvedRefs = refs.filter(path => !pathLookup.has(path.toLowerCase()));
       const unrelated = related.filter(path => !refs.some(ref => ref.toLowerCase() === path.toLowerCase()) && !assetExtension.test(path));
       const dedicatedGLB = ext === 'glb' && related.length <= 12 && unrelated.length === 0;
       const dedicatedGLTF = ext === 'gltf' && related.length === 0;
-      const dependencyPackage = ext === 'gltf' && refs.length > 0 && unresolvedRefs.length === 0 && unrelated.length === 0;
-      const isPackage = !parseError && (dedicatedGLB || dedicatedGLTF || dependencyPackage);
-      return {
-        path: modelPath,
-        isPackage,
-        kind: isPackage ? '3D model package' : 'Archive containing a 3D model',
-        referencedAssets: resolvedRefs.length,
-        externalReferences: refs.length,
-        unresolvedReferences: unresolvedRefs,
-        unrelatedFiles: unrelated,
-        fileCount: paths.length,
-        parseError
-      };
+      const dependencyGLTF = ext === 'gltf' && refs.length > 0 && unresolvedRefs.length === 0 && unrelated.length === 0;
+      const dedicatedOBJ = ext === 'obj' && refs.length === 0 && related.length === 0;
+      const dependencyOBJ = ext === 'obj' && refs.length > 0 && unresolvedRefs.length === 0 && unrelated.length === 0;
+      const isPackage = !parseError && (dedicatedGLB || dedicatedGLTF || dependencyGLTF || dedicatedOBJ || dependencyOBJ);
+      return {path:modelPath,isPackage,kind:isPackage?'3D model package':'Archive containing a 3D model',referencedAssets:resolvedRefs.length,externalReferences:refs.length,unresolvedReferences:unresolvedRefs,unrelatedFiles:unrelated,fileCount:paths.length,parseError};
     });
-    modelResults.sort((left, right) =>
-      Number(right.isPackage) - Number(left.isPackage) ||
-      right.referencedAssets - left.referencedAssets ||
-      Number(left.path.includes('/')) - Number(right.path.includes('/'))
-    );
+    modelResults.sort((left,right)=>Number(right.isPackage)-Number(left.isPackage)||right.referencedAssets-left.referencedAssets||Number(left.path.includes('/'))-Number(right.path.includes('/')));
     return modelResults[0];
   }
 
