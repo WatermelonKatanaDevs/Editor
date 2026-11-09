@@ -45,10 +45,16 @@
       accept:input.accept || '',
       multiple:!!input.multiple,
       allowDevice:true
-    }).then(files => dispatchFiles(input, files || []))
-      .catch(error => {
-        console.error('PhotoCraft shared file picker failed:', error);
-      });
+    }).then(files => {
+      if (!files?.length) {
+        input.dispatchEvent(new Event('cancel'));
+        return;
+      }
+      dispatchFiles(input, files);
+    }).catch(error => {
+      if (error?.name === 'AbortError') input.dispatchEvent(new Event('cancel'));
+      else console.error('PhotoCraft shared file picker failed:', error);
+    });
   };
 
   HTMLAnchorElement.prototype.click = function () {
