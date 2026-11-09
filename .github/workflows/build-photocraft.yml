@@ -1,0 +1,52 @@
+name: Build PhotoCraft for GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-photocraft.yml"
+      - "editor/previews/vendor/photocraft-src"
+      - "editor/previews/photocraft-bridge.js"
+      - "scripts/build-photocraft.mjs"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: photocraft-pages-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Editor and its source submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Trunk
+        run: cargo install trunk --locked
+
+      - name: Build PhotoCraft
+        run: node scripts/build-photocraft.mjs
+
+      - name: Commit compiled PhotoCraft files for GitHub Pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f editor/previews/vendor/photocraft
+          if git diff --cached --quiet; then
+            echo "PhotoCraft output is already up to date."
+            exit 0
+          fi
+          git commit -m "Build PhotoCraft web app"
+          git push
