@@ -238,6 +238,15 @@
       }, {skipDirectory:path => path.split('/').includes('node_modules')});
     }
 
+    async forEachFile(callback, options = {}) {
+      const ignoreNodeModules = !!options.ignoreNodeModules;
+      let count = 0;
+      for (const path of this.provider.cache.keys()) {
+        if (!ignoreNodeModules || !path.split('/').includes('node_modules')) callback(path);
+        if (++count % 256 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+
     listDirectoriesSync() {
       return Array.from(this.directories).filter(Boolean);
     }

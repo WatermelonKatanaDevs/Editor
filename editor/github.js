@@ -657,11 +657,14 @@
       if (!path || ignoredPath(path) || inExcludedPath(path) || (ignoreNodeModules && isNodeModulesPath(path))) return;
       localPaths.push({fsPath, path});
     };
-    if (typeof fs.forEachFileSync === 'function') fs.forEachFileSync(addLocalPath, {ignoreNodeModules});
+    if (typeof fs.forEachFile === 'function') await fs.forEachFile(addLocalPath, {ignoreNodeModules});
+    else if (typeof fs.forEachFileSync === 'function') fs.forEachFileSync(addLocalPath, {ignoreNodeModules});
     else for (const rawPath of fs.listFilesSync()) addLocalPath(rawPath);
     const remoteFiles = new Map();
+    let remoteCount = 0;
     for (const entry of remoteTree || []) {
       if (entry?.type === 'blob' && entry.path && !ignoredPath(entry.path) && !inExcludedPath(entry.path) && !(ignoreNodeModules && isNodeModulesPath(entry.path))) remoteFiles.set(entry.path, entry);
+      if (++remoteCount % 512 === 0) await new Promise(resolve => setTimeout(resolve, 0));
     }
 
     const changes = [];
