@@ -1,1 +1,64 @@
-(()=>{if(window.__WKPhotoCraftBridgeInstalled)return;window.__WKPhotoCraftBridgeInstalled=true;const id=new URLSearchParams(location.search).get('wk_editor_bridge'),api=id&&window.parent?.__WKPhotoCraftBridges?.[id];if(!api)return;const norm=v=>{const a=[];for(const p of String(v||'').replace(/\\/g,'/').split('/')){if(!p||p==='.')continue;if(p==='..'){a.pop();continue}a.push(p)}return a.join('/')},base=p=>norm(p).split('/').pop()||'',dir=p=>{const s=norm(p),i=s.lastIndexOf('/');return i<0?'':s.slice(0,i)},ext=p=>{const n=base(p),i=n.lastIndexOf('.');return i<0?'':n.slice(i+1).toLowerCase()},nativeClick=HTMLInputElement.prototype.click,anchorClick=HTMLAnchorElement.prototype.click;const style=document.createElement('style');style.textContent='.wkpc{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:20px;background:#000b;font:13px system-ui;color:#eee}.wkpc section{display:flex;flex-direction:column;width:min(740px,96vw);max-height:88vh;overflow:hidden;background:#202326;border:1px solid #485057;border-radius:9px}.wkpc header,.wkpc nav,.wkpc footer{padding:12px;border-bottom:1px solid #3b4146;display:flex;gap:8px;align-items:center}.wkpc footer{border-top:1px solid #3b4146;border-bottom:0;justify-content:space-between}.wkpc .path{flex:1;color:#aeb6bd}.wkpc input{background:#15181a;color:#eee;border:1px solid #50585e;border-radius:5px;padding:7px}.wkpc .list{overflow:auto;min-height:180px;max-height:54vh;padding:8px}.wkpc button{border:1px solid #596168;background:#30363a;color:#fff;border-radius:5px;padding:7px 11px;cursor:pointer}.wkpc .list button{display:block;width:100%;text-align:left;border:0;background:transparent}.wkpc .list .folder{color:#c8d9ce}.wkpc .list .selected{background:#28523f}.wkpc button:disabled{opacity:.4}.wkpc .actions{display:flex;gap:8px}.wkpc .primary{background:#087b49;border-color:#00a65a}';document.head.append(style);function choose(save,multiple,accept,suggested){return new Promise(resolve=>{const allowed=new Set(String(accept||'').split(',').map(x=>x.trim().replace(/^\\./,'').toLowerCase()).filter(Boolean)),all=(api.listFiles()||[]).map(norm),selected=new Set();let current='',closed=false;const ov=document.createElement('div');ov.className='wkpc';const panel=document.createElement('section');ov.append(panel);const h=document.createElement('header');h.textContent=save?'Save to Editor Workspace':'Open from Editor Workspace';panel.append(h);const nav=document.createElement('nav'),up=document.createElement('button');up.textContent='↑ Up';const path=document.createElement('div');path.className='path';const search=document.createElement('input');search.placeholder='Filter files';nav.append(up,path,search);panel.append(nav);const list=document.createElement('div');list.className='list';panel.append(list);const foot=document.createElement('footer'),device=document.createElement('button');device.textContent='From this device…';const native=document.createElement('input');native.type='file';native.hidden=true;native.multiple=multiple;native.accept=accept;const actions=document.createElement('div');actions.className='actions';const cancel=document.createElement('button');cancel.textContent='Cancel';const ok=document.createElement('button');ok.className='primary';ok.textContent=save?'Save':'Open selected';actions.append(cancel,ok);foot.append(device,native,actions);panel.append(foot);let filename;if(save){filename=document.createElement('input');filename.value=suggested||'image.png';panel.insertBefore(filename,foot);device.hidden=true}const done=v=>{if(closed)return;closed=true;ov.remove();resolve(v)};function draw(){list.replaceChildren();const q=search.value.toLowerCase().trim(),prefix=current?current+'/':'',dirs=new Set(),files=[];for(const p of all){if(!p.startsWith(prefix))continue;const r=p.slice(prefix.length);if(!r)continue;const i=r.indexOf('/');if(i>=0)dirs.add(r.slice(0,i));else if(save||!allowed.size||allowed.has(ext(p)))files.push(p)}const rows=[...[...dirs].sort().map(name=>({folder:true,name})),...files.sort().map(p=>({path:p,name:base(p)}))].filter(x=>x.name.toLowerCase().includes(q));for(const r of rows){const b=document.createElement('button');b.className=(r.folder?'folder ':'')+(r.path&&selected.has(r.path)?'selected':'');b.textContent=(r.folder?'▸ ':'▧ ')+r.name;b.onclick=()=>{if(r.folder){current=norm(prefix+r.name);selected.clear()}else if(save){filename.value=r.name}else if(multiple&&selected.has(r.path))selected.delete(r.path);else{selected.clear();selected.add(r.path)}draw()};b.ondblclick=()=>{if(!r.folder){if(save){filename.value=r.name;ok.click()}else done([r.path])}};list.append(b)}path.textContent=current?'/'+current:'/';up.disabled=!current;ok.disabled=save?!String(filename?.value||'').trim():!selected.size}up.onclick=()=>{current=dir(current);selected.clear();draw()};search.oninput=draw;filename?.addEventListener('input',draw);cancel.onclick=()=>done(null);ov.onmousedown=e=>{if(e.target===ov)done(null)};ok.onclick=()=>{if(save){const p=norm((current?current+'/':'')+filename.value.trim());if(all.includes(p)&&!confirm('Replace '+p+'?'))return;done(p)}else done([...selected])};device.onclick=()=>nativeClick.call(native);native.onchange=()=>{const fs=[...(native.files||[])];if(fs.length)done(fs)};const key=e=>{if(e.key==='Escape'){document.removeEventListener('keydown',key);done(null)}};document.addEventListener('keydown',key);document.body.append(ov);draw()})}function deliver(t,files){const dt=new DataTransfer();files.forEach(f=>dt.items.add(f));try{t.files=dt.files}catch(_){}t.dispatchEvent(new Event('change',{bubbles:true}))}HTMLInputElement.prototype.click=function(){if(this.type!=='file')return nativeClick.call(this);const t=this;void choose(false,!!t.multiple,t.accept).then(r=>{if(!r)return deliver(t,[]);deliver(t,r.every(x=>x instanceof File)?r:r.map(p=>new File([api.readFile(p)],base(p),{type:'application/octet-stream'})))}).catch(e=>{console.error(e);nativeClick.call(t)})};HTMLAnchorElement.prototype.click=function(){if(!this.download||!String(this.href).startsWith('blob:'))return anchorClick.call(this);const a=this;void fetch(a.href).then(r=>r.blob()).then(async blob=>{const p=await choose(true,false,'',base(a.download)||'image.png');if(p)api.writeFile(p,new Uint8Array(await blob.arrayBuffer()))}).catch(e=>{console.error(e);anchorClick.call(a)})};window.__WKPhotoCraftWorkspaceReady=true})();
+(() => {
+  if (window.__WKPhotoCraftBridgeInstalled) return;
+  window.__WKPhotoCraftBridgeInstalled = true;
+
+  const id = new URLSearchParams(location.search).get('wk_editor_bridge');
+  const api = id && window.parent?.__WKPhotoCraftBridges?.[id];
+  if (!api) {
+    console.error('PhotoCraft workspace bridge could not connect to the Editor.');
+    return;
+  }
+
+  const nativeInputClick = HTMLInputElement.prototype.click;
+  const nativeAnchorClick = HTMLAnchorElement.prototype.click;
+
+  function dispatchFiles(input, files) {
+    try {
+      const transfer = new DataTransfer();
+      for (const file of files || []) transfer.items.add(file);
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', {bubbles:true}));
+    } catch (error) {
+      console.error('PhotoCraft could not receive the selected files:', error);
+    }
+  }
+
+  HTMLInputElement.prototype.click = function () {
+    if (this.type !== 'file') return nativeInputClick.call(this);
+    const input = this;
+    void api.pickFiles({
+      title:input.getAttribute('data-wk-picker-title') || 'Open in PhotoCraft',
+      accept:input.accept || '',
+      multiple:!!input.multiple,
+      allowDevice:true
+    }).then(files => dispatchFiles(input, files || []))
+      .catch(error => {
+        console.error('PhotoCraft shared file picker failed:', error);
+        dispatchFiles(input, []);
+      });
+  };
+
+  HTMLAnchorElement.prototype.click = function () {
+    if (!this.download || !String(this.href).startsWith('blob:')) {
+      return nativeAnchorClick.call(this);
+    }
+    const anchor = this;
+    void fetch(anchor.href).then(response => {
+      if (!response.ok) throw new Error('Could not read the exported file (' + response.status + ').');
+      return response.blob();
+    }).then(blob => {
+      const match = /\.([^.]+)$/.exec(anchor.download || '');
+      return api.saveFile({
+        title:'Save from PhotoCraft',
+        suggestedName:anchor.download || 'image.png',
+        extensions:match ? [match[1].toLowerCase()] : [],
+        bytes:blob
+      });
+    }).catch(error => {
+      console.error('PhotoCraft shared save dialog failed:', error);
+    });
+  };
+
+  window.__WKPhotoCraftWorkspaceReady = true;
+  console.info('PhotoCraft is using the shared Editor workspace picker.');
+})();
