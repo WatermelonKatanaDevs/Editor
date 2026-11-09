@@ -197,7 +197,9 @@ async function handleIsolatedProxy(request, requestUrl) {
       target = new URL(rawUrl);
       validateIsolatedTarget(target, requestUrl.origin);
       const destination = new URL(isolatedProxyPath(target), requestUrl.origin);
-      return Response.redirect(destination.href, 307);
+      const redirectHeaders = new Headers(corsHeaders);
+      redirectHeaders.set("Location", destination.href);
+      return new Response(null, {status:307, headers:redirectHeaders});
     }
 
     const route = requestUrl.pathname.slice(ISOLATE_ROUTE.length);
