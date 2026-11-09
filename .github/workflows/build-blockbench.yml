@@ -57,12 +57,14 @@ jobs:
             --exclude='tsconfig.json' \
             --exclude='typedoc.*' \
             vendor/blockbench/ blockbench/
+          rm -f blockbench/.gitignore
 
       - name: Commit built web app
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add blockbench/
+          git add -f blockbench/dist/
           if git diff --cached --quiet; then
             echo "Blockbench build is already up to date."
           else
