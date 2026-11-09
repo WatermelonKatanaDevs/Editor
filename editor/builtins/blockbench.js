@@ -28,6 +28,7 @@
     const bridge = {
       pickFiles:options => workspacePicker.open(options),
       savePath:options => workspacePicker.savePath(options),
+      saveFile:options => workspacePicker.saveFile(options),
       listFiles() {
         const fs = ctx.state.fs;
         if (!fs) return [];

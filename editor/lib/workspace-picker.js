@@ -101,11 +101,15 @@
       catch (error) { console.warn('Workspace picker write notification failed:', error); }
       return normalized;
     }
-    function makeWorkspaceFile(path) {
+    function makeWorkspaceFile(path, maxFileBytes) {
       const normalized = normalizePath(path);
       const value = fs().readFileSync(normalized, 'binary');
       if (value == null) throw new Error('File no longer exists in the workspace: ' + normalized);
-      const file = new File([asBytes(value).slice()], basename(normalized), {
+      const bytes = asBytes(value).slice();
+      if (Number.isFinite(maxFileBytes) && bytes.byteLength > maxFileBytes) {
+        throw new Error(normalized + ' exceeds the ' + Math.round(maxFileBytes / (1024 * 1024)) + ' MiB file-picker limit.');
+      }
+      const file = new File([bytes], basename(normalized), {
         type:fileType(normalized) || 'application/octet-stream'
       });
       Object.defineProperties(file, {
@@ -116,21 +120,27 @@
     }
     function open(options = {}) {
       const filters = normalizeAccept(options), files = listFiles();
+      const directories = listDirectories(fs(), files);
+      let startPath = normalizePath(options.startPath || options.startpath || '');
+      if (startPath && (files.includes(startPath) || !directories.has(startPath))) startPath = dirname(startPath);
       return showDialog({
         mode:'open', title:options.title || 'Open from Editor Workspace',
-        files, directories:listDirectories(fs(), files), filters,
+        files, directories, filters,
         multiple:options.multiple === true, allowDevice:options.allowDevice !== false,
-        startPath:options.startPath || options.startpath || '', allFiles:!filters.length
+        startPath, allFiles:!filters.length, maxFileBytes:options.maxFileBytes
       });
     }
     function savePath(options = {}) {
       if (!canWrite()) return Promise.reject(new Error('This Editor workspace is read-only.'));
       const files = listFiles();
+      const directories = listDirectories(fs(), files);
+      let startPath = normalizePath(options.startPath || options.startpath || '');
+      if (startPath && (files.includes(startPath) || !directories.has(startPath))) startPath = dirname(startPath);
       return showDialog({
         mode:'save', title:options.title || 'Save to Editor Workspace',
-        files, directories:listDirectories(fs(), files), filters:normalizeAccept(options),
+        files, directories, filters:normalizeAccept(options),
         multiple:false, allowDevice:false,
-        startPath:options.startPath || options.startpath || '',
+        startPath,
         suggestedName:options.suggestedName || options.name || 'untitled',
         allFiles:true
       });
@@ -253,6 +263,11 @@
         const addDeviceFiles = incoming => {
           const items = Array.from(incoming || []);
           if (!items.length) return;
+          const tooLarge = Number.isFinite(options.maxFileBytes) && items.find(file => file.size > options.maxFileBytes);
+          if (tooLarge) {
+            status.textContent = tooLarge.name + ' exceeds the ' + Math.round(options.maxFileBytes / (1024 * 1024)) + ' MiB file-picker limit.';
+            return;
+          }
           const rejected = showAllFiles ? [] : items.filter(file => !matchesFilter(file.name, file.type, filters));
           if (rejected.length) {
             status.textContent = 'Some selected files do not match this file filter. Turn on All files to include them.';
@@ -277,7 +292,7 @@
           status.textContent = 'Preparing selected files…';
           try {
             const output = selectedDeviceFiles.slice();
-            for (const path of selected) output.push(makeWorkspaceFile(path));
+            for (const path of selected) output.push(makeWorkspaceFile(path, options.maxFileBytes));
             close(output);
           } catch (error) {
             status.textContent = error?.message || String(error);

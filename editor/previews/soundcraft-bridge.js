@@ -46,16 +46,19 @@
     void fetch(anchor.href).then(response => {
       if (!response.ok) throw new Error('Could not read the exported file (' + response.status + ').');
       return response.blob();
-    }).then(blob => api.saveFile({
-      title:'Save from SoundCraft',
-      suggestedName:anchor.download || 'Session.scraftz',
-      extensions:(/\.([^.]+)$/.exec(anchor.download || '') || [])[1] ? [RegExp.$1.toLowerCase()] : [],
-      bytes:blob
-    })).catch(error => {
+    }).then(blob => {
+      const match = /\.([^.]+)$/.exec(anchor.download || '');
+      return api.saveFile({
+        title:'Save from SoundCraft',
+        suggestedName:anchor.download || 'Session.scraftz',
+        extensions:match ? [match[1].toLowerCase()] : [],
+        bytes:blob
+      });
+    }).catch(error => {
       console.error('SoundCraft shared save dialog failed:', error);
     });
   };
 
-  window.__WKSoundCraftWorkspaceReady = {ready:true, picker:'EditorWorkspacePicker'};
+  window.__WKSoundCraftWorkspaceReady = true;
   console.info('SoundCraft is using the shared Editor workspace picker.');
 })();

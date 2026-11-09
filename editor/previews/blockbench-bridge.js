@@ -75,6 +75,50 @@
     } catch (_) { console.warn(message); }
   };
 
+  const nativeInputClick = HTMLInputElement.prototype.click;
+  const nativeAnchorClick = HTMLAnchorElement.prototype.click;
+  function dispatchSelectedFiles(input, files) {
+    try {
+      const transfer = new DataTransfer();
+      for (const file of files || []) transfer.items.add(file);
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', {bubbles:true}));
+    } catch (error) {
+      console.error('Blockbench could not receive selected workspace files:', error);
+    }
+  }
+  HTMLInputElement.prototype.click = function () {
+    if (this.type !== 'file') return nativeInputClick.call(this);
+    const input = this;
+    void bridge.pickFiles({
+      title:input.getAttribute('data-wk-picker-title') || 'Open in Blockbench',
+      accept:input.accept || '',
+      multiple:!!input.multiple,
+      allowDevice:true
+    }).then(files => dispatchSelectedFiles(input, files || []))
+      .catch(error => {
+        console.error('Blockbench shared file picker failed:', error);
+        dispatchSelectedFiles(input, []);
+      });
+  };
+  HTMLAnchorElement.prototype.click = function () {
+    if (!this.download || !String(this.href).startsWith('blob:')) {
+      return nativeAnchorClick.call(this);
+    }
+    const anchor = this;
+    void fetch(anchor.href).then(response => {
+      if (!response.ok) throw new Error('Could not read the exported file (' + response.status + ').');
+      return response.blob();
+    }).then(blob => bridge.saveFile({
+      title:'Save from Blockbench',
+      suggestedName:anchor.download || 'model',
+      bytes:blob
+    })).catch(error => {
+      console.error('Blockbench shared save dialog failed:', error);
+      notify('Could not save file: ' + (error?.message || error));
+    });
+  };
+
   async function readWorkspaceFile(path, options = {}) {
     path = normalize(path);
     const bytes = bridge.readFile(path);
