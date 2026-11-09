@@ -721,6 +721,31 @@
       }
     }
 
+    async function ensureLocalGitIdentity(service) {
+      let name = '';
+      let email = '';
+      try { name = String((await service.runSerialized(['config', 'user.name'], {cwd:'/'})).output || '').trim(); } catch (error) {
+        if (!String(error?.message || error).includes('key not found')) throw error;
+      }
+      try { email = String((await service.runSerialized(['config', 'user.email'], {cwd:'/'})).output || '').trim(); } catch (error) {
+        if (!String(error?.message || error).includes('key not found')) throw error;
+      }
+      if (!name) {
+        name = window.prompt('Git commit author name (stored only in this repository):', '');
+        if (name == null) throw new Error('Commit cancelled. An author name is required.');
+        name = name.trim();
+        if (!name) throw new Error('An author name is required to create a commit.');
+        await service.runSerialized(['config', 'user.name', name], {cwd:'/'});
+      }
+      if (!email) {
+        email = window.prompt('Git commit author email (stored only in this repository). It does not need to be a GitHub account email:', '');
+        if (email == null) throw new Error('Commit cancelled. An author email is required.');
+        email = email.trim();
+        if (!email) throw new Error('An author email is required to create a commit.');
+        await service.runSerialized(['config', 'user.email', email], {cwd:'/'});
+      }
+    }
+
     async function commitLocal() {
       const button = tree.querySelector('[data-local-commit]');
       if (!button || button.disabled || commitBusy) return;
@@ -737,6 +762,7 @@
         const status = await service.status('/');
         if (status.changes.some(change => change.staged)) {
           if (!message) throw new Error('Enter a commit message.');
+          await ensureLocalGitIdentity(service);
           const result = await service.runSerialized(['commit', '-m', message], {cwd:'/'});
           localCommitCreated = true;
           state.markDirty?.('.git');
