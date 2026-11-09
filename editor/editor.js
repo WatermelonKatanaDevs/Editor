@@ -1754,16 +1754,64 @@ window.__editorInitPromise = (async function () {
     return '/' + [base, name].filter(Boolean).join('/');
   }
 
-  function hasNodeDependencies(fs, root) {
+  async function hasNodeDependencies(fs, root) {
     if (!fs) return false;
-    const nodeModulesPath = nodeRuntimePath(root, 'node_modules');
-    if (fs.isDirectorySync?.(nodeModulesPath) || fs.existsSync?.(nodeModulesPath)) return true;
-    const prefix = nodeModulesPath.replace(/\/+$/, '') + '/';
+    const rootPath = String(root || '').replace(/^\/+|\/+$/g, '');
+    const rootManifestPath = nodeRuntimePath(rootPath, 'package.json');
+    let rootManifest;
     try {
-      return fs.listFilesSync().some(path => String(path || '').startsWith(prefix));
+      rootManifest = JSON.parse(String(fs.readFileSync(rootManifestPath, 'utf8') || '{}'));
     } catch (_) {
       return false;
     }
+
+    const required = {
+      ...(rootManifest.dependencies || {}),
+      ...(rootManifest.devDependencies || {})
+    };
+    for (const [name, meta] of Object.entries(rootManifest.peerDependenciesMeta || {})) {
+      if (!meta?.optional && rootManifest.peerDependencies?.[name]) required[name] = rootManifest.peerDependencies[name];
+    }
+    const pending = Object.keys(required).map(name => ({name, from:rootPath, root:true}));
+    const checked = new Set();
+    let processed = 0;
+
+    const resolveInstalledPackage = (name, from) => {
+      let current = from;
+      while (true) {
+        const base = String(current || '').replace(/\/+$/, '');
+        const candidate = [base, 'node_modules', name, 'package.json'].filter(Boolean).join('/');
+        if (fs.existsSync(candidate)) return candidate;
+        if (current === rootPath) break;
+        const slash = String(current || '').lastIndexOf('/');
+        const parent = slash >= 0 ? String(current).slice(0, slash) : '';
+        if (parent.length < rootPath.length || (rootPath && parent !== rootPath && !parent.startsWith(rootPath + '/'))) break;
+        current = parent;
+      }
+      return null;
+    };
+
+    while (pending.length) {
+      const item = pending.pop();
+      const packageJsonPath = resolveInstalledPackage(item.name, item.from);
+      if (!packageJsonPath) return false;
+      if (checked.has(packageJsonPath)) continue;
+      checked.add(packageJsonPath);
+
+      let manifest;
+      try {
+        manifest = JSON.parse(String(fs.readFileSync(packageJsonPath, 'utf8') || '{}'));
+      } catch (_) {
+        return false;
+      }
+      const packageDir = packageJsonPath.slice(0, -'/package.json'.length);
+      for (const name of Object.keys(manifest.dependencies || {})) pending.push({name, from:packageDir});
+      for (const [name, meta] of Object.entries(manifest.peerDependenciesMeta || {})) {
+        if (!meta?.optional && manifest.peerDependencies?.[name]) pending.push({name, from:packageDir});
+      }
+      if (++processed % 64 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    return true;
   }
 
   function nodeDependencyManifest(fs, config) {
@@ -1782,7 +1830,7 @@ window.__editorInitPromise = (async function () {
   async function installNodeDependencies(runtime, config) {
     const fs = state.fs;
     const manifest = nodeDependencyManifest(fs, config);
-    if (!manifest.hasPackageJson || hasNodeDependencies(fs, manifest.root)) return false;
+    if (!manifest.hasPackageJson || await hasNodeDependencies(fs, manifest.root)) return false;
 
     let useCi = false;
   if (manifest.hasLockfile) {
@@ -1809,7 +1857,7 @@ window.__editorInitPromise = (async function () {
     if (!state.fs || config?.serverType !== 'node') return false;
 
     const manifest = nodeDependencyManifest(state.fs, config);
-    if (!manifest.hasPackageJson || hasNodeDependencies(state.fs, manifest.root)) return false;
+    if (!manifest.hasPackageJson || await hasNodeDependencies(state.fs, manifest.root)) return false;
 
     let net = state.browserNetwork;
     if (!net) {

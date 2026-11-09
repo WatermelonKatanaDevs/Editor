@@ -3051,6 +3051,7 @@
 
     const moduleCache = new Map(); // Canonical path -> { exports, loaded: boolean, moduleObj }
     const specifierMap = new Map(); // Key: "parentDir|specifier" -> Resolved Canonical Path
+    const preloadErrors = new Map(); // Key: "parentDir|specifier" -> original preload failure
 
     /**
      * Helper to fetch a built-in module polyfill from available global namespaces
@@ -3548,6 +3549,7 @@
       // Record mapping so synchronous lookup knows exact target path
       const mapKey = `${parentDir}|${moduleSpecifier}`;
       specifierMap.set(mapKey, resolvedPath);
+      preloadErrors.delete(mapKey);
 
       if (moduleCache.has(resolvedPath)) {
         return location;
@@ -3586,10 +3588,14 @@
       // Recursively pre-fetch child dependencies
       const childSpecifiers = extractRequireSpecifiers(rawSource);
       for (const childSpec of childSpecifiers) {
+        const childKey = `${dirname(resolvedPath)}|${childSpec}`;
         try {
           await preloadModule(childSpec, resolvedPath);
+          preloadErrors.delete(childKey);
         } catch (e) {
-          // Ignore dynamic/optional requires during pre-pass
+          // Optional/dynamic dependencies may be absent, but keep the reason
+          // so a later synchronous require reports the actual resolution error.
+          preloadErrors.set(childKey, e);
         }
       }
 
@@ -3626,7 +3632,9 @@
           return executeModuleSync(moduleSpecifier);
         }
 
-        throw new Error(`[Sync Require Error] Module '${moduleSpecifier}' was not preloaded or found in cache from '${currentFilePath}'`);
+        const preloadError = preloadErrors.get(mapKey);
+        const detail = preloadError ? ` Preloading failed: ${preloadError.message || preloadError}` : '';
+        throw new Error(`[Sync Require Error] Module '${moduleSpecifier}' was not preloaded or found in cache from '${currentFilePath}'.${detail}`);
       };
     }
 
