@@ -27,22 +27,29 @@ const CORSFIX_RETRY_STATUSES = new Set([
 // ============================================================
 
 
-const ISOLATE_ROUTE = "/isolate/";
+const ISOLATION_ROUTE = "/isolation/";
 const ISOLATION_POLICY = "isolate-and-credentialless";
+const ISOLATION_SESSION_TTL = 86400;
 
-function encodeIsolateOrigin(origin) {
-  return btoa(origin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+function isolationCorsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "*",
+    "Access-Control-Expose-Headers": "*",
+    "Access-Control-Max-Age": "86400"
+  };
 }
 
-function decodeIsolateOrigin(value) {
-  let normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
-  while (normalized.length % 4) normalized += "=";
-  const decoded = atob(normalized);
-  const origin = new URL(decoded);
-  if (origin.origin !== decoded || origin.pathname !== "/" || origin.search || origin.hash) {
-    throw new Error("Invalid isolated proxy origin.");
-  }
-  return origin;
+function isolationJson(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      ...isolationCorsHeaders(),
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
 }
 
 function validateIsolatedTarget(target, workerOrigin) {
@@ -104,55 +111,56 @@ function validateIsolatedTarget(target, workerOrigin) {
   }
 }
 
-function isolatedProxyPath(target) {
-  return ISOLATE_ROUTE + encodeIsolateOrigin(target.origin) + target.pathname + target.search + target.hash;
+function validateIsolationId(id) {
+  return /^[A-Za-z0-9_-]{1,128}$/.test(String(id || ""));
 }
 
-function rewriteIsolatedUrl(value, target, onlyAppRoot = false) {
+function isolationAssetPath(id, relativePath, search = "") {
+  const path = String(relativePath || "").replace(/^\/+/, "");
+  return ISOLATION_ROUTE + encodeURIComponent(id) + "/" + path + search;
+}
+
+function getIsolatedTargetUrl(value, base, sessionId) {
   const raw = String(value || "").trim();
   if (
     !raw ||
     raw.startsWith("#") ||
     /^(?:data:|blob:|javascript:|mailto:|tel:|about:)/i.test(raw) ||
-    raw.startsWith("/isolate/")
+    raw.startsWith(ISOLATION_ROUTE)
   ) return value;
 
   try {
-    const resolved = new URL(raw, target);
-    if (resolved.origin !== target.origin) return value;
-    if (onlyAppRoot && raw.startsWith("/") && !resolved.pathname.startsWith(target.pathname.replace(/[^/]*$/, ""))) {
-      return value;
-    }
-    return ISOLATE_ROUTE + encodeIsolateOrigin(resolved.origin) + resolved.pathname + resolved.search + resolved.hash;
+    const resolved = new URL(raw, base);
+    if (resolved.origin !== base.origin || !resolved.pathname.startsWith(base.pathname)) return value;
+    const relative = resolved.pathname.slice(base.pathname.length);
+    return isolationAssetPath(sessionId, relative, resolved.search) + resolved.hash;
   } catch (_) {
     return value;
   }
 }
 
-function rewriteIsolatedHtml(source, target) {
-  const basePath = new URL(".", target).pathname;
-  const baseHref = ISOLATE_ROUTE + encodeIsolateOrigin(target.origin) + basePath;
-
+function rewriteIsolatedHtml(source, base, sessionId) {
+  const rootPath = ISOLATION_ROUTE + encodeURIComponent(sessionId) + "/";
   let output = source.replace(
     /\b(src|href|action|poster|data|formaction|cite|manifest|xlink:href|background)\s*=\s*(["'])(.*?)\2/gi,
-    (match, name, quote, value) => name + "=" + quote + rewriteIsolatedUrl(value, target) + quote
+    (match, name, quote, value) => name + "=" + quote + getIsolatedTargetUrl(value, base, sessionId) + quote
   );
 
   output = output.replace(/\bsrcset\s*=\s*(["'])(.*?)\1/gi, (match, quote, value) => {
     if (/^\s*data:/i.test(value)) return match;
     const rewritten = value.split(",").map(candidate => {
       const parts = candidate.trim().split(/\s+/, 2);
-      parts[0] = rewriteIsolatedUrl(parts[0], target);
+      parts[0] = getIsolatedTargetUrl(parts[0], base, sessionId);
       return parts.join(" ");
     }).join(", ");
     return "srcset=" + quote + rewritten + quote;
   });
 
-  const baseTag = '<base href="' + baseHref + '">';
+  const baseTag = '<base href="' + rootPath + '">';
   if (/<base\b[^>]*>/i.test(output)) {
     output = output.replace(/<base\b[^>]*>/i, tag => {
-      if (/\bhref\s*=/i.test(tag)) return tag.replace(/\bhref\s*=\s*(["']).*?\1/i, 'href="' + baseHref + '"');
-      return tag.replace(/>$/, ' href="' + baseHref + '">');
+      if (/\bhref\s*=/i.test(tag)) return tag.replace(/\bhref\s*=\s*(["']).*?\1/i, 'href="' + rootPath + '"');
+      return tag.replace(/>$/, ' href="' + rootPath + '">');
     });
   } else if (/<head\b[^>]*>/i.test(output)) {
     output = output.replace(/<head\b[^>]*>/i, tag => tag + baseTag);
@@ -160,60 +168,101 @@ function rewriteIsolatedHtml(source, target) {
     output = baseTag + output;
   }
 
-  // Inline scripts and JSON configuration often contain root-relative asset paths.
   output = output.replace(/(["'])((?:https?:\/\/[^"'\s<>]+)|\/(?!\/)[^"'\s<>]+)\1/g,
-    (match, quote, value) => quote + rewriteIsolatedUrl(value, target) + quote);
+    (match, quote, value) => quote + getIsolatedTargetUrl(value, base, sessionId) + quote);
   return output;
 }
 
-function rewriteIsolatedCss(source, target) {
+function rewriteIsolatedCss(source, base, sessionId) {
   let output = source.replace(/url\(\s*(["']?)(.*?)\1\s*\)/gi,
-    (match, quote, value) => "url(" + quote + rewriteIsolatedUrl(value, target) + quote + ")");
+    (match, quote, value) => "url(" + quote + getIsolatedTargetUrl(value, base, sessionId) + quote + ")");
   output = output.replace(/@import\s+(["'])(.*?)\1/gi,
-    (match, quote, value) => "@import " + quote + rewriteIsolatedUrl(value, target) + quote);
+    (match, quote, value) => "@import " + quote + getIsolatedTargetUrl(value, base, sessionId) + quote);
   return output;
 }
 
-function rewriteIsolatedScript(source, target) {
+function rewriteIsolatedScript(source, base, sessionId) {
   return source.replace(/(["'])((?:https?:\/\/[^"'\s<>]+)|\/(?!\/)[^"'\s<>]+)\1/g,
-    (match, quote, value) => quote + rewriteIsolatedUrl(value, target, true) + quote);
+    (match, quote, value) => quote + getIsolatedTargetUrl(value, base, sessionId) + quote);
 }
 
-async function handleIsolatedProxy(request, requestUrl) {
-  const corsHeaders = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "*",
-    "Access-Control-Expose-Headers": "*",
-    "Access-Control-Max-Age": "86400"
-  };
-
-  if (request.method === "OPTIONS") {
-    return new Response(null, {status:204, headers:corsHeaders});
+async function handleIsolationSetup(requestUrl, env) {
+  const corsHeaders = isolationCorsHeaders();
+  const rawUrl = requestUrl.searchParams.get("url");
+  const id = requestUrl.searchParams.get("id");
+  if (!rawUrl) return isolationJson({error:"Missing url parameter."}, 400);
+  if (!validateIsolationId(id)) return isolationJson({error:"Missing or invalid isolation id."}, 400);
+  if (!env?.ISOLATION_SESSIONS) {
+    return isolationJson({error:"The Worker is missing its ISOLATION_SESSIONS KV binding."}, 503);
   }
 
+  let base;
+  try {
+    base = new URL(rawUrl);
+    validateIsolatedTarget(base, requestUrl.origin);
+    base.hash = "";
+    if (!base.pathname.endsWith("/")) base.pathname += "/";
+  } catch (error) {
+    return isolationJson({error:error.message || "Invalid isolation URL."}, 400);
+  }
+
+  try {
+    await env.ISOLATION_SESSIONS.put("isolation:" + id, JSON.stringify({
+      baseUrl:base.href,
+      origin:base.origin,
+      basePath:base.pathname,
+      createdAt:Date.now()
+    }), {expirationTtl:ISOLATION_SESSION_TTL});
+  } catch (error) {
+    return isolationJson({error:"Could not save the isolation session: " + (error.message || String(error))}, 500);
+  }
+
+  return isolationJson({
+    ok:true,
+    id,
+    url:requestUrl.origin + ISOLATION_ROUTE + encodeURIComponent(id) + "/",
+    expiresIn:ISOLATION_SESSION_TTL
+  }, 201);
+}
+
+async function handleIsolationAsset(request, requestUrl, env) {
+  const corsHeaders = isolationCorsHeaders();
+  if (request.method === "OPTIONS") return new Response(null, {status:204, headers:corsHeaders});
+  if (!["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"].includes(request.method)) {
+    return new Response("Method not allowed.", {status:405, headers:corsHeaders});
+  }
+  if (!env?.ISOLATION_SESSIONS) {
+    return new Response("The Worker is missing its ISOLATION_SESSIONS KV binding.", {status:503, headers:corsHeaders});
+  }
+
+  const route = requestUrl.pathname.slice(ISOLATION_ROUTE.length);
+  const slash = route.indexOf("/");
+  const id = slash < 0 ? route : route.slice(0, slash);
+  const relativePath = slash < 0 ? "" : route.slice(slash + 1);
+  if (!validateIsolationId(id)) return new Response("Invalid isolation id.", {status:400, headers:corsHeaders});
+
+  let session;
+  try {
+    session = await env.ISOLATION_SESSIONS.get("isolation:" + id, {type:"json"});
+  } catch (error) {
+    return new Response("Could not read the isolation session: " + (error.message || String(error)), {status:500, headers:corsHeaders});
+  }
+  if (!session?.baseUrl || !session?.basePath) {
+    return new Response("This isolation session does not exist or has expired. Reopen the isolated document.", {status:404, headers:corsHeaders});
+  }
+
+  let base;
   let target;
   try {
-    if (requestUrl.pathname === "/isolate") {
-      const rawUrl = requestUrl.searchParams.get("url");
-      if (!rawUrl) return new Response("Missing url parameter.", {status:400, headers:corsHeaders});
-      target = new URL(rawUrl);
-      validateIsolatedTarget(target, requestUrl.origin);
-      const destination = new URL(isolatedProxyPath(target), requestUrl.origin);
-      const redirectHeaders = new Headers(corsHeaders);
-      redirectHeaders.set("Location", destination.href);
-      return new Response(null, {status:307, headers:redirectHeaders});
+    base = new URL(session.baseUrl);
+    target = relativePath ? new URL(relativePath, base) : base;
+    if (requestUrl.search) target.search = requestUrl.search;
+    if (target.origin !== session.origin || !target.pathname.startsWith(session.basePath)) {
+      throw new Error("The requested path is outside this isolation session's base directory.");
     }
-
-    const route = requestUrl.pathname.slice(ISOLATE_ROUTE.length);
-    const separator = route.indexOf("/");
-    const encodedOrigin = separator < 0 ? route : route.slice(0, separator);
-    const path = separator < 0 ? "/" : route.slice(separator) || "/";
-    const origin = decodeIsolateOrigin(encodedOrigin);
-    target = new URL(path + requestUrl.search, origin);
     validateIsolatedTarget(target, requestUrl.origin);
   } catch (error) {
-    return new Response(error.message || "Invalid isolated proxy URL.", {status:400, headers:corsHeaders});
+    return new Response(error.message || "Invalid isolated asset path.", {status:403, headers:corsHeaders});
   }
 
   const upstreamHeaders = new Headers(request.headers);
@@ -239,15 +288,24 @@ async function handleIsolatedProxy(request, requestUrl) {
     headers:upstreamHeaders,
     redirect:"manual"
   };
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = await request.arrayBuffer();
-  }
+  if (request.method !== "GET" && request.method !== "HEAD") init.body = await request.arrayBuffer();
 
   let upstream;
   try {
     upstream = await fetch(target.href, init);
   } catch (error) {
     return new Response("Isolated proxy fetch failed: " + (error.message || String(error)), {status:502, headers:corsHeaders});
+  }
+
+  // openDAW uses client-side routes. If an extensionless route is reloaded,
+  // serve the Studio app shell instead of returning a static-host 404.
+  if (upstream.status === 404 && request.method === "GET" && relativePath && !relativePath.split("/").pop().includes(".")) {
+    try {
+      target = new URL(base.href);
+      upstream = await fetch(target.href, {...init, body:undefined});
+    } catch (error) {
+      return new Response("Could not load the openDAW app shell: " + (error.message || String(error)), {status:502, headers:corsHeaders});
+    }
   }
 
   const responseHeaders = new Headers(upstream.headers);
@@ -261,8 +319,13 @@ async function handleIsolatedProxy(request, requestUrl) {
   if (location && upstream.status >= 300 && upstream.status < 400) {
     try {
       const redirectedTarget = new URL(location, target);
-      validateIsolatedTarget(redirectedTarget, requestUrl.origin);
-      responseHeaders.set("Location", isolatedProxyPath(redirectedTarget));
+      if (redirectedTarget.origin === base.origin && redirectedTarget.pathname.startsWith(session.basePath)) {
+        const redirectedPath = redirectedTarget.pathname.slice(session.basePath.length);
+        responseHeaders.set("Location", isolationAssetPath(id, redirectedPath, redirectedTarget.search) + redirectedTarget.hash);
+      } else {
+        validateIsolatedTarget(redirectedTarget, requestUrl.origin);
+        responseHeaders.set("Location", redirectedTarget.href);
+      }
     } catch (error) {
       return new Response("Blocked upstream redirect: " + (error.message || String(error)), {status:502, headers:corsHeaders});
     }
@@ -274,17 +337,17 @@ async function handleIsolatedProxy(request, requestUrl) {
   const isHtml = contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
   const isCss = contentType.includes("text/css");
   const isScript = contentType.includes("javascript") || contentType.includes("ecmascript");
-
   let body = upstream.body;
+
   if (isHtml || isCss || isScript) {
     let source = await upstream.text();
     if (isHtml) {
-      source = rewriteIsolatedHtml(source, target);
+      source = rewriteIsolatedHtml(source, base, id);
       responseHeaders.set("Document-Isolation-Policy", ISOLATION_POLICY);
     } else if (isCss) {
-      source = rewriteIsolatedCss(source, target);
+      source = rewriteIsolatedCss(source, base, id);
     } else {
-      source = rewriteIsolatedScript(source, target);
+      source = rewriteIsolatedScript(source, base, id);
     }
     body = source;
     responseHeaders.delete("etag");
@@ -299,12 +362,21 @@ async function handleIsolatedProxy(request, requestUrl) {
   });
 }
 
+async function handleIsolationRequest(request, requestUrl, env) {
+  if (request.method === "OPTIONS") return new Response(null, {status:204, headers:isolationCorsHeaders()});
+  if (requestUrl.pathname === "/isolate") {
+    if (request.method !== "GET") return new Response("Method not allowed.", {status:405, headers:isolationCorsHeaders()});
+    return handleIsolationSetup(requestUrl, env);
+  }
+  return handleIsolationAsset(request, requestUrl, env);
+}
+
 export default {
 
   async fetch(request, env) {
     const routeUrl = new URL(request.url);
-    if (routeUrl.pathname === "/isolate" || routeUrl.pathname.startsWith("/isolate/")) {
-      return handleIsolatedProxy(request, routeUrl);
+    if (routeUrl.pathname === "/isolate" || routeUrl.pathname.startsWith("/isolation/")) {
+      return handleIsolationRequest(request, routeUrl, env);
     }
 
 
