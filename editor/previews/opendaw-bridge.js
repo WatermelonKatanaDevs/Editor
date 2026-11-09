@@ -106,6 +106,8 @@
     return new Uint8Array(value || []);
   };
   const abortError = () => new DOMException('The user aborted the request.', 'AbortError');
+  const nativeInputClick = HTMLInputElement.prototype.click;
+  const nativeAnchorClick = HTMLAnchorElement.prototype.click;
   function makeFile(entry) {
     const file = new File([entry.bytes], entry.name, {type:entry.type || 'application/octet-stream'});
     if (entry.path) Object.defineProperties(file, {
@@ -136,6 +138,21 @@
       });
     }
   });
+
+  HTMLInputElement.prototype.click = function () {
+    if (this.type !== 'file') return nativeInputClick.call(this);
+    const input = this;
+    void request('pickFiles', pickerOptions({
+      title:input.getAttribute('data-wk-picker-title') || 'Open in openDAW',
+      accept:input.accept || '',
+      multiple:!!input.multiple
+    })).then(entries => {
+      const transfer = new DataTransfer();
+      for (const entry of entries || []) transfer.items.add(makeFile(entry));
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', {bubbles:true}));
+    }).catch(error => console.error('openDAW shared file picker failed:', error));
+  };
 
   Object.defineProperty(window, 'showSaveFilePicker', {
     configurable:true,
@@ -197,6 +214,24 @@
       };
     }
   });
+
+  HTMLAnchorElement.prototype.click = function () {
+    if (!this.download || !String(this.href).startsWith('blob:')) {
+      return nativeAnchorClick.call(this);
+    }
+    const anchor = this;
+    void fetch(anchor.href).then(response => {
+      if (!response.ok) throw new Error('Could not read the exported file (' + response.status + ').');
+      return response.blob();
+    }).then(async blob => {
+      const path = await request('pickSavePath', {
+        title:'Save from openDAW',
+        suggestedName:anchor.download || 'untitled'
+      });
+      if (!path) return;
+      await bridge.writeFile(path, new Uint8Array(await blob.arrayBuffer()));
+    }).catch(error => console.error('openDAW shared save dialog failed:', error));
+  };
 
   window.__WKOpenDAWWorkspace = {
     listFiles:() => bridge.listFiles(),
