@@ -712,7 +712,6 @@
       if (!oid || !window.confirm('Restore the workspace files to commit ' + oid.slice(0, 7) + '? Current tracked files will be overwritten. Your current branch will not move.')) return;
       try {
         const service = getLocalGit();
-        const repository = await service._repository('/');
         await service.runSerialized(['restore-commit', oid], {cwd:'/'});
         state.markDirty?.('.git');
         state.refreshExplorer?.();
