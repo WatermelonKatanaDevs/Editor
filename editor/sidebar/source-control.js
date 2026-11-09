@@ -723,24 +723,25 @@
 
     async function commitLocal() {
       const button = tree.querySelector('[data-local-commit]');
-      const message = tree.querySelector('[data-local-commit-message]')?.value.trim() || '';
       if (!button || button.disabled || commitBusy) return;
+      const message = tree.querySelector('[data-local-commit-message]')?.value.trim() || '';
       const connectedRemote = state.gitRemote?.provider === 'github';
-      const service = getLocalGit();
       commitBusy = true;
       button.disabled = true;
-      button.textContent = connectedRemote ? 'Committing…' : 'Committing…';
+      button.textContent = 'Committing…';
       let successMessage = '';
       let errorMessage = '';
       let localCommitCreated = false;
       try {
+        const service = getLocalGit();
         const status = await service.status('/');
         if (status.changes.some(change => change.staged)) {
           if (!message) throw new Error('Enter a commit message.');
           const result = await service.runSerialized(['commit', '-m', message], {cwd:'/'});
           localCommitCreated = true;
           state.markDirty?.('.git');
-          if (tree.querySelector('[data-local-commit-message]')) tree.querySelector('[data-local-commit-message]').value = '';
+          const messageInput = tree.querySelector('[data-local-commit-message]');
+          if (messageInput) messageInput.value = '';
           successMessage = result.output || 'Commit created.';
         } else if (!connectedRemote || !localGitPushStatus?.ahead) {
           throw new Error('Nothing staged to commit.');
@@ -755,13 +756,24 @@
           successMessage = (localCommitCreated ? successMessage + '\n' : '') + (pushed.output || 'Pushed to GitHub.');
         }
       } catch (error) {
-        errorMessage = error.message || String(error);
+        console.error('[Source Control] Creating local commit or pushing to GitHub', error);
+        errorMessage = error?.message || String(error);
         if (localCommitCreated && connectedRemote) errorMessage = 'Committed locally, but the push failed: ' + errorMessage;
       } finally {
         commitBusy = false;
-        await refreshLocalStatus();
+        try {
+          await refreshLocalStatus();
+        } catch (error) {
+          console.error('[Source Control] Refreshing status after commit', error);
+          if (!errorMessage) errorMessage = 'The commit operation finished, but refreshing repository status failed: ' + (error?.message || String(error));
+        }
+        try {
+          await loadLocalHistory();
+        } catch (error) {
+          console.error('[Source Control] Refreshing commit history', error);
+          if (!errorMessage) errorMessage = (localCommitCreated ? 'Commit created, but ' : '') + 'commit history could not be refreshed: ' + (error?.message || String(error));
+        }
       }
-      await loadLocalHistory();
       if (errorMessage) showStatus(errorMessage, true);
       else if (successMessage) showStatus(successMessage);
     }
