@@ -1,5 +1,6 @@
 (function () {
-  const TAG_EVENTS = 'editor-audio-tags-changed';
+  const FILE_SAVED_EVENT = 'editor-audio-file-saved';
+  const AUDIO_EXTENSION = /\.(aac|aif|aiff|flac|m4a|mp3|oga|ogg|opus|wav|wave|webm)$/i;
   const FIELDS = [
     ['title', 'Title', 'text'],
     ['artist', 'Artist', 'text'],
@@ -398,13 +399,13 @@
         if (wasPlaying) audio.play().catch(() => {});
       }, { once: true });
     };
-    window.addEventListener(TAG_EVENTS, refresh);
+    window.addEventListener(FILE_SAVED_EVENT, refresh);
 
     updateMetadata(metadata);
     updatePlayButton();
     ctx.addCleanup(() => {
       disposed = true;
-      window.removeEventListener(TAG_EVENTS, refresh);
+      window.removeEventListener(FILE_SAVED_EVENT, refresh);
       if (artworkURL) URL.revokeObjectURL(artworkURL);
       try { audio.pause(); } catch (_) {}
       try { audio.removeAttribute('src'); audio.load(); } catch (_) {}
@@ -421,7 +422,26 @@
     audio.src = ctx.getURL();
     wrap.appendChild(audio);
     ctx.host.appendChild(wrap);
+
+    let disposed = false;
+    const refresh = event => {
+      if (event?.detail?.path !== ctx.file.path || disposed) return;
+      const wasPlaying = !audio.paused;
+      const time = audio.currentTime;
+      const nextURL = ctx.getURL();
+      if (!nextURL) return;
+      audio.src = nextURL;
+      audio.load();
+      audio.addEventListener('loadedmetadata', function restore() {
+        audio.removeEventListener('loadedmetadata', restore);
+        if (Number.isFinite(time) && time < audio.duration) audio.currentTime = time;
+        if (wasPlaying) audio.play().catch(() => {});
+      }, { once: true });
+    };
+    window.addEventListener(FILE_SAVED_EVENT, refresh);
     ctx.addCleanup(() => {
+      disposed = true;
+      window.removeEventListener(FILE_SAVED_EVENT, refresh);
       try { audio.pause(); } catch (_) {}
       try { audio.removeAttribute('src'); audio.load(); } catch (_) {}
     });
@@ -710,6 +730,22 @@
     save.textContent = 'Save tags';
     footer.append(status, save);
 
+    const refreshFromFile = event => {
+      if (event?.detail?.path !== ctx.file.path || event?.detail?.source === 'audio-tags') return;
+      try {
+        parsed = window.EditorAudioTags.read(ctx.readBinary(), format);
+        for (const [key] of FIELDS) inputs[key].value = parsed.tags?.[key] || '';
+        cover = parsed.picture ? { ...parsed.picture, data: new Uint8Array(parsed.picture.data) } : null;
+        replaceCover = false;
+        removeCover.disabled = !cover;
+        renderCover();
+        status.textContent = 'Reloaded saved tags from ' + ctx.file.name;
+      } catch (error) {
+        status.textContent = error?.message || 'Could not reload saved audio tags.';
+      }
+    };
+    window.addEventListener(FILE_SAVED_EVENT, refreshFromFile);
+
     form.addEventListener('submit', event => {
       event.preventDefault();
       if (save.disabled) return;
@@ -729,7 +765,7 @@
         ctx.markDirty(ctx.file.path);
         parsed = window.EditorAudioTags.read(updated, format);
         replaceCover = false;
-        window.dispatchEvent(new CustomEvent(TAG_EVENTS, { detail: { path: ctx.file.path } }));
+        window.dispatchEvent(new CustomEvent(FILE_SAVED_EVENT, { detail: { path: ctx.file.path, source: 'audio-tags' } }));
         status.textContent = 'Saved into ' + ctx.file.name;
         save.textContent = 'Saved';
       } catch (error) {
@@ -744,6 +780,7 @@
     ctx.host.appendChild(root);
     renderCover();
     ctx.addCleanup(() => {
+      window.removeEventListener(FILE_SAVED_EVENT, refreshFromFile);
       if (coverObjectURL) URL.revokeObjectURL(coverObjectURL);
     });
   }
@@ -751,7 +788,10 @@
   window.EditorPreviewProviders = window.EditorPreviewProviders || [];
   window.EditorPreviewProviders.push({
     id: 'audio',
-    match(file) { return String(file.mime || '').startsWith('audio/'); },
+    match(file) {
+      return String(file.mime || '').toLowerCase().startsWith('audio/') ||
+        AUDIO_EXTENSION.test(String(file.name || file.path || ''));
+    },
     views: [
       {
         id: 'audio-player',
