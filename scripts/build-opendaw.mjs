@@ -66,6 +66,12 @@ const patches = [
     after: '    const base = process.env.WK_OPENDAW_BASE_PATH || ((command === "build" && isCI) ? ' + tick + '/' + dollar + '{envFolder}/releases/' + dollar + '{uuid}/' + tick + ' : "/")'
   },
   {
+    path: resolve(sourceRoot, "turbo.json"),
+    label: "forward nested base through Turborepo",
+    before: '    "VITE_WCLAP_ORIGIN"\n  ],',
+    after: '    "VITE_WCLAP_ORIGIN",\n    "WK_OPENDAW_BASE_PATH"\n  ],'
+  },
+  {
     path: resolve(studioRoot, "src/boot.ts"),
     label: "nested build-info URL",
     before: 'const loadBuildInfo = async () => fetch(' + tick + '/build-info.json?v=' + dollar + '{Date.now()}' + tick + ')',
