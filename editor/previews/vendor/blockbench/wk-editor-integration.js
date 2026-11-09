@@ -134,6 +134,7 @@
   }
 
   let activePickerDrop = null;
+  let forceSaveDialog = false;
   function showWorkspacePicker(options = {}) {
     return new Promise(resolve => {
       const mode = options.mode === 'save' ? 'save' : 'open';
@@ -444,7 +445,7 @@
     let suggestedName = fileName;
     if (expectedExt && extension(suggestedName) !== expectedExt) suggestedName += '.' + expectedExt;
 
-    let path = preferredSavePath(options);
+    let path = forceSaveDialog ? '' : preferredSavePath(options);
     if (!path) {
       path = await showWorkspacePicker({
         mode: 'save',
@@ -466,21 +467,30 @@
         return;
       }
     } else {
-      await writeFile(path, options, savedPath => {
-        const project = window.Project;
-        const ext = extension(savedPath);
-        if (project) {
-          if (ext === 'bbmodel' || /project/i.test(String(options.type || ''))) {
-            project.save_path = savedPath;
-            project.name = basename(savedPath).replace(/\.[^.]+$/, '');
-          } else if (window.Format?.codec && ext === String(window.Format.codec.extension || '').toLowerCase()) {
-            project.export_path = savedPath;
-            project.export_codec = window.Format.codec.id;
+      try {
+        await writeFile(path, options, savedPath => {
+          const project = window.Project;
+          const ext = extension(savedPath);
+          let representsProject = false;
+          if (project) {
+            if (ext === 'bbmodel' || /project/i.test(String(options.type || ''))) {
+              project.save_path = savedPath;
+              project.name = basename(savedPath).replace(/\.[^.]+$/, '');
+              representsProject = true;
+            } else if (window.Format?.codec && ext === String(window.Format.codec.extension || '').toLowerCase()) {
+              project.export_path = savedPath;
+              project.export_codec = window.Format.codec.id;
+              representsProject = true;
+            }
+            if (representsProject) project.saved = true;
           }
-          project.saved = true;
-        }
-        if (typeof callback === 'function') callback(savedPath);
-      });
+          if (typeof callback === 'function') callback(savedPath);
+        });
+      } catch (error) {
+        console.error('Blockbench workspace save failed:', error);
+        notify('Could not save to the Editor workspace: ' + (error?.message || error));
+        return;
+      }
     }
     return path;
   }
@@ -559,6 +569,30 @@
     });
   }
   patchBlockbench(blockbenchApi);
+
+  function installSaveAsHook() {
+    const action = window.BarItems?.save_project_as;
+    if (!action || action.__wkWorkspaceSaveAsPatched || typeof action.click !== 'function') return;
+    action.__wkWorkspaceSaveAsPatched = true;
+    const originalClick = action.click;
+    action.click = function (...args) {
+      forceSaveDialog = true;
+      try {
+        const result = originalClick.apply(this, args);
+        queueMicrotask(() => { forceSaveDialog = false; });
+        return result;
+      } catch (error) {
+        forceSaveDialog = false;
+        throw error;
+      }
+    };
+  }
+
+  window.addEventListener('load', installSaveAsHook, {once: true});
+  for (const eventName of ['setup_project', 'new_project']) {
+    try { blockbenchApi?.on?.(eventName, installSaveAsHook); } catch (_) {}
+  }
+  setTimeout(installSaveAsHook, 1000);
 
   async function handleWorkspaceDrop(files, event) {
     const BlockbenchApi = window.Blockbench;
