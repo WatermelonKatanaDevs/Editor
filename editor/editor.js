@@ -1852,66 +1852,6 @@ window.__editorInitPromise = (async function () {
     return true;
   }
 
-  async function preloadNodeDependencies() {
-    const config = state.runConfig?.config;
-    if (!state.fs || config?.serverType !== 'node') return false;
-
-    const manifest = nodeDependencyManifest(state.fs, config);
-    if (!manifest.hasPackageJson || await hasNodeDependencies(state.fs, manifest.root)) return false;
-
-    let net = state.browserNetwork;
-    if (!net) {
-      for (const info of state.browserTabs.values()) {
-        if (!info?.ready) continue;
-        try {
-          net = await info.ready;
-        } catch (_) {}
-        if (net) break;
-      }
-    }
-    if (!net) return false;
-
-    if (remoteLoadProgress) {
-      updateRemoteLoadProgress(
-        'Installing Node dependencies…',
-        null,
-        manifest.hasLockfile ? 'Running npm ci from package-lock.json' : 'Running npm install from package.json'
-      );
-    }
-
-    const terminalTab = getBuiltin('terminal')?.getOrOpenTerminal();
-    const emulator = new NodeEmulator({
-      domain: String(config.domain || 'http://localhost:3000').replace(/\/+$/, ''),
-      rootfolder: manifest.root,
-      pathPrefix: config.path || '/',
-      filesystem: state.fs,
-      fileSystemSync: false,
-      network: net,
-      cwd: config.cwd || '/',
-      env: {
-        NODE_ENV: 'development',
-        USER: 'browser_user',
-        ...state.environment
-      }
-    });
-
-    try {
-      await emulator.ready;
-      if (emulator.loadError) throw emulator.loadError;
-      for (const terminal of state.terminalTabs.values()) terminal.attach(emulator);
-      const installed = await installNodeDependencies(emulator, config);
-      if (installed) {
-        state.nodeDependenciesError = null;
-        state.fileManager?.refresh?.();
-        updateStatus();
-      }
-      return installed;
-    } finally {
-      for (const terminal of state.terminalTabs.values()) if (terminal.runner === emulator) terminal.attach(null);
-      try { emulator.destroy?.(); } catch (_) {}
-    }
-  }
-
   let runtimeSetupPromise = null;
   state.ensureNodeRuntime = async function(terminal) {
     if (runtimeSetupPromise) await runtimeSetupPromise;
@@ -2416,10 +2356,14 @@ window.__editorInitPromise = (async function () {
     if (options.fromCache) state.dirty = !!options.cachedDirty;
     if (state.runConfig?.config?.serverType === 'node') {
       try {
-        await preloadNodeDependencies();
+        // Initialize the persistent runtime during project open. This uses the
+        // same dependency-install path as Run, rather than a temporary emulator
+        // that can diverge from the runtime used by the project.
+        await setupRuntime(state.browserNetwork);
+        state.nodeDependenciesError = null;
       } catch (e) {
-        // Dependency installation is retried by setupRuntime when Run is pressed.
         // Keep the editor usable if npm is temporarily unavailable while loading.
+        // Run can retry setup after the underlying problem is corrected.
         state.nodeDependenciesError = e;
         for (const terminal of state.terminalTabs.values()) terminal.console?.error('Failed to pre-install Node dependencies:', e?.message || e);
         console.error('Failed to pre-install Node dependencies:', e);
