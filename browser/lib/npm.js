@@ -227,34 +227,40 @@
   }
 
   function readTarString(bytes, offset, length) {
-    let end = offset + length;
-    while (end > offset && bytes[end - 1] === 0) end--;
-    return new TextDecoder().decode(bytes.slice(offset, end));
+    let end = offset;
+    const limit = Math.min(bytes.length, offset + length);
+    while (end < limit && bytes[end] !== 0) end++;
+    return new TextDecoder().decode(bytes.subarray(offset, end));
   }
 
   function readTarNumber(bytes, offset, length) {
-    const value = readTarString(bytes, offset, length).trim();
-    if (!value) return 0;
-    if (value[0] === 'x') {
-      let result = 0;
-      for (let i = 1; i < value.length; i++) result = result * 256 + value.charCodeAt(i);
-      return result;
+    if (bytes[offset] & 0x80) {
+      let value = bytes[offset] & 0x7f;
+      for (let i = 1; i < length; i++) value = value * 256 + bytes[offset + i];
+      if (bytes[offset] & 0x40) value -= 2 ** (length * 8 - 1);
+      return value;
     }
-    return parseInt(value, 8) || 0;
+    const value = readTarString(bytes, offset, length).trim();
+    return value ? parseInt(value, 8) || 0 : 0;
   }
 
   function parsePax(bytes) {
-    const text = new TextDecoder().decode(bytes);
     const result = {};
+    const decoder = new TextDecoder();
     let pos = 0;
-    while (pos < text.length) {
-      const space = text.indexOf(' ', pos);
+    while (pos < bytes.length) {
+      const space = bytes.indexOf(32, pos);
       if (space < 0) break;
-      const length = Number(text.slice(pos, space));
-      if (!length) break;
-      const record = text.slice(space + 1, pos + length).replace(/\n$/, '');
-      const eq = record.indexOf('=');
-      if (eq >= 0) result[record.slice(0, eq)] = record.slice(eq + 1);
+      const length = Number(decoder.decode(bytes.subarray(pos, space)));
+      if (!Number.isSafeInteger(length) || length <= 0 || pos + length > bytes.length) break;
+      let end = pos + length;
+      if (bytes[end - 1] === 10) end--;
+      const equals = bytes.indexOf(61, space + 1);
+      if (equals >= 0 && equals < end) {
+        const key = decoder.decode(bytes.subarray(space + 1, equals));
+        const value = decoder.decode(bytes.subarray(equals + 1, end));
+        result[key] = value;
+      }
       pos += length;
     }
     return result;
@@ -300,37 +306,42 @@
       if (empty) break;
 
       const name = readTarString(header, 0, 100);
-      const prefix = readTarString(header, 345, 155);
+      const magic = readTarString(header, 257, 6);
+      const prefix = magic.startsWith('ustar') ? readTarString(header, 345, 155) : '';
       const rawPath = prefix ? `${prefix}/${name}` : name;
       const mode = readTarString(header, 100, 8);
-      const size = readTarNumber(header, 124, 12);
+      const headerSize = readTarNumber(header, 124, 12);
       const type = String.fromCharCode(header[156] || 0);
-      const body = tar.slice(offset, offset + size);
-      offset += Math.ceil(size / 512) * 512;
+      const bodyStart = offset;
+      const headerBody = tar.slice(bodyStart, bodyStart + headerSize);
+      offset = bodyStart + Math.ceil(headerSize / 512) * 512;
 
       if (type === 'L') {
-        longName = new TextDecoder().decode(body).replace(/\0+$/, '').replace(/\n$/, '');
+        longName = new TextDecoder().decode(headerBody).replace(/\0+$/, '').replace(/\n$/, '');
         continue;
       }
       if (type === 'g') {
-        globalPax = { ...globalPax, ...parsePax(body) };
+        globalPax = { ...globalPax, ...parsePax(headerBody) };
         continue;
       }
       if (type === 'x') {
-        pax = { ...pax, ...parsePax(body) };
+        pax = { ...pax, ...parsePax(headerBody) };
         continue;
       }
 
       const mergedPax = { ...globalPax, ...pax };
       pax = {};
+      const paxSize = mergedPax.size == null ? headerSize : Number(mergedPax.size);
+      if (!Number.isSafeInteger(paxSize) || paxSize < 0) throw new NpmError('Package archive contains an invalid TAR entry size.', 'ETAR');
+      const body = paxSize === headerSize ? headerBody : tar.slice(bodyStart, bodyStart + paxSize);
+      offset = bodyStart + Math.ceil(paxSize / 512) * 512;
       let filePath = mergedPax.path || longName || rawPath;
       longName = null;
       filePath = sanitizeTarPath(filePath);
       if (!filePath) continue;
 
-      if (type === '5') continue;
-      if (type === '2' || type === '1') continue;
-      if (type !== '0' && type !== '' && type !== '\0') continue;
+      if (type === '5' || type === '2' || type === '1') continue;
+      if (type !== '0' && type !== '' && type !== '\0' && type !== '7' && type !== ' ') continue;
 
       let relativePath = filePath;
       if (relativePath === 'package') continue;
@@ -339,6 +350,16 @@
       if (!relativePath) continue;
 
       files.push({ path: relativePath, data: body, mode });
+    }
+
+    if (!files.some(file => file.path === 'package.json')) {
+      const manifestFiles = files.filter(file => file.path.endsWith('/package.json')).sort((a,b) => a.path.split('/').length - b.path.split('/').length);
+      if (manifestFiles.length) {
+        const root = manifestFiles[0].path.slice(0, -'/package.json'.length);
+        const prefix = root + '/';
+        const rootedFiles = files.filter(file => file.path.startsWith(prefix)).map(file => ({...file, path:file.path.slice(prefix.length)}));
+        if (rootedFiles.some(file => file.path === 'package.json')) return rootedFiles;
+      }
     }
     return files;
   }
@@ -539,7 +560,10 @@
       const bytes = await this.fetchTarball(dist.tarball);
       await this.verifyIntegrity(bytes, dist.integrity);
       const files = await extractTgz(bytes);
-      if (!files.some(f => f.path === 'package.json')) throw new NpmError(`Package '${name}@${version}' does not contain package.json.`, 'EBADPACK');
+      if (!files.some(file => file.path === 'package.json')) {
+        const entries = files.slice(0, 10).map(file => file.path).join(', ') || 'no regular files parsed';
+        throw new NpmError(`Package '${name}@${version}' archive has no root package.json (parsed ${files.length} files; first entries: ${entries}).`, 'EBADPACK');
+      }
 
       const destination = this.installedPackagePath(targetDir, name);
       this.deleteTree(destination.replace(this.rootfolder + '/', ''));
