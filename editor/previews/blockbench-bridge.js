@@ -134,19 +134,18 @@
     return values.map(value => String(value).replace(/^\./, '').toLowerCase());
   }
   function isAllowed(path, extensions) {
-    if (!extensions.length) return true;
+    if (!extensions.length || extensions.includes('*')) return true;
     const ext = extension(path);
     if (extensions.includes(ext)) return true;
-    if (extensions.includes('image/*')) return /^image\//.test(mimeFor(path));
-    if (extensions.includes('*')) return true;
-    return false;
+    const type = String(mimeFor(path) || '').toLowerCase();
+    return extensions.includes(type) || extensions.some(value => value.endsWith('/*') && type.startsWith(value.slice(0, -1)));
   }
   function isAllowedFile(file, extensions) {
     if (!extensions.length || extensions.includes('*')) return true;
     const ext = extension(file?.name || '');
     if (extensions.includes(ext)) return true;
     const type = String(file?.type || mimeFor(file?.name || '')).toLowerCase();
-    return extensions.includes('image/*') && type.startsWith('image/');
+    return extensions.includes(type) || extensions.some(value => value.endsWith('/*') && type.startsWith(value.slice(0, -1)));
   }
 
   let activePickerDrop = null;
@@ -157,7 +156,7 @@
       const multiple = mode === 'open' && options.multiple === true;
       const extensions = allowedExtensions(options);
       const suggestedName = String(options.name || 'model').trim() || 'model';
-      const suggestedExtension = extensions.find(value => value !== '*' && value !== 'image/*') || '';
+      const suggestedExtension = extensions.find(value => value !== '*' && !value.includes('/')) || '';
       const initialPath = normalize(options.startpath || '');
       let allFiles = [];
       try { allFiles = (bridge.listFiles() || []).map(normalize).filter(Boolean); } catch (_) {}
@@ -166,6 +165,7 @@
       let currentDir = startIsFile || startLooksLikeMissingFile ? dirname(initialPath) : initialPath;
       let selected = new Set();
       let droppedFiles = [];
+      let showAllFiles = !extensions.length || extensions.includes('*');
 
       const overlay = document.createElement('div');
       overlay.className = 'wk-blockbench-picker-overlay';
@@ -198,14 +198,25 @@
       deviceButton.hidden = mode !== 'open';
       deviceInput.multiple = multiple;
       const deviceAccept = extensions.map(value =>
-        value === 'image/*' ? 'image/*' : value === '*' ? '*/*' : '.' + value
+        value === '*' ? '*/*' : value.includes('/') ? value : '.' + value
       ).join(',');
-      if (deviceAccept) deviceInput.accept = deviceAccept;
+      const updateDeviceAccept = () => {
+        if (showAllFiles || !deviceAccept) deviceInput.removeAttribute('accept');
+        else deviceInput.accept = deviceAccept;
+      };
+      updateDeviceAccept();
+      const allFilesButton = document.createElement('button');
+      allFilesButton.type = 'button';
+      allFilesButton.textContent = 'All files: ' + (showAllFiles ? 'On' : 'Off');
+      allFilesButton.title = 'Show every workspace and device file, regardless of the suggested file types.';
+      allFilesButton.hidden = !extensions.length || extensions.includes('*');
+      allFilesButton.setAttribute('aria-pressed', String(showAllFiles));
+      allFilesButton.style.cssText = 'flex:none;border:1px solid #596168;background:#30363a;color:#e9edf0;border-radius:5px;padding:7px 10px;cursor:pointer;';
       const search = document.createElement('input');
       search.type = 'search';
       search.placeholder = 'Filter workspace files';
       search.style.cssText = 'width:190px;max-width:32%;min-width:110px;background:#15181a;color:#eee;border:1px solid #50585e;border-radius:5px;padding:7px 9px;outline:none;';
-      toolbar.append(upButton, pathLabel, deviceButton, search);
+      toolbar.append(upButton, pathLabel, deviceButton, allFilesButton, search);
       panel.appendChild(toolbar);
 
       const list = document.createElement('div');
@@ -268,7 +279,7 @@
           if (!remainder) continue;
           const slash = remainder.indexOf('/');
           if (slash >= 0) dirs.add(remainder.slice(0, slash));
-          else if (isAllowed(path, extensions)) files.push(path);
+          else if (showAllFiles || isAllowed(path, extensions)) files.push(path);
         }
         return {
           dirs: [...dirs].sort((a, b) => a.localeCompare(b)),
@@ -366,7 +377,7 @@
         accept(files) {
           if (mode !== 'open' || !files?.length) return false;
           const incoming = [...files];
-          const rejected = incoming.filter(file => !isAllowedFile(file, extensions));
+          const rejected = showAllFiles ? [] : incoming.filter(file => !isAllowedFile(file, extensions));
           if (rejected.length) {
             status.textContent = 'Some files do not match the accepted file types.';
             return false;
@@ -392,7 +403,7 @@
         const incoming = Array.from(deviceInput.files || []);
         deviceInput.value = '';
         if (!incoming.length) return;
-        const rejected = incoming.filter(file => !isAllowedFile(file, extensions));
+        const rejected = showAllFiles ? [] : incoming.filter(file => !isAllowedFile(file, extensions));
         if (rejected.length) {
           status.textContent = rejected.length + ' file(s) do not match the accepted file types.';
           return;
@@ -402,6 +413,17 @@
         status.textContent = droppedFiles.length + ' file(s) selected from this device. Press Open to continue.';
         renderList();
       });
+      allFilesButton.addEventListener('click', () => {
+        showAllFiles = !showAllFiles;
+        selected.clear();
+        droppedFiles = [];
+        allFilesButton.textContent = 'All files: ' + (showAllFiles ? 'On' : 'Off');
+        allFilesButton.setAttribute('aria-pressed', String(showAllFiles));
+        allFilesButton.style.background = showAllFiles ? '#31513f' : '#30363a';
+        updateDeviceAccept();
+        renderList();
+      });
+      allFilesButton.style.background = showAllFiles ? '#31513f' : '#30363a';
       search.addEventListener('input', renderList);
       overlay.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); finish(null); }

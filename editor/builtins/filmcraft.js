@@ -300,17 +300,32 @@
       const input = document.createElement('input');
       input.type = 'file';
       input.multiple = true;
-      input.accept = 'video/*,audio/*,image/*,.fcproj,.mxf,.aaf,.omf,.edl,.srt,.vtt';
+      const acceptedDeviceTypes = 'video/*,audio/*,image/*,.fcproj,.mxf,.aaf,.omf,.edl,.srt,.vtt';
+      input.accept = acceptedDeviceTypes;
       input.hidden = true;
       input.onchange = () => {
         handleDeviceFiles(input.files);
         input.value = '';
       };
       openDeviceButton.onclick = () => input.click();
+      let showAllDeviceFiles = false;
+      const allDeviceFilesButton = document.createElement('button');
+      allDeviceFilesButton.type = 'button';
+      allDeviceFilesButton.textContent = 'All file types: Off';
+      allDeviceFilesButton.title = 'Show every file in the device picker, including types FilmCraft may not recognize.';
+      allDeviceFilesButton.setAttribute('aria-pressed', 'false');
+      allDeviceFilesButton.onclick = () => {
+        showAllDeviceFiles = !showAllDeviceFiles;
+        if (showAllDeviceFiles) input.removeAttribute('accept');
+        else input.accept = acceptedDeviceTypes;
+        allDeviceFilesButton.textContent = 'All file types: ' + (showAllDeviceFiles ? 'On' : 'Off');
+        allDeviceFilesButton.setAttribute('aria-pressed', String(showAllDeviceFiles));
+        allDeviceFilesButton.style.background = showAllDeviceFiles ? '#31513f' : '#2b3038';
+      };
       status = document.createElement('div');
       status.className = 'status';
       status.textContent = 'Loading FilmCraft…';
-      toolbar.append(openWorkspaceButton, openDeviceButton, status);
+      toolbar.append(openWorkspaceButton, openDeviceButton, allDeviceFilesButton, status);
       const frameWrap = document.createElement('div');
       frameWrap.className = 'wk-filmcraft-frame-wrap';
       frame = document.createElement('iframe');
