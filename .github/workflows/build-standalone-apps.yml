@@ -1,0 +1,60 @@
+name: Build standalone web apps
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-standalone-apps.yml"
+      - ".github/workflows/build-photocraft.yml"
+      - ".gitmodules"
+      - "editor/previews/vendor/opendaw-src"
+      - "editor/previews/vendor/photocraft-src"
+      - "editor/previews/opendaw-bridge.js"
+      - "editor/previews/photocraft-bridge.js"
+      - "scripts/build-opendaw.mjs"
+      - "scripts/build-photocraft.mjs"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: standalone-web-apps
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out Editor and pinned application sources
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build openDAW standalone app
+        run: node scripts/build-opendaw.mjs
+      - name: Build PhotoCraft standalone app
+        run: node scripts/build-photocraft.mjs
+      - name: Verify standalone HTML entry points
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s editor/previews/vendor/opendaw/index.html
+          test -s editor/previews/vendor/photocraft/index.html
+          grep -q '<base href="./">' editor/previews/vendor/opendaw/index.html
+          grep -q 'opendaw-bridge.js' editor/previews/vendor/opendaw/index.html
+          grep -q 'wk-photocraft-bridge.js' editor/previews/vendor/photocraft/index.html
+          echo "Both standalone entry points exist and use the optional bridges."
+      - name: Commit built applications for GitHub Pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f editor/previews/vendor/opendaw editor/previews/vendor/photocraft
+          if git diff --cached --quiet; then
+            echo "Standalone application output is already current."
+            exit 0
+          fi
+          git commit -m "Build standalone openDAW and PhotoCraft apps"
+          git push

@@ -11,8 +11,8 @@ const editorRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = resolve(editorRoot, "editor/previews/vendor/opendaw-src");
 const outputRoot = resolve(editorRoot, "editor/previews/vendor/opendaw");
 const studioRoot = resolve(sourceRoot, "packages/app/studio");
-const basePath = "/editor/editor/previews/vendor/opendaw/";
-const integrationVersion = 4;
+const basePath = "./";
+const integrationVersion = 5
 const markerPath = resolve(outputRoot, ".wk-openDAW-build.json");
 
 function run(command, args, options = {}) {
@@ -101,7 +101,7 @@ const patches = [
     path: resolve(sourceRoot, "packages/lib/jsx/src/routes.ts"),
     label: "nested route helper",
     before: "    // Pushes a new history entry, so the browser's back button returns to the previous path.\n    navigateTo(path: string): boolean {",
-    after: '    private static toBasePath(path: string): string {\n        const base = document.querySelector("base")?.getAttribute("href") || "/"\n        if (base === "/" || path === base || path.startsWith(base)) {return path}\n        return base + path.replace(/^\\/+/, "")\n    }\n\n    // Pushes a new history entry, so the browser\'s back button returns to the previous path.\n    navigateTo(path: string): boolean {'
+    after: '    private static toBasePath(path: string): string {\n        const base = new URL(document.querySelector("base")?.getAttribute("href") || "/", location.href).pathname\n        if (base === "/" || path === base || path.startsWith(base)) {return path}\n        return base + path.replace(/^\\/+/, "")\n    }\n\n    // Pushes a new history entry, so the browser\'s back button returns to the previous path.\n    navigateTo(path: string): boolean {'
   },
   {
     path: resolve(sourceRoot, "packages/lib/jsx/src/routes.ts"),
@@ -119,7 +119,7 @@ const patches = [
     path: resolve(sourceRoot, "packages/lib/jsx/src/routes.ts"),
     label: "nested route pathname",
     before: '    get path(): string {return location.pathname}',
-    after: '    get path(): string {\n        const base = document.querySelector("base")?.getAttribute("href") || "/"\n        const path = location.pathname\n        if (base !== "/" && path.startsWith(base)) {\n            const relative = path.slice(base.length)\n            return relative.length === 0 ? "/" : "/" + relative\n        }\n        return path\n    }'
+    after: '    get path(): string {\n        const base = new URL(document.querySelector("base")?.getAttribute("href") || "/", location.href).pathname\n        const path = location.pathname\n        if (base !== "/" && path.startsWith(base)) {\n            const relative = path.slice(base.length)\n            return relative.length === 0 ? "/" : "/" + relative\n        }\n        return path\n    }'
   },
   {
         path: resolve(studioRoot, "src/service/ProjectProfileService.ts"),
