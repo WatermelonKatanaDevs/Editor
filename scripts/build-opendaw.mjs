@@ -208,7 +208,8 @@ async function main() {
   const env = {
     ...process.env,
     PATH: [join(homedir(), ".cargo", "bin"), process.env.PATH || ""].filter(Boolean).join(delimiter),
-    WK_OPENDAW_BASE_PATH: basePath
+    WK_OPENDAW_BASE_PATH: basePath,
+    NODE_OPTIONS: process.env.NODE_OPTIONS || "--max-old-space-size=3072"
   };
   const originals = [];
   try {
@@ -223,7 +224,7 @@ async function main() {
     await run("npm", ["ci"], {cwd:sourceRoot, env});
     await installRust(env);
     console.log("[openDAW] Building Studio and its worker/WASM dependencies...");
-    await run("npx", ["turbo", "run", "build", "--filter=@opendaw/app-studio..."], {cwd:sourceRoot, env});
+    await run("npx", ["turbo", "run", "build", "--filter=@opendaw/app-studio...", "--concurrency=1"], {cwd:sourceRoot, env});
 
     const dist = resolve(studioRoot, "dist");
     if (!existsSync(resolve(dist, "index.html")) ||
