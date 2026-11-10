@@ -3727,7 +3727,19 @@
               if (virtualAttributeName &&
                   (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')) {
                 if (target.ownerElement) {
-                  target.ownerElement.setAttribute(virtualAttributeName, String(nextValue));
+                  const owner = target.ownerElement;
+                  const value = String(nextValue);
+                  if (
+                    owner instanceof HTMLScriptElement &&
+                    virtualAttributeName.toLowerCase() === 'type'
+                  ) {
+                    clearSavedScriptType(owner, 'type');
+                    Reflect.apply(nativeElementSetAttribute, owner, ['type', value]);
+                  } else if (/^on[a-z]/i.test(virtualAttributeName)) {
+                    rewriteInlineEventAttribute(owner, virtualAttributeName, value);
+                  } else {
+                    owner.setAttribute(virtualAttributeName, value);
+                  }
                   return true;
                 }
               }
