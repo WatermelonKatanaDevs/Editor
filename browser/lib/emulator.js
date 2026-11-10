@@ -543,12 +543,180 @@
   }
 
   function transformAST(ast, options = {}) {
+    if (typeof options.source === 'string') {
+      const originalSource = options.source;
+      const identifier = name => ({ type: "Identifier", name });
+      const literal = value => ({ type: "Literal", value, raw: JSON.stringify(value) });
+      const call = (name,args) => ({ type: "CallExpression", callee: identifier(name), arguments: args });
+      const statement = expression => ({ type: "ExpressionStatement", expression });
+      const objectProperty = (name,value) => ({
+        type: "Property",
+        key: identifier(name),
+        value,
+        kind: "init",
+        method: false,
+        shorthand: false,
+        computed: false
+      });
+      const staticKey = property => {
+        if (!property || property.type === "PrivateIdentifier") return null;
+        if (property.type === "Identifier" && !property.computed) return property.name;
+        if (property.type === "Literal" && (typeof property.value === "string" || typeof property.value === "number")) return String(property.value);
+        return null;
+      };
+      const functionNameHint = (parent,key,child) => {
+        if (!parent) return null;
+        if (parent.type === "VariableDeclarator" && parent.init === child && parent.id.type === "Identifier") return parent.id.name;
+        if (parent.type === "AssignmentExpression" && parent.right === child && parent.left.type === "Identifier") return parent.left.name;
+        if (parent.type === "Property" && parent.value === child && !parent.computed) return staticKey(parent.key);
+        if (parent.type === "PropertyDefinition" && parent.value === child && !parent.computed) return staticKey(parent.key);
+        return null;
+      };
+      const methodEntries = (container,isClass) => {
+        const entries = [];
+        const properties = isClass ? (container.body?.body || []) : (container.properties || []);
+        for (const property of properties) {
+          if (isClass ? property.type !== "MethodDefinition" : property.type !== "Property") continue;
+          const key = staticKey(property.key);
+          if (key == null) continue;
+          const isMethod = isClass || property.method || property.kind === "get" || property.kind === "set";
+          if (!isMethod) continue;
+          entries.push({
+            key,
+            kind: property.kind === "get" || property.kind === "set" ? property.kind : "value",
+            isStatic: isClass ? !!property.static : false,
+            source: originalSource.slice(property.start, property.end)
+          });
+        }
+        return entries;
+      };
+      const entriesNode = entries => ({
+        type: "ArrayExpression",
+        elements: entries.map(entry => ({
+          type: "ObjectExpression",
+          properties: [
+            objectProperty("key", literal(entry.key)),
+            objectProperty("kind", literal(entry.kind)),
+            objectProperty("static", { type: "Literal", value: entry.isStatic, raw: String(entry.isStatic) }),
+            objectProperty("source", literal(entry.source))
+          ]
+        }))
+      });
+      const registerFunction = (expression,parent,key) => call("__wkRegisterFunctionSource", [
+        expression,
+        literal(originalSource.slice(expression.start, expression.end)),
+        literal(functionNameHint(parent,key,expression))
+      ]);
+      const registerObject = expression => {
+        const entries = methodEntries(expression,false);
+        return entries.length
+          ? call("__wkRegisterObjectFunctionSources", [expression, entriesNode(entries)])
+          : expression;
+      };
+      const registerClass = (expression,parent,key) => call("__wkRegisterClassFunctionSources", [
+        expression,
+        literal(originalSource.slice(expression.start, expression.end)),
+        entriesNode(methodEntries(expression,true)),
+        literal(functionNameHint(parent,key,expression))
+      ]);
+      const registerDeclaration = (name,source) => statement(call("__wkRegisterFunctionSource", [
+        identifier(name), literal(source), literal(null)
+      ]));
+      const registerClassDeclaration = (name,node) => statement(call("__wkRegisterClassFunctionSources", [
+        identifier(name),
+        literal(originalSource.slice(node.start,node.end)),
+        entriesNode(methodEntries(node,true)),
+        literal(null)
+      ]));
+      const isMethodValue = (parent,key) =>
+        (parent.type === "MethodDefinition" && key === "value") ||
+        (parent.type === "Property" && key === "value" &&
+          (parent.method || parent.kind === "get" || parent.kind === "set"));
+
+      function instrument(node,parent=null,key=null) {
+        if (!node || typeof node !== "object" || !node.type) return node;
+
+        if (node.type === "Program" || node.type === "BlockStatement" || node.type === "StaticBlock" || node.type === "SwitchCase") {
+          const bodyKey = node.type === "SwitchCase" ? "consequent" : "body";
+          const body = node[bodyKey] || [];
+          for (let i = 0; i < body.length; i++) body[i] = instrument(body[i], node, bodyKey);
+
+          const directives = [];
+          let directiveCount = 0;
+          while (
+            directiveCount < body.length &&
+            body[directiveCount].type === "ExpressionStatement" &&
+            body[directiveCount].directive
+          ) directives.push(body[directiveCount++]);
+
+          const prefix = [];
+          const rebuilt = [...directives];
+          for (let i = directiveCount; i < body.length; i++) {
+            const child = body[i];
+            if (child.type === "FunctionDeclaration" && child.id) {
+              prefix.push(registerDeclaration(child.id.name, originalSource.slice(child.start,child.end)));
+            }
+            rebuilt.push(child);
+            if (
+              child.type === "ClassDeclaration" &&
+              child.id &&
+              node.type !== "Program"
+            ) rebuilt.push(registerClassDeclaration(child.id.name,child));
+          }
+          node[bodyKey] = [...directives, ...prefix, ...rebuilt.slice(directiveCount)];
+          return node;
+        }
+
+        for (const prop of Object.keys(node)) {
+          if (prop === "start" || prop === "end" || prop === "loc" || prop === "range") continue;
+          const value = node[prop];
+          if (Array.isArray(value)) {
+            for (let i = 0; i < value.length; i++) {
+              const child = value[i];
+              if (!child || typeof child !== "object" || !child.type) continue;
+              let next = instrument(child,node,prop);
+              if (next === child && !isMethodValue(node,prop)) {
+                if (child.type === "FunctionExpression" || child.type === "ArrowFunctionExpression") {
+                  next = registerFunction(child,node,prop);
+                } else if (child.type === "ClassExpression") {
+                  next = registerClass(child,node,prop);
+                } else if (child.type === "ObjectExpression") {
+                  next = registerObject(child);
+                }
+              }
+              value[i] = next;
+            }
+          } else if (value && typeof value === "object" && value.type) {
+            let next = instrument(value,node,prop);
+            if (next === value && !isMethodValue(node,prop)) {
+              if (value.type === "FunctionExpression" || value.type === "ArrowFunctionExpression") {
+                next = registerFunction(value,node,prop);
+              } else if (value.type === "ClassExpression") {
+                next = registerClass(value,node,prop);
+              } else if (value.type === "ObjectExpression") {
+                next = registerObject(value);
+              }
+            }
+            node[prop] = next;
+          }
+        }
+        return node;
+      }
+
+      instrument(ast);
+    }
+
     acorn.walk.simple(ast, {
       CallExpression(node) {
         const callee = node.callee;
 
-        // IIFE: (function(){})()
-        if (callee.type === "FunctionExpression") {
+        // IIFE: (function(){})(), including a function wrapped for source tracking.
+        if (
+          callee.type === "FunctionExpression" ||
+          (callee.type === "CallExpression" &&
+            callee.callee?.type === "Identifier" &&
+            callee.callee.name === "__wkRegisterFunctionSource")
+        ) {
           node.callee = {
             type: "MemberExpression",
             object: callee,
@@ -587,7 +755,13 @@
           const last = exprs[exprs.length - 1];
 
           // Only rewrite if last expression is callable
-          if (last.type === "Identifier" || last.type === "MemberExpression") {
+          if (
+            last.type === "Identifier" ||
+            last.type === "MemberExpression" ||
+            (last.type === "CallExpression" &&
+              last.callee?.type === "Identifier" &&
+              last.callee.name === "__wkRegisterFunctionSource")
+          ) {
             node.callee = {
               type: "MemberExpression",
               object: last,
@@ -695,7 +869,34 @@
 
           node.type = "ClassExpression";
 
-          newBody.push(createGlobalAssignment(name, node));
+          const classValue = typeof options.source === 'string'
+            ? {
+                type: "CallExpression",
+                callee: { type: "Identifier", name: "__wkRegisterClassFunctionSources" },
+                arguments: [
+                  node,
+                  { type: "Literal", value: options.source.slice(node.start,node.end), raw: JSON.stringify(options.source.slice(node.start,node.end)) },
+                  {
+                    type: "ArrayExpression",
+                    elements: (node.body?.body || [])
+                      .filter(method => method.type === "MethodDefinition" &&
+                        (method.key.type === "Identifier" || method.key.type === "Literal"))
+                      .map(method => ({
+                        type: "ObjectExpression",
+                        properties: [
+                          { type: "Property", key: {type:"Identifier",name:"key"}, value: {type:"Literal",value:method.key.type === "Identifier" ? method.key.name : String(method.key.value),raw:JSON.stringify(method.key.type === "Identifier" ? method.key.name : String(method.key.value))}, kind:"init", method:false, shorthand:false, computed:false },
+                          { type: "Property", key: {type:"Identifier",name:"kind"}, value: {type:"Literal",value:method.kind === "get" || method.kind === "set" ? method.kind : "value",raw:JSON.stringify(method.kind === "get" || method.kind === "set" ? method.kind : "value")}, kind:"init", method:false, shorthand:false, computed:false },
+                          { type: "Property", key: {type:"Identifier",name:"static"}, value: {type:"Literal",value:!!method.static,raw:String(!!method.static)}, kind:"init", method:false, shorthand:false, computed:false },
+                          { type: "Property", key: {type:"Identifier",name:"source"}, value: {type:"Literal",value:options.source.slice(method.start,method.end),raw:JSON.stringify(options.source.slice(method.start,method.end))}, kind:"init", method:false, shorthand:false, computed:false }
+                        ]
+                      }))
+                  },
+                  { type: "Literal", value: null, raw: "null" }
+                ]
+              }
+            : node;
+
+          newBody.push(createGlobalAssignment(name, classValue));
         }
       }
 
@@ -740,8 +941,8 @@
     // Parse the code (function or raw)
     const ast = parseCode(code, 'script');
 
-    // Transform AST
-    transformAST(ast);
+    // Transform AST while preserving exact source slices for code inspection.
+    transformAST(ast, { source: code });
 
     // Regenerate code
     const transformed = astring.generate(ast);
@@ -4399,7 +4600,7 @@
         if (evalFunction !== __nativeEval || typeof source !== 'string') return source;
         try {
           const ast = parseCode(source, 'script');
-          transformAST(ast, { rewriteGlobals: false });
+          transformAST(ast, { rewriteGlobals: false, source });
           return astring.generate(ast);
         } catch (_) {
           return source;
@@ -4427,7 +4628,7 @@
           sourceType: 'script',
           allowYieldOutsideFunction: allowYield
         });
-        transformAST(ast, { rewriteGlobals: false });
+        transformAST(ast, { rewriteGlobals: false, source });
         const transformedBody = astring.generate(ast);
         const prefix = kind === 'async' || kind === 'asyncGenerator' ? 'async ' : '';
         const generator = kind === 'generator' || kind === 'asyncGenerator' ? '*' : '';
