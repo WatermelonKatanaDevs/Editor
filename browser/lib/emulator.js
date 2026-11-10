@@ -3128,7 +3128,15 @@
                   value: wrapDOMValue(item)
                 };
               }
-              return Reflect.getOwnPropertyDescriptor(target, prop);
+              const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
+              if (!descriptor || !('value' in descriptor)) return descriptor;
+              const publicValue = wrapDOMValue(descriptor.value);
+              if (
+                descriptor.configurable === false &&
+                descriptor.writable === false &&
+                publicValue !== descriptor.value
+              ) return descriptor;
+              return { ...descriptor, value: publicValue };
             }
           });
           wrappedDOMCollections.set(collection, proxy);
