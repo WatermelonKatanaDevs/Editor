@@ -5660,6 +5660,29 @@
           return null;
         }
 
+        function getNativeChildWindow(child) {
+          const iframe = child?.iframe;
+          if (!iframe) return null;
+          try {
+            if (iframe.__wkNativeContentWindow) return iframe.__wkNativeContentWindow;
+          } catch (_) {}
+          try {
+            const getter = Object.getOwnPropertyDescriptor(
+              HTMLIFrameElement.prototype,
+              'contentWindow'
+            )?.get;
+            return getter ? Reflect.apply(getter, iframe, []) : null;
+          } catch (_) {
+            return null;
+          }
+        }
+
+        function getPublicChildWindow(child) {
+          const nativeChildWindow = getNativeChildWindow(child);
+          if (!nativeChildWindow) return null;
+          return getCallerWindowProxy(child, nativeChildWindow);
+        }
+
         // A WindowProxy returned by another PageEmulator is implemented in
         // that other frame's realm. Calling its proxied postMessage from this
         // frame would therefore make the browser attribute the message to the
@@ -5933,14 +5956,12 @@
             if (typeof prop === 'string' && /^\d+$/.test(prop)) {
               const child = getChildPage(prop);
               if (!child) return undefined;
-              const nativeChildWindow = child.iframe?.__wkNativeContentWindow || null;
-              return nativeChildWindow ? getCallerWindowProxy(child, nativeChildWindow) : child.__windowProxy || undefined;
+              return getPublicChildWindow(child) || undefined;
             }
             if (typeof prop === 'string') {
               const child = getChildPage(prop);
               if (child?.__windowProxy) {
-                const nativeChildWindow = child.iframe?.__wkNativeContentWindow || null;
-                return nativeChildWindow ? getCallerWindowProxy(child, nativeChildWindow) : child.__windowProxy;
+                return getPublicChildWindow(child) || undefined;
               }
             }
             const value = Reflect.get(window, prop, window);
