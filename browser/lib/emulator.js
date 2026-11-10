@@ -2597,7 +2597,7 @@
 
         var getOldContextWindow = (f=>f.call.bind(f))(Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get);
         function wrapElement(elem) {
-          if (!(elem instanceof HTMLElement)) return elem;
+          if (!isDOMElementValue(elem)) return elem;
           
           // Guard against re-wrapping the same node
           if (elem.__isWrapped) return elem;
@@ -2849,6 +2849,43 @@
         const unwrappedEvents = new WeakMap();
         let documentProxy;
 
+        function isDOMNodeValue(value) {
+          if (!value || (typeof value !== 'object' && typeof value !== 'function')) return false;
+          try {
+            return typeof value.nodeType === 'number' &&
+              typeof value.nodeName === 'string' &&
+              (value.nodeType === 9 || typeof value.cloneNode === 'function');
+          } catch (_) {
+            return false;
+          }
+        }
+
+        function isDOMElementValue(value) {
+          if (!isDOMNodeValue(value) || value.nodeType !== 1) return false;
+          try { return typeof value.tagName === 'string'; } catch (_) { return false; }
+        }
+
+        function isDOMAttrValue(value) {
+          if (!isDOMNodeValue(value) || value.nodeType !== 2) return false;
+          try { return typeof value.name === 'string' && typeof value.value === 'string'; } catch (_) { return false; }
+        }
+
+        function isDOMEventValue(value) {
+          if (!value || typeof value !== 'object') return false;
+          try {
+            return typeof value.type === 'string' &&
+              typeof value.preventDefault === 'function' &&
+              typeof value.stopPropagation === 'function';
+          } catch (_) {
+            return false;
+          }
+        }
+
+        function hasDOMBrand(value, name) {
+          try { return Object.prototype.toString.call(value) === '[object ' + name + ']'; }
+          catch (_) { return false; }
+        }
+
         function unwrapDOMValue(value) {
           if (!value || (typeof value !== 'object' && typeof value !== 'function')) return value;
           if (typeof windowProxy !== 'undefined' && value === windowProxy) return window;
@@ -2875,7 +2912,7 @@
         }
 
         function wrapVirtualAttribute(attribute, publicName) {
-          if (!attribute || !(attribute instanceof Attr)) return null;
+          if (!isDOMAttrValue(attribute)) return null;
           virtualDOMAttributeNames.set(attribute, publicName);
           return wrapDOMNode(attribute);
         }
@@ -3305,7 +3342,7 @@
         }
 
         function wrapDOMNode(node) {
-          if (!node || !(node instanceof Node)) return node;
+          if (!node || !isDOMNodeValue(node)) return node;
           if (unwrappedDOMNodes.has(node)) return node;
           if (
             typeof Attr !== 'undefined' &&
@@ -3322,13 +3359,13 @@
           }
           if (node === document) return documentProxy;
           if (wrappedDOMNodes.has(node)) return wrappedDOMNodes.get(node);
-          if (node instanceof HTMLElement) wrapElement(node);
+          if (isDOMElementValue(node)) wrapElement(node);
 
           let proxy;
           proxy = new Proxy(node, {
             get(target, prop) {
               if (isHiddenDOMRuntimeProperty(prop)) return undefined;
-              const virtualAttributeName = typeof Attr !== 'undefined' && target instanceof Attr
+              const virtualAttributeName = typeof Attr !== 'undefined' && isDOMAttrValue(target)
                 ? virtualDOMAttributeNames.get(target)
                 : null;
               if (virtualAttributeName) {
@@ -3338,7 +3375,7 @@
               }
               if (
                 typeof Attr !== 'undefined' &&
-                target instanceof Attr &&
+                isDOMAttrValue(target) &&
                 /^on[a-z]/i.test(target.name) &&
                 (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')
               ) {
@@ -3346,19 +3383,19 @@
                 if (raw != null) return raw;
               }
               if (
-                target instanceof HTMLScriptElement &&
+                (isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
                 prop === 'type' &&
                 target.hasAttribute('data-raw-type')
               ) return target.getAttribute('data-raw-type');
               if (
-                target instanceof HTMLStyleElement &&
+                (isDOMElementValue(target) && target.tagName === 'STYLE') &&
                 (prop === 'textContent' || prop === 'innerText')
               ) {
                 const original = target.getAttribute('data-raw-style-text');
                 if (original != null) return original;
               }
               if (
-                target instanceof HTMLScriptElement &&
+                (isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
                 (prop === 'textContent' || prop === 'text' || prop === 'innerText')
               ) {
                 const original = target.getAttribute('data-raw-script');
@@ -3385,7 +3422,7 @@
                 if (original != null) return original;
               }
 
-              if (prop === 'setAttribute' && target instanceof Element) {
+              if (prop === 'setAttribute' && isDOMElementValue(target)) {
                 return function(name, value) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return;
@@ -3397,7 +3434,7 @@
                   return Reflect.apply(setter, target, [name, unwrapDOMValue(value)]);
                 };
               }
-              if (prop === 'toggleAttribute' && target instanceof Element) {
+              if (prop === 'toggleAttribute' && isDOMElementValue(target)) {
                 return function(name, force) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return false;
@@ -3405,17 +3442,17 @@
                     const rawPresent = Reflect.apply(target.hasAttribute, target, ['data-raw-' + attributeName]);
                     const nativePresent = Reflect.apply(target.hasAttribute, target, [attributeName]);
                     const currentlyPresent = rawPresent || nativePresent ||
-                      (target instanceof HTMLScriptElement && attributeName === 'type' &&
+                      ((isDOMElementValue(target) && target.tagName === 'SCRIPT') && attributeName === 'type' &&
                         Reflect.apply(target.hasAttribute, target, ['data-raw-type']));
                     const shouldExist = arguments.length > 1 ? !!force : !currentlyPresent;
                     if (shouldExist) {
                       Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
-                      if (target instanceof HTMLScriptElement && attributeName === 'type') clearSavedScriptType(target, attributeName);
+                      if ((isDOMElementValue(target) && target.tagName === 'SCRIPT') && attributeName === 'type') clearSavedScriptType(target, attributeName);
                       Reflect.apply(target.setAttribute, target, [attributeName, '']);
                       return true;
                     }
                     Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
-                    if (target instanceof HTMLScriptElement && attributeName === 'type') {
+                    if ((isDOMElementValue(target) && target.tagName === 'SCRIPT') && attributeName === 'type') {
                       Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-type']);
                     }
                     Reflect.apply(nativeElementRemoveAttribute, target, [attributeName]);
@@ -3438,7 +3475,7 @@
                   return Reflect.apply(method, target, arguments);
                 };
               }
-              if (prop === 'removeAttributeNS' && target instanceof Element) {
+              if (prop === 'removeAttributeNS' && isDOMElementValue(target)) {
                 return function(namespace, name) {
                   const attributeName = String(name || '').toLowerCase();
                   if ((namespace == null || namespace === '') && isInternalDOMAttribute(attributeName)) return;
@@ -3446,31 +3483,31 @@
                     if (isVirtualPublicAttribute(target, attributeName)) {
                       Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
                     }
-                    if (target instanceof HTMLScriptElement && attributeName === 'type') {
+                    if ((isDOMElementValue(target) && target.tagName === 'SCRIPT') && attributeName === 'type') {
                       Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-type']);
                     }
                   }
                   return Reflect.apply(target.removeAttributeNS, target, [namespace, name]);
                 };
               }
-              if (prop === 'removeAttribute' && target instanceof Element) {
+              if (prop === 'removeAttribute' && isDOMElementValue(target)) {
                 return function(name) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return;
                   if (isVirtualPublicAttribute(target, attributeName)) {
                     Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
                   }
-                  if (target instanceof HTMLScriptElement && attributeName === 'type') {
+                  if ((isDOMElementValue(target) && target.tagName === 'SCRIPT') && attributeName === 'type') {
                     Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-type']);
                   }
                   return Reflect.apply(nativeElementRemoveAttribute, target, [name]);
                 };
               }
-              if (prop === 'setAttributeNS' && target instanceof Element) {
+              if (prop === 'setAttributeNS' && isDOMElementValue(target)) {
                 return function(namespace, name, value) {
                   const attributeName = String(name || '').toLowerCase();
                   if ((namespace == null || namespace === '') && isInternalDOMAttribute(attributeName)) return;
-                  if ((namespace == null || namespace === '') && target instanceof HTMLScriptElement && attributeName === 'type') {
+                  if ((namespace == null || namespace === '') && (isDOMElementValue(target) && target.tagName === 'SCRIPT') && attributeName === 'type') {
                     clearSavedScriptType(target, attributeName);
                   }
                   if ((namespace == null || namespace === '') && /^on[a-z]/i.test(attributeName)) {
@@ -3485,13 +3522,13 @@
                   return Reflect.apply(target.setAttributeNS, target, [namespace, name, unwrapDOMValue(value)]);
                 };
               }
-              if (prop === 'getAttributeNS' && target instanceof Element) {
+              if (prop === 'getAttributeNS' && isDOMElementValue(target)) {
                 return function(namespace, name) {
                   if (namespace == null || namespace === '') {
                     const publicName = String(name || '').toLowerCase();
                     if (isInternalDOMAttribute(publicName)) return null;
                     if (
-                      target instanceof HTMLScriptElement &&
+                      (isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
                       publicName === 'type'
                     ) {
                       const originalType = Reflect.apply(target.getAttribute, target, ['data-raw-type']);
@@ -3510,7 +3547,7 @@
                 return function(name) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return null;
-                  if (target instanceof HTMLScriptElement && attributeName === 'type') {
+                  if ((isDOMElementValue(target) && target.tagName === 'SCRIPT') && attributeName === 'type') {
                     const originalType = Reflect.apply(target.getAttribute, target, ['data-raw-type']);
                     if (originalType != null) return originalType;
                   }
@@ -3525,7 +3562,7 @@
                   return Reflect.apply(target.getAttribute, target, [name]);
                 };
               }
-              if (prop === 'hasAttributeNS' && target instanceof Element) {
+              if (prop === 'hasAttributeNS' && isDOMElementValue(target)) {
                 return function(namespace, name) {
                   if (namespace == null || namespace === '') {
                     const publicName = String(name || '').toLowerCase();
@@ -3535,7 +3572,7 @@
                       Reflect.apply(target.hasAttribute, target, ['data-raw-' + publicName])
                     ) return true;
                     if (
-                      target instanceof HTMLScriptElement &&
+                      (isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
                       publicName === 'type' &&
                       Reflect.apply(target.hasAttribute, target, ['data-raw-type'])
                     ) return true;
@@ -3549,7 +3586,7 @@
                   const publicName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(publicName)) return false;
                   if (
-                    target instanceof HTMLScriptElement &&
+                    (isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
                     publicName === 'type' &&
                     Reflect.apply(target.hasAttribute, target, ['data-raw-type'])
                   ) return true;
@@ -3564,7 +3601,7 @@
                 return function() {
                   const names = Reflect.apply(target.getAttributeNames, target, [])
                     .filter(name => !isInternalDOMAttribute(name));
-                  if (target instanceof HTMLScriptElement &&
+                  if ((isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
                       Reflect.apply(target.hasAttribute, target, ['data-raw-type']) &&
                       !names.includes('type')) names.push('type');
                   for (const name of ['src', 'href', 'srcset', 'poster', 'srcdoc', 'data']) {
@@ -3593,15 +3630,15 @@
               }
               if (
                 (prop === 'setAttributeNode' || prop === 'setAttributeNodeNS') &&
-                target instanceof Element
+                isDOMElementValue(target)
               ) {
                 return function(attribute) {
                   const rawAttribute = unwrapDOMValue(attribute);
                   const logicalName = getVirtualAttributeName(rawAttribute) || rawAttribute?.name;
                   if (
-                    rawAttribute instanceof Attr &&
+                    isDOMAttrValue(rawAttribute) &&
                     rawAttribute.namespaceURI == null &&
-                    target instanceof HTMLScriptElement &&
+                    (isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
                     String(logicalName).toLowerCase() === 'type'
                   ) {
                     const oldAttribute = Reflect.apply(target.getAttributeNode, target, ['type']);
@@ -3610,9 +3647,9 @@
                     return wrapDOMValue(oldAttribute);
                   }
                   if (
-                    rawAttribute instanceof Attr &&
+                    isDOMAttrValue(rawAttribute) &&
                     rawAttribute.namespaceURI == null &&
-                    target instanceof HTMLScriptElement &&
+                    (isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
                     rawAttribute.name.toLowerCase() === 'type'
                   ) {
                     const oldAttribute = Reflect.apply(target.getAttributeNode, target, ['type']);
@@ -3621,7 +3658,7 @@
                     return wrapDOMValue(oldAttribute);
                   }
                   if (
-                    rawAttribute instanceof Attr &&
+                    isDOMAttrValue(rawAttribute) &&
                     rawAttribute.namespaceURI == null &&
                     /^on[a-z]/i.test(String(logicalName)) &&
                     getVirtualAttributeName(rawAttribute)
@@ -3631,7 +3668,7 @@
                     return wrapDOMValue(oldAttribute);
                   }
                   if (
-                    rawAttribute instanceof Attr &&
+                    isDOMAttrValue(rawAttribute) &&
                     rawAttribute.namespaceURI == null &&
                     isVirtualPublicAttribute(target, logicalName)
                   ) {
@@ -3648,23 +3685,23 @@
                   return wrapDOMValue(Reflect.apply(target[prop], target, [rawAttribute]));
                 };
               }
-              if (prop === 'removeAttributeNode' && target instanceof Element) {
+              if (prop === 'removeAttributeNode' && isDOMElementValue(target)) {
                 return function(attribute) {
                   const rawAttribute = unwrapDOMValue(attribute);
                   const logicalName = getVirtualAttributeName(rawAttribute) || rawAttribute?.name;
                   if (
-                    rawAttribute instanceof Attr &&
+                    isDOMAttrValue(rawAttribute) &&
                     isVirtualizedResourceAttribute(target, logicalName)
                   ) {
                     Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + String(logicalName).toLowerCase()]);
                   }
                   if (
-                    rawAttribute instanceof Attr &&
-                    target instanceof HTMLScriptElement &&
+                    isDOMAttrValue(rawAttribute) &&
+                    (isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
                     String(logicalName).toLowerCase() === 'type'
                   ) Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-type']);
                   if (
-                    rawAttribute instanceof Attr &&
+                    isDOMAttrValue(rawAttribute) &&
                     /^on[a-z]/i.test(String(logicalName)) &&
                     getVirtualAttributeName(rawAttribute)
                   ) {
@@ -3672,7 +3709,7 @@
                     return wrapDOMValue(rawAttribute);
                   }
                   if (
-                    rawAttribute instanceof Attr &&
+                    isDOMAttrValue(rawAttribute) &&
                     isVirtualPublicAttribute(target, logicalName) &&
                     getVirtualAttributeName(rawAttribute)
                   ) {
@@ -3683,7 +3720,7 @@
                   return wrapDOMValue(Reflect.apply(target.removeAttributeNode, target, [rawAttribute]));
                 };
               }
-              if (prop === 'getAttributeNode' && target instanceof Element) {
+              if (prop === 'getAttributeNode' && isDOMElementValue(target)) {
                 return function(name) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return null;
@@ -3692,7 +3729,7 @@
                   return wrapDOMValue(Reflect.apply(target.getAttributeNode, target, [name]));
                 };
               }
-              if (prop === 'getAttributeNodeNS' && target instanceof Element) {
+              if (prop === 'getAttributeNodeNS' && isDOMElementValue(target)) {
                 return function(namespace, name) {
                   if (isInternalDOMAttribute(name)) return null;
                   if (namespace == null || namespace === '') {
@@ -3703,7 +3740,7 @@
                   return wrapDOMValue(Reflect.apply(target.getAttributeNodeNS, target, [namespace, name]));
                 };
               }
-              if (prop === 'hasAttributes' && target instanceof Element) {
+              if (prop === 'hasAttributes' && isDOMElementValue(target)) {
                 return function() {
                   const nativeNames = Reflect.apply(target.getAttributeNames, target, []);
                   if (nativeNames.some(name => !isInternalDOMAttribute(name))) return true;
@@ -3711,7 +3748,7 @@
                     isVirtualizedResourceAttribute(target, name) &&
                     Reflect.apply(target.hasAttribute, target, ['data-raw-' + name])
                   ) || (
-                    target instanceof HTMLScriptElement &&
+                    (isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
                     Reflect.apply(target.hasAttribute, target, ['data-raw-type'])
                   );
                 };
@@ -3730,7 +3767,7 @@
               return wrapDOMValue(member);
             },
             set(target, prop, nextValue) {
-              const virtualAttributeName = typeof Attr !== 'undefined' && target instanceof Attr
+              const virtualAttributeName = typeof Attr !== 'undefined' && isDOMAttrValue(target)
                 ? virtualDOMAttributeNames.get(target)
                 : null;
               if (virtualAttributeName &&
@@ -3754,8 +3791,8 @@
               }
               if (
                 typeof Attr !== 'undefined' &&
-                target instanceof Attr &&
-                target.ownerElement instanceof HTMLScriptElement &&
+                isDOMAttrValue(target) &&
+                (isDOMElementValue(target.ownerElement) && target.ownerElement.tagName === 'SCRIPT') &&
                 target.name.toLowerCase() === 'type' &&
                 (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')
               ) {
@@ -3764,7 +3801,7 @@
               }
               if (
                 typeof Attr !== 'undefined' &&
-                target instanceof Attr &&
+                isDOMAttrValue(target) &&
                 isVirtualizedResourceAttribute(target.ownerElement, target.name) &&
                 (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')
               ) {
@@ -3775,7 +3812,7 @@
               }
               if (
                 typeof Attr !== 'undefined' &&
-                target instanceof Attr &&
+                isDOMAttrValue(target) &&
                 /^on[a-z]/i.test(target.name) &&
                 (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')
               ) {
@@ -3791,15 +3828,15 @@
                 }
               }
               if (
-                target instanceof HTMLScriptElement &&
+                (isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
                 prop === 'type'
               ) clearSavedScriptType(target, 'type');
               if (
-                target instanceof HTMLStyleElement &&
+                (isDOMElementValue(target) && target.tagName === 'STYLE') &&
                 (prop === 'textContent' || prop === 'innerText')
               ) target.removeAttribute('data-raw-style-text');
               if (
-                target instanceof HTMLScriptElement &&
+                (isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
                 (prop === 'textContent' || prop === 'text' || prop === 'innerText')
               ) target.removeAttribute('data-raw-script');
               if (target.nodeType === Node.TEXT_NODE &&
@@ -3976,9 +4013,15 @@
             value instanceof Storage &&
             nativeStorageProxies.has(value)
           ) return nativeStorageProxies.get(value);
-          if (typeof Event !== 'undefined' && value instanceof Event) return wrapEvent(value);
-          if (value instanceof Node) return wrapDOMNode(value);
-          if (typeof EventTarget !== 'undefined' && value instanceof EventTarget) return wrapDOMObject(value);
+          if (
+            (typeof Event !== 'undefined' && value instanceof Event) ||
+            isDOMEventValue(value)
+          ) return wrapEvent(value);
+          if (isDOMNodeValue(value)) return wrapDOMNode(value);
+          if (
+            (typeof EventTarget !== 'undefined' && value instanceof EventTarget) ||
+            (typeof value.addEventListener === 'function' && typeof value.removeEventListener === 'function')
+          ) return wrapDOMObject(value);
           if (
             value instanceof HTMLCollection ||
             value instanceof NodeList ||
@@ -5149,7 +5192,9 @@
           if (unwrappedEvents.has(event)) return event;
           if (wrappedEvents.has(event)) return wrappedEvents.get(event);
 
-          const isMessage = typeof MessageEvent !== 'undefined' && event instanceof MessageEvent;
+          const isMessage =
+            (typeof MessageEvent !== 'undefined' && event instanceof MessageEvent) ||
+            (event.type === 'message' && 'source' in event && 'origin' in event);
           const sourceProxy = isMessage ? resolveVirtualMessageSource(event) : undefined;
           const rewriteOrigin = isMessage && (!event.origin || event.origin === 'null' || event.origin === 'about:srcdoc');
           let proxy;
