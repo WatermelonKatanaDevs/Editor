@@ -285,7 +285,7 @@
       Array.from(node.attributes || []).forEach(attr => {
         if (attr.name.startsWith('on') && attr.value && !attr.value.includes('__executeCode')) {
           node.setAttribute('data-raw-' + attr.name, attr.value);
-          node.setAttribute(attr.name, `return window.__executeCode(${JSON.stringify(attr.value)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? {event: event} : {})`);
+          node.setAttribute(attr.name, `return window.__executeCode(${JSON.stringify(attr.value)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? event : undefined)`);
         }
       });
     });
@@ -736,6 +736,13 @@
         }
 
         // Preserve direct-eval syntax, but transform the evaluated source first.
+        else if (callee.type === "Identifier" && callee.name === "eval" && node.optional) {
+          node.callee = {
+            type: "CallExpression",
+            callee: { type: "Identifier", name: "__getIndirectEval" },
+            arguments: [{ type: "Identifier", name: "eval" }]
+          };
+        }
         else if (callee.type === "Identifier" && callee.name === "eval") {
           const firstArgument = node.arguments.length ? node.arguments[0] : { type: "Identifier", name: "undefined" };
           node.arguments[0] = {
@@ -1813,7 +1820,7 @@
               // Override attribute value to dispatch through sandboxed executor
               node.setAttribute(
                 attr.name, 
-                `return window.__executeCode(${JSON.stringify(rawCode)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? {event: event} : {})`
+                `return window.__executeCode(${JSON.stringify(rawCode)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? event : undefined)`
               );
             }
           });
@@ -2474,6 +2481,10 @@
           if (wrappedDOMObjects.has(value)) return wrappedDOMObjects.get(value);
           const proxy = new Proxy(value, {
             get(target, prop) {
+              if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+                const entry = getEventHandlerEntry(target, prop);
+                if (entry && Reflect.get(target, prop, target) === entry.wrapped) return entry.original;
+              }
               const member = Reflect.get(target, prop, target);
               if (typeof member === 'function') {
                 return function(...args) {
@@ -2483,6 +2494,9 @@
               return wrapDOMValue(member);
             },
             set(target, prop, nextValue) {
+              if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+                return setWrappedEventHandler(target, prop, nextValue);
+              }
               return Reflect.set(target, prop, unwrapDOMValue(nextValue), target);
             }
           });
@@ -4605,7 +4619,7 @@
         return __rawReflectApply(function(window, self, globalThis, parent, top, location, document) {
           with (__globalLexicalScope) {
             return eval(`
-            ${__event ? 'let event = __event;' : ''}
+            ${__event != null ? 'let event = wrapDOMValue(__event);' : ''}
             ${__codeString.code}
             \n//# sourceURL=`+__sourceURL);
           }
@@ -4622,7 +4636,7 @@
           let __execResult;
           with (__globalLexicalScope) {
             await eval(`
-            ${__event ? 'let event = __event;' : ''}
+            ${__event != null ? 'let event = wrapDOMValue(__event);' : ''}
             (async function(){
               ${__codeString.code}
             }).call(this);
@@ -4650,7 +4664,7 @@
           with (__globalLexicalScope) {
             await eval(`
             "use strict";
-            ${__event ? 'let event = __event;' : ''}
+            ${__event != null ? 'let event = wrapDOMValue(__event);' : ''}
             ${__codeString.code}
             \n//# sourceURL=`+__sourceURL);
           }
