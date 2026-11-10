@@ -2105,22 +2105,27 @@
           { selector: 'object[data]', attr: 'data' }
         ];
 
-        async function interceptElementAttribute(el, attr, rawAttr = 'data-raw-src', filter = f => f) {
+        async function interceptElementAttribute(el, attr, rawAttr = 'data-raw-src', filter = f => f, force = false) {
           const isScript = el?.tagName === 'SCRIPT' && attr === 'src';
           const val = isScript
-            ? (el.getAttribute(rawAttr) || Reflect.apply(nativeElementGetAttribute, el, [attr]))
+            ? (Reflect.apply(nativeElementGetAttribute, el, [rawAttr]) ||
+              Reflect.apply(nativeElementGetAttribute, el, [attr]))
             : el.getAttribute(attr);
           if (!val) return;
 
           const shouldExecute = isScript && isExecutableJavaScriptType(
-            el.getAttribute('data-raw-type') || el.getAttribute('type')
+            Reflect.apply(nativeElementGetAttribute, el, ['data-raw-type']) ||
+            Reflect.apply(nativeElementGetAttribute, el, ['type'])
           );
           const blockIfNeeded = () => { if (shouldExecute) blockUnprocessedScript(el); };
 
-          if (isScript && /^(?:data|blob):/i.test(val) && !el.hasAttribute('data-raw-src')) {
+          if (/^(?:data|blob):/i.test(val)) {
+            if (!isScript) return;
             el.__processing_attr = true;
             try {
-              Reflect.apply(nativeElementSetAttribute, el, ['data-raw-src', val]);
+              if (!Reflect.apply(nativeElementGetAttribute, el, [rawAttr])) {
+                Reflect.apply(nativeElementSetAttribute, el, [rawAttr, val]);
+              }
               const response = await fetch(val);
               if (!response || !response.ok) {
                 blockIfNeeded();
@@ -2133,7 +2138,7 @@
               }
               const dataUri = await createDataUri(processed);
               if (dataUri) {
-                Reflect.apply(nativeElementSetAttribute, el, ['src', dataUri]);
+                Reflect.apply(nativeElementSetAttribute, el, [attr, dataUri]);
               } else {
                 blockIfNeeded();
               }
@@ -2146,32 +2151,35 @@
             return;
           }
 
-          if (/^(?:data|blob):/i.test(val) && !isScript) return;
-          if (!el.hasAttribute(rawAttr)) {
-            const resolvedUrl = new URL(val, CURRENT_PAGE_URL).href;
-            el.setAttribute(rawAttr, resolvedUrl);
-            try {
-              const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, el.tagName);
-              if (!response || !response.ok) {
-                blockIfNeeded();
-                return;
-              }
-              const processedRes = await filter(response, resolvedUrl, BASE_ORIGIN, el);
-              if (!processedRes) {
-                blockIfNeeded();
-                return;
-              }
-              const dataUri = await createDataUri(processedRes);
-              if (dataUri) {
-                el.setAttribute(attr, dataUri);
-              } else {
-                blockIfNeeded();
-              }
-            } catch (error) {
+          if (!force && Reflect.apply(nativeElementGetAttribute, el, [rawAttr])) return;
+          const resolvedUrl = new URL(val, CURRENT_PAGE_URL).href;
+          if (!Reflect.apply(nativeElementGetAttribute, el, [rawAttr])) {
+            Reflect.apply(nativeElementSetAttribute, el, [rawAttr, resolvedUrl]);
+          }
+          el.__processing_attr = true;
+          try {
+            const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, el.tagName);
+            if (!response || !response.ok) {
               blockIfNeeded();
-              if (!shouldExecute) throw error;
-              console.warn('Blocked script whose source could not be virtualized:', resolvedUrl, error);
+              return;
             }
+            const processedRes = await filter(response, resolvedUrl, BASE_ORIGIN, el);
+            if (!processedRes) {
+              blockIfNeeded();
+              return;
+            }
+            const dataUri = await createDataUri(processedRes);
+            if (dataUri) {
+              Reflect.apply(nativeElementSetAttribute, el, [attr, dataUri]);
+            } else {
+              blockIfNeeded();
+            }
+          } catch (error) {
+            blockIfNeeded();
+            if (!shouldExecute) throw error;
+            console.warn('Blocked script whose source could not be virtualized:', resolvedUrl, error);
+          } finally {
+            el.__processing_attr = false;
           }
         }
 
@@ -2200,12 +2208,40 @@
           node.textContent = `window.${execFn}(${JSON.stringify(rawScript)}, ${JSON.stringify(CURRENT_PAGE_URL)}, this);\n`;
         }
 
+        function prepareExternalScript(node) {
+          if (!node || node.nodeType !== Node.ELEMENT_NODE || node.tagName !== 'SCRIPT') return;
+          if (!isExecutableJavaScriptType(
+            Reflect.apply(nativeElementGetAttribute, node, ['data-raw-type']) ||
+            Reflect.apply(nativeElementGetAttribute, node, ['type'])
+          )) return;
+          if (Reflect.apply(nativeElementGetAttribute, node, ['data-raw-src'])) return;
+
+          const sourceUrl = Reflect.apply(nativeElementGetAttribute, node, ['src']);
+          if (!sourceUrl) return;
+
+          // Remove the native src synchronously before insertion. The normal
+          // fetch/rewriter can then install only an executor-backed data URL.
+          Reflect.apply(nativeElementSetAttribute, node, ['data-raw-src', sourceUrl]);
+          Reflect.apply(nativeElementRemoveAttribute, node, ['src']);
+          const scriptFilter = ATTRIBUTE_MAP.find(rule => rule.selector === 'script[src]')?.filter || (value => value);
+          Promise.resolve().then(() =>
+            interceptElementAttribute(node, 'src', 'data-raw-src', scriptFilter, true)
+          ).catch(error => {
+            blockUnprocessedScript(node);
+            console.warn('Blocked inserted script whose source could not be virtualized:', sourceUrl, error);
+          });
+        }
+
         function prepareInsertedScripts(node) {
           if (!node) return;
           patchInlineEventsInTree(node);
+          prepareExternalScript(node);
           prepareInlineScript(node);
           if (typeof node.querySelectorAll === 'function') {
-            node.querySelectorAll('script').forEach(prepareInlineScript);
+            node.querySelectorAll('script').forEach(script => {
+              prepareExternalScript(script);
+              prepareInlineScript(script);
+            });
           }
         }
 
@@ -2277,6 +2313,7 @@
 
           // 1. Rewrite dynamic event handlers and inline scripts
           patchInlineEvents(node);
+          prepareExternalScript(node);
           prepareInlineScript(node);
 
           // 2. Process inline styles and <style> tags
