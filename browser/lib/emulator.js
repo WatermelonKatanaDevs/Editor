@@ -2581,6 +2581,7 @@
 
         function wrapDOMValue(value) {
           if (value == null) return value;
+          if (Array.isArray(value)) return value.map(wrapDOMValue);
           if (value === window) return windowProxy;
           if (value === document) return documentProxy;
           if (typeof Event !== 'undefined' && value instanceof Event) return wrapEvent(value);
@@ -2603,7 +2604,20 @@
             (typeof CSSRule !== 'undefined' && value instanceof CSSRule) ||
             (typeof CSSRuleList !== 'undefined' && value instanceof CSSRuleList) ||
             (typeof MediaList !== 'undefined' && value instanceof MediaList) ||
-            (typeof DOMTokenList !== 'undefined' && value instanceof DOMTokenList)
+            (typeof DOMTokenList !== 'undefined' && value instanceof DOMTokenList) ||
+            (typeof DOMImplementation !== 'undefined' && value instanceof DOMImplementation) ||
+            (typeof MutationRecord !== 'undefined' && value instanceof MutationRecord) ||
+            (typeof IntersectionObserverEntry !== 'undefined' && value instanceof IntersectionObserverEntry) ||
+            (typeof ResizeObserverEntry !== 'undefined' && value instanceof ResizeObserverEntry) ||
+            (typeof PerformanceEntry !== 'undefined' && value instanceof PerformanceEntry) ||
+            (typeof XPathResult !== 'undefined' && value instanceof XPathResult) ||
+            (typeof XPathExpression !== 'undefined' && value instanceof XPathExpression) ||
+            (typeof XPathEvaluator !== 'undefined' && value instanceof XPathEvaluator) ||
+            (typeof MutationObserver !== 'undefined' && value instanceof MutationObserver) ||
+            (typeof IntersectionObserver !== 'undefined' && value instanceof IntersectionObserver) ||
+            (typeof ResizeObserver !== 'undefined' && value instanceof ResizeObserver) ||
+            (typeof PerformanceObserver !== 'undefined' && value instanceof PerformanceObserver) ||
+            (typeof MediaQueryList !== 'undefined' && value instanceof MediaQueryList)
           ) return wrapDOMObject(value);
           return value;
         }
@@ -4763,6 +4777,56 @@
         return classValue;
       }
 
+      function installScopedDOMConstructor(name, callbackArgIndex = -1) {
+        const NativeConstructor = window[name];
+        if (typeof NativeConstructor !== 'function' || !NativeConstructor.prototype) return;
+        const ScopedConstructor = new Proxy(NativeConstructor, {
+          apply(target, thisArg, args) {
+            return Reflect.apply(target, thisArg, args);
+          },
+          construct(target, args, newTarget) {
+            const scopedArgs = args.slice();
+            if (callbackArgIndex >= 0 && typeof scopedArgs[callbackArgIndex] === 'function') {
+              const originalCallback = scopedArgs[callbackArgIndex];
+              scopedArgs[callbackArgIndex] = function(...callbackArgs) {
+                const wrappedArgs = callbackArgs.map(wrapDOMValue);
+                return Reflect.apply(originalCallback, __windowProxy, wrappedArgs);
+              };
+            }
+            const instance = Reflect.construct(
+              target,
+              scopedArgs,
+              newTarget === ScopedConstructor ? target : newTarget
+            );
+            return wrapDOMObject(instance);
+          }
+        });
+        try {
+          Object.defineProperty(window, name, {
+            value: ScopedConstructor,
+            writable: true,
+            configurable: true,
+            enumerable: true
+          });
+        } catch (_) {
+          try { window[name] = ScopedConstructor; } catch (_) {}
+        }
+        dynamicFunctionSources.set(ScopedConstructor, 'function ' + name + '() { [native code] }');
+      }
+
+      [
+        'DOMParser',
+        'XMLSerializer',
+        'XPathEvaluator',
+        'MutationObserver',
+        'IntersectionObserver',
+        'ResizeObserver',
+        'PerformanceObserver'
+      ].forEach(name => {
+        const callbackIndex = ['MutationObserver', 'IntersectionObserver', 'ResizeObserver', 'PerformanceObserver'].includes(name) ? 0 : -1;
+        installScopedDOMConstructor(name, callbackIndex);
+      });
+
       function constructorString(value) {
         if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
         return String(value);
@@ -4847,6 +4911,12 @@
       Object.defineProperty(asyncGeneratorFunctionPrototype, 'constructor', { ...Object.getOwnPropertyDescriptor(asyncGeneratorFunctionPrototype, 'constructor'), value: ScopedAsyncGeneratorFunction });
 
       const nativeFunctionToString = rawToString;
+      dynamicFunctionSources.set(__indirectEval, 'function eval() { [native code] }');
+      ['setTimeout', 'setInterval', 'requestAnimationFrame', 'requestIdleCallback', 'queueMicrotask'].forEach(name => {
+        if (typeof window[name] === 'function') dynamicFunctionSources.set(window[name], 'function ' + name + '() { [native code] }');
+      });
+      dynamicFunctionSources.set(EventTarget.prototype.addEventListener, 'function addEventListener() { [native code] }');
+      dynamicFunctionSources.set(EventTarget.prototype.removeEventListener, 'function removeEventListener() { [native code] }');
       Function.prototype.toString = function() {
         const originalSource = dynamicFunctionSources.get(this);
         return originalSource === undefined
