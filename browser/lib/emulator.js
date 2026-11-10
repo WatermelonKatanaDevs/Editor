@@ -1810,6 +1810,17 @@
           })(linkprop);
 
           if (tagName == "iframe") {
+            // Keep the browser's real WindowProxy before overriding contentWindow
+            // with the emulator proxy. Nested PageEmulators need this native handle
+            // to deliver postMessage without routing back into their own proxy.
+            try {
+              Object.defineProperty(elem, '__wkNativeContentWindow', {
+                value: getOldContextWindow(elem),
+                writable: true,
+                configurable: true
+              });
+            } catch (e) {}
+
             const ensureFrameEmulator = () => {
               usefulHelpers.ensureSandBoxSameOrigin(elem);
               if (elem.pageEmulator) return elem.pageEmulator;
@@ -1838,7 +1849,7 @@
             Object.defineProperty(elem,'contentWindow',{
               get: () => {
                 ensureFrameEmulator();
-                const contextWindow = getOldContextWindow(elem);
+                const contextWindow = elem.__wkNativeContentWindow || getOldContextWindow(elem);
                 return window.__runSyncInterceptor(elem,contextWindow);
               },
               set: () => {}
@@ -1847,7 +1858,7 @@
             Object.defineProperty(elem,'contentDocument',{
               get: () => {
                 ensureFrameEmulator();
-                const contextWindow = getOldContextWindow(elem);
+                const contextWindow = elem.__wkNativeContentWindow || getOldContextWindow(elem);
                 const proxyWindow = window.__runSyncInterceptor(elem,contextWindow);
                 return proxyWindow?.document;
               },
@@ -3533,8 +3544,32 @@
                     receiverPage = pageEmulator.parent;
                   }
                 }
-                var targetWindow = receiverPage?.iframe?.contentWindow;
-                if (!targetWindow || typeof targetWindow.postMessage !== 'function') return;
+                var targetFrame = receiverPage?.iframe;
+                var targetWindow = targetFrame?.__wkNativeContentWindow || null;
+
+                // A nested frame's public contentWindow getter returns its
+                // virtual proxy. Calling postMessage on that proxy here would
+                // recursively route the same message back to itself. Prefer the
+                // native WindowProxy captured before the getter was replaced.
+                if (!targetWindow && targetFrame) {
+                  try {
+                    var nativeContentWindowGetter = Object.getOwnPropertyDescriptor(
+                      HTMLIFrameElement.prototype,
+                      'contentWindow'
+                    )?.get;
+                    if (nativeContentWindowGetter) {
+                      targetWindow = Reflect.apply(nativeContentWindowGetter,targetFrame,[]);
+                    }
+                  } catch(e) {}
+                }
+
+                // Root browser tabs are not wrapped by another emulated page, so
+                // their iframe.contentWindow is already the native WindowProxy.
+                if (!targetWindow && targetFrame) {
+                  try { targetWindow = targetFrame.contentWindow; } catch(e) {}
+                }
+                if (!targetWindow || targetWindow === receiverPage?.__windowProxy || typeof targetWindow.postMessage !== 'function') return;
+
                 try {
                   var origin = targetOrigin || '*';
                   targetWindow.postMessage(message, origin, transfer);
