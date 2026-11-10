@@ -1299,41 +1299,45 @@ function createNewPage(iframe,parentPage=null) {
   });
 
   page.interceptEvent('iframe-navigate',async function(obj){
-    var page2 = obj.iframe.pageEmulator;
-    var navigationId = obj.navigationId;
-    var targetPath = '';
-    try { targetPath = obj.src ? new URL(obj.src, page.location?.url || page.location?.origin).pathname : ''; } catch (_) {}
-    const isTurboWarpPlayer = targetPath === '/turbowarp/play';
-    const frameDiag = (stage, details = {}) => {
-      if (!isTurboWarpPlayer) return;
-      try {
-        page.sendEvent('console', 'warn', [
-          '[WK-TW-DIAG] ' + stage,
-          JSON.stringify(details)
-        ]);
-      } catch (_) {}
-    };
-    frameDiag('iframe-navigation-handler-enter', {
-      parentPageId: page.id || null,
-      childPageId: page2?.id || null,
-      parentPath: (() => { try { return new URL(page.location?.url || '').pathname; } catch (_) { return ''; } })(),
-      childPath: targetPath,
-      navigationId,
-      iframeNavigationId: obj.iframe?.__iframeNavigationId,
-      iframeConnected: !!obj.iframe?.isConnected,
-      hasNativeContentWindow: !!obj.iframe?.__wkNativeContentWindow
-    });
+    const iframe = obj?.iframe;
+    if (!iframe) return;
+
+    const registry = window.__pageRegistry;
+    const pageId = iframe.getAttribute?.('data-page-id');
+    const attachedPage = iframe.pageEmulator;
+    let page2 = attachedPage && (!attachedPage.id || registry?.[attachedPage.id] === attachedPage)
+      ? attachedPage
+      : null;
+
+    if (!page2 && pageId) page2 = registry?.[pageId] || null;
+    if (!page2) page2 = page.children?.find(child => child?.iframe === iframe) || null;
 
     if (!page2) {
-      frameDiag('iframe-navigation-no-page-emulator');
-      alert("Page not found!");
+      page2 = page.sendEvent('iframe-create',{iframe}) || iframe.pageEmulator || null;
+    }
+
+    if (!page2) {
+      console.error('Could not resolve a PageEmulator for iframe navigation.', iframe);
       return;
     }
 
-    if (navigationId !== undefined && obj.iframe.__iframeNavigationId !== navigationId) {
-      frameDiag('iframe-navigation-stale-before-fetch', { navigationId, currentNavigationId: obj.iframe.__iframeNavigationId });
-      return;
+    // Restore the emulator association if the iframe DOM node was replaced.
+    page2.iframe = iframe;
+    if (page2.id && iframe.getAttribute?.('data-page-id') !== page2.id) {
+      iframe.setAttribute('data-page-id',page2.id);
     }
+    iframe.pageEmulator = page2;
+    iframe.usefulHelpers = registry?.__usefulHelpers || iframe.usefulHelpers;
+    if (page2.tab) {
+      page2.tab.iframe = iframe;
+      page2.tab.frameElement = iframe;
+    }
+    if (page2.parent !== page || !page.children.includes(page2)) page.addChild(page2);
+    browserDevTools?.runOnPage(page2,page);
+
+    var navigationId = obj.navigationId;
+
+    if (navigationId !== undefined && iframe.__iframeNavigationId !== navigationId) return;
 
     if (obj.is_doc) {
       page2.setLocation('about:srcdoc',page.location?.origin || 'http://localhost:3000');
@@ -1341,7 +1345,7 @@ function createNewPage(iframe,parentPage=null) {
 
       page2.rawDocument = String(obj.srcdoc || '');
 
-      if (navigationId !== undefined && obj.iframe.__iframeNavigationId !== navigationId) return;
+      if (navigationId !== undefined && iframe.__iframeNavigationId !== navigationId) return;
 
       await page2.setDocument(obj.srcdoc || '');
       return;
@@ -1361,49 +1365,17 @@ function createNewPage(iframe,parentPage=null) {
     page2.setLocation(targetUrl.href,targetUrl.origin);
     if (page2.tab) page2.tab.url = targetUrl.href;
 
-    frameDiag('iframe-network-request-start', {
-      childPageId: page2.id || null,
-      targetPath: targetUrl.pathname,
-      targetOrigin: targetUrl.origin
-    });
     const res = await page2.network.request(targetUrl.href,targetUrl.origin,{},'iframe');
-    frameDiag('iframe-network-request-finished', {
-      responseExists: !!res,
-      ok: !!res?.ok,
-      status: res?.status ?? null,
-      contentType: res?.headers?.get?.('content-type') || '',
-      contentLength: res?.headers?.get?.('content-length') || ''
-    });
 
-    if (navigationId !== undefined && obj.iframe.__iframeNavigationId !== navigationId) {
-      frameDiag('iframe-navigation-stale-after-fetch', { navigationId, currentNavigationId: obj.iframe.__iframeNavigationId });
-      return;
-    }
-    if (!res || !res.ok) {
-      frameDiag('iframe-network-response-not-ok', { status: res?.status ?? null, responseExists: !!res });
-      return;
-    }
+    if (navigationId !== undefined && iframe.__iframeNavigationId !== navigationId) return;
+    if (!res || !res.ok) return;
 
     var rawHtml = await window.getDocumentContent(res,targetUrl.href,targetUrl.origin,obj);
-    frameDiag('iframe-document-content-received', {
-      rawHtmlLength: String(rawHtml || '').length,
-      hasGameLabSetup: String(rawHtml || '').includes('wrappedExportedCode'),
-      hasTurboWarpSandbox: String(rawHtml || '').includes('/turbowarp/sandbox.js')
-    });
 
-    if (navigationId !== undefined && obj.iframe.__iframeNavigationId !== navigationId) {
-      frameDiag('iframe-navigation-stale-after-document-read', { navigationId, currentNavigationId: obj.iframe.__iframeNavigationId });
-      return;
-    }
+    if (navigationId !== undefined && iframe.__iframeNavigationId !== navigationId) return;
 
     page2.rawDocument = String(rawHtml || '');
     await page2.setDocument(rawHtml);
-    frameDiag('iframe-document-installed', {
-      childPageId: page2.id || null,
-      rawDocumentLength: page2.rawDocument?.length || 0,
-      childPath: (() => { try { return new URL(page2.location?.url || '').pathname; } catch (_) { return page2.location?.url || ''; } })(),
-      iframeConnected: !!obj.iframe?.isConnected
-    });
   });
 
   page.interceptEvent('hidecontext',async function(){
@@ -2314,10 +2286,11 @@ async function renderTabContent(tab, url) {
     'Referer': origin || 'https://google.com'
   };
   var response = await tab.page.network.request(url, origin, { headers: requestHeaders }, 'page-load');
-  for (var i = 0; i < 5 && (!response || !response.ok); i++) {
-    await wait(i * 1000);
-    response = await tab.page.network.request(url, origin, { headers: requestHeaders }, 'page-load');
-  }
+  // Disabled: retrying a failed page load several times added too much delay.
+  // for (var i = 0; i < 5 && (!response || !response.ok); i++) {
+  //   await wait(i * 1000);
+  //   response = await tab.page.network.request(url, origin, { headers: requestHeaders }, 'page-load');
+  // }
 
   if (!response) {
     //tab.iframe.removeAttribute('srcdoc');
