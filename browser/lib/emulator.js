@@ -2927,7 +2927,7 @@
         }
 
         const DOMCollectionBrands = new Set([
-          'HTMLCollection', 'NodeList', 'NamedNodeMap', 'StyleSheetList'
+          'HTMLCollection', 'HTMLAllCollection', 'NodeList', 'NamedNodeMap', 'StyleSheetList'
         ]);
         const DOMPlatformObjectBrands = new Set([
           'Range', 'Selection', 'TreeWalker', 'NodeIterator', 'TouchList', 'Touch',
@@ -4133,7 +4133,10 @@
           'Option', 'Worker', 'SharedWorker', 'BroadcastChannel', 'MessageChannel',
           'AbortController', 'FileReader', 'WebSocket', 'EventSource',
           'MutationObserver', 'IntersectionObserver', 'ResizeObserver',
-          'PerformanceObserver'
+          'PerformanceObserver', 'CSSStyleSheet', 'Animation', 'KeyframeEffect',
+          'DOMMatrix', 'DOMMatrixReadOnly', 'DOMPoint', 'DOMPointReadOnly',
+          'DOMRect', 'DOMRectReadOnly', 'Path2D', 'ImageData', 'Blob', 'File',
+          'MediaStream', 'MediaStreamTrack', 'RTCPeerConnection'
         ]);
 
         function wrapDOMConstructor(name, constructor) {
