@@ -3117,7 +3117,7 @@
               ) return target.getAttribute('data-raw-type');
               if (
                 target instanceof HTMLScriptElement &&
-                (prop === 'textContent' || prop === 'text')
+                (prop === 'textContent' || prop === 'text' || prop === 'innerText')
               ) {
                 const original = target.getAttribute('data-raw-script');
                 if (original != null) return original;
@@ -3248,9 +3248,17 @@
               }
               if (prop === 'hasAttribute') {
                 return function(name) {
-                  if (isInternalDOMAttribute(name)) return false;
-                  if (target instanceof HTMLScriptElement && String(name).toLowerCase() === 'type' &&
-                      Reflect.apply(target.hasAttribute, target, ['data-raw-type'])) return true;
+                  const publicName = String(name || '').toLowerCase();
+                  if (isInternalDOMAttribute(publicName)) return false;
+                  if (
+                    target instanceof HTMLScriptElement &&
+                    publicName === 'type' &&
+                    Reflect.apply(target.hasAttribute, target, ['data-raw-type'])
+                  ) return true;
+                  if (
+                    isVirtualizedResourceAttribute(target, publicName) &&
+                    Reflect.apply(target.hasAttribute, target, ['data-raw-' + publicName])
+                  ) return true;
                   return Reflect.apply(target.hasAttribute, target, [name]);
                 };
               }
@@ -3258,11 +3266,16 @@
                 return function() {
                   const names = Reflect.apply(target.getAttributeNames, target, [])
                     .filter(name => !isInternalDOMAttribute(name));
-                  if (
-                    target instanceof HTMLScriptElement &&
-                    Reflect.apply(target.hasAttribute, target, ['data-raw-type']) &&
-                    !names.includes('type')
-                  ) names.push('type');
+                  if (target instanceof HTMLScriptElement &&
+                      Reflect.apply(target.hasAttribute, target, ['data-raw-type']) &&
+                      !names.includes('type')) names.push('type');
+                  for (const name of ['src', 'href', 'srcset', 'poster', 'srcdoc', 'data']) {
+                    if (
+                      isVirtualizedResourceAttribute(target, name) &&
+                      Reflect.apply(target.hasAttribute, target, ['data-raw-' + name]) &&
+                      !names.includes(name)
+                    ) names.push(name);
+                  }
                   return names;
                 };
               }
@@ -3442,7 +3455,7 @@
               ) clearSavedScriptType(target, 'type');
               if (
                 target instanceof HTMLScriptElement &&
-                (prop === 'textContent' || prop === 'text')
+                (prop === 'textContent' || prop === 'text' || prop === 'innerText')
               ) target.removeAttribute('data-raw-script');
               if (target.nodeType === Node.TEXT_NODE &&
                   (prop === 'textContent' || prop === 'nodeValue' || prop === 'data') &&
