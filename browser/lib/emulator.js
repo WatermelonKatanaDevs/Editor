@@ -1447,6 +1447,11 @@
                 knownPage.tab.iframe = el;
                 knownPage.tab.frameElement = el;
               }
+
+              // Notify the browser shell that the frame's DOM element changed.
+              // The existing iframe-create handler recognizes the page id and
+              // rebinds DevTools without creating a duplicate emulator.
+              sendEvent('iframe-create',{iframe:el,reattached:true});
             } else {
               sendEvent('iframe-create',{
                 iframe: el,
@@ -1838,6 +1843,9 @@
                   knownPage.tab.frameElement = elem;
                 }
 
+                // Keep DevTools in sync if contentWindow is the first code to
+                // touch a reconstructed iframe element.
+                sendEvent('iframe-create',{iframe:elem,reattached:true});
                 return knownPage;
               }
 
