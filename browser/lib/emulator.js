@@ -803,9 +803,26 @@
           if (parent.type === "CallExpression" &&
               parent.callee?.name === "__prepareDirectEvalCode" &&
               parent.arguments?.[1] === node) return;
-          if (parent.type === "MemberExpression" && parent.property === node && !parent.computed) return;
-          if (parent.type === "Property" && parent.key === node && !parent.computed && !parent.shorthand) return;
+          if (
+            (parent.type === "MemberExpression" && parent.property === node && !parent.computed) ||
+            (parent.type === "Property" && parent.key === node && !parent.computed) ||
+            (parent.type === "PropertyDefinition" && parent.key === node && !parent.computed) ||
+            (parent.type === "MethodDefinition" && parent.key === node && !parent.computed) ||
+            (parent.type === "LabeledStatement" && parent.label === node) ||
+            ((parent.type === "BreakStatement" || parent.type === "ContinueStatement") && parent.label === node)
+          ) return;
           if (parent.type === "VariableDeclarator" && parent.id === node) return;
+          if (
+            (parent.type === "RestElement" && parent.argument === node) ||
+            (parent.type === "AssignmentPattern" && parent.left === node) ||
+            (parent.type === "ArrayPattern" && parent.elements.includes(node)) ||
+            (parent.type === "Property" && parent.value === node &&
+              ancestors[ancestors.length - 3]?.type === "ObjectPattern")
+          ) return;
+          if (
+            (parent.type === "ForInStatement" || parent.type === "ForOfStatement") &&
+            parent.left === node
+          ) return;
           if (
             (parent.type === "FunctionDeclaration" || parent.type === "FunctionExpression") &&
             (parent.id === node || parent.params.includes(node))
