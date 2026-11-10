@@ -1881,8 +1881,9 @@
             const hadCachedWindow = !!nativeWindow;
             if (!nativeWindow) {
               try {
-                const getter = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow')?.get;
-                if (getter) nativeWindow = Reflect.apply(getter, iframe, []);
+                if (nativeIframeContentWindowGetter) {
+                  nativeWindow = Reflect.apply(nativeIframeContentWindowGetter, iframe, []);
+                }
                 if (nativeWindow) {
                   try { Object.defineProperty(iframe, '__wkNativeContentWindow', { value: nativeWindow, writable: true, configurable: true }); } catch (_) {}
                 }
