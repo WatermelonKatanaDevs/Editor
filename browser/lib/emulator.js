@@ -1830,6 +1830,21 @@
         const nativeElementSetAttribute = Element.prototype.setAttribute;
         const nativeElementGetAttribute = Element.prototype.getAttribute;
         const nativeElementRemoveAttribute = Element.prototype.removeAttribute;
+        const nativeElementSetAttributeNode = Element.prototype.setAttributeNode;
+        const nativeElementSetAttributeNodeNS = Element.prototype.setAttributeNodeNS;
+        const nativeAttrValueDescriptor = Object.getOwnPropertyDescriptor(Attr.prototype, 'value');
+
+        function rewriteInlineEventAttribute(element, name, rawValue) {
+          const attributeName = String(name || '').toLowerCase();
+          if (!/^on[a-z]/i.test(attributeName)) return false;
+          const source = String(rawValue);
+          Reflect.apply(nativeElementSetAttribute, element, ['data-raw-' + attributeName, source]);
+          Reflect.apply(nativeElementSetAttribute, element, [
+            attributeName,
+            `return window.__executeCode(${JSON.stringify(source)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? event : undefined)`
+          ]);
+          return true;
+        }
 
         // --- Dynamic Inline On* Handler Rewriter ---
         function patchInlineEvents(node) {
@@ -1849,6 +1864,49 @@
             }
           });
         }
+
+        // setAttributeNode() is a separate native path from setAttribute().
+        // Rewrite a detached event Attr before attaching it so it cannot execute
+        // raw code during the interval before the MutationObserver callback.
+        Element.prototype.setAttributeNode = function(attribute) {
+          const attr = attribute;
+          if (
+            attr instanceof Attr &&
+            /^on[a-z]/i.test(attr.name) &&
+            !attr.ownerElement &&
+            attr.ownerDocument === this.ownerDocument
+          ) {
+            const rawValue = attr.value;
+            rewriteInlineEventAttribute(this, attr.name, rawValue);
+            const rewritten = this.getAttribute(attr.name);
+            if (nativeAttrValueDescriptor?.set) {
+              Reflect.apply(nativeAttrValueDescriptor.set, attr, [rewritten]);
+            }
+            const result = Reflect.apply(nativeElementSetAttributeNode, this, [attr]);
+            return result;
+          }
+          return Reflect.apply(nativeElementSetAttributeNode, this, [attr]);
+        };
+
+        Element.prototype.setAttributeNodeNS = function(attribute) {
+          const attr = attribute;
+          if (
+            attr instanceof Attr &&
+            /^on[a-z]/i.test(attr.name) &&
+            !attr.ownerElement &&
+            attr.namespaceURI == null &&
+            attr.ownerDocument === this.ownerDocument
+          ) {
+            const rawValue = attr.value;
+            rewriteInlineEventAttribute(this, attr.name, rawValue);
+            const rewritten = this.getAttribute(attr.name);
+            if (nativeAttrValueDescriptor?.set) {
+              Reflect.apply(nativeAttrValueDescriptor.set, attr, [rewritten]);
+            }
+            return Reflect.apply(nativeElementSetAttributeNodeNS, this, [attr]);
+          }
+          return Reflect.apply(nativeElementSetAttributeNodeNS, this, [attr]);
+        };
 
         function patchInlineEventsInTree(root) {
           if (!root) return;
@@ -2496,6 +2554,46 @@
                 };
               }
               if (prop === 'length' && isNamedNodeMap) return visibleItems().length;
+              if (
+                isNamedNodeMap &&
+                ['setNamedItem', 'setNamedItemNS'].includes(prop) &&
+                typeof target[prop] === 'function'
+              ) {
+                return function(attribute) {
+                  const rawAttribute = unwrapDOMValue(attribute);
+                  const owner = target.ownerElement;
+                  if (
+                    owner &&
+                    rawAttribute instanceof Attr &&
+                    !rawAttribute.ownerElement &&
+                    rawAttribute.namespaceURI == null &&
+                    /^on[a-z]/i.test(rawAttribute.name) &&
+                    rawAttribute.ownerDocument === owner.ownerDocument
+                  ) {
+                    const rawValue = rawAttribute.value;
+                    rewriteInlineEventAttribute(owner, rawAttribute.name, rawValue);
+                    const rewritten = owner.getAttribute(rawAttribute.name);
+                    if (nativeAttrValueDescriptor?.set) {
+                      Reflect.apply(nativeAttrValueDescriptor.set, rawAttribute, [rewritten]);
+                    }
+                  }
+                  return wrapDOMValue(Reflect.apply(target[prop], target, [rawAttribute]));
+                };
+              }
+              if (
+                isNamedNodeMap &&
+                ['removeNamedItem', 'removeNamedItemNS'].includes(prop) &&
+                typeof target[prop] === 'function'
+              ) {
+                return function(...args) {
+                  const name = String(args[args.length - 1] || '').toLowerCase();
+                  const result = Reflect.apply(target[prop], target, args);
+                  if (/^on[a-z]/i.test(name) && target.ownerElement) {
+                    Reflect.apply(nativeElementRemoveAttribute, target.ownerElement, ['data-raw-' + name]);
+                  }
+                  return wrapDOMValue(result);
+                };
+              }
               if ((prop === 'item' || prop === 'namedItem') && typeof target[prop] === 'function') {
                 return function(...args) {
                   if (isNamedNodeMap && prop === 'namedItem' && isInternalDOMAttribute(args[0])) return null;
@@ -2588,15 +2686,31 @@
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return;
                   if (/^on[a-z]/i.test(attributeName)) {
-                    Reflect.apply(nativeElementSetAttribute, target, ['data-raw-' + attributeName, value]);
-                    const rawCode = Reflect.apply(nativeElementGetAttribute, target, ['data-raw-' + attributeName]) || '';
-                    return Reflect.apply(nativeElementSetAttribute, target, [
-                      attributeName,
-                      `return window.__executeCode(${JSON.stringify(rawCode)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? event : undefined)`
-                    ]);
+                    return rewriteInlineEventAttribute(target, attributeName, value);
                   }
                   const setter = Reflect.get(target, prop, target);
                   return Reflect.apply(setter, target, [name, unwrapDOMValue(value)]);
+                };
+              }
+              if (prop === 'toggleAttribute' && target instanceof Element) {
+                return function(name, force) {
+                  const attributeName = String(name || '').toLowerCase();
+                  if (isInternalDOMAttribute(attributeName)) return false;
+                  if (/^on[a-z]/i.test(attributeName)) {
+                    const currentlyPresent = Reflect.apply(target.hasAttribute, target, [attributeName]);
+                    const shouldExist = arguments.length > 1 ? !!force : !currentlyPresent;
+                    if (!shouldExist) {
+                      Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
+                      Reflect.apply(nativeElementRemoveAttribute, target, [attributeName]);
+                      return false;
+                    }
+                    if (!currentlyPresent) {
+                      rewriteInlineEventAttribute(target, attributeName, '');
+                    }
+                    return true;
+                  }
+                  const method = Reflect.get(target, prop, target);
+                  return Reflect.apply(method, target, arguments);
                 };
               }
               if (prop === 'removeAttribute' && target instanceof Element) {
@@ -2613,12 +2727,7 @@
                 return function(namespace, name, value) {
                   const attributeName = String(name || '').toLowerCase();
                   if ((namespace == null || namespace === '') && /^on[a-z]/i.test(attributeName)) {
-                    Reflect.apply(nativeElementSetAttribute, target, ['data-raw-' + attributeName, value]);
-                    const rawCode = Reflect.apply(nativeElementGetAttribute, target, ['data-raw-' + attributeName]) || '';
-                    return Reflect.apply(nativeElementSetAttribute, target, [
-                      attributeName,
-                      `return window.__executeCode(${JSON.stringify(rawCode)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? event : undefined)`
-                    ]);
+                    return rewriteInlineEventAttribute(target, attributeName, value);
                   }
                   return Reflect.apply(target.setAttributeNS, target, [namespace, name, unwrapDOMValue(value)]);
                 };
