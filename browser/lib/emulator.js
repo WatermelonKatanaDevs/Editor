@@ -3586,6 +3586,79 @@
           }
           return null;
         }
+
+        // A WindowProxy returned by another PageEmulator is implemented in
+        // that other frame's realm. Calling its proxied postMessage from this
+        // frame would therefore make the browser attribute the message to the
+        // wrong browsing context. Wrap ancestor windows in the caller's realm
+        // and invoke the matching native ancestor WindowProxy directly.
+        const callerWindowProxyCache = new Map();
+        function getCallerWindowProxy(targetPage, nativeTargetWindow) {
+          if (!targetPage || targetPage === pageEmulator) return windowProxy;
+          if (!targetPage.__windowProxy || !nativeTargetWindow) {
+            return targetPage.__windowProxy || nativeTargetWindow || windowProxy;
+          }
+          const cacheKey = targetPage.id || targetPage;
+          if (callerWindowProxyCache.has(cacheKey)) return callerWindowProxyCache.get(cacheKey);
+
+          const callerProxy = new Proxy(targetPage.__windowProxy, {
+            get(target, prop) {
+              if (prop === 'postMessage') {
+                return function(message, targetOrigin, transfer) {
+                  const turboMessageType = message && typeof message === 'object' && ['ready', 'init', 'storage'].includes(message.turbowarp) ? message.turbowarp : null;
+                  const logTurboMessage = !!turboMessageType;
+                  if (logTurboMessage) turboDebug('postmessage-request', {
+                    type: turboMessageType,
+                    senderPageId: pageEmulator?.id || null,
+                    senderPath: (() => { try { return new URL(CURRENT_PAGE_URL).pathname; } catch (_) { return ''; } })(),
+                    receiverPageId: targetPage.id || null
+                  });
+                  try {
+                    const origin = targetOrigin || '*';
+                    nativeTargetWindow.postMessage(message, origin, transfer);
+                    if (logTurboMessage) turboDebug('postmessage-posted', {
+                      type: turboMessageType,
+                      receiverPageId: targetPage.id || null,
+                      targetOrigin: origin
+                    });
+                  } catch (error) {
+                    if (logTurboMessage) turboDebug('postmessage-threw', {
+                      type: turboMessageType,
+                      error: error?.message || String(error)
+                    });
+                    try { nativeTargetWindow.postMessage(message, '*'); } catch (_) {}
+                  }
+                };
+              }
+
+              if (prop === 'parent') {
+                const parentPage = targetPage.parent && targetPage.parent !== false ? targetPage.parent : null;
+                if (!parentPage) return callerProxy;
+                let nativeParentWindow = null;
+                try { nativeParentWindow = nativeTargetWindow.parent; } catch (_) {}
+                return getCallerWindowProxy(parentPage, nativeParentWindow);
+              }
+
+              if (prop === 'top') {
+                let topPage = targetPage;
+                let nativeTopWindow = nativeTargetWindow;
+                const seen = new Set();
+                while (topPage?.parent && topPage.parent !== false && !seen.has(topPage)) {
+                  seen.add(topPage);
+                  topPage = topPage.parent;
+                  try { nativeTopWindow = nativeTopWindow.parent; } catch (_) { break; }
+                }
+                return getCallerWindowProxy(topPage, nativeTopWindow);
+              }
+
+              return Reflect.get(target, prop, target);
+            }
+          });
+
+          callerWindowProxyCache.set(cacheKey, callerProxy);
+          return callerProxy;
+        }
+
         windowProxy = new Proxy(windowTarget, {
           has(target, prop) {
             if (prop === 'location' || prop === 'document' || ['window','parent','top','globalThis','self','frames'].includes(prop)) {
@@ -3681,8 +3754,26 @@
             if (prop === 'document') return documentProxy;
             if (['window','globalThis','self','frames'].includes(prop)) return windowProxy;
             if (prop === 'length') return (pageEmulator?.children || []).length;
-            if (prop === 'top') return getTopPage().__windowProxy || windowProxy;
-            if (prop === 'parent') return pageEmulator?.parent && pageEmulator.parent !== false && pageEmulator.parent.__windowProxy ? pageEmulator.parent.__windowProxy : windowProxy;
+            if (prop === 'top') {
+              const topPage = getTopPage();
+              if (topPage === pageEmulator) return windowProxy;
+              let nativeTopWindow = window;
+              const seen = new Set();
+              let currentPage = pageEmulator;
+              while (currentPage?.parent && currentPage.parent !== false && !seen.has(currentPage)) {
+                seen.add(currentPage);
+                currentPage = currentPage.parent;
+                try { nativeTopWindow = nativeTopWindow.parent; } catch (_) { break; }
+              }
+              return getCallerWindowProxy(topPage, nativeTopWindow);
+            }
+            if (prop === 'parent') {
+              const parentPage = pageEmulator?.parent && pageEmulator.parent !== false ? pageEmulator.parent : null;
+              if (!parentPage) return windowProxy;
+              let nativeParentWindow = null;
+              try { nativeParentWindow = window.parent; } catch (_) {}
+              return getCallerWindowProxy(parentPage, nativeParentWindow);
+            }
             if (prop === 'postMessage') {
               return function(message, targetOrigin, transfer) {
                 const turboMessageType = message && typeof message === 'object' && ['ready', 'init', 'storage'].includes(message.turbowarp) ? message.turbowarp : null;
