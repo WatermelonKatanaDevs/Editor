@@ -2831,6 +2831,7 @@
         const virtualDOMAttributeNames = new WeakMap();
         const wrappedDOMObjects = new WeakMap();
         const unwrappedDOMObjects = new WeakMap();
+        const nativeStorageProxies = new WeakMap();
         const wrappedEvents = new WeakMap();
         const unwrappedEvents = new WeakMap();
         let documentProxy;
@@ -3862,6 +3863,11 @@
           ) return value;
           if (value === window || value === windowProxy) return windowProxy;
           if (value === document) return documentProxy;
+          if (
+            typeof Storage !== 'undefined' &&
+            value instanceof Storage &&
+            nativeStorageProxies.has(value)
+          ) return nativeStorageProxies.get(value);
           if (typeof Window !== 'undefined') {
             try {
               if (value instanceof Window) return wrapWindowReference(value);
@@ -5249,8 +5255,12 @@
         }
 
         const storagePrefix = BASE_ORIGIN + ":";
-        const localStorageProxy = createStorageProxy(window.localStorage, storagePrefix);
-        const sessionStorageProxy = createStorageProxy(window.sessionStorage, storagePrefix);
+        const nativeLocalStorage = window.localStorage;
+        const nativeSessionStorage = window.sessionStorage;
+        const localStorageProxy = createStorageProxy(nativeLocalStorage, storagePrefix);
+        const sessionStorageProxy = createStorageProxy(nativeSessionStorage, storagePrefix);
+        nativeStorageProxies.set(nativeLocalStorage, localStorageProxy);
+        nativeStorageProxies.set(nativeSessionStorage, sessionStorageProxy);
         Object.defineProperty(window, 'localStorage', {
           get: function() { return localStorageProxy; },
           set: undefined,
@@ -5258,7 +5268,7 @@
           enumerable: true
         });
         Object.defineProperty(window, 'sessionStorage', {
-          get: function() { return localStorageProxy; },
+          get: function() { return sessionStorageProxy; },
           set: undefined,
           configurable: true,
           enumerable: true
