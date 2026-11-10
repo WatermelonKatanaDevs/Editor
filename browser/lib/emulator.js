@@ -3958,6 +3958,15 @@
               });
               return;
             }
+            if (prop === 'defaultView') {
+              Object.defineProperty(documentTarget, prop, {
+                get: function() { return windowProxy; },
+                set: undefined,
+                configurable: true,
+                enumerable: true
+              });
+              return;
+            }
             const desc = Object.getOwnPropertyDescriptor(document, prop);
             if (desc) {
               Object.defineProperty(documentTarget, prop, desc);
@@ -4069,6 +4078,28 @@
             return Reflect.ownKeys(target);
           },
           getOwnPropertyDescriptor(target, prop) {
+            if (prop === 'eval') {
+              const descriptor = Reflect.getOwnPropertyDescriptor(target, prop) || {
+                configurable: true,
+                enumerable: false,
+                writable: true
+              };
+              return {
+                configurable: descriptor.configurable,
+                enumerable: descriptor.enumerable,
+                writable: true,
+                value: __indirectEval
+              };
+            }
+            if (prop === 'defaultView') {
+              const descriptor = Reflect.getOwnPropertyDescriptor(target, prop) || {};
+              return {
+                configurable: descriptor.configurable !== false,
+                enumerable: descriptor.enumerable ?? true,
+                get: function() { return windowProxy; },
+                set: undefined
+              };
+            }
             return Reflect.getOwnPropertyDescriptor(target, prop);
           },
           defineProperty(target, prop, desc) {
@@ -4160,10 +4191,22 @@
             }
             if (['window','globalThis','self'].includes(prop)) {
               Object.defineProperty(windowTarget, prop, {
-                get: function() { return window.__windowProxy; },
+                get: function() { return windowProxy; },
                 set: undefined,
                 configurable: true,
                 enumerable: prop !== 'globalThis'
+              });
+              return;
+            }
+            if (['parent','top','frames','opener','frameElement','eval'].includes(prop)) {
+              Object.defineProperty(windowTarget, prop, {
+                get: function() {
+                  if (prop === 'eval') return __indirectEval;
+                  return windowProxy ? windowProxy[prop] : undefined;
+                },
+                set: undefined,
+                configurable: true,
+                enumerable: true
               });
               return;
             }
@@ -4176,6 +4219,33 @@
           }
         });
         let windowProxy;
+        function syncWindowTargetProperty(prop, overrideValue) {
+          const nativeDescriptor = Object.getOwnPropertyDescriptor(window, prop);
+          const targetDescriptor = Object.getOwnPropertyDescriptor(windowTarget, prop);
+          let descriptor = nativeDescriptor || targetDescriptor;
+          if (overrideValue !== undefined) {
+            descriptor = {
+              ...(descriptor || {}),
+              value: overrideValue,
+              writable: descriptor?.writable !== false,
+              enumerable: descriptor?.enumerable ?? true,
+              configurable: descriptor?.configurable !== false
+            };
+          }
+          if (!descriptor) return false;
+          try {
+            Object.defineProperty(windowTarget, prop, descriptor);
+            return true;
+          } catch (_) {
+            try {
+              if ('value' in descriptor && targetDescriptor?.writable) {
+                windowTarget[prop] = descriptor.value;
+                return true;
+              }
+            } catch (_) {}
+            return false;
+          }
+        }
         function getTopPage() {
           let current = pageEmulator;
           const seen = new Set();
@@ -4504,6 +4574,28 @@
             return Reflect.ownKeys(target);
           },
           getOwnPropertyDescriptor(target, prop) {
+            if (prop === 'eval') {
+              const descriptor = Reflect.getOwnPropertyDescriptor(target, prop) || {
+                configurable: true,
+                enumerable: false,
+                writable: true
+              };
+              return {
+                configurable: descriptor.configurable,
+                enumerable: descriptor.enumerable,
+                writable: true,
+                value: __indirectEval
+              };
+            }
+            if (prop === 'defaultView') {
+              const descriptor = Reflect.getOwnPropertyDescriptor(target, prop) || {};
+              return {
+                configurable: descriptor.configurable !== false,
+                enumerable: descriptor.enumerable ?? true,
+                get: function() { return windowProxy; },
+                set: undefined
+              };
+            }
             return Reflect.getOwnPropertyDescriptor(target, prop);
           },
           defineProperty(target, prop, desc) {
@@ -4554,6 +4646,7 @@
           } catch (_) {
             try { window[name] = wrappedTimer; } catch (_) {}
           }
+          syncWindowTargetProperty(name, wrappedTimer);
         });
 
         // 1. Store pure, raw native references BEFORE overriding anything
@@ -4707,6 +4800,7 @@
         if (typeof source !== 'string') return source;
         return window.__executeCode(source, '<anonymous indirect eval>', __windowProxy);
       };
+      syncWindowTargetProperty('eval', __indirectEval);
       function __getIndirectEval(value) {
         return value === __nativeEval ? __indirectEval : value;
       }
@@ -4842,6 +4936,7 @@
         } catch (_) {
           try { window[name] = ScopedConstructor; } catch (_) {}
         }
+        syncWindowTargetProperty(name, ScopedConstructor);
         dynamicFunctionSources.set(ScopedConstructor, 'function ' + name + '() { [native code] }');
       }
 
@@ -4932,6 +5027,7 @@
       const ScopedAsyncGeneratorFunction = makeScopedFunctionConstructor(NativeAsyncGeneratorFunction, 'asyncGenerator');
 
       window.Function = ScopedFunction;
+      syncWindowTargetProperty('Function', ScopedFunction);
       const nativeFunctionPrototype = NativeFunction.prototype;
       const asyncFunctionPrototype = Object.getPrototypeOf(async function() {});
       const generatorFunctionPrototype = Object.getPrototypeOf(function*() {});
