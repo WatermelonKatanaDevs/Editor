@@ -2410,6 +2410,13 @@
 
         function unwrapDOMValue(value) {
           if (!value || (typeof value !== 'object' && typeof value !== 'function')) return value;
+          if (typeof windowProxy !== 'undefined' && value === windowProxy) return window;
+          if (typeof documentProxy !== 'undefined' && value === documentProxy) return document;
+          if (typeof callerWindowProxyCache !== 'undefined') {
+            for (const entry of callerWindowProxyCache.values()) {
+              if (entry.proxy === value || entry.targetWindowProxy === value) return entry.nativeTargetWindow;
+            }
+          }
           if (unwrappedDOMNodes.has(value)) return unwrappedDOMNodes.get(value);
           if (unwrappedDOMCollections.has(value)) return unwrappedDOMCollections.get(value);
           if (unwrappedDOMObjects.has(value)) return unwrappedDOMObjects.get(value);
@@ -4078,19 +4085,6 @@
             return Reflect.ownKeys(target);
           },
           getOwnPropertyDescriptor(target, prop) {
-            if (prop === 'eval') {
-              const descriptor = Reflect.getOwnPropertyDescriptor(target, prop) || {
-                configurable: true,
-                enumerable: false,
-                writable: true
-              };
-              return {
-                configurable: descriptor.configurable,
-                enumerable: descriptor.enumerable,
-                writable: true,
-                value: __indirectEval
-              };
-            }
             if (prop === 'defaultView') {
               const descriptor = Reflect.getOwnPropertyDescriptor(target, prop) || {};
               return {
@@ -4585,15 +4579,6 @@
                 enumerable: descriptor.enumerable,
                 writable: true,
                 value: __indirectEval
-              };
-            }
-            if (prop === 'defaultView') {
-              const descriptor = Reflect.getOwnPropertyDescriptor(target, prop) || {};
-              return {
-                configurable: descriptor.configurable !== false,
-                enumerable: descriptor.enumerable ?? true,
-                get: function() { return windowProxy; },
-                set: undefined
               };
             }
             return Reflect.getOwnPropertyDescriptor(target, prop);
