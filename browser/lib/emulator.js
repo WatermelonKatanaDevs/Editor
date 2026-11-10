@@ -88,11 +88,30 @@
     }
   }
 
+  const EXECUTABLE_SCRIPT_MIME_TYPES = new Set([
+    'application/ecmascript',
+    'application/javascript',
+    'application/x-ecmascript',
+    'application/x-javascript',
+    'text/ecmascript',
+    'text/javascript',
+    'text/javascript1.0',
+    'text/javascript1.1',
+    'text/javascript1.2',
+    'text/javascript1.3',
+    'text/javascript1.4',
+    'text/javascript1.5',
+    'text/jscript',
+    'text/livescript',
+    'text/x-ecmascript',
+    'text/x-javascript'
+  ]);
+
   function isExecutableJavaScriptType(type) {
     const normalized = String(type || '').trim().toLowerCase();
     return !normalized ||
       normalized === 'module' ||
-      /^(?:text|application)\/(?:java|ecma)script(?:\s*;|$)/i.test(normalized);
+      EXECUTABLE_SCRIPT_MIME_TYPES.has(normalized);
   }
 
   function blockUnprocessedScript(element) {
@@ -228,8 +247,7 @@
         let text = await response.clone().text();
         const scriptType = (element?.getAttribute('type') || '').trim();
         const isModule = scriptType.toLowerCase() === 'module';
-        const isClassicScript = !scriptType ||
-          /^(?:text|application)\/(?:java|ecma)script(?:\s*;|$)/i.test(scriptType);
+        const isClassicScript = isExecutableJavaScriptType(scriptType) && !isModule;
         if (!isModule && !isClassicScript) return response;
 
         if (isModule) {
@@ -337,8 +355,7 @@
     doc.querySelectorAll('script:not([src]):not([data-wk-device-emulation])').forEach(script => {
       const scriptType = (script.getAttribute('type') || '').trim();
       const isModule = scriptType.toLowerCase() === 'module';
-      const isClassicScript = !scriptType ||
-        /^(?:text|application)\/(?:java|ecma)script(?:\s*;|$)/i.test(scriptType);
+      const isClassicScript = isExecutableJavaScriptType(scriptType) && !isModule;
       if ((!isModule && !isClassicScript) || !script.textContent || script.textContent.includes('__executeCode')) return;
       {
         const rawScript = script.textContent;
@@ -2219,8 +2236,7 @@
                 ''
               ).trim();
               const isModule = scriptType.toLowerCase() === 'module';
-              const isClassicScript = !scriptType ||
-                /^(?:text|application)\/(?:java|ecma)script(?:\s*;|$)/i.test(scriptType);
+              const isClassicScript = isExecutableJavaScriptType(scriptType) && !isModule;
               if (!isModule && !isClassicScript) return response;
               if (isModule) {
                 element.setAttribute('data-raw-type', element.getAttribute('type'));
@@ -2335,8 +2351,7 @@
 
           const scriptType = (node.getAttribute('type') || '').trim();
           const isModule = scriptType.toLowerCase() === 'module';
-          const isClassicScript = !scriptType ||
-            /^(?:text|application)\/(?:java|ecma)script(?:\s*;|$)/i.test(scriptType);
+          const isClassicScript = isExecutableJavaScriptType(scriptType) && !isModule;
           if (!isModule && !isClassicScript) return;
 
           const rawScript = node.textContent;
