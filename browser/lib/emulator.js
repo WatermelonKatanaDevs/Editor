@@ -3240,9 +3240,17 @@
         function wrapDOMNode(node) {
           if (!node || !(node instanceof Node)) return node;
           if (unwrappedDOMNodes.has(node)) return node;
-          if (typeof Attr !== 'undefined' && node instanceof Attr && isInternalDOMAttribute(node.name)) {
+          if (
+            typeof Attr !== 'undefined' &&
+            node instanceof Attr &&
+            node.ownerElement &&
+            isInternalDOMAttribute(node.name)
+          ) {
             const publicName = getPublicAliasName(node);
-            if (!publicName) return null;
+            if (
+              !publicName ||
+              !isVirtualPublicAttribute(node.ownerElement, publicName)
+            ) return null;
             virtualDOMAttributeNames.set(node, publicName);
           }
           if (node === document) return documentProxy;
