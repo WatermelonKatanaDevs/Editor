@@ -4504,7 +4504,7 @@
           const trampolineExecution = kind === 'generator' || kind === 'asyncGenerator'
             ? 'yield* ' + invocation + ';'
             : 'return ' + invocation + ';';
-          const trampolineBody = (strict ? '"use strict";\\n' : '') + trampolineExecution;
+          const trampolineBody = (strict ? '"use strict";\n' : '') + trampolineExecution;
           const trampoline = Reflect.construct(nativeConstructor, [...parameters, trampolineBody]);
 
           let scopedFunction;
