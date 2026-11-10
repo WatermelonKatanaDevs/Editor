@@ -3917,6 +3917,9 @@ var DevToolsInternal = {
       }
       const tracker = frameDocumentTrackers.get(tab);
       if (tracker?.observer) { try { tracker.observer.disconnect(); } catch(e) {} }
+      if (tracker?.element && tracker?.loadHandler) {
+        try { tracker.element.removeEventListener('load',tracker.loadHandler); } catch(e) {}
+      }
       frameDocumentTrackers.delete(tab);
       delete tab.__sourceRefreshQueued;
       if (getTabState(tab)) delete getTabState(tab).documentSource;
