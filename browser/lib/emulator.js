@@ -1800,6 +1800,12 @@
           }
         });
       }
+      // These helpers are initialized by the page setup IIFE and are also used
+      // by the execution wrappers below it. Keep them in the enclosing bootstrap
+      // scope rather than publishing them on the emulated or native window.
+      let pageReflect;
+      let syncWindowTargetProperty;
+
       (function() { 
         
         const parentWindow = window.parent;
@@ -5603,7 +5609,7 @@
           }
         });
         let windowProxy;
-        function syncWindowTargetProperty(prop, overrideValue) {
+        syncWindowTargetProperty = function syncWindowTargetProperty(prop, overrideValue) {
           const nativeDescriptor = Object.getOwnPropertyDescriptor(window, prop);
           const targetDescriptor = Object.getOwnPropertyDescriptor(windowTarget, prop);
           let descriptor = nativeDescriptor || targetDescriptor;
@@ -5629,7 +5635,7 @@
             } catch (_) {}
             return false;
           }
-        }
+        };
         function getTopPage() {
           let current = pageEmulator;
           const seen = new Set();
@@ -6049,7 +6055,7 @@
           }
         }
 
-        const pageReflect = new Proxy(Reflect, {
+        pageReflect = new Proxy(Reflect, {
           get(target, prop) {
             if (prop === 'apply') {
               return function(fn, thisArg, args) {
