@@ -4046,9 +4046,16 @@
           return wrapped;
         }
 
-        function resolveVirtualStorage(value) {
-          if (!value || !(value instanceof Storage || hasDOMBrand(value, 'Storage'))) return null;
-          if (nativeStorageProxies.has(value)) return nativeStorageProxies.get(value);
+        function resolveVirtualStorage(value, sourceURL = null) {
+          if (!value || (
+            !(typeof Storage !== 'undefined' && value instanceof Storage) &&
+            !hasDOMBrand(value, 'Storage')
+          )) return null;
+
+          let sourceOrigin = null;
+          if (sourceURL) {
+            try { sourceOrigin = new URL(sourceURL, CURRENT_PAGE_URL).origin; } catch (_) {}
+          }
 
           let root = pageEmulator;
           const ancestors = new Set();
@@ -4059,18 +4066,34 @@
 
           const pending = [root];
           const seen = new Set();
+          const matchingAreas = [];
           while (pending.length) {
             const candidate = pending.shift();
             if (!candidate || seen.has(candidate)) continue;
             seen.add(candidate);
             const areas = candidate.__wkStorageAreas;
             if (areas) {
-              if (value === areas.local || value === areas.localProxy) return areas.localProxy;
-              if (value === areas.session || value === areas.sessionProxy) return areas.sessionProxy;
+              if (value === areas.local || value === areas.localProxy) {
+                if (sourceOrigin && areas.origin === sourceOrigin) return areas.localProxy;
+                matchingAreas.push(areas.localProxy);
+              } else if (value === areas.session || value === areas.sessionProxy) {
+                if (sourceOrigin && areas.origin === sourceOrigin) return areas.sessionProxy;
+                matchingAreas.push(areas.sessionProxy);
+              }
             }
             for (const child of candidate.children || []) pending.push(child);
           }
-          return null;
+
+          if (sourceOrigin && matchingAreas.length) {
+            const currentAreas = pageEmulator.__wkStorageAreas;
+            if (currentAreas && matchingAreas.includes(currentAreas.localProxy) &&
+                (currentAreas.local === value || currentAreas.localProxy === value)) return currentAreas.localProxy;
+            if (currentAreas && matchingAreas.includes(currentAreas.sessionProxy) &&
+                (currentAreas.session === value || currentAreas.sessionProxy === value)) return currentAreas.sessionProxy;
+          }
+
+          if (nativeStorageProxies.has(value)) return nativeStorageProxies.get(value);
+          return matchingAreas[0] || null;
         }
 
         function wrapDOMValue(value) {
@@ -5283,6 +5306,16 @@
           proxy = new Proxy(event, {
             get(target, prop) {
               if (prop === 'source' && isMessage) return sourceProxy;
+              if (
+                prop === 'storageArea' &&
+                target.type === 'storage' &&
+                'storageArea' in target
+              ) {
+                return resolveVirtualStorage(
+                  Reflect.get(target, prop, target),
+                  target.url
+                );
+              }
               if (prop === 'view') return wrapWindowReference(Reflect.get(target, prop, target));
               if (prop === 'origin' && rewriteOrigin) return BASE_ORIGIN;
               if (prop === 'composedPath') {
@@ -5497,6 +5530,7 @@
         nativeStorageProxies.set(nativeLocalStorage, localStorageProxy);
         nativeStorageProxies.set(nativeSessionStorage, sessionStorageProxy);
         pageEmulator.__wkStorageAreas = {
+          origin: BASE_ORIGIN,
           local: nativeLocalStorage,
           session: nativeSessionStorage,
           localProxy: localStorageProxy,
