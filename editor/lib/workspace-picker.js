@@ -287,7 +287,6 @@
         panel.append(footer);
 
         const nativeAccept = filters.some(value => value === '*' || value === '*/*') ? '' : filters
-          .filter(value => value.startsWith('.') || value.includes('/'))
           .map(value => value.startsWith('.') || value.includes('/') ? value : '.' + value)
           .join(',');
         const updateNativeAccept = () => {
