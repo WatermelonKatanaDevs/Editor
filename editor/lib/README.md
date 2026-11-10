@@ -25,7 +25,9 @@ const picker = window.EditorWorkspacePicker.create({
 - `writeFile(path, bytes)` writes directly to the workspace and runs the configured dirty/refresh callback.
 - `cancelActive()` closes or cancels queued dialogs belonging to that picker instance.
 
-Supported options include `title`, `extensions`, `accept`, `types`, `multiple`, `allowDevice`, `startPath`, and `maxFileBytes`.
+Supported options include `title`, `extensions`, `accept`, `types`, `multiple`, `allowDevice`, `startPath`, `maxFileBytes`, `capture`, and `directory`.
+
+Device selection now receives the app's accepted extensions and MIME types, multiselect setting, capture hint, and directory-selection flag. The selected files are validated again, including the configured size limit. Browser and operating-system file dialogs treat `accept` as a filter hint and do not offer a native file-size filter; files over `maxFileBytes` are rejected after selection.
 
 The picker defaults to **Contained inside the editor tab**. Change this under Settings → File Picker → Picker display to use **Overlay over the entire Editor** instead. The preference is stored locally in the browser. Each integrated builtin supplies its active workbench view body as the contained host, so the picker is clipped to that app tab and does not cover the rest of the Editor.
 

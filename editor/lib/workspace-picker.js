@@ -29,22 +29,38 @@
   function isPrivatePath(path) {
     return PRIVATE_PATHS.some(part => path === part || path.startsWith(part + '/'));
   }
-  function normalizeAccept(options) {
+  function normalizeAccept(options = {}) {
     const values = [];
     const add = value => {
-      const normalized = String(value || '').trim().toLowerCase();
-      if (normalized && !values.includes(normalized)) values.push(normalized);
-    };
-    for (const value of Array.isArray(options.extensions) ? options.extensions : []) {
-      add(String(value).replace(/^\./, ''));
-    }
-    for (const value of String(options.accept || '').split(',')) add(value);
-    for (const type of options.types || []) {
-      for (const [mime, extensions] of Object.entries(type?.accept || {})) {
-        add(mime);
-        for (const value of extensions || []) add(String(value).replace(/^\./, ''));
+      if (Array.isArray(value)) {
+        for (const item of value) add(item);
+        return;
       }
-    }
+      if (value && typeof value === 'object') {
+        const mapping = value.accept && typeof value.accept === 'object' ? value.accept : value;
+        for (const [mime, extensions] of Object.entries(mapping)) {
+          add(mime);
+          add(extensions);
+        }
+        return;
+      }
+      for (const part of String(value || '').split(',')) {
+        const normalized = part.trim().toLowerCase();
+        if (!normalized || values.includes(normalized)) continue;
+        const validExtension = normalized.startsWith('.') && /^[a-z0-9][a-z0-9._+-]*$/.test(normalized.slice(1));
+        const mimeParts = normalized.split('/');
+        const validMime = mimeParts.length === 2 &&
+          /^[a-z0-9!#$&^_.+-]+$/.test(mimeParts[0]) &&
+          (mimeParts[1] === '*' || /^[a-z0-9!#$&^_.+-]+$/.test(mimeParts[1]));
+        const validBareExtension = /^[a-z0-9][a-z0-9._+-]*$/.test(normalized);
+        if (normalized === '*' || normalized === '*/*' || validExtension || validMime || validBareExtension) {
+          values.push(normalized);
+        }
+      }
+    };
+    add(options.extensions || []);
+    add(options.accept || '');
+    add(options.types || []);
     return values;
   }
   function matchesFilter(path, type, filters) {
@@ -211,7 +227,7 @@
         allFilesButton.className = 'wk-workspace-picker-secondary';
         allFilesButton.textContent = 'All files: ' + (showAllFiles ? 'On' : 'Off');
         allFilesButton.setAttribute('aria-pressed', String(showAllFiles));
-        allFilesButton.hidden = mode !== 'open' || !filters.length;
+        allFilesButton.hidden = mode !== 'open' || !filters.length || options.excludeAcceptAllOption === true;
         toolbar.append(allFilesButton);
         panel.append(toolbar);
 
@@ -248,9 +264,15 @@
           deviceInput = document.createElement('input');
           deviceInput.type = 'file';
           deviceInput.hidden = true;
-          deviceInput.multiple = multiple;
+          deviceInput.multiple = multiple || options.directory === true;
+          if (options.capture) deviceInput.setAttribute('capture', String(options.capture));
+          if (options.directory === true) deviceInput.setAttribute('webkitdirectory', '');
           footerLeft.append(deviceButton, deviceInput);
-          deviceButton.addEventListener('click', () => deviceInput.click());
+          deviceButton.addEventListener('click', () => {
+            updateNativeAccept();
+            deviceInput.multiple = multiple || options.directory === true;
+            deviceInput.click();
+          });
         }
         const footerRight = document.createElement('div');
         footerRight.className = 'wk-workspace-picker-footer-right';
@@ -264,14 +286,14 @@
         footer.append(footerLeft, footerRight);
         panel.append(footer);
 
-        const nativeAccept = filters.map(value => {
-          if (value === '*' || value === '*/*' || value.includes('/')) return value;
-          return '.' + value.replace(/^\./, '');
-        }).join(',');
+        const nativeAccept = filters.some(value => value === '*' || value === '*/*') ? '' : filters
+          .filter(value => value.startsWith('.') || value.includes('/'))
+          .map(value => value.startsWith('.') || value.includes('/') ? value : '.' + value)
+          .join(',');
         const updateNativeAccept = () => {
           if (!deviceInput) return;
           if (showAllFiles || !nativeAccept) deviceInput.removeAttribute('accept');
-          else deviceInput.accept = nativeAccept;
+          else deviceInput.setAttribute('accept', nativeAccept);
         };
         updateNativeAccept();
 
@@ -506,7 +528,7 @@
     document.head.append(style);
   }
 
-  window.EditorWorkspacePicker = {create, normalizePath, basename, dirname, extension, getDisplayMode, setDisplayMode};
+  window.EditorWorkspacePicker = {create, normalizePath, basename, dirname, extension, normalizeAccept, getDisplayMode, setDisplayMode};
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installStyles, {once:true});
   else installStyles();
 })();

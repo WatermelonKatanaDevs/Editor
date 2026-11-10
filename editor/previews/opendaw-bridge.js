@@ -136,6 +136,9 @@
       types:options.types || [],
       extensions:options.extensions || [],
       accept:options.accept || '',
+      excludeAcceptAllOption:options.excludeAcceptAllOption === true,
+      capture:options.capture || '',
+      directory:options.directory === true,
       allowDevice:true
     };
   }
@@ -159,7 +162,9 @@
     void request('pickFiles', pickerOptions({
       title:input.getAttribute('data-wk-picker-title') || 'Open in openDAW',
       accept:input.accept || '',
-      multiple:!!input.multiple
+      multiple:!!input.multiple,
+      capture:input.capture || '',
+      directory:!!input.webkitdirectory
     })).then(entries => {
       if (!entries?.length) {
         input.dispatchEvent(new Event('cancel'));

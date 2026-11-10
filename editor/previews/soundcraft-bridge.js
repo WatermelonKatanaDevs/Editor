@@ -44,6 +44,8 @@
       title:input.getAttribute('data-wk-picker-title') || 'Open in SoundCraft',
       accept:input.accept || '',
       multiple:!!input.multiple,
+      capture:input.capture || '',
+      directory:!!input.webkitdirectory,
       allowDevice:true
     }).then(files => {
       if (!files?.length) {

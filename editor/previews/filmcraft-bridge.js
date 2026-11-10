@@ -19,6 +19,9 @@
       extensions:options.extensions || [],
       types:options.types || [],
       multiple:options.multiple === true,
+      excludeAcceptAllOption:options.excludeAcceptAllOption === true,
+      capture:options.capture || '',
+      directory:options.directory === true,
       allowDevice:true,
       maxFileBytes:MAX_OPEN_BYTES
     });
@@ -63,7 +66,9 @@
     void choose({
       title:input.getAttribute('data-wk-picker-title') || 'Open in FilmCraft',
       accept:input.accept || '',
-      multiple:!!input.multiple
+      multiple:!!input.multiple,
+      capture:input.capture || '',
+      directory:!!input.webkitdirectory
     }).then(handles => {
       const files = (handles || []).map(handle => {
         let file = null;
