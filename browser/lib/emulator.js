@@ -4037,6 +4037,33 @@
           return wrapped;
         }
 
+        function resolveVirtualStorage(value) {
+          if (!value || !(value instanceof Storage || hasDOMBrand(value, 'Storage'))) return null;
+          if (nativeStorageProxies.has(value)) return nativeStorageProxies.get(value);
+
+          let root = pageEmulator;
+          const ancestors = new Set();
+          while (root?.parent && root.parent !== false && !ancestors.has(root)) {
+            ancestors.add(root);
+            root = root.parent;
+          }
+
+          const pending = [root];
+          const seen = new Set();
+          while (pending.length) {
+            const candidate = pending.shift();
+            if (!candidate || seen.has(candidate)) continue;
+            seen.add(candidate);
+            const areas = candidate.__wkStorageAreas;
+            if (areas) {
+              if (value === areas.local || value === areas.localProxy) return areas.localProxy;
+              if (value === areas.session || value === areas.sessionProxy) return areas.sessionProxy;
+            }
+            for (const child of candidate.children || []) pending.push(child);
+          }
+          return null;
+        }
+
         function wrapDOMValue(value) {
           if (value == null) return value;
           if (Array.isArray(value)) return value.map(wrapDOMValue);
@@ -4060,10 +4087,9 @@
             }
           }
           if (
-            typeof Storage !== 'undefined' &&
-            value instanceof Storage &&
-            nativeStorageProxies.has(value)
-          ) return nativeStorageProxies.get(value);
+            (typeof Storage !== 'undefined' && value instanceof Storage) ||
+            hasDOMBrand(value, 'Storage')
+          ) return resolveVirtualStorage(value);
           if (
             (typeof Event !== 'undefined' && value instanceof Event) ||
             isDOMEventValue(value)
@@ -5461,6 +5487,12 @@
         const sessionStorageProxy = createStorageProxy(nativeSessionStorage, storagePrefix);
         nativeStorageProxies.set(nativeLocalStorage, localStorageProxy);
         nativeStorageProxies.set(nativeSessionStorage, sessionStorageProxy);
+        pageEmulator.__wkStorageAreas = {
+          local: nativeLocalStorage,
+          session: nativeSessionStorage,
+          localProxy: localStorageProxy,
+          sessionProxy: sessionStorageProxy
+        };
         Object.defineProperty(window, 'localStorage', {
           get: function() { return localStorageProxy; },
           set: undefined,
