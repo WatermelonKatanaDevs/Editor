@@ -5743,22 +5743,29 @@
         });
         function virtualizeDocumentSelector(selector) {
           if (typeof selector !== 'string') return selector;
-          const logicalResourceSelector = selector
-            .replace(
-              /(^|[,>+~\s])script(\s*)\[src([\s~|^$*]?=)/gi,
-              '$1script[data-wk-internal-script-src$3'
-            )
-            .replace(
-              /(^|[,>+~\s])script(\s*)\[type([\s~|^$*]?=)/gi,
-              '$1script[data-wk-internal-script-type$3'
-            );
-          const withoutPrivateAttributes = logicalResourceSelector.replace(
+
+          // Resource URLs, inline handlers, and inline styles are stored in
+          // data-raw-* while their live DOM attributes contain rewritten data.
+          // Make CSS selectors test either the live or logical/original value.
+          const withLogicalAttributeAliases = selector.replace(
+            /\[\s*(src|href|srcset|poster|srcdoc|data|style|type|on[a-z][a-z0-9_-]*)\b([^\]]*)\]/gi,
+            (_match, attribute, qualifier) => {
+              const publicName = String(attribute).toLowerCase();
+              return ':is([' + publicName + qualifier + '],[data-wk-internal-' +
+                publicName + qualifier + '])';
+            }
+          );
+
+          // Private runtime metadata must never be selectable by page code.
+          const withoutPrivateAttributes = withLogicalAttributeAliases.replace(
             /\[\s*data-(?:raw-[a-z0-9_-]+|page-id|embed-frame|embed-wrapper)(?:\s*(?:[~|^$*]?=)[^\]]*)?\s*\]/gi,
             ':not(*)'
           );
-          return withoutPrivateAttributes
-            .replace(/data-wk-internal-script-src/gi, 'data-raw-src')
-            .replace(/data-wk-internal-script-type/gi, 'data-raw-type');
+
+          return withoutPrivateAttributes.replace(
+            /data-wk-internal-([a-z][a-z0-9_-]*)/gi,
+            'data-raw-$1'
+          );
         }
 
         documentProxy = new Proxy(documentTarget, {
