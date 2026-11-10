@@ -1710,6 +1710,16 @@
       // proxy exposes the emulated global lexical bindings plus an explicit
       // allowlist of transformer/module helpers; private runtime locals never
       // resolve as user-script globals.
+      function __isEventHandlerProperty(prop) {
+        if (typeof prop !== 'string' || prop.length < 3) return false;
+        const first = prop[0];
+        const second = prop[1];
+        const third = prop[2];
+        return (first === 'o' || first === 'O') &&
+          (second === 'n' || second === 'N') &&
+          ((third >= 'a' && third <= 'z') || (third >= 'A' && third <= 'Z'));
+      }
+
       const __privateScriptNames = Object.create(null);
       [
         'BASE_ORIGIN', 'CURRENT_PAGE_URL', 'DOCUMENT_URL',
@@ -1734,7 +1744,7 @@
         'rawCall', 'rawApply', 'rawBind', 'rawToString', 'rawReflectApply',
         'normalizeThis', 'isNativeFunction', 'callerWindowProxyCache',
         'windowTarget', 'documentTarget', 'virtualLocation', 'virtualHistory',
-        'windowProxy', 'pageReflect', 'syncWindowTargetProperty'
+        'windowProxy', 'pageReflect', 'syncWindowTargetProperty', '__isEventHandlerProperty'
       ].forEach(name => { __privateScriptNames[name] = true; });
 
       const __scopeHasOwn = Object.prototype.hasOwnProperty;
@@ -2023,7 +2033,7 @@
 
         function rewriteInlineEventAttribute(element, name, rawValue) {
           const attributeName = String(name || '').toLowerCase();
-          if (!/^on[a-z]/i.test(attributeName)) return;
+          if (!__isEventHandlerProperty(attributeName)) return;
           const source = String(rawValue);
           Reflect.apply(nativeElementSetAttribute, element, ['data-raw-' + attributeName, source]);
           Reflect.apply(nativeElementSetAttribute, element, [
@@ -2058,7 +2068,7 @@
           const attr = attribute;
           if (
             attr instanceof Attr &&
-            /^on[a-z]/i.test(attr.name) &&
+            __isEventHandlerProperty(attr.name) &&
             !attr.ownerElement &&
             attr.ownerDocument === this.ownerDocument
           ) {
@@ -2078,7 +2088,7 @@
           const attr = attribute;
           if (
             attr instanceof Attr &&
-            /^on[a-z]/i.test(attr.name) &&
+            __isEventHandlerProperty(attr.name) &&
             !attr.ownerElement &&
             attr.namespaceURI == null &&
             attr.ownerDocument === this.ownerDocument
@@ -3094,7 +3104,7 @@
                     rawAttribute instanceof Attr &&
                     !rawAttribute.ownerElement &&
                     rawAttribute.namespaceURI == null &&
-                    /^on[a-z]/i.test(String(logicalName)) &&
+                    __isEventHandlerProperty(String(logicalName)) &&
                     rawAttribute.ownerDocument === owner.ownerDocument
                   ) {
                     const oldAttribute = Reflect.apply(target.getNamedItem, target, [logicalName]);
@@ -3106,7 +3116,7 @@
                     rawAttribute instanceof Attr &&
                     !rawAttribute.ownerElement &&
                     rawAttribute.namespaceURI == null &&
-                    /^on[a-z]/i.test(rawAttribute.name) &&
+                    __isEventHandlerProperty(rawAttribute.name) &&
                     rawAttribute.ownerDocument === owner.ownerDocument
                   ) {
                     const rawValue = rawAttribute.value;
@@ -3154,7 +3164,7 @@
                   if (target.ownerElement instanceof HTMLScriptElement && name === 'type') {
                     Reflect.apply(nativeElementRemoveAttribute, target.ownerElement, ['data-raw-type']);
                   }
-                  if (/^on[a-z]/i.test(name) && target.ownerElement) {
+                  if (__isEventHandlerProperty(name) && target.ownerElement) {
                     Reflect.apply(nativeElementRemoveAttribute, target.ownerElement, ['data-raw-' + name]);
                   }
                   return wrapDOMValue(result);
@@ -3250,7 +3260,7 @@
               if (typeof DOMStringMap !== 'undefined' && target instanceof DOMStringMap &&
                   typeof prop === 'string' &&
                   /^(?:raw[A-Z]|pageId$|embedFrame$|embedWrapper$)/.test(prop)) return undefined;
-              if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+              if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
                 const entry = getEventHandlerEntry(target, prop);
                 if (entry && Reflect.get(target, prop, target) === entry.wrapped) return entry.original;
               }
@@ -3266,7 +3276,7 @@
               if (typeof DOMStringMap !== 'undefined' && target instanceof DOMStringMap &&
                   typeof prop === 'string' &&
                   /^(?:raw[A-Z]|pageId$|embedFrame$|embedWrapper$)/.test(prop)) return true;
-              if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+              if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
                 return setWrappedEventHandler(target, prop, nextValue);
               }
               return Reflect.set(target, prop, unwrapDOMValue(nextValue), target);
@@ -3299,7 +3309,7 @@
                   descriptor.writable === false
                 ) return descriptor;
 
-                if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+                if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
                   const entry = getEventHandlerEntry(target, prop);
                   if (entry && descriptor.value === entry.wrapped) {
                     return { ...descriptor, value: entry.original };
@@ -3379,7 +3389,7 @@
           const attr = String(name || '').toLowerCase();
           return isVirtualizedResourceAttribute(element, attr) ||
             (element instanceof HTMLScriptElement && attr === 'type') ||
-            /^on[a-z]/i.test(attr) ||
+            __isEventHandlerProperty(attr) ||
             (attr === 'style' && Reflect.apply(element.hasAttribute, element, ['data-raw-style']));
         }
 
@@ -3427,7 +3437,7 @@
               if (
                 typeof Attr !== 'undefined' &&
                 isDOMAttrValue(target) &&
-                /^on[a-z]/i.test(target.name) &&
+                __isEventHandlerProperty(target.name) &&
                 (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')
               ) {
                 const raw = target.ownerElement?.getAttribute('data-raw-' + target.name.toLowerCase());
@@ -3452,7 +3462,7 @@
                 const original = target.getAttribute('data-raw-script');
                 if (original != null) return original;
               }
-              if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+              if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
                 const entry = getEventHandlerEntry(target, prop);
                 if (entry && Reflect.get(target, prop, target) === entry.wrapped) return entry.original;
               }
@@ -3478,7 +3488,7 @@
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return;
                   clearSavedScriptType(target, attributeName);
-                  if (/^on[a-z]/i.test(attributeName)) {
+                  if (__isEventHandlerProperty(attributeName)) {
                     return rewriteInlineEventAttribute(target, attributeName, value);
                   }
                   const setter = Reflect.get(target, prop, target);
@@ -3489,7 +3499,7 @@
                 return function(name, force) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return false;
-                  if (isVirtualPublicAttribute(target, attributeName) && !/^on[a-z]/i.test(attributeName)) {
+                  if (isVirtualPublicAttribute(target, attributeName) && !__isEventHandlerProperty(attributeName)) {
                     const rawPresent = Reflect.apply(target.hasAttribute, target, ['data-raw-' + attributeName]);
                     const nativePresent = Reflect.apply(target.hasAttribute, target, [attributeName]);
                     const currentlyPresent = rawPresent || nativePresent ||
@@ -3509,7 +3519,7 @@
                     Reflect.apply(nativeElementRemoveAttribute, target, [attributeName]);
                     return false;
                   }
-                  if (/^on[a-z]/i.test(attributeName)) {
+                  if (__isEventHandlerProperty(attributeName)) {
                     const currentlyPresent = Reflect.apply(target.hasAttribute, target, [attributeName]);
                     const shouldExist = arguments.length > 1 ? !!force : !currentlyPresent;
                     if (!shouldExist) {
@@ -3561,7 +3571,7 @@
                   if ((namespace == null || namespace === '') && (isDOMElementValue(target) && target.tagName === 'SCRIPT') && attributeName === 'type') {
                     clearSavedScriptType(target, attributeName);
                   }
-                  if ((namespace == null || namespace === '') && /^on[a-z]/i.test(attributeName)) {
+                  if ((namespace == null || namespace === '') && __isEventHandlerProperty(attributeName)) {
                     return rewriteInlineEventAttribute(target, attributeName, value);
                   }
                   if (
@@ -3711,7 +3721,7 @@
                   if (
                     isDOMAttrValue(rawAttribute) &&
                     rawAttribute.namespaceURI == null &&
-                    /^on[a-z]/i.test(String(logicalName)) &&
+                    __isEventHandlerProperty(String(logicalName)) &&
                     getVirtualAttributeName(rawAttribute)
                   ) {
                     const oldAttribute = Reflect.apply(target.getAttributeNode, target, [logicalName]);
@@ -3726,7 +3736,7 @@
                     const oldAttribute = prop === 'setAttributeNodeNS'
                       ? Reflect.apply(target.getAttributeNodeNS, target, [null, logicalName])
                       : Reflect.apply(target.getAttributeNode, target, [logicalName]);
-                    if (/^on[a-z]/i.test(String(logicalName))) {
+                    if (__isEventHandlerProperty(String(logicalName))) {
                       rewriteInlineEventAttribute(target, logicalName, rawAttribute.value);
                     } else {
                       Reflect.apply(target.setAttribute, target, [logicalName, rawAttribute.value]);
@@ -3753,7 +3763,7 @@
                   ) Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-type']);
                   if (
                     isDOMAttrValue(rawAttribute) &&
-                    /^on[a-z]/i.test(String(logicalName)) &&
+                    __isEventHandlerProperty(String(logicalName)) &&
                     getVirtualAttributeName(rawAttribute)
                   ) {
                     Reflect.apply(nativeElementRemoveAttribute, target, [String(logicalName)]);
@@ -3832,7 +3842,7 @@
                   ) {
                     clearSavedScriptType(owner, 'type');
                     Reflect.apply(nativeElementSetAttribute, owner, ['type', value]);
-                  } else if (/^on[a-z]/i.test(virtualAttributeName)) {
+                  } else if (__isEventHandlerProperty(virtualAttributeName)) {
                     rewriteInlineEventAttribute(owner, virtualAttributeName, value);
                   } else {
                     owner.setAttribute(virtualAttributeName, value);
@@ -3864,7 +3874,7 @@
               if (
                 typeof Attr !== 'undefined' &&
                 isDOMAttrValue(target) &&
-                /^on[a-z]/i.test(target.name) &&
+                __isEventHandlerProperty(target.name) &&
                 (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')
               ) {
                 const raw = String(nextValue);
@@ -3896,7 +3906,7 @@
                 target.parentElement.removeAttribute('data-raw-script');
               }
               if (isHiddenDOMRuntimeProperty(prop)) return true;
-              if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+              if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
                 return setWrappedEventHandler(target, prop, nextValue);
               }
               return Reflect.set(target, prop, unwrapDOMValue(nextValue), target);
@@ -3919,7 +3929,7 @@
               ) return undefined;
               const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
               if (!descriptor || !('value' in descriptor)) return descriptor;
-              if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+              if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
                 const entry = getEventHandlerEntry(target, prop);
                 if (entry && descriptor.value === entry.wrapped) {
                   return { ...descriptor, value: entry.original };
@@ -5658,9 +5668,9 @@
             
             // Force document.location to return the virtual location object
             if (prop === 'location') return virtualLocation;
-            if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+            if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
               const entry = getEventHandlerEntry(document, prop);
-              if (entry && Reflect.get(document, prop, document) === entry.wrapped) return entry.original;
+              if (entry) return entry.original;
             }
             if (prop === 'referrer') return '';
             if (prop === 'documentURI') return DOCUMENT_URL;
@@ -5733,7 +5743,7 @@
               virtualLocation.assign(value);
               return true;
             }
-            if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+            if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
               return setWrappedEventHandler(document, prop, value);
             }
             const ret = Reflect.set(document, prop, unwrapDOMValue(value), document);
@@ -6144,9 +6154,9 @@
               }
               return null;
             }
-            if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+            if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
               const entry = getEventHandlerEntry(window, prop);
-              if (entry && Reflect.get(window, prop, window) === entry.wrapped) return entry.original;
+              if (entry) return entry.original;
             }
             if (['window','globalThis','self','frames'].includes(prop)) return windowProxy;
             if (prop === 'length') return (pageEmulator?.children || []).length;
@@ -6260,7 +6270,7 @@
               virtualLocation.assign(value);
               return true;
             }
-            if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+            if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
               return setWrappedEventHandler(window, prop, value);
             }
             const ret = Reflect.set(window, prop, unwrapDOMValue(value), window);
