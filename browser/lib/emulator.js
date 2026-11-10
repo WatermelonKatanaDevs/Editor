@@ -1836,14 +1836,13 @@
 
         function rewriteInlineEventAttribute(element, name, rawValue) {
           const attributeName = String(name || '').toLowerCase();
-          if (!/^on[a-z]/i.test(attributeName)) return false;
+          if (!/^on[a-z]/i.test(attributeName)) return;
           const source = String(rawValue);
           Reflect.apply(nativeElementSetAttribute, element, ['data-raw-' + attributeName, source]);
           Reflect.apply(nativeElementSetAttribute, element, [
             attributeName,
             `return window.__executeCode(${JSON.stringify(source)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? event : undefined)`
           ]);
-          return true;
         }
 
         // --- Dynamic Inline On* Handler Rewriter ---
