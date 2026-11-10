@@ -4147,7 +4147,12 @@
           // its iframe/window proxy, or hand the URL to the real browser for
           // an external origin. Do not assume every result has an iframe.
           if (!newPage) return null;
-          if (newPage.__windowProxy) return newPage.__windowProxy;
+          if (newPage.__windowProxy) {
+            const nativeWindow = getNativeChildWindow(newPage);
+            return nativeWindow
+              ? getCallerWindowProxy(newPage, nativeWindow)
+              : newPage.__windowProxy;
+          }
           if (newPage.iframe) {
             const contentWindow = newPage.iframe.contentWindow;
             const virtualWindow = contentWindow?.__windowProxy ||
