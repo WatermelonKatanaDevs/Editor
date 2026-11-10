@@ -1332,7 +1332,6 @@
         // in an arbitrary page, there is no such host and its project loader
         // remains pending forever. Emulate the small host bridge for that
         // specific route, but leave the real /turbowarp wrapper in control.
-        const handledTurboWarpFrames = new WeakSet();
         window.addEventListener('message', function(event) {
           const data = event.data;
           if (!data || (data.turbowarp !== 'ready' && data.turbowarp !== 'storage')) return;
@@ -1361,9 +1360,6 @@
           const storage = window.localStorage;
 
           if (data.turbowarp === 'ready') {
-            if (handledTurboWarpFrames.has(childPage)) return;
-            handledTurboWarpFrames.add(childPage);
-
             const snapshot = {};
             try {
               for (let i = 0; i < storage.length; i++) {
@@ -1376,9 +1372,7 @@
 
             try {
               event.source.postMessage({ turbowarp: 'init', userid: null, storage: snapshot }, '*');
-            } catch (_) {
-              handledTurboWarpFrames.delete(childPage);
-            }
+            } catch (_) {}
             return;
           }
 
