@@ -2891,6 +2891,18 @@
                     rawAttribute instanceof Attr &&
                     !rawAttribute.ownerElement &&
                     rawAttribute.namespaceURI == null &&
+                    /^on[a-z]/i.test(String(logicalName)) &&
+                    rawAttribute.ownerDocument === owner.ownerDocument
+                  ) {
+                    const oldAttribute = Reflect.apply(target.getNamedItem, target, [logicalName]);
+                    rewriteInlineEventAttribute(owner, logicalName, rawAttribute.value);
+                    return wrapDOMValue(oldAttribute);
+                  }
+                  if (
+                    owner &&
+                    rawAttribute instanceof Attr &&
+                    !rawAttribute.ownerElement &&
+                    rawAttribute.namespaceURI == null &&
                     /^on[a-z]/i.test(rawAttribute.name) &&
                     rawAttribute.ownerDocument === owner.ownerDocument
                   ) {
@@ -2913,7 +2925,7 @@
                   const name = String(args[args.length - 1] || '').toLowerCase();
                   const owner = target.ownerElement;
                   const isVirtualResource = owner && isVirtualizedResourceAttribute(owner, name);
-                  const rawAlias = isVirtualResource
+                  const rawAlias = (isVirtualResource || /^on[a-z]/i.test(name))
                     ? Reflect.apply(target.getNamedItem, target, ['data-raw-' + name])
                     : null;
                   if (rawAlias) {
@@ -3129,6 +3141,13 @@
                 target.hasAttribute('data-raw-type')
               ) return target.getAttribute('data-raw-type');
               if (
+                target instanceof HTMLStyleElement &&
+                (prop === 'textContent' || prop === 'innerText')
+              ) {
+                const original = target.getAttribute('data-raw-style-text');
+                if (original != null) return original;
+              }
+              if (
                 target instanceof HTMLScriptElement &&
                 (prop === 'textContent' || prop === 'text' || prop === 'innerText')
               ) {
@@ -3145,6 +3164,14 @@
                 target.parentElement?.tagName === 'SCRIPT'
               ) {
                 const original = target.parentElement.getAttribute('data-raw-script');
+                if (original != null) return original;
+              }
+              if (
+                target.nodeType === Node.TEXT_NODE &&
+                (prop === 'textContent' || prop === 'nodeValue' || prop === 'data') &&
+                target.parentElement?.tagName === 'STYLE'
+              ) {
+                const original = target.parentElement.getAttribute('data-raw-style-text');
                 if (original != null) return original;
               }
 
@@ -3338,6 +3365,16 @@
                   if (
                     rawAttribute instanceof Attr &&
                     rawAttribute.namespaceURI == null &&
+                    /^on[a-z]/i.test(String(logicalName)) &&
+                    getVirtualAttributeName(rawAttribute)
+                  ) {
+                    const oldAttribute = Reflect.apply(target.getAttributeNode, target, [logicalName]);
+                    rewriteInlineEventAttribute(target, logicalName, rawAttribute.value);
+                    return wrapDOMValue(oldAttribute);
+                  }
+                  if (
+                    rawAttribute instanceof Attr &&
+                    rawAttribute.namespaceURI == null &&
                     isVirtualizedResourceAttribute(target, logicalName)
                   ) {
                     const oldAttribute = prop === 'setAttributeNodeNS'
@@ -3364,6 +3401,14 @@
                     target instanceof HTMLScriptElement &&
                     String(logicalName).toLowerCase() === 'type'
                   ) Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-type']);
+                  if (
+                    rawAttribute instanceof Attr &&
+                    /^on[a-z]/i.test(String(logicalName)) &&
+                    getVirtualAttributeName(rawAttribute)
+                  ) {
+                    Reflect.apply(nativeElementRemoveAttribute, target, [String(logicalName)]);
+                    return wrapDOMValue(rawAttribute);
+                  }
                   if (
                     rawAttribute instanceof Attr &&
                     isVirtualizedResourceAttribute(target, logicalName) &&
@@ -3474,6 +3519,10 @@
                 target instanceof HTMLScriptElement &&
                 prop === 'type'
               ) clearSavedScriptType(target, 'type');
+              if (
+                target instanceof HTMLStyleElement &&
+                (prop === 'textContent' || prop === 'innerText')
+              ) target.removeAttribute('data-raw-style-text');
               if (
                 target instanceof HTMLScriptElement &&
                 (prop === 'textContent' || prop === 'text' || prop === 'innerText')
