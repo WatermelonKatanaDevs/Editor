@@ -1111,9 +1111,28 @@ function createNewPage(iframe,parentPage=null) {
     page.network.addEventListener('requestend',function(){ updateLoadingProgress(80); });
   }
   page.interceptEvent('iframe-create',function(obj){
-    if (obj.iframe.pageEmulator) return obj.iframe.pageEmulator;
+    const iframe = obj?.iframe;
+    if (!iframe) return null;
 
-    var page2 = createNewPage(obj.iframe,page);
+    // A serialized iframe can be re-created as a new DOM node while retaining
+    // its data-page-id. Reattach it to the existing PageEmulator instead of
+    // creating a second, stale frame context.
+    const pageId = iframe.getAttribute?.('data-page-id');
+    const existing = iframe.pageEmulator || (pageId ? window.__pageRegistry?.[pageId] : null);
+    if (existing) {
+      existing.iframe = iframe;
+      iframe.pageEmulator = existing;
+      iframe.usefulHelpers = window.__pageRegistry?.__usefulHelpers;
+      if (existing.tab) {
+        existing.tab.iframe = iframe;
+        existing.tab.frameElement = iframe;
+      }
+      if (existing.parent !== page || !page.children.includes(existing)) page.addChild(existing);
+      browserDevTools?.runOnPage(existing,page);
+      return existing;
+    }
+
+    var page2 = createNewPage(iframe,page);
     page.addChild(page2);
 
     page2.setLocation('about:blank',page.location?.origin || 'http://localhost:3000');
@@ -1123,23 +1142,50 @@ function createNewPage(iframe,parentPage=null) {
 
     page2.tab = {
       id: frameId,
-      iframe: obj.iframe,
+      iframe: iframe,
       page: page2,
       subframe: true,
       parentTab: parentTab,
-      frameElement: obj.iframe,
+      frameElement: iframe,
       url: 'about:blank',
       title: 'iframe',
     };
 
-    obj.iframe.addEventListener('load',() => {
-      if (!page2.tab) return;
-      try {
-        page2.tab.url = page2.location?.url || page2.tab.url;
-      } catch(e) {}
-    });
+    const bindLoad = (element) => {
+      if (page2.__browserFrameLoadElement === element) return;
+      if (page2.__browserFrameLoadElement && page2.__browserFrameLoadHandler) {
+        page2.__browserFrameLoadElement.removeEventListener('load',page2.__browserFrameLoadHandler);
+      }
+      if (!page2.__browserFrameLoadHandler) {
+        page2.__browserFrameLoadHandler = () => {
+          if (!page2.tab) return;
+          try {
+            page2.tab.url = page2.location?.url || page2.tab.url;
+          } catch(e) {}
+        };
+      }
+      page2.__browserFrameLoadElement = element;
+      element.addEventListener('load',page2.__browserFrameLoadHandler);
+    };
+    bindLoad(iframe);
 
     return page2;
+  });
+
+  page.interceptEvent('iframe-remove',function(obj){
+    const iframe = obj?.iframe;
+    const child = iframe?.pageEmulator || obj?.page;
+    if (!child || (child.parent !== page && !page.children.includes(child))) return null;
+
+    if (child.__browserFrameLoadElement && child.__browserFrameLoadHandler) {
+      child.__browserFrameLoadElement.removeEventListener('load',child.__browserFrameLoadHandler);
+      delete child.__browserFrameLoadElement;
+      delete child.__browserFrameLoadHandler;
+    }
+
+    browserDevTools?.removePage(child);
+    child.remove();
+    return true;
   });
 
   page.interceptEvent('embed-create',function(obj){
@@ -1575,6 +1621,7 @@ function closeTab(tabId, event) {
     historyIndex: tabToRemove.page.historyIndex
   });
 
+  tabToRemove.page?.remove?.();
   tabToRemove.iframe.remove();
   tabs.splice(index, 1);
 
