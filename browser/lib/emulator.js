@@ -3646,10 +3646,15 @@
             return targetPage.__windowProxy || nativeTargetWindow || windowProxy;
           }
           const cacheKey = targetPage;
+          const targetWindowProxy = targetPage.__windowProxy;
           const cachedProxy = callerWindowProxyCache.get(cacheKey);
-          if (cachedProxy && cachedProxy.nativeTargetWindow === nativeTargetWindow) return cachedProxy.proxy;
+          if (
+            cachedProxy &&
+            cachedProxy.nativeTargetWindow === nativeTargetWindow &&
+            cachedProxy.targetWindowProxy === targetWindowProxy
+          ) return cachedProxy.proxy;
 
-          const callerProxy = new Proxy(targetPage.__windowProxy, {
+          const callerProxy = new Proxy(targetWindowProxy, {
             get(target, prop) {
               if (prop === 'postMessage') {
                 return function(message, targetOrigin, transfer) {
@@ -3703,7 +3708,11 @@
             }
           });
 
-          callerWindowProxyCache.set(cacheKey, { nativeTargetWindow, proxy: callerProxy });
+          callerWindowProxyCache.set(cacheKey, {
+            nativeTargetWindow,
+            targetWindowProxy,
+            proxy: callerProxy
+          });
           return callerProxy;
         }
 
