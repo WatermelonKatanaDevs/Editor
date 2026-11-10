@@ -3063,8 +3063,6 @@
               if (isNamedNodeMap && typeof prop === 'string' && isInternalDOMAttribute(prop)) return undefined;
               if (typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
                 return wrapDOMValue(isNamedNodeMap ? visibleItems()[Number(prop)] : Reflect.get(target, prop, target));
-              }              if (typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
-                return wrapDOMValue(isNamedNodeMap ? visibleItems()[Number(prop)] : Reflect.get(target, prop, target));
               }
               if (isNamedNodeMap && typeof prop === 'string') {
                 const named = visibleItems().find(item => item?.name === prop);
@@ -3076,7 +3074,6 @@
             },
             has(target, prop) {
               if (isNamedNodeMap && typeof prop === 'string' && isInternalDOMAttribute(prop)) return false;
-              if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {            has(target, prop) {
               if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
                 return Number(prop) < visibleItems().length;
               }
@@ -3101,7 +3098,6 @@
             },
             getOwnPropertyDescriptor(target, prop) {
               if (isNamedNodeMap && typeof prop === 'string' && isInternalDOMAttribute(prop)) return undefined;
-              if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {            getOwnPropertyDescriptor(target, prop) {
               if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
                 const item = visibleItems()[Number(prop)];
                 if (!item) return undefined;
@@ -3232,7 +3228,6 @@
           proxy = new Proxy(node, {
             get(target, prop) {
               if (isHiddenDOMRuntimeProperty(prop)) return undefined;
-              const virtualAttributeName = typeof Attr !== 'undefined' && target instanceof Attr            get(target, prop) {
               const virtualAttributeName = typeof Attr !== 'undefined' && target instanceof Attr
                 ? virtualDOMAttributeNames.get(target)
                 : null;
@@ -3397,7 +3392,7 @@
                   return Reflect.apply(target.getAttributeNS, target, [namespace, name]);
                 };
               }
-              if (prop === 'getAttribute') {              if (prop === 'getAttribute') {
+              if (prop === 'getAttribute') {
                 return function(name) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return null;
@@ -3425,7 +3420,7 @@
                   return Reflect.apply(target.hasAttributeNS, target, [namespace, name]);
                 };
               }
-              if (prop === 'hasAttribute') {              if (prop === 'hasAttribute') {
+              if (prop === 'hasAttribute') {
                 return function(name) {
                   const publicName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(publicName)) return false;
