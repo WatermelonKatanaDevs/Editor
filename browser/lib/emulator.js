@@ -6200,6 +6200,136 @@
           }
         });
 
+        // Prototype descriptors can bypass instance-level Proxy traps via
+        // Object.getOwnPropertyDescriptor(...).get.call(...). Rewrap the native
+        // getters at their owning prototypes so those alternate paths obey the
+        // same Window/Document/Event membrane.
+        function patchPublicNativeGetter(startObject, property, mapper) {
+          let owner = startObject;
+          const seen = new Set();
+          while (owner && !seen.has(owner)) {
+            seen.add(owner);
+            let descriptor;
+            try { descriptor = Object.getOwnPropertyDescriptor(owner, property); } catch (_) {}
+            if (descriptor) {
+              if (typeof descriptor.get !== 'function' || descriptor.configurable === false) return false;
+              const nativeGetter = descriptor.get;
+              try {
+                Object.defineProperty(owner, property, {
+                  ...descriptor,
+                  get: function() {
+                    const value = Reflect.apply(nativeGetter, this, []);
+                    return mapper(value, this);
+                  }
+                });
+                return true;
+              } catch (_) {
+                return false;
+              }
+            }
+            try { owner = Object.getPrototypeOf(owner); } catch (_) { return false; }
+          }
+          return false;
+        }
+
+        function patchPublicNativeMethod(startObject, methodName, mapper) {
+          let owner = startObject;
+          const seen = new Set();
+          while (owner && !seen.has(owner)) {
+            seen.add(owner);
+            let descriptor;
+            try { descriptor = Object.getOwnPropertyDescriptor(owner, methodName); } catch (_) {}
+            if (descriptor) {
+              if (typeof descriptor.value !== 'function' || descriptor.configurable === false) return false;
+              const nativeMethod = descriptor.value;
+              try {
+                Object.defineProperty(owner, methodName, {
+                  ...descriptor,
+                  value: function(...args) {
+                    const result = Reflect.apply(nativeMethod, unwrapDOMValue(this), args.map(unwrapDOMValue));
+                    return mapper(result, this, args);
+                  }
+                });
+                return true;
+              } catch (_) {
+                return false;
+              }
+            }
+            try { owner = Object.getPrototypeOf(owner); } catch (_) { return false; }
+          }
+          return false;
+        }
+
+        // These resolve the corresponding emulated Window from the native
+        // receiver. An unregistered/native shell Window is deliberately hidden.
+        for (const property of [
+          'window', 'self', 'frames', 'parent', 'top', 'opener',
+          'frameElement', 'document', 'location'
+        ]) {
+          patchPublicNativeGetter(window, property, (_nativeValue, receiver) => {
+            const publicWindow = wrapWindowReference(receiver);
+            return publicWindow ? Reflect.get(publicWindow, property, publicWindow) : null;
+          });
+        }
+
+        patchPublicNativeGetter(document, 'defaultView', nativeValue =>
+          wrapDOMValue(nativeValue)
+        );
+        patchPublicNativeGetter(document, 'location', nativeValue =>
+          document === window.document ? virtualLocation : wrapDOMValue(nativeValue)
+        );
+        patchPublicNativeGetter(Node.prototype, 'ownerDocument', nativeValue =>
+          wrapDOMValue(nativeValue)
+        );
+        patchPublicNativeGetter(Node.prototype, 'parentNode', nativeValue =>
+          wrapDOMValue(nativeValue)
+        );
+        patchPublicNativeGetter(Node.prototype, 'firstChild', nativeValue =>
+          wrapDOMValue(nativeValue)
+        );
+        patchPublicNativeGetter(Node.prototype, 'lastChild', nativeValue =>
+          wrapDOMValue(nativeValue)
+        );
+        patchPublicNativeGetter(Node.prototype, 'previousSibling', nativeValue =>
+          wrapDOMValue(nativeValue)
+        );
+        patchPublicNativeGetter(Node.prototype, 'nextSibling', nativeValue =>
+          wrapDOMValue(nativeValue)
+        );
+
+        const nativeIframeContentWindowGetter =
+          Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow')?.get;
+        if (nativeIframeContentWindowGetter) {
+          patchPublicNativeGetter(HTMLIFrameElement.prototype, 'contentWindow', (nativeValue, iframe) => {
+            try { wrapElement(iframe); } catch (_) {}
+            return wrapWindowReference(nativeValue);
+          });
+        }
+        if (Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentDocument')?.get) {
+          patchPublicNativeGetter(HTMLIFrameElement.prototype, 'contentDocument', nativeValue =>
+            wrapDOMValue(nativeValue)
+          );
+        }
+
+        for (const prototype of [
+          Event.prototype, UIEvent.prototype, MouseEvent.prototype,
+          typeof FocusEvent !== 'undefined' ? FocusEvent.prototype : null,
+          typeof PointerEvent !== 'undefined' ? PointerEvent.prototype : null,
+          typeof MessageEvent !== 'undefined' ? MessageEvent.prototype : null
+        ]) {
+          if (!prototype) continue;
+          for (const property of [
+            'target', 'currentTarget', 'srcElement', 'relatedTarget', 'view', 'source'
+          ]) {
+            patchPublicNativeGetter(prototype, property, nativeValue =>
+              wrapDOMValue(nativeValue)
+            );
+          }
+        }
+        patchPublicNativeMethod(Event.prototype, 'composedPath', nativeValue =>
+          wrapDOMValue(nativeValue)
+        );
+
         // Install the timer wrappers on the actual frame global as well as the
         // window proxy. Bare global calls (setTimeout(...)) must not bypass the
         // string-code executor simply because they do not use window.setTimeout.
