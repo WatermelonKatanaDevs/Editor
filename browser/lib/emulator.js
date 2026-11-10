@@ -3652,6 +3652,11 @@
         function wrapWindowReference(value) {
           if (!value) return value;
           if (value === window || value === windowProxy) return windowProxy;
+          if (typeof callerWindowProxyCache !== 'undefined') {
+            for (const entry of callerWindowProxyCache.values()) {
+              if (entry.proxy === value || entry.targetWindowProxy === value) return entry.proxy;
+            }
+          }
 
           let root = pageEmulator;
           const rootSeen = new Set();
@@ -3688,6 +3693,11 @@
           ) return value;
           if (value === window || value === windowProxy) return windowProxy;
           if (value === document) return documentProxy;
+          if (typeof Window !== 'undefined') {
+            try {
+              if (value instanceof Window) return wrapWindowReference(value);
+            } catch (_) {}
+          }
           if (typeof Event !== 'undefined' && value instanceof Event) return wrapEvent(value);
           if (value instanceof Node) return wrapDOMNode(value);
           if (typeof EventTarget !== 'undefined' && value instanceof EventTarget) return wrapDOMObject(value);
@@ -5557,6 +5567,7 @@
               }
             }
             if (prop === 'document') return documentProxy;
+            if (prop === 'Reflect') return pageReflect;
             if (prop === 'eval') return __indirectEval;
             if (prop === 'opener') {
               const nativeOpener = Reflect.get(window, 'opener', window);
@@ -5783,6 +5794,47 @@
           }
         }
 
+        const pageReflect = new Proxy(Reflect, {
+          get(target, prop) {
+            if (prop === 'apply') {
+              return function(fn, thisArg, args) {
+                const nativeTarget = isNativeFunction(fn);
+                const normalizedThis = normalizeThis(fn, thisArg);
+                const normalizedArgs = nativeTarget
+                  ? Array.from(args || [], unwrapDOMValue)
+                  : args || [];
+                const result = rawReflectApply(target.apply, target, [
+                  fn,
+                  normalizedThis,
+                  normalizedArgs
+                ]);
+                return nativeTarget ? wrapDOMValue(result) : result;
+              };
+            }
+            if (prop === 'construct') {
+              return function(fn, args, newTarget) {
+                const result = rawReflectApply(target.construct, target, [
+                  fn,
+                  Array.from(args || [], unwrapDOMValue),
+                  newTarget
+                ]);
+                return wrapDOMValue(result);
+              };
+            }
+            if (prop === 'getOwnPropertyDescriptor') {
+              return function(object, key) {
+                const descriptor = rawReflectApply(target.getOwnPropertyDescriptor, target, [
+                  unwrapDOMValue(object),
+                  key
+                ]);
+                return descriptor ? wrapDOMValue(descriptor) : descriptor;
+              };
+            }
+            const value = rawReflectApply(target.get, target, [target, prop, target]);
+            return typeof value === 'function' ? value.bind(target) : value;
+          }
+        });
+
         function normalizeThis(fn, thisArg) {
           // Prevent recursion on Function prototype methods themselves
           if (fn === rawCall || fn === rawApply || fn === rawBind || fn === rawToString) {
@@ -5791,8 +5843,8 @@
 
           // Native browser functions (e.g., addEventListener, setTimeout) MUST keep real window/target
           if (isNativeFunction(fn)) {
-            if (thisArg == windowProxy) return window;
-            return (thisArg === undefined || thisArg === null) ? window : thisArg;
+            if (thisArg == null) return window;
+            return thisArg === windowProxy ? window : unwrapDOMValue(thisArg);
           }
 
           // User functions: redirect default global (undefined/null/real window) to windowProxy
@@ -5819,13 +5871,23 @@
         };
 
         Function.prototype.call = function(thisArg, ...args) {
+          const nativeTarget = isNativeFunction(this);
           const targetThis = normalizeThis(this, thisArg);
-          return rawReflectApply(rawCall, this, [targetThis, ...args]);
+          const targetArgs = nativeTarget ? args.map(unwrapDOMValue) : args;
+          const result = rawReflectApply(rawCall, this, [targetThis, ...targetArgs]);
+          return nativeTarget ? wrapDOMValue(result) : result;
         };
 
         Function.prototype.apply = function(thisArg, argsArray) {
+          const nativeTarget = isNativeFunction(this);
           const targetThis = normalizeThis(this, thisArg);
-          return rawReflectApply(rawApply, this, [targetThis, argsArray || []]);
+          const targetArgs = argsArray == null
+            ? []
+            : nativeTarget
+              ? Array.from(argsArray, unwrapDOMValue)
+              : argsArray;
+          const result = rawReflectApply(rawApply, this, [targetThis, targetArgs]);
+          return nativeTarget ? wrapDOMValue(result) : result;
         };
 
         window.__windowProxy = windowProxy;
@@ -5843,6 +5905,7 @@
         __codeString = window.__usefulHelpers.editCode(__codeString);
         const __scriptBindings = {
           __windowProxy: window.__windowProxy,
+          Reflect: pageReflect,
           __globalLexicalScope: __scriptLexicalFacade,
           __declareGlobalLexicalConstant,
           __declareGlobalLexicalVariable,
@@ -5876,6 +5939,7 @@
         let __execResult;
         const __scriptBindings = {
           __windowProxy: window.__windowProxy,
+          Reflect: pageReflect,
           __globalLexicalScope: __scriptLexicalFacade,
           __declareGlobalLexicalConstant,
           __declareGlobalLexicalVariable,
@@ -5928,6 +5992,7 @@
         __codeString = window.__usefulHelpers.editCode(__codeString, { preserveIIFEThis: true });
         const __scriptBindings = {
           __windowProxy: window.__windowProxy,
+          Reflect: pageReflect,
           __globalLexicalScope: __scriptLexicalFacade,
           __declareGlobalLexicalConstant,
           __declareGlobalLexicalVariable,
