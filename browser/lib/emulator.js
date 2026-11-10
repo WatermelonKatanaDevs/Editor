@@ -1651,6 +1651,18 @@
                   node.querySelectorAll('*').forEach(child => checkNodeAndChildren(child));
                 }
               });
+
+              // Removed frames must release their child PageEmulators. Otherwise
+              // DevTools keeps stale frame records after DOM replacement/navigation.
+              mutation.removedNodes.forEach(node => {
+                if (node.nodeType !== Node.ELEMENT_NODE) return;
+                const removedFrames = [];
+                if (node.matches('iframe')) removedFrames.push(node);
+                node.querySelectorAll('iframe').forEach(frame => removedFrames.push(frame));
+                removedFrames.forEach(frame => {
+                  if (!frame.isConnected) sendEvent('iframe-remove', { iframe: frame });
+                });
+              });
             } else if (mutation.type === 'attributes') {
               const el = mutation.target;
               const attrName = mutation.attributeName;
@@ -1870,14 +1882,16 @@
               // Async resolution
               (async () => {
                 if (this.tagName == 'IFRAME') {
+                  // Keep iframe src/srcdoc virtual. Setting the native attribute
+                  // first starts a real browser navigation that races the
+                  // emulator's own fetch + srcdoc navigation.
                   this.__sandboxed = false;
-                  var res = oldSetAttribute.call(this, prop, value);
-                  try { 
+                  try {
                     await setupNestedFrame(this);
-                  } finally { 
+                  } finally {
                     this.__processing_attr = false;
                   }
-                  return res;
+                  return;
                 }
                 
                 try {
@@ -3898,8 +3912,28 @@
     }
 
     remove() {
+      if (!this.id && !this.iframe) return;
+
+      const children = Array.isArray(this.children) ? this.children.slice() : [];
+      children.forEach(child => child?.remove?.());
+
+      const parent = this.parent;
+      if (parent && parent !== false && Array.isArray(parent.children)) {
+        const index = parent.children.indexOf(this);
+        if (index >= 0) parent.children.splice(index, 1);
+      }
+
+      const iframe = this.iframe;
+      if (iframe) {
+        try {
+          if (iframe.pageEmulator === this) delete iframe.pageEmulator;
+          if (iframe.getAttribute?.('data-page-id') === this.id) iframe.removeAttribute('data-page-id');
+          if (iframe.usefulHelpers === usefulHelpers) delete iframe.usefulHelpers;
+        } catch (_) {}
+      }
+
       delete __pageRegistry[this.id];
-      for (var i in this) delete this[i];
+      for (const key of Object.keys(this)) delete this[key];
     }
 
     addChild(page) {
@@ -3915,21 +3949,37 @@
     }
 
     async setDocument(rawHtml, processHtml = true, baseUrlOverride = null) {
+      // A document replacement discards every nested browsing context from
+      // the previous document. Release those PageEmulators before preprocessHtml
+      // creates the child frames belonging to the new document.
+      for (const child of (this.children || []).slice()) {
+        this.sendEvent('iframe-remove', { iframe: child.iframe, page: child, reason: 'document-replaced' });
+        if (this.children?.includes(child)) child.remove();
+      }
+
       // Keep the exact source supplied to the emulator. DevTools Sources uses
       // this as the iframe's Original document, including dynamically-created
-      // frames whose source was fetched after the parent document loaded.
+      // frames whose source was fetched after the parent page loaded.
       this.rawDocument = String(rawHtml ?? '');
       const finalHtml = await sandboxSource(rawHtml,this,processHtml,baseUrlOverride);
 
-      // idk why i need to double it but it breaks if you remove one
+      // Use the native srcdoc setter exactly once. Assigning it twice starts
+      // two separate iframe navigations and can leave a stale browsing context.
+      const iframe = this.iframe;
+      iframe.removeAttribute('src');
+      iframe.removeAttribute('srcdoc');
 
-      this.iframe.removeAttribute('src');
-      this.iframe.removeAttribute('srcdoc');
-      this.iframe.srcdoc = finalHtml;
+      let srcdocSetter = null;
+      for (let prototype = Object.getPrototypeOf(iframe); prototype && !srcdocSetter; prototype = Object.getPrototypeOf(prototype)) {
+        const descriptor = Object.getOwnPropertyDescriptor(prototype, 'srcdoc');
+        if (typeof descriptor?.set === 'function') srcdocSetter = descriptor.set;
+      }
 
-      this.iframe.removeAttribute('src');
-      this.iframe.removeAttribute('srcdoc');
-      this.iframe.srcdoc = finalHtml;
+      if (srcdocSetter) {
+        Reflect.apply(srcdocSetter, iframe, [finalHtml]);
+      } else {
+        iframe.setAttribute('srcdoc', finalHtml);
+      }
     }
 
     setLocation(url, origin) {
