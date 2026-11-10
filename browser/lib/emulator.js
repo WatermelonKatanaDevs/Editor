@@ -1733,7 +1733,8 @@
         'nativeTimerFunctions', 'wrappedTimer', 'nativeTimer', 'originalCallback',
         'rawCall', 'rawApply', 'rawBind', 'rawToString', 'rawReflectApply',
         'normalizeThis', 'isNativeFunction', 'callerWindowProxyCache',
-        'windowTarget', 'documentTarget', 'virtualLocation', 'virtualHistory'
+        'windowTarget', 'documentTarget', 'virtualLocation', 'virtualHistory',
+        'windowProxy', 'pageReflect', 'syncWindowTargetProperty'
       ].forEach(name => { __privateScriptNames[name] = true; });
 
       const __scopeHasOwn = Object.prototype.hasOwnProperty;
@@ -1807,8 +1808,10 @@
       // These helpers are initialized by the page setup IIFE and are also used
       // by the execution wrappers below it. Keep them in the enclosing bootstrap
       // scope rather than publishing them on the emulated or native window.
+      let windowProxy;
       let pageReflect;
       let syncWindowTargetProperty;
+      let rawToString;
 
       (function() { 
         
@@ -5710,7 +5713,6 @@
             console.log("Failed to clone:", prop);
           }
         });
-        let windowProxy;
         syncWindowTargetProperty = function syncWindowTargetProperty(prop, overrideValue) {
           const nativeDescriptor = Object.getOwnPropertyDescriptor(window, prop);
           const targetDescriptor = Object.getOwnPropertyDescriptor(windowTarget, prop);
@@ -6165,7 +6167,7 @@
         const rawCall = Function.prototype.call;
         const rawApply = Function.prototype.apply;
         const rawBind = Function.prototype.bind;
-        const rawToString = Function.prototype.toString;
+        rawToString = Function.prototype.toString;
         const rawReflectApply = Reflect.apply;
 
         // 2. Safe native check that DOES NOT invoke .call() on any prototype
