@@ -2698,6 +2698,9 @@
           if (wrappedDOMObjects.has(value)) return wrappedDOMObjects.get(value);
           const proxy = new Proxy(value, {
             get(target, prop) {
+              if (typeof DOMStringMap !== 'undefined' && target instanceof DOMStringMap &&
+                  typeof prop === 'string' &&
+                  /^(?:raw[A-Z]|pageId$|embedFrame$|embedWrapper$)/.test(prop)) return undefined;
               if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
                 const entry = getEventHandlerEntry(target, prop);
                 if (entry && Reflect.get(target, prop, target) === entry.wrapped) return entry.original;
@@ -2711,6 +2714,9 @@
               return wrapDOMValue(member);
             },
             set(target, prop, nextValue) {
+              if (typeof DOMStringMap !== 'undefined' && target instanceof DOMStringMap &&
+                  typeof prop === 'string' &&
+                  /^(?:raw[A-Z]|pageId$|embedFrame$|embedWrapper$)/.test(prop)) return true;
               if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
                 return setWrappedEventHandler(target, prop, nextValue);
               }
@@ -2835,11 +2841,36 @@
                 };
               }
               if (prop === 'attributes') return wrapDOMCollection(Reflect.get(target, prop, target));
+              if (prop === 'dataset') return wrapDOMObject(Reflect.get(target, prop, target));
+              if (['querySelector', 'querySelectorAll', 'matches', 'closest'].includes(prop)) {
+                return function(selector) {
+                  const result = Reflect.apply(
+                    target[prop],
+                    target,
+                    [virtualizeDocumentSelector(selector)]
+                  );
+                  return prop === 'querySelectorAll'
+                    ? wrapDOMCollection(result)
+                    : wrapDOMValue(result);
+                };
+              }
               if (prop === 'getAttributeNode' && target instanceof Element) {
                 return function(name) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return null;
                   return wrapDOMValue(Reflect.apply(target.getAttributeNode, target, [name]));
+                };
+              }
+              if (prop === 'getAttributeNodeNS' && target instanceof Element) {
+                return function(namespace, name) {
+                  if (isInternalDOMAttribute(name)) return null;
+                  return wrapDOMValue(Reflect.apply(target.getAttributeNodeNS, target, [namespace, name]));
+                };
+              }
+              if (prop === 'hasAttributes' && target instanceof Element) {
+                return function() {
+                  return Reflect.apply(target.getAttributeNames, target, [])
+                    .some(name => !isInternalDOMAttribute(name));
                 };
               }
               if (prop === 'ownerDocument') {
@@ -2920,6 +2951,7 @@
             (typeof CSSRuleList !== 'undefined' && value instanceof CSSRuleList) ||
             (typeof MediaList !== 'undefined' && value instanceof MediaList) ||
             (typeof DOMTokenList !== 'undefined' && value instanceof DOMTokenList) ||
+            (typeof DOMStringMap !== 'undefined' && value instanceof DOMStringMap) ||
             (typeof DOMImplementation !== 'undefined' && value instanceof DOMImplementation) ||
             (typeof MutationRecord !== 'undefined' && value instanceof MutationRecord) ||
             (typeof IntersectionObserverEntry !== 'undefined' && value instanceof IntersectionObserverEntry) ||
@@ -4088,15 +4120,16 @@
 
         EventTarget.prototype.addEventListener = function(type, listener, options) {
           const wrappedListener = getWrappedListener(type, listener, options);
-          return originalAddEventListener.call(this, type, wrappedListener, options);
+          return originalAddEventListener.call(unwrapDOMValue(this), type, wrappedListener, options);
         };
 
         EventTarget.prototype.removeEventListener = function(type, listener, options) {
+          const nativeTarget = unwrapDOMValue(this);
           if (listener && (typeof listener === 'function' || typeof listener === 'object')) {
             const wrappedListener = getWrappedListener(type, listener, options);
-            return originalRemoveEventListener.call(this, type, wrappedListener, options);
+            return originalRemoveEventListener.call(nativeTarget, type, wrappedListener, options);
           }
-          return originalRemoveEventListener.call(this, type, listener, options);
+          return originalRemoveEventListener.call(nativeTarget, type, listener, options);
         };
 
         Object.defineProperty(window, 'frameElement', {
@@ -4279,7 +4312,7 @@
             }
             const desc = Object.getOwnPropertyDescriptor(document, prop);
             if (desc) {
-              Object.defineProperty(documentTarget, prop, desc);
+              Object.defineProperty(documentTarget, prop, { ...desc, configurable: true });
             }
           } catch(e) {
             console.log("Failed to clone 2:", prop);
@@ -4287,7 +4320,15 @@
         });
         function virtualizeDocumentSelector(selector) {
           if (typeof selector !== 'string') return selector;
-          return selector.replace(/(^|[,>+~\s])script(\s*)\[src([\s~|^$*]?=)/gi, '$1script$2[data-raw-src$3');
+          const logicalResourceSelector = selector.replace(
+            /(^|[,>+~\\s])script(\\s*)\\[src([\\s~|^$*]?=)/gi,
+            '$1script[data-wk-internal-script-src$3'
+          );
+          const withoutPrivateAttributes = logicalResourceSelector.replace(
+            /\\[\\s*data-(?:raw-[a-z0-9_-]+|page-id|embed-frame|embed-wrapper)(?:\\s*(?:[~|^$*]?=)[^\\]]*)?\\s*\\]/gi,
+            ':not(*)'
+          );
+          return withoutPrivateAttributes.replace(/data-wk-internal-script-src/gi, 'data-raw-src');
         }
 
         const documentProxy = new Proxy(documentTarget, {
@@ -4349,7 +4390,7 @@
               return function(selector) {
                 const virtualSelector = virtualizeDocumentSelector(selector);
                 const result = value.call(document, virtualSelector);
-                if (prop === 'querySelectorAll') return Array.from(result).map(wrapDOMValue);
+                if (prop === 'querySelectorAll') return wrapDOMCollection(result);
                 return wrapDOMValue(result);
               };
             }
@@ -4509,7 +4550,7 @@
             }
             const desc = Object.getOwnPropertyDescriptor(window, prop);
             if (desc) {
-              Object.defineProperty(windowTarget, prop, desc);
+              Object.defineProperty(windowTarget, prop, { ...desc, configurable: true });
             }
           } catch(e) {
             console.log("Failed to clone:", prop);
