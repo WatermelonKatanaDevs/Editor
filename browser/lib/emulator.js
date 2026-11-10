@@ -2927,7 +2927,9 @@
         }
 
         const DOMCollectionBrands = new Set([
-          'HTMLCollection', 'HTMLAllCollection', 'NodeList', 'NamedNodeMap', 'StyleSheetList'
+          'HTMLCollection', 'HTMLAllCollection', 'HTMLFormControlsCollection',
+          'HTMLOptionsCollection', 'RadioNodeList', 'NodeList', 'NamedNodeMap',
+          'StyleSheetList'
         ]);
         const DOMPlatformObjectBrands = new Set([
           'Range', 'Selection', 'TreeWalker', 'NodeIterator', 'TouchList', 'Touch',
@@ -3214,8 +3216,12 @@
                 if (named) return wrapDOMValue(named);
               }
               const value = Reflect.get(target, prop, target);
-              if (typeof value === 'function') return value.bind(target);
-              return wrapDOMValue(value);
+              if (typeof value === 'function') {
+                return function(...args) {
+                  return wrapAsyncDOMResult(Reflect.apply(value, target, args.map(unwrapDOMValue)));
+                };
+              }
+              return wrapAsyncDOMResult(value);
             },
             has(target, prop) {
               if (isNamedNodeMap && typeof prop === 'string' && isInternalDOMAttribute(prop)) return false;
