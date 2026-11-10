@@ -3265,7 +3265,7 @@
                   /^(?:raw[A-Z]|pageId$|embedFrame$|embedWrapper$)/.test(prop)) return undefined;
               if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
                 const entry = getEventHandlerEntry(target, prop);
-                if (entry && Reflect.get(target, prop, target) === entry.wrapped) return entry.original;
+                if (entry) return entry.original;
               }
               const member = Reflect.get(target, prop, target);
               if (typeof member === 'function') {
@@ -3467,7 +3467,7 @@
               }
               if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
                 const entry = getEventHandlerEntry(target, prop);
-                if (entry && Reflect.get(target, prop, target) === entry.wrapped) return entry.original;
+                if (entry) return entry.original;
               }
               if (
                 target.nodeType === Node.TEXT_NODE &&
@@ -6153,7 +6153,7 @@
 
         windowProxy = new Proxy(windowTarget, {
           has(target, prop) {
-            if (prop === 'location' || prop === 'document' || ['window','parent','top','globalThis','self','frames'].includes(prop)) {
+            if (prop === 'location' || prop === 'document' || prop === 'window' || prop === 'parent' || prop === 'top' || prop === 'globalThis' || prop === 'self' || prop === 'frames') {
               return true;
             }
             if (typeof prop === 'string' && /^\d+$/.test(prop)) return Number(prop) < (pageEmulator?.children || []).length;
@@ -6161,6 +6161,9 @@
             return Reflect.has(target, prop) || Reflect.has(window, prop);
           },
           get(target, prop) {
+            // Resolve the Window self-aliases before any other property
+            // inspection so they cannot enter event-handler/native lookup.
+            if (prop === 'window' || prop === 'globalThis' || prop === 'self' || prop === 'frames') return windowProxy;
             if (prop === Symbol.unscopables) return undefined;
             if (prop === 'location') return virtualLocation;
 
@@ -6268,7 +6271,7 @@
               const entry = getEventHandlerEntry(window, prop);
               if (entry) return entry.original;
             }
-            if (['window','globalThis','self','frames'].includes(prop)) return windowProxy;
+            if (prop === 'window' || prop === 'globalThis' || prop === 'self' || prop === 'frames') return windowProxy;
             if (prop === 'length') return (pageEmulator?.children || []).length;
             if (prop === 'top') {
               const topPage = getTopPage();
