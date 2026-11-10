@@ -1326,6 +1326,79 @@
 
         window.sendEvent = sendEvent;
 
+        // The direct /turbowarp/play export expects to be hosted by the
+        // /turbowarp wrapper, which normally answers its "ready" message with
+        // a "turbowarp:init" payload. When /turbowarp/play is embedded directly
+        // in an arbitrary page, there is no such host and its project loader
+        // remains pending forever. Emulate the small host bridge for that
+        // specific route, but leave the real /turbowarp wrapper in control.
+        const handledTurboWarpFrames = new WeakSet();
+        window.addEventListener('message', function(event) {
+          const data = event.data;
+          if (!data || (data.turbowarp !== 'ready' && data.turbowarp !== 'storage')) return;
+
+          const childPage = (pageEmulator.children || []).find(child => {
+            const nativeWindow = child?.iframe?.__wkNativeContentWindow;
+            return nativeWindow && nativeWindow === event.source;
+          });
+          if (!childPage) return;
+
+          let childUrl;
+          let parentUrl;
+          try {
+            childUrl = new URL(childPage.location?.url || '');
+            parentUrl = new URL(CURRENT_PAGE_URL);
+          } catch (_) {
+            return;
+          }
+
+          if (childUrl.pathname.replace(/\/+$/, '') !== '/turbowarp/play') return;
+          if (parentUrl.pathname.replace(/\/+$/, '') === '/turbowarp') return;
+
+          const projectId = childUrl.searchParams.get('u');
+          if (!projectId) return;
+          const storagePrefix = 'turbowarp:' + projectId + ':';
+          const storage = window.localStorage;
+
+          if (data.turbowarp === 'ready') {
+            if (handledTurboWarpFrames.has(childPage)) return;
+            handledTurboWarpFrames.add(childPage);
+
+            const snapshot = {};
+            try {
+              for (let i = 0; i < storage.length; i++) {
+                const key = storage.key(i);
+                if (key && key.startsWith(storagePrefix)) {
+                  snapshot[key.slice(storagePrefix.length)] = storage.getItem(key);
+                }
+              }
+            } catch (_) {}
+
+            try {
+              event.source.postMessage({ turbowarp: 'init', userid: null, storage: snapshot }, '*');
+            } catch (_) {
+              handledTurboWarpFrames.delete(childPage);
+            }
+            return;
+          }
+
+          // Match the storage bridge provided by /turbowarp's normal host page.
+          try {
+            if (data.op === 'set') {
+              storage.setItem(storagePrefix + String(data.key), String(data.value));
+            } else if (data.op === 'remove') {
+              storage.removeItem(storagePrefix + String(data.key));
+            } else if (data.op === 'clear') {
+              const keys = [];
+              for (let i = 0; i < storage.length; i++) {
+                const key = storage.key(i);
+                if (key && key.startsWith(storagePrefix)) keys.push(key);
+              }
+              keys.forEach(key => storage.removeItem(key));
+            }
+          } catch (_) {}
+        });
+
         // - Srcset candidate URL resolution helper ---
         function parseSrcSet(srcsetVal) {
           const candidates = [];
