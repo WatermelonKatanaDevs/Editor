@@ -1322,6 +1322,7 @@ function createNewPage(iframe,parentPage=null) {
     }
 
     // Restore the emulator association if the iframe DOM node was replaced.
+    const needsDevToolsRebind = page2.iframe !== iframe;
     page2.iframe = iframe;
     if (page2.id && iframe.getAttribute?.('data-page-id') !== page2.id) {
       iframe.setAttribute('data-page-id',page2.id);
@@ -1333,7 +1334,7 @@ function createNewPage(iframe,parentPage=null) {
       page2.tab.frameElement = iframe;
     }
     if (page2.parent !== page || !page.children.includes(page2)) page.addChild(page2);
-    browserDevTools?.runOnPage(page2,page);
+    if (needsDevToolsRebind) browserDevTools?.runOnPage(page2,page);
 
     var navigationId = obj.navigationId;
 
