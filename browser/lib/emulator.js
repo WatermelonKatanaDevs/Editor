@@ -3223,6 +3223,10 @@
               }
               return wrapAsyncDOMResult(value);
             },
+            set(target, prop, nextValue) {
+              if (isNamedNodeMap && typeof prop === 'string' && isInternalDOMAttribute(prop)) return false;
+              return Reflect.set(target, prop, unwrapDOMValue(nextValue), target);
+            },
             has(target, prop) {
               if (isNamedNodeMap && typeof prop === 'string' && isInternalDOMAttribute(prop)) return false;
               if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
