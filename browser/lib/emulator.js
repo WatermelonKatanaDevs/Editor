@@ -4962,18 +4962,35 @@
           return proxy;
         }
 
-        function captureOption(options) {
-          return typeof options === 'boolean' ? options : !!options?.capture;
+        function normalizeListenerOptions(options) {
+          if (typeof options === 'boolean' || options == null) {
+            return { capture: !!options, nativeOptions: options };
+          }
+          if (typeof options !== 'object' && typeof options !== 'function') {
+            return { capture: false, nativeOptions: options };
+          }
+
+          // Read capture once for listener identity; unwrap AbortSignal without
+          // changing the other WebIDL dictionary defaults (notably passive).
+          const capture = !!options.capture;
+          const normalized = { capture };
+          const once = options.once;
+          const passive = options.passive;
+          const signal = options.signal;
+          if (once !== undefined) normalized.once = once;
+          if (passive !== undefined) normalized.passive = passive;
+          if (signal !== undefined) normalized.signal = unwrapDOMValue(signal);
+          return { capture, nativeOptions: normalized };
         }
 
-        function getWrappedListener(type, listener, options) {
+        function getWrappedListener(type, listener, capture) {
           if (!listener || (typeof listener !== 'function' && typeof listener !== 'object')) return listener;
           let perListener = listenerMap.get(listener);
           if (!perListener) {
             perListener = new Map();
             listenerMap.set(listener, perListener);
           }
-          const key = String(type) + '|' + (captureOption(options) ? '1' : '0');
+          const key = String(type) + '|' + (capture ? '1' : '0');
           if (perListener.has(key)) return perListener.get(key);
 
           const wrappedListener = function(event) {
@@ -4992,17 +5009,36 @@
         }
 
         EventTarget.prototype.addEventListener = function(type, listener, options) {
-          const wrappedListener = getWrappedListener(type, listener, options);
-          return originalAddEventListener.call(unwrapDOMValue(this), type, wrappedListener, options);
+          const eventType = String(type);
+          const normalizedOptions = normalizeListenerOptions(options);
+          const wrappedListener = getWrappedListener(eventType, listener, normalizedOptions.capture);
+          return originalAddEventListener.call(
+            unwrapDOMValue(this),
+            eventType,
+            wrappedListener,
+            normalizedOptions.nativeOptions
+          );
         };
 
         EventTarget.prototype.removeEventListener = function(type, listener, options) {
+          const eventType = String(type);
+          const normalizedOptions = normalizeListenerOptions(options);
           const nativeTarget = unwrapDOMValue(this);
           if (listener && (typeof listener === 'function' || typeof listener === 'object')) {
-            const wrappedListener = getWrappedListener(type, listener, options);
-            return originalRemoveEventListener.call(nativeTarget, type, wrappedListener, options);
+            const wrappedListener = getWrappedListener(eventType, listener, normalizedOptions.capture);
+            return originalRemoveEventListener.call(
+              nativeTarget,
+              eventType,
+              wrappedListener,
+              normalizedOptions.nativeOptions
+            );
           }
-          return originalRemoveEventListener.call(nativeTarget, type, listener, options);
+          return originalRemoveEventListener.call(
+            nativeTarget,
+            eventType,
+            listener,
+            normalizedOptions.nativeOptions
+          );
         };
 
         Object.defineProperty(window, 'frameElement', {
