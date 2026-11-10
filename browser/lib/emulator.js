@@ -2053,7 +2053,9 @@
         ];
 
         async function interceptElementAttribute(el, attr, rawAttr = 'data-raw-src', filter = f => f) {
-          const val = el.getAttribute(attr);
+          const val = el.tagName === 'SCRIPT' && attr === 'src'
+            ? (el.getAttribute(rawAttr) || Reflect.apply(nativeElementGetAttribute, el, [attr]))
+            : el.getAttribute(attr);
           if (!val) return;
 
           if (
