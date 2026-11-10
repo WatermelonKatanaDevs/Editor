@@ -2686,6 +2686,41 @@
               const value = Reflect.get(target, prop, target);
               if (typeof value === 'function') return value.bind(target);
               return wrapDOMValue(value);
+            },
+            has(target, prop) {
+              if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\\d*)$/.test(prop)) {
+                return Number(prop) < visibleItems().length;
+              }
+              if (isNamedNodeMap && prop === 'length') return true;
+              return Reflect.has(target, prop);
+            },
+            ownKeys(target) {
+              if (!isNamedNodeMap) return Reflect.ownKeys(target);
+              const originalKeys = Reflect.ownKeys(target);
+              const numericKeys = originalKeys.filter(key =>
+                typeof key === 'string' && /^(?:0|[1-9]\\d*)$/.test(key)
+              );
+              const otherKeys = originalKeys.filter(key =>
+                !(typeof key === 'string' && /^(?:0|[1-9]\\d*)$/.test(key))
+              );
+              const visibleLength = Math.min(visibleItems().length, numericKeys.length);
+              return [
+                ...Array.from({ length: visibleLength }, (_, index) => String(index)),
+                ...otherKeys
+              ];
+            },
+            getOwnPropertyDescriptor(target, prop) {
+              if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\\d*)$/.test(prop)) {
+                const item = visibleItems()[Number(prop)];
+                if (!item) return undefined;
+                return {
+                  configurable: true,
+                  enumerable: true,
+                  writable: false,
+                  value: wrapDOMValue(item)
+                };
+              }
+              return Reflect.getOwnPropertyDescriptor(target, prop);
             }
           });
           wrappedDOMCollections.set(collection, proxy);
@@ -2721,6 +2756,26 @@
                 return setWrappedEventHandler(target, prop, nextValue);
               }
               return Reflect.set(target, prop, unwrapDOMValue(nextValue), target);
+            },
+            has(target, prop) {
+              if (typeof DOMStringMap !== 'undefined' && target instanceof DOMStringMap &&
+                  typeof prop === 'string' &&
+                  /^(?:raw[A-Z]|pageId$|embedFrame$|embedWrapper$)/.test(prop)) return false;
+              return Reflect.has(target, prop);
+            },
+            ownKeys(target) {
+              const keys = Reflect.ownKeys(target);
+              if (typeof DOMStringMap === 'undefined' || !(target instanceof DOMStringMap)) return keys;
+              return keys.filter(key =>
+                typeof key !== 'string' ||
+                !/^(?:raw[A-Z]|pageId$|embedFrame$|embedWrapper$)/.test(key)
+              );
+            },
+            getOwnPropertyDescriptor(target, prop) {
+              if (typeof DOMStringMap !== 'undefined' && target instanceof DOMStringMap &&
+                  typeof prop === 'string' &&
+                  /^(?:raw[A-Z]|pageId$|embedFrame$|embedWrapper$)/.test(prop)) return undefined;
+              return Reflect.getOwnPropertyDescriptor(target, prop);
             }
           });
           wrappedDOMObjects.set(value, proxy);
