@@ -3220,6 +3220,11 @@
         function wrapDOMNode(node) {
           if (!node || !(node instanceof Node)) return node;
           if (unwrappedDOMNodes.has(node)) return node;
+          if (typeof Attr !== 'undefined' && node instanceof Attr && isInternalDOMAttribute(node.name)) {
+            const publicName = getPublicAliasName(node);
+            if (!publicName) return null;
+            virtualDOMAttributeNames.set(node, publicName);
+          }
           if (node === document) return documentProxy;
           if (wrappedDOMNodes.has(node)) return wrappedDOMNodes.get(node);
           if (node instanceof HTMLElement) wrapElement(node);
@@ -3301,10 +3306,15 @@
                 return function(name, force) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return false;
-                  if (isVirtualizedResourceAttribute(target, attributeName)) {
-                    const currentlyPresent = Reflect.apply(target.hasAttribute, target, [attributeName]);
+                  if (isVirtualPublicAttribute(target, attributeName) && !/^on[a-z]/i.test(attributeName)) {
+                    const rawPresent = Reflect.apply(target.hasAttribute, target, ['data-raw-' + attributeName]);
+                    const nativePresent = Reflect.apply(target.hasAttribute, target, [attributeName]);
+                    const currentlyPresent = rawPresent || nativePresent ||
+                      (target instanceof HTMLScriptElement && attributeName === 'type' &&
+                        Reflect.apply(target.hasAttribute, target, ['data-raw-type']));
                     const shouldExist = arguments.length > 1 ? !!force : !currentlyPresent;
                     if (shouldExist) {
+                      Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
                       if (target instanceof HTMLScriptElement && attributeName === 'type') clearSavedScriptType(target, attributeName);
                       Reflect.apply(target.setAttribute, target, [attributeName, '']);
                       return true;
@@ -3352,10 +3362,7 @@
                 return function(name) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return;
-                  if (/^on[a-z]/i.test(attributeName)) {
-                    Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
-                  }
-                  if (isVirtualizedResourceAttribute(target, attributeName)) {
+                  if (isVirtualPublicAttribute(target, attributeName)) {
                     Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
                   }
                   if (target instanceof HTMLScriptElement && attributeName === 'type') {
@@ -3386,7 +3393,19 @@
               if (prop === 'getAttributeNS' && target instanceof Element) {
                 return function(namespace, name) {
                   if (namespace == null || namespace === '') {
-                    if (isInternalDOMAttribute(name)) return null;
+                    const publicName = String(name || '').toLowerCase();
+                    if (isInternalDOMAttribute(publicName)) return null;
+                    if (
+                      target instanceof HTMLScriptElement &&
+                      publicName === 'type'
+                    ) {
+                      const originalType = Reflect.apply(target.getAttribute, target, ['data-raw-type']);
+                      if (originalType != null) return originalType;
+                    }
+                    if (isVirtualPublicAttribute(target, publicName)) {
+                      const rawValue = Reflect.apply(target.getAttribute, target, ['data-raw-' + publicName]);
+                      if (rawValue != null) return rawValue;
+                    }
                     return Reflect.apply(target.getAttribute, target, [name]);
                   }
                   return Reflect.apply(target.getAttributeNS, target, [namespace, name]);
@@ -3414,7 +3433,17 @@
               if (prop === 'hasAttributeNS' && target instanceof Element) {
                 return function(namespace, name) {
                   if (namespace == null || namespace === '') {
-                    if (isInternalDOMAttribute(name)) return false;
+                    const publicName = String(name || '').toLowerCase();
+                    if (isInternalDOMAttribute(publicName)) return false;
+                    if (
+                      isVirtualPublicAttribute(target, publicName) &&
+                      Reflect.apply(target.hasAttribute, target, ['data-raw-' + publicName])
+                    ) return true;
+                    if (
+                      target instanceof HTMLScriptElement &&
+                      publicName === 'type' &&
+                      Reflect.apply(target.hasAttribute, target, ['data-raw-type'])
+                    ) return true;
                     return Reflect.apply(target.hasAttribute, target, [name]);
                   }
                   return Reflect.apply(target.hasAttributeNS, target, [namespace, name]);
