@@ -3250,12 +3250,12 @@
                   configurable: true,
                   enumerable: true,
                   writable: false,
-                  value: wrapDOMValue(item)
+                  value: wrapAsyncDOMResult(item)
                 };
               }
               const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
               if (!descriptor || !('value' in descriptor)) return descriptor;
-              const publicValue = wrapDOMValue(descriptor.value);
+              const publicValue = wrapAsyncDOMResult(descriptor.value);
               if (
                 descriptor.configurable === false &&
                 descriptor.writable === false &&
@@ -3334,7 +3334,7 @@
                   }
                 }
 
-                return { ...descriptor, value: wrapDOMValue(descriptor.value) };
+                return { ...descriptor, value: wrapAsyncDOMResult(descriptor.value) };
               }
 
               if (descriptor.configurable === false) return descriptor;
@@ -3342,7 +3342,7 @@
               if (typeof descriptor.get === 'function') {
                 const getter = descriptor.get;
                 wrappedDescriptor.get = function() {
-                  return wrapDOMValue(Reflect.apply(getter, target, []));
+                  return wrapAsyncDOMResult(Reflect.apply(getter, target, []));
                 };
               }
               if (typeof descriptor.set === 'function') {
@@ -3953,7 +3953,7 @@
                   return { ...descriptor, value: entry.original };
                 }
               }
-              const publicValue = wrapDOMValue(descriptor.value);
+              const publicValue = wrapAsyncDOMResult(descriptor.value);
               if (
                 descriptor.configurable === false &&
                 descriptor.writable === false &&
