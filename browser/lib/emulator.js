@@ -1954,7 +1954,7 @@
                   return wrapElement(Reflect.apply(target[prop], target, args));
                 };
               }
-              if (typeof prop === 'string' && /^(?:0|[1-9]\\d*)$/.test(prop)) {
+              if (typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
                 return wrapElement(Reflect.get(target, prop, target));
               }
 
