@@ -2454,7 +2454,12 @@
           
           // Guard against re-wrapping the same node
           if (elem.__isWrapped) return elem;
-          elem.__isWrapped = true;
+          Object.defineProperty(elem, '__isWrapped', {
+            value: true,
+            writable: true,
+            configurable: true,
+            enumerable: false
+          });
 
           const tagName = elem.tagName.toLowerCase();
           const propMap = {
@@ -2666,6 +2671,19 @@
 
             return oldGetAttribute.call(this, prop);
           };
+
+          Object.defineProperty(elem, 'setAttribute', {
+            value: elem.setAttribute,
+            writable: true,
+            configurable: true,
+            enumerable: false
+          });
+          Object.defineProperty(elem, 'getAttribute', {
+            value: elem.getAttribute,
+            writable: true,
+            configurable: true,
+            enumerable: false
+          });
 
           return elem;
         }
