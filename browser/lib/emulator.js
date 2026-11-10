@@ -3680,15 +3680,9 @@
                 return function() {
                   const names = Reflect.apply(target.getAttributeNames, target, [])
                     .filter(name => !isInternalDOMAttribute(name));
-                  if ((isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
-                      Reflect.apply(target.hasAttribute, target, ['data-raw-type']) &&
-                      !names.includes('type')) names.push('type');
-                  for (const name of ['src', 'href', 'srcset', 'poster', 'srcdoc', 'data']) {
-                    if (
-                      isVirtualPublicAttribute(target, name) &&
-                      Reflect.apply(target.hasAttribute, target, ['data-raw-' + name]) &&
-                      !names.includes(name)
-                    ) names.push(name);
+                  for (const rawAttribute of Array.from(target.attributes || [])) {
+                    const publicName = getPublicAliasName(rawAttribute);
+                    if (publicName && !names.includes(publicName)) names.push(publicName);
                   }
                   return names;
                 };
