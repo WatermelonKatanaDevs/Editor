@@ -3903,6 +3903,25 @@
             (typeof ResizeObserver !== 'undefined' && value instanceof ResizeObserver) ||
             (typeof PerformanceObserver !== 'undefined' && value instanceof PerformanceObserver) ||
             (typeof MediaQueryList !== 'undefined' && value instanceof MediaQueryList) ||
+            (typeof Navigator !== 'undefined' && value instanceof Navigator) ||
+            (typeof Screen !== 'undefined' && value instanceof Screen) ||
+            (typeof ScreenOrientation !== 'undefined' && value instanceof ScreenOrientation) ||
+            (typeof History !== 'undefined' && value instanceof History) ||
+            (typeof CustomElementRegistry !== 'undefined' && value instanceof CustomElementRegistry) ||
+            (typeof BarProp !== 'undefined' && value instanceof BarProp) ||
+            (typeof Performance !== 'undefined' && value instanceof Performance) ||
+            (typeof Crypto !== 'undefined' && value instanceof Crypto) ||
+            (typeof SubtleCrypto !== 'undefined' && value instanceof SubtleCrypto) ||
+            (typeof StorageManager !== 'undefined' && value instanceof StorageManager) ||
+            (typeof PermissionStatus !== 'undefined' && value instanceof PermissionStatus) ||
+            (typeof Permissions !== 'undefined' && value instanceof Permissions) ||
+            (typeof Geolocation !== 'undefined' && value instanceof Geolocation) ||
+            (typeof MediaDevices !== 'undefined' && value instanceof MediaDevices) ||
+            (typeof Clipboard !== 'undefined' && value instanceof Clipboard) ||
+            (typeof NetworkInformation !== 'undefined' && value instanceof NetworkInformation) ||
+            (typeof LockManager !== 'undefined' && value instanceof LockManager) ||
+            (typeof IDBFactory !== 'undefined' && value instanceof IDBFactory) ||
+            (typeof CacheStorage !== 'undefined' && value instanceof CacheStorage) ||
             (typeof Animation !== 'undefined' && value instanceof Animation) ||
             (typeof KeyframeEffect !== 'undefined' && value instanceof KeyframeEffect) ||
             (typeof AnimationTimeline !== 'undefined' && value instanceof AnimationTimeline) ||
