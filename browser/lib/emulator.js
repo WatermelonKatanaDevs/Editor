@@ -2954,6 +2954,24 @@
           return proxy;
         }
 
+        function isVirtualizedResourceAttribute(element, name) {
+          if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
+          const attr = String(name || '').toLowerCase();
+          const map = {
+            script: ['src'],
+            link: ['href'],
+            img: ['src', 'srcset'],
+            audio: ['src'],
+            video: ['src', 'poster'],
+            source: ['src'],
+            track: ['src'],
+            iframe: ['src', 'srcdoc'],
+            embed: ['src'],
+            object: ['data']
+          };
+          return (map[element.tagName.toLowerCase()] || []).includes(attr);
+        }
+
         function wrapDOMNode(node) {
           if (!node || !(node instanceof Node)) return node;
           if (node === document) return documentProxy;
@@ -3045,6 +3063,12 @@
                   if ((namespace == null || namespace === '') && /^on[a-z]/i.test(attributeName)) {
                     return rewriteInlineEventAttribute(target, attributeName, value);
                   }
+                  if (
+                    (namespace == null || namespace === '') &&
+                    isVirtualizedResourceAttribute(target, attributeName)
+                  ) {
+                    return Reflect.apply(target.setAttribute, target, [attributeName, unwrapDOMValue(value)]);
+                  }
                   return Reflect.apply(target.setAttributeNS, target, [namespace, name, unwrapDOMValue(value)]);
                 };
               }
@@ -3097,6 +3121,26 @@
                     : wrapDOMValue(result);
                 };
               }
+              if (
+                (prop === 'setAttributeNode' || prop === 'setAttributeNodeNS') &&
+                target instanceof Element
+              ) {
+                return function(attribute) {
+                  const rawAttribute = unwrapDOMValue(attribute);
+                  if (
+                    rawAttribute instanceof Attr &&
+                    rawAttribute.namespaceURI == null &&
+                    isVirtualizedResourceAttribute(target, rawAttribute.name)
+                  ) {
+                    const oldAttribute = prop === 'setAttributeNodeNS'
+                      ? Reflect.apply(target.getAttributeNodeNS, target, [null, rawAttribute.name])
+                      : Reflect.apply(target.getAttributeNode, target, [rawAttribute.name]);
+                    Reflect.apply(target.setAttribute, target, [rawAttribute.name, rawAttribute.value]);
+                    return wrapDOMValue(oldAttribute);
+                  }
+                  return wrapDOMValue(Reflect.apply(target[prop], target, [rawAttribute]));
+                };
+              }
               if (prop === 'getAttributeNode' && target instanceof Element) {
                 return function(name) {
                   const attributeName = String(name || '').toLowerCase();
@@ -3130,6 +3174,17 @@
               return wrapDOMValue(member);
             },
             set(target, prop, nextValue) {
+              if (
+                typeof Attr !== 'undefined' &&
+                target instanceof Attr &&
+                isVirtualizedResourceAttribute(target.ownerElement, target.name) &&
+                (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')
+              ) {
+                if (target.ownerElement) {
+                  target.ownerElement.setAttribute(target.name, String(nextValue));
+                  return true;
+                }
+              }
               if (
                 typeof Attr !== 'undefined' &&
                 target instanceof Attr &&
