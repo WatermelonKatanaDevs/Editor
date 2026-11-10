@@ -49,6 +49,8 @@
       this.readOnly = !!options.readOnly;
       this.canContextMenu = options.canContextMenu || (() => true);
       this.selectedNode = null;
+      this.errorToast = null;
+      this.errorToastTimer = null;
       this.selectedNodes = new Set();
       this.selectionAnchor = null;
       this.collapsedPaths = new Set();
@@ -156,7 +158,38 @@
       this.render();
     }
     report(err) {
-      if (window.EditorApp?.logError) window.EditorApp.logError(err); else console.error(err);
+      if (window.EditorApp?.logError) window.EditorApp.logError(err);
+      else {
+        console.error(err?.stack || err);
+        this.showError(err);
+      }
+    }
+    showError(err) {
+      const message = String(err?.message || err || 'Unknown error');
+      if (this.errorToastTimer) clearTimeout(this.errorToastTimer);
+      this.errorToast?.remove();
+      const toast = document.createElement('div');
+      toast.className = 'file-manager-error-toast';
+      toast.setAttribute('role', 'alert');
+      toast.style.cssText = 'position:fixed;right:18px;bottom:52px;z-index:100000;display:flex;align-items:flex-start;gap:12px;max-width:min(520px,calc(100vw - 36px));padding:11px 13px;background:#3b2025;color:#ffe7ea;border:1px solid #a94e5b;border-radius:8px;box-shadow:0 8px 28px #0008;font:13px/1.45 system-ui,sans-serif;overflow-wrap:anywhere';
+      const text = document.createElement('span');
+      text.textContent = 'File operation failed: ' + message;
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.setAttribute('aria-label', 'Dismiss error');
+      close.textContent = '×';
+      close.style.cssText = 'flex:0 0 auto;border:0;background:transparent;color:inherit;font:20px/1 system-ui;cursor:pointer;padding:0 2px';
+      const dismiss = () => {
+        if (this.errorToastTimer) clearTimeout(this.errorToastTimer);
+        this.errorToastTimer = null;
+        toast.remove();
+        if (this.errorToast === toast) this.errorToast = null;
+      };
+      close.addEventListener('click', dismiss);
+      toast.append(text, close);
+      document.body.appendChild(toast);
+      this.errorToast = toast;
+      this.errorToastTimer = setTimeout(dismiss, 10000);
     }
     normalize(path) {
       const parts = String(path ?? '').replace(/\\/g, '/').split('/');
@@ -288,7 +321,8 @@
         if (e.target.closest?.('li[data-path]')) return;
         e.preventDefault();
         rootList.classList.add('draghover');
-        e.dataTransfer.dropEffect = e.dataTransfer.types.includes('application/x-wk-editor-files') ? 'copy' : 'move';
+        const internalMove = e.dataTransfer.types.includes('application/x-file-manager-paths');
+        e.dataTransfer.dropEffect = internalMove ? 'move' : e.dataTransfer.types.includes('application/x-wk-editor-files') ? 'copy' : 'move';
       };
       rootList.ondragleave = e => {
         if (!rootList.contains(e.relatedTarget)) rootList.classList.remove('draghover');
@@ -326,7 +360,9 @@
         const li = e.target.closest?.('li[data-path]');
         li?.classList.add('draghover');
         container.classList.add('draghover');
-        e.dataTransfer.dropEffect = e.dataTransfer.types.includes('application/x-wk-editor-files') || e.dataTransfer.types.includes('application/x-proxy-download') || e.dataTransfer.files?.length ? 'copy' : 'move';
+        const internalMove = e.dataTransfer.types.includes('application/x-file-manager-paths');
+        const externalCopy = e.dataTransfer.types.includes('application/x-wk-editor-files') || e.dataTransfer.types.includes('application/x-proxy-download') || e.dataTransfer.files?.length;
+        e.dataTransfer.dropEffect = internalMove ? 'move' : externalCopy ? 'copy' : 'move';
       };
       container.ondragleave = e => {
         const related = e.relatedTarget;
@@ -486,6 +522,18 @@
     async handleDrop(e, targetNode) {
       const transfer = e.dataTransfer;
       if (this.readOnly) return;
+
+      const internalPaths = transfer.getData('application/x-file-manager-paths');
+      if (internalPaths) {
+        let paths;
+        try { paths = JSON.parse(internalPaths); }
+        catch (_) { throw new Error('The dragged workspace items could not be identified. Try dragging them again.'); }
+        if (!Array.isArray(paths) || paths.some(path => typeof path !== 'string')) {
+          throw new Error('The dragged workspace items could not be identified. Try dragging them again.');
+        }
+        await this.handleMoveMany(paths, targetNode);
+        return;
+      }
 
       const editorFilesToken = transfer.getData('application/x-wk-editor-files');
       if (editorFilesToken) {
@@ -817,29 +865,64 @@
     async movePath(oldPath, newPath, isDir = false) {
       oldPath = this.normalize(oldPath);
       newPath = this.normalize(newPath);
-      if (oldPath === newPath) return;
-      if (newPath.startsWith(oldPath + '/')) return;
-      const collapsed = [...this.collapsedPaths].filter(p => p === oldPath || p.startsWith(oldPath + '/'));
-      for (const p of collapsed) this.collapsedPaths.delete(p);
-      if (isDir) {
-        this.fs.mkdirSync(newPath);
-        const files = this.fs.listFilesSync().filter(p => p === oldPath || p.startsWith(oldPath + '/'));
-        for (const p of files) await this.copyFile(p, newPath + p.slice(oldPath.length));
-        for (const p of files) this.fs.deleteFileSync(p);
-        this.fs.deleteDirectorySync?.(oldPath);
-      } else {
-        await this.moveFile(oldPath, newPath);
-        if (this.fs.existsSync(oldPath + '.piskel')) await this.moveFile(oldPath + '.piskel', newPath + '.piskel');
+      if (!oldPath || !newPath) throw new Error('A valid source and destination are required.');
+      if (oldPath === newPath) return false;
+      if (newPath.startsWith(oldPath + '/')) throw new Error('A folder cannot be moved into itself.');
+      const pathExists = path => !!this.fs.existsSync?.(path) || !!this.fs.isDirectorySync?.(path);
+      if (!pathExists(oldPath)) throw new Error('The item no longer exists: ' + oldPath);
+      if (pathExists(newPath)) throw new Error('Cannot move "' + oldPath + '" because "' + newPath + '" already exists.');
+      if (typeof this.fs.moveSync !== 'function') throw new Error('This workspace filesystem does not support moving files and folders.');
+      const companionOld = !isDir && this.fs.existsSync?.(oldPath + '.piskel') ? oldPath + '.piskel' : '';
+      const companionNew = companionOld ? newPath + '.piskel' : '';
+      if (companionNew && pathExists(companionNew)) {
+        throw new Error('Cannot move "' + oldPath + '" because its Piskel data already exists at "' + companionNew + '".');
       }
-      for (const p of collapsed) this.collapsedPaths.add(newPath + p.slice(oldPath.length));
-      this.refresh();
-      this.reveal(newPath);
-      this.onMove(oldPath, newPath, isDir);
+      const collapsed = [...this.collapsedPaths].filter(p => p === oldPath || p.startsWith(oldPath + '/'));
+      let movedCompanion = false;
+      let movedMain = false;
+      const finishMove = () => {
+        for (const p of collapsed) {
+          this.collapsedPaths.delete(p);
+          this.collapsedPaths.add(newPath + p.slice(oldPath.length));
+        }
+        this.refresh();
+        this.reveal(newPath);
+        this.onMove(oldPath, newPath, isDir);
+      };
+      try {
+        if (companionOld) {
+          if (!this.fs.moveSync(companionOld, companionNew)) throw new Error('Could not move the associated Piskel data: ' + companionOld);
+          movedCompanion = true;
+        }
+        if (!this.fs.moveSync(oldPath, newPath)) throw new Error('Could not move "' + oldPath + '" to "' + newPath + '".');
+        movedMain = true;
+        await this.fs.flush?.();
+      } catch (error) {
+        if (movedMain) {
+          finishMove();
+          throw new Error('The item was moved in the workspace, but storage synchronization failed: ' + (error?.message || error));
+        }
+        if (movedCompanion) {
+          try {
+            this.fs.moveSync(companionNew, companionOld);
+            await this.fs.flush?.();
+          } catch (rollbackError) {
+            throw new Error((error?.message || error) + ' The associated Piskel data could not be restored: ' + (rollbackError?.message || rollbackError));
+          }
+        }
+        throw error;
+      }
+      finishMove();
+      return true;
     }
     async renameNode(node, name) {
+      name = String(name || '').trim();
+      if (!name || name === '.' || name === '..' || /[\\/]/.test(name)) {
+        throw new Error('Enter a valid file or folder name without path separators.');
+      }
       const parent = this.pathBase(node.path), newPath = parent ? parent + '/' + name : name;
       if (this.normalize(newPath) === this.normalize(node.path)) return;
-      if (this.fs.existsSync(newPath)) throw new Error('A file or folder already exists: ' + newPath);
+      if (this.fs.existsSync(newPath) || this.fs.isDirectorySync?.(newPath)) throw new Error('A file or folder already exists: ' + newPath);
       await this.movePath(node.path, newPath, node.isDir);
       this.reveal(newPath);
     }
@@ -884,13 +967,16 @@
       this.refresh();
     }
     async handleMoveMany(paths, dstNode) {
-      const unique = [...new Set(paths)].map(p => this.nodeByPath.get(p)).filter(Boolean);
+      const selectedPaths = [...new Set(paths.map(path => this.normalize(path)))];
+      const topLevelPaths = selectedPaths.filter(path =>
+        !selectedPaths.some(other => other !== path && path.startsWith(other + '/'))
+      );
+      const unique = topLevelPaths.map(path => this.nodeByPath.get(path)).filter(Boolean);
       const targetBase = this.targetBase(dstNode);
-      const moving = new Set(unique.map(n => n.path));
       for (const node of unique) {
         if (node === dstNode || (dstNode?.path && dstNode.path.startsWith(node.path + '/'))) continue;
         const newPath = targetBase ? targetBase + '/' + node.name : node.name;
-        if (moving.has(newPath)) continue;
+        if (newPath === node.path) continue;
         await this.movePath(node.path, newPath, node.isDir);
       }
       this.clearSelection();
