@@ -3060,7 +3060,10 @@
                   return wrapDOMValue(Reflect.apply(target[prop], target, args));
                 };
               }
+              if (isNamedNodeMap && typeof prop === 'string' && isInternalDOMAttribute(prop)) return undefined;
               if (typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
+                return wrapDOMValue(isNamedNodeMap ? visibleItems()[Number(prop)] : Reflect.get(target, prop, target));
+              }              if (typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
                 return wrapDOMValue(isNamedNodeMap ? visibleItems()[Number(prop)] : Reflect.get(target, prop, target));
               }
               if (isNamedNodeMap && typeof prop === 'string') {
@@ -3072,6 +3075,8 @@
               return wrapDOMValue(value);
             },
             has(target, prop) {
+              if (isNamedNodeMap && typeof prop === 'string' && isInternalDOMAttribute(prop)) return false;
+              if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {            has(target, prop) {
               if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
                 return Number(prop) < visibleItems().length;
               }
@@ -3085,7 +3090,8 @@
                 typeof key === 'string' && /^(?:0|[1-9]\d*)$/.test(key)
               );
               const otherKeys = originalKeys.filter(key =>
-                !(typeof key === 'string' && /^(?:0|[1-9]\d*)$/.test(key))
+                !(typeof key === 'string' &&
+                  (/^(?:0|[1-9]\d*)$/.test(key) || isInternalDOMAttribute(key)))
               );
               const visibleLength = Math.min(visibleItems().length, numericKeys.length);
               return [
@@ -3094,6 +3100,8 @@
               ];
             },
             getOwnPropertyDescriptor(target, prop) {
+              if (isNamedNodeMap && typeof prop === 'string' && isInternalDOMAttribute(prop)) return undefined;
+              if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {            getOwnPropertyDescriptor(target, prop) {
               if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
                 const item = visibleItems()[Number(prop)];
                 if (!item) return undefined;
@@ -3204,6 +3212,15 @@
             (attr === 'style' && Reflect.apply(element.hasAttribute, element, ['data-raw-style']));
         }
 
+        const hiddenDOMRuntimeProperties = new Set([
+          '__isWrapped', '__wkNativeContentWindow', '__processing_attr',
+          '__editingAttribute', '__processing_style', '__sandboxed',
+          '__iframeNavigationId', '__embedNavigationId', '__wkScriptBlocked'
+        ]);
+        function isHiddenDOMRuntimeProperty(prop) {
+          return typeof prop === 'string' && hiddenDOMRuntimeProperties.has(prop);
+        }
+
         function wrapDOMNode(node) {
           if (!node || !(node instanceof Node)) return node;
           if (unwrappedDOMNodes.has(node)) return node;
@@ -3214,6 +3231,8 @@
           let proxy;
           proxy = new Proxy(node, {
             get(target, prop) {
+              if (isHiddenDOMRuntimeProperty(prop)) return undefined;
+              const virtualAttributeName = typeof Attr !== 'undefined' && target instanceof Attr            get(target, prop) {
               const virtualAttributeName = typeof Attr !== 'undefined' && target instanceof Attr
                 ? virtualDOMAttributeNames.get(target)
                 : null;
@@ -3322,6 +3341,7 @@
               if (prop === 'removeAttributeNS' && target instanceof Element) {
                 return function(namespace, name) {
                   const attributeName = String(name || '').toLowerCase();
+                  if ((namespace == null || namespace === '') && isInternalDOMAttribute(attributeName)) return;
                   if (namespace == null || namespace === '') {
                     if (isVirtualPublicAttribute(target, attributeName)) {
                       Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
@@ -3352,6 +3372,7 @@
               if (prop === 'setAttributeNS' && target instanceof Element) {
                 return function(namespace, name, value) {
                   const attributeName = String(name || '').toLowerCase();
+                  if ((namespace == null || namespace === '') && isInternalDOMAttribute(attributeName)) return;
                   if ((namespace == null || namespace === '') && target instanceof HTMLScriptElement && attributeName === 'type') {
                     clearSavedScriptType(target, attributeName);
                   }
@@ -3367,7 +3388,16 @@
                   return Reflect.apply(target.setAttributeNS, target, [namespace, name, unwrapDOMValue(value)]);
                 };
               }
-              if (prop === 'getAttribute') {
+              if (prop === 'getAttributeNS' && target instanceof Element) {
+                return function(namespace, name) {
+                  if (namespace == null || namespace === '') {
+                    if (isInternalDOMAttribute(name)) return null;
+                    return Reflect.apply(target.getAttribute, target, [name]);
+                  }
+                  return Reflect.apply(target.getAttributeNS, target, [namespace, name]);
+                };
+              }
+              if (prop === 'getAttribute') {              if (prop === 'getAttribute') {
                 return function(name) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return null;
@@ -3386,7 +3416,16 @@
                   return Reflect.apply(target.getAttribute, target, [name]);
                 };
               }
-              if (prop === 'hasAttribute') {
+              if (prop === 'hasAttributeNS' && target instanceof Element) {
+                return function(namespace, name) {
+                  if (namespace == null || namespace === '') {
+                    if (isInternalDOMAttribute(name)) return false;
+                    return Reflect.apply(target.hasAttribute, target, [name]);
+                  }
+                  return Reflect.apply(target.hasAttributeNS, target, [namespace, name]);
+                };
+              }
+              if (prop === 'hasAttribute') {              if (prop === 'hasAttribute') {
                 return function(name) {
                   const publicName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(publicName)) return false;
@@ -3637,10 +3676,55 @@
                   target.parentElement?.tagName === 'SCRIPT') {
                 target.parentElement.removeAttribute('data-raw-script');
               }
+              if (isHiddenDOMRuntimeProperty(prop)) return true;
               if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
                 return setWrappedEventHandler(target, prop, nextValue);
               }
               return Reflect.set(target, prop, unwrapDOMValue(nextValue), target);
+            },
+            has(target, prop) {
+              if (isHiddenDOMRuntimeProperty(prop)) return false;
+              return Reflect.has(target, prop);
+            },
+            ownKeys(target) {
+              return Reflect.ownKeys(target).filter(prop =>
+                !isHiddenDOMRuntimeProperty(prop) &&
+                !(prop === 'setAttribute' || prop === 'getAttribute')
+              );
+            },
+            getOwnPropertyDescriptor(target, prop) {
+              if (
+                isHiddenDOMRuntimeProperty(prop) ||
+                prop === 'setAttribute' ||
+                prop === 'getAttribute'
+              ) return undefined;
+              const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
+              if (!descriptor || !('value' in descriptor)) return descriptor;
+              if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+                const entry = getEventHandlerEntry(target, prop);
+                if (entry && descriptor.value === entry.wrapped) {
+                  return { ...descriptor, value: entry.original };
+                }
+              }
+              const publicValue = wrapDOMValue(descriptor.value);
+              if (
+                descriptor.configurable === false &&
+                descriptor.writable === false &&
+                publicValue !== descriptor.value
+              ) return descriptor;
+              return { ...descriptor, value: publicValue };
+            },
+            defineProperty(target, prop, descriptor) {
+              if (isHiddenDOMRuntimeProperty(prop)) return true;
+              const nextDescriptor = { ...descriptor };
+              if ('value' in nextDescriptor) {
+                nextDescriptor.value = wrapDOMValue(unwrapDOMValue(nextDescriptor.value));
+              }
+              return Reflect.defineProperty(target, prop, nextDescriptor);
+            },
+            deleteProperty(target, prop) {
+              if (isHiddenDOMRuntimeProperty(prop)) return true;
+              return Reflect.deleteProperty(target, prop);
             }
           });
 
