@@ -2930,7 +2930,8 @@
           'OffscreenCanvasRenderingContext2D', 'ImageBitmapRenderingContext',
           'WebGLRenderingContext', 'WebGL2RenderingContext', 'Location', 'DOMStringList',
           'DOMParser', 'XMLSerializer', 'XSLTProcessor', 'MessageChannel',
-          'MessagePort', 'SharedWorker', 'AbortController', 'FileReader'
+          'MessagePort', 'SharedWorker', 'AbortController', 'FileReader',
+          'PerformanceObserverEntryList', 'ScreenDetails'
         ]);
         function getDOMBrand(value) {
           try {
@@ -4159,7 +4160,16 @@
                 constructorArgs,
                 newTarget === proxy ? target : newTarget
               );
-              return wrapDOMValue(instance);
+              const wrappedInstance = wrapDOMValue(instance);
+              if (
+                wrappedInstance === instance &&
+                [
+                  'DOMParser', 'XMLSerializer', 'XSLTProcessor',
+                  'XPathEvaluator', 'MessageChannel', 'SharedWorker',
+                  'AbortController'
+                ].includes(name)
+              ) return wrapDOMObject(instance);
+              return wrappedInstance;
             }
           });
 
@@ -4191,6 +4201,13 @@
           ) return value;
           if (value === window || value === windowProxy) return windowProxy;
           if (value === document || (typeof documentProxy !== 'undefined' && value === documentProxy)) return documentProxy;
+          if (isDOMNodeValue(value) && value.nodeType === 9) {
+            try {
+              const defaultView = Reflect.get(value, 'defaultView', value);
+              const virtualView = wrapWindowReference(defaultView);
+              if (virtualView) return virtualView.document;
+            } catch (_) {}
+          }
           if (typeof Window !== 'undefined') {
             try {
               if (
