@@ -2608,7 +2608,7 @@
 
           const wrapperClass = function(...args) {
             var obj = new originalClass(...filter(args));
-            obj = wrapElement(obj);
+            obj = wrapDOMValue(wrapElement(obj));
             oncreate.call(obj, ...args);
             return obj;
           };
@@ -2928,7 +2928,9 @@
           'Animation', 'KeyframeEffect', 'AnimationTimeline', 'DocumentTimeline',
           'ScrollTimeline', 'ViewTimeline', 'VisualViewport', 'CanvasRenderingContext2D',
           'OffscreenCanvasRenderingContext2D', 'ImageBitmapRenderingContext',
-          'WebGLRenderingContext', 'WebGL2RenderingContext', 'Location', 'DOMStringList'
+          'WebGLRenderingContext', 'WebGL2RenderingContext', 'Location', 'DOMStringList',
+          'DOMParser', 'XMLSerializer', 'XSLTProcessor', 'MessageChannel',
+          'MessagePort', 'SharedWorker', 'AbortController', 'FileReader'
         ]);
         function getDOMBrand(value) {
           try {
@@ -4104,6 +4106,65 @@
 
           if (nativeStorageProxies.has(value)) return nativeStorageProxies.get(value);
           return matchingAreas[0] || null;
+        }
+
+        const wrappedDOMConstructors = new WeakMap();
+        const DOMConstructorNames = new Set([
+          'DOMParser', 'XMLSerializer', 'XSLTProcessor', 'XPathEvaluator',
+          'Option', 'Worker', 'SharedWorker', 'BroadcastChannel', 'MessageChannel',
+          'AbortController', 'FileReader', 'WebSocket', 'EventSource',
+          'MutationObserver', 'IntersectionObserver', 'ResizeObserver',
+          'PerformanceObserver'
+        ]);
+
+        function wrapDOMConstructor(name, constructor) {
+          if (typeof constructor !== 'function') return constructor;
+          if (wrappedDOMConstructors.has(constructor)) {
+            return wrappedDOMConstructors.get(constructor);
+          }
+
+          let proxy;
+          proxy = new Proxy(constructor, {
+            apply(target, thisArg, args) {
+              return wrapDOMValue(Reflect.apply(
+                target,
+                unwrapDOMValue(thisArg),
+                Array.from(args || [], unwrapDOMValue)
+              ));
+            },
+            construct(target, args, newTarget) {
+              const constructorArgs = Array.from(args || [], unwrapDOMValue);
+              const callbackIndex = (
+                name === 'MutationObserver' ||
+                name === 'IntersectionObserver' ||
+                name === 'ResizeObserver' ||
+                name === 'PerformanceObserver'
+              ) ? 0 : -1;
+
+              if (callbackIndex >= 0 && typeof constructorArgs[callbackIndex] === 'function') {
+                const callback = constructorArgs[callbackIndex];
+                constructorArgs[callbackIndex] = function(...callbackArgs) {
+                  const wrappedArgs = callbackArgs.map((argument, index) => {
+                    if (index === 0 && Array.isArray(argument)) {
+                      return argument.map(wrapDOMValue);
+                    }
+                    return wrapDOMValue(argument);
+                  });
+                  return Reflect.apply(callback, undefined, wrappedArgs);
+                };
+              }
+
+              const instance = Reflect.construct(
+                target,
+                constructorArgs,
+                newTarget === proxy ? target : newTarget
+              );
+              return wrapDOMValue(instance);
+            }
+          });
+
+          wrappedDOMConstructors.set(constructor, proxy);
+          return proxy;
         }
 
         function wrapDOMValue(value) {
@@ -6258,6 +6319,9 @@
               }
             }
             const value = Reflect.get(window, prop, window);
+            if (typeof prop === 'string' && DOMConstructorNames.has(prop)) {
+              return wrapDOMConstructor(prop, value);
+            }
             if (isNativeFunction(value) && !value.prototype) {
               return function(...args) {
                 return wrapDOMValue(Reflect.apply(value, window, args.map(unwrapDOMValue)));
