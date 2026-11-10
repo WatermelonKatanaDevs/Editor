@@ -165,7 +165,20 @@
 
       return elements.map(async (el) => {
         const originalUrl = el.getAttribute(attr);
-        if (!originalUrl || originalUrl.startsWith('data:') || originalUrl.startsWith('blob:')) return;
+        if (!originalUrl) return;
+
+        const embeddedScript = el.tagName === 'SCRIPT' && /^(?:data|blob):/i.test(originalUrl);
+        if (embeddedScript) {
+          const response = await fetch(originalUrl);
+          if (!response || !response.ok) return;
+          el.setAttribute(rawAttr, originalUrl);
+          const processedRes = await filter(response, originalUrl, originalUrl, el);
+          if (!processedRes) return;
+          const dataUri = await createDataUri(processedRes);
+          if (dataUri) el.setAttribute(attr, dataUri);
+          return;
+        }
+        if (originalUrl.startsWith('data:') || originalUrl.startsWith('blob:')) return;
 
         const absoluteUrl = resolveUrl(originalUrl);
         el.setAttribute(rawAttr, originalUrl);
@@ -2041,7 +2054,33 @@
 
         async function interceptElementAttribute(el, attr, rawAttr = 'data-raw-src', filter = f => f) {
           const val = el.getAttribute(attr);
-          if (!val || val.startsWith('data:') || val.startsWith('blob:')) return;
+          if (!val) return;
+
+          if (
+            el.tagName === 'SCRIPT' &&
+            attr === 'src' &&
+            /^(?:data|blob):/i.test(val) &&
+            !el.hasAttribute('data-raw-src')
+          ) {
+            el.__processing_attr = true;
+            try {
+              Reflect.apply(nativeElementSetAttribute, el, ['data-raw-src', val]);
+              const response = await fetch(val);
+              if (!response || !response.ok) return;
+              const scriptFilter = ATTRIBUTE_MAP.find(rule => rule.selector === 'script[src]')?.filter || (value => value);
+              const processed = await scriptFilter(response, val, val, el);
+              if (!processed) return;
+              const dataUri = await createDataUri(processed);
+              if (dataUri) Reflect.apply(nativeElementSetAttribute, el, ['src', dataUri]);
+            } catch (error) {
+              console.warn('Failed to virtualize embedded script source:', error);
+            } finally {
+              el.__processing_attr = false;
+            }
+            return;
+          }
+
+          if (val.startsWith('data:') || val.startsWith('blob:')) return;
 
           if (!el.hasAttribute(rawAttr)) {
             const resolvedUrl = new URL(val, CURRENT_PAGE_URL).href;
