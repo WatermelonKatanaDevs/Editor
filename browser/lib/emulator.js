@@ -3951,6 +3951,11 @@
           ) return value;
           if (value === window || value === windowProxy) return windowProxy;
           if (value === document) return documentProxy;
+          if (typeof Window !== 'undefined') {
+            try {
+              if (value instanceof Window) return wrapWindowReference(value);
+            } catch (_) {}
+          }
           if (
             typeof Storage !== 'undefined' &&
             value instanceof Storage &&
