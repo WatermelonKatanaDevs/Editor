@@ -542,7 +542,7 @@
     return body.length === 1 ? body[0] : { type: "BlockStatement", body };
   }
 
-  function transformAST(ast) {
+  function transformAST(ast, options = {}) {
     acorn.walk.simple(ast, {
       CallExpression(node) {
         const callee = node.callee;
@@ -557,6 +557,16 @@
           };
 
           node.arguments.unshift({ type: "Identifier", name: "__windowProxy" });
+        }
+
+        // Preserve direct-eval syntax, but transform the evaluated source first.
+        else if (callee.type === "Identifier" && callee.name === "eval") {
+          const firstArgument = node.arguments.length ? node.arguments[0] : { type: "Identifier", name: "undefined" };
+          node.arguments[0] = {
+            type: "CallExpression",
+            callee: { type: "Identifier", name: "__prepareDirectEvalCode" },
+            arguments: [firstArgument, { type: "Identifier", name: "eval" }]
+          };
         }
 
         // Simple identifier call: foo()
@@ -590,6 +600,8 @@
         }
       }
     });
+
+    if (options.rewriteGlobals === false) return;
 
     const rootBody = ast.body;
     const newBody = [];
@@ -1621,7 +1633,17 @@
         // Target rules for dynamic element checks
         const ATTRIBUTE_MAP = [
           { selector: 'img[src]', attr: 'src' },
-          { selector: 'script[src]', attr: 'src' },
+          { selector: 'script[src]', attr: 'src',
+            filter: async function(response, absoluteUrl, origin, element) {
+              const source = await response.clone().text();
+              const isModule = element && element.getAttribute('type') === 'module';
+              if (isModule) element.removeAttribute('type');
+              const executor = isModule ? '__executeCodeModule' : '__executeCode';
+              const wrappedSource = 'window.' + executor + '(' +
+                JSON.stringify(source) + ', ' + JSON.stringify(absoluteUrl) + ');';
+              return new Response(wrappedSource, { headers: { 'Content-Type': 'application/javascript' } });
+            }
+          },
           { selector: 'link:not([rel="stylesheet"])[href]', attr: 'href', rawAttr: 'data-raw-href'},
           { selector: 'link[rel="stylesheet"][href]', attr: 'href', rawAttr: 'data-raw-href', 
             filter: async function(response, absoluteUrl) {
@@ -3962,7 +3984,7 @@
             ${__codeString.code}
             \n//# sourceURL=`+__sourceURL);
           }
-        }, __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
+        }, __thisArg == null ? __windowProxy : __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
       };
 
       window.__executeCodeAsync = function(__codeString, __sourceURL, __thisArg, __event) {
@@ -3978,11 +4000,11 @@
             ${__event ? 'let event = __event;' : ''}
             (async function(){
               ${__codeString.code}
-            })();
+            }).call(this);
             \n//# sourceURL=`+__sourceURL);
           }
           return { value: __execResult };
-        }, __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
+        }, __thisArg == null ? __windowProxy : __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
       };
 
       window.__executeCodeModule = function(__codeString, __sourceURL, __thisArg, __event, __scriptFileName) {
@@ -3991,6 +4013,7 @@
 
         __codeString = `
           (async function(){
+            "use strict";
             ${window.__usefulHelpers.editCodeModule(__codeString)}
           })();
         `;
@@ -4006,7 +4029,7 @@
             \n//# sourceURL=`+__sourceURL);
           }
           return __currentModuleExports;
-        }, __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
+        }, __thisArg == null ? __windowProxy : __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
 
 
       };
