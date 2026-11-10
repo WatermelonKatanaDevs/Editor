@@ -1915,6 +1915,65 @@
           return elem;
         }
 
+        // Keep native live DOM collections, but wrap elements as they are read
+        // so collections such as document.scripts expose the same virtualized
+        // element properties as querySelector()/getElementById().
+        const wrappedDOMCollections = new WeakMap();
+
+        function wrapDOMCollection(collection) {
+          if (!(collection instanceof HTMLCollection) && !(collection instanceof NodeList)) return collection;
+          if (wrappedDOMCollections.has(collection)) return wrappedDOMCollections.get(collection);
+
+          let proxy;
+          proxy = new Proxy(collection, {
+            get(target, prop) {
+              if (prop === Symbol.iterator || prop === 'values') {
+                return function* () {
+                  for (let i = 0; i < target.length; i++) yield wrapElement(target[i]);
+                };
+              }
+              if (prop === 'keys') {
+                return function* () {
+                  for (let i = 0; i < target.length; i++) yield i;
+                };
+              }
+              if (prop === 'entries') {
+                return function* () {
+                  for (let i = 0; i < target.length; i++) yield [i, wrapElement(target[i])];
+                };
+              }
+              if (prop === 'forEach' && target instanceof NodeList) {
+                return function(callback, thisArg) {
+                  for (let i = 0; i < target.length; i++) {
+                    Reflect.apply(callback, thisArg, [wrapElement(target[i]), i, proxy]);
+                  }
+                };
+              }
+              if ((prop === 'item' || prop === 'namedItem') && typeof target[prop] === 'function') {
+                return function(...args) {
+                  return wrapElement(Reflect.apply(target[prop], target, args));
+                };
+              }
+              if (typeof prop === 'string' && /^(?:0|[1-9]\\d*)$/.test(prop)) {
+                return wrapElement(Reflect.get(target, prop, target));
+              }
+
+              const value = Reflect.get(target, prop, target);
+              if (typeof value === 'function') return value.bind(target);
+              return wrapElement(value);
+            }
+          });
+
+          wrappedDOMCollections.set(collection, proxy);
+          return proxy;
+        }
+
+        function wrapDocumentValue(value) {
+          if (value instanceof HTMLElement) return wrapElement(value);
+          if (value instanceof HTMLCollection || value instanceof NodeList) return wrapDOMCollection(value);
+          return value;
+        }
+
         const originalInsertRule = CSSStyleSheet.prototype.insertRule;
         CSSStyleSheet.prototype.insertRule = function(rule, index) {
           if (rule && rule.includes('url(')) {
@@ -3166,6 +3225,10 @@
               };
             }
             
+            // HTMLCollection-backed document properties are live, but their
+            // elements still need the emulator's element wrappers.
+            if (prop === 'scripts') return wrapDOMCollection(document.scripts);
+
             const value = Reflect.get(document, prop, document);
 
             // Virtualized resource attributes are stored in data-raw-* while the
@@ -3182,12 +3245,18 @@
 
             // Handle native methods (like document.getElementById, etc.)
             if (isNativeFunction(value) && !value.prototype && prop != 'constructor') {
-              return function(){ return wrapElement(value.apply(document, Array.from(arguments).map(v => v == documentProxy ? document : v))); };
+              return function(){
+                const args = Array.from(arguments).map(v => v == documentProxy ? document : v);
+                return wrapDocumentValue(Reflect.apply(value, document, args));
+              };
             }
             if (typeof value == 'function' && prop != 'constructor') {
-              return function(){ return wrapElement(value.apply(this == documentProxy ? document : this, arguments)); };
+              return function(){
+                const receiver = this == documentProxy ? document : this;
+                return wrapDocumentValue(Reflect.apply(value, receiver, arguments));
+              };
             }
-            return wrapElement(value);
+            return wrapDocumentValue(value);
           },
           set(target, prop, value) {
             if (prop === 'location') {
