@@ -884,6 +884,35 @@
           const classSource = typeof options.source === 'string'
             ? options.source.slice(node.start,node.end)
             : null;
+          const classEntries = (node.body?.body || [])
+            .filter(method => method.type === "MethodDefinition" &&
+              (
+                (method.key.type === "Identifier" && !method.computed) ||
+                method.key.type === "Literal"
+              ))
+            .map(method => {
+              const key = method.key.type === "Identifier" ? method.key.name : String(method.key.value);
+              const kind = method.kind === "get" || method.kind === "set" ? method.kind : "value";
+              const methodSource = options.source.slice(method.start,method.end);
+              const property = (name,value) => ({
+                type: "Property",
+                key: { type: "Identifier", name },
+                value,
+                kind: "init",
+                method: false,
+                shorthand: false,
+                computed: false
+              });
+              return {
+                type: "ObjectExpression",
+                properties: [
+                  property("key", { type: "Literal", value: key, raw: JSON.stringify(key) }),
+                  property("kind", { type: "Literal", value: kind, raw: JSON.stringify(kind) }),
+                  property("static", { type: "Literal", value: !!method.static, raw: String(!!method.static) }),
+                  property("source", { type: "Literal", value: methodSource, raw: JSON.stringify(methodSource) })
+                ]
+              };
+            });
           const classValue = classSource === null
             ? node
             : {
@@ -892,7 +921,7 @@
                 arguments: [
                   node,
                   { type: "Literal", value: classSource, raw: JSON.stringify(classSource) },
-                  entriesNode(methodEntries(node,true)),
+                  { type: "ArrayExpression", elements: classEntries },
                   { type: "Literal", value: null, raw: "null" }
                 ]
               };
