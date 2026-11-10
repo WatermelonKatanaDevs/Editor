@@ -1544,7 +1544,7 @@
           if (isModule) node.removeAttribute('type');
 
           const execFn = isModule ? '__executeCodeModule' : '__executeCode';
-          node.textContent = `window.${execFn}(${JSON.stringify(rawScript)}, ${JSON.stringify(CURRENT_PAGE_URL)}, this);\\n`;
+          node.textContent = `window.${execFn}(${JSON.stringify(rawScript)}, ${JSON.stringify(CURRENT_PAGE_URL)}, this);\n`;
         }
 
         function prepareInsertedScripts(node) {
