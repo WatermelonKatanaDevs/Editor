@@ -1815,7 +1815,26 @@
 
       (function() { 
         
-        const parentWindow = window.parent;
+        function findNativeGetter(startObject, property) {
+          let owner = startObject;
+          const seen = new Set();
+          while (owner && !seen.has(owner)) {
+            seen.add(owner);
+            const descriptor = Object.getOwnPropertyDescriptor(owner, property);
+            if (descriptor?.get) return descriptor.get;
+            owner = Object.getPrototypeOf(owner);
+          }
+          return null;
+        }
+        const nativeWindowParentGetter = findNativeGetter(Window.prototype, 'parent');
+        const nativeWindowTopGetter = findNativeGetter(Window.prototype, 'top');
+        const nativeIframeContentWindowGetter = findNativeGetter(HTMLIFrameElement.prototype, 'contentWindow');
+        const nativeTopWindow = nativeWindowTopGetter
+          ? Reflect.apply(nativeWindowTopGetter, window, [])
+          : window.top;
+        const parentWindow = nativeWindowParentGetter
+          ? Reflect.apply(nativeWindowParentGetter, window, [])
+          : window.parent;
         const pageEmulator = window.__pageEmulator;
         const usefulHelpers = window.__usefulHelpers;
         
@@ -5839,11 +5858,9 @@
             if (iframe.__wkNativeContentWindow) return iframe.__wkNativeContentWindow;
           } catch (_) {}
           try {
-            const getter = Object.getOwnPropertyDescriptor(
-              HTMLIFrameElement.prototype,
-              'contentWindow'
-            )?.get;
-            return getter ? Reflect.apply(getter, iframe, []) : null;
+            return nativeIframeContentWindowGetter
+              ? Reflect.apply(nativeIframeContentWindowGetter, iframe, [])
+              : null;
           } catch (_) {
             return null;
           }
@@ -5901,7 +5918,11 @@
                 const parentPage = targetPage.parent && targetPage.parent !== false ? targetPage.parent : null;
                 if (!parentPage) return callerProxy;
                 let nativeParentWindow = null;
-                try { nativeParentWindow = nativeTargetWindow.parent; } catch (_) {}
+                try {
+                  nativeParentWindow = nativeWindowParentGetter
+                    ? Reflect.apply(nativeWindowParentGetter, nativeTargetWindow, [])
+                    : null;
+                } catch (_) {}
                 return getCallerWindowProxy(parentPage, nativeParentWindow);
               }
 
@@ -5912,7 +5933,12 @@
                 while (topPage?.parent && topPage.parent !== false && !seen.has(topPage)) {
                   seen.add(topPage);
                   topPage = topPage.parent;
-                  try { nativeTopWindow = nativeTopWindow.parent; } catch (_) { break; }
+                  try {
+                    nativeTopWindow = nativeWindowParentGetter
+                      ? Reflect.apply(nativeWindowParentGetter, nativeTopWindow, [])
+                      : null;
+                    if (!nativeTopWindow) break;
+                  } catch (_) { break; }
                 }
                 return getCallerWindowProxy(topPage, nativeTopWindow);
               }
@@ -6057,7 +6083,12 @@
               while (currentPage?.parent && currentPage.parent !== false && !seen.has(currentPage)) {
                 seen.add(currentPage);
                 currentPage = currentPage.parent;
-                try { nativeTopWindow = nativeTopWindow.parent; } catch (_) { break; }
+                try {
+                  nativeTopWindow = nativeWindowParentGetter
+                    ? Reflect.apply(nativeWindowParentGetter, nativeTopWindow, [])
+                    : null;
+                  if (!nativeTopWindow) break;
+                } catch (_) { break; }
               }
               return getCallerWindowProxy(topPage, nativeTopWindow);
             }
@@ -6065,7 +6096,11 @@
               const parentPage = pageEmulator?.parent && pageEmulator.parent !== false ? pageEmulator.parent : null;
               if (!parentPage) return windowProxy;
               let nativeParentWindow = null;
-              try { nativeParentWindow = window.parent; } catch (_) {}
+              try {
+                nativeParentWindow = nativeWindowParentGetter
+                  ? Reflect.apply(nativeWindowParentGetter, window, [])
+                  : null;
+              } catch (_) {}
               return getCallerWindowProxy(parentPage, nativeParentWindow);
             }
             if (prop === 'postMessage') {
@@ -6297,8 +6332,6 @@
           wrapDOMValue(nativeValue)
         );
 
-        const nativeIframeContentWindowGetter =
-          Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow')?.get;
         if (nativeIframeContentWindowGetter) {
           patchPublicNativeGetter(HTMLIFrameElement.prototype, 'contentWindow', (nativeValue, iframe) => {
             try { wrapElement(iframe); } catch (_) {}
@@ -6483,8 +6516,8 @@
         pageEmulator.__windowProxy = windowProxy;
         pageEmulator.__getCallerWindowProxy = getCallerWindowProxy;
         window.__rawReflectApply = rawReflectApply;
-        window.__hostURL = window.top.location.href;
-        window.__hostOrigin = window.top.location.origin;
+        window.__hostURL = nativeTopWindow.location.href;
+        window.__hostOrigin = nativeTopWindow.location.origin;
       })();
 
       window.__executeCode = function(__codeString, __sourceURL, __thisArg, __event) {
