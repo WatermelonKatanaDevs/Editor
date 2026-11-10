@@ -1,7 +1,8 @@
 (function () {
   const MAX_FILES = 5000;
-  const MAX_FILE_BYTES = 64 * 1024 * 1024;
-  const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+  const MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024;
+  const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
+  const MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
   const MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;
 
   function safeArchivePath(value) {
@@ -65,7 +66,8 @@
     const bytes = Math.max(0, Number(value) || 0);
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
   }
 
   function showMessage(host, message, error = false) {
@@ -93,9 +95,9 @@
       }
       const rawSize = Number(entry._data?.uncompressedSize);
       if (Number.isFinite(rawSize) && rawSize >= 0) {
-        if (rawSize > MAX_FILE_BYTES) throw new Error('A file in this archive exceeds the 64 MB preview limit.');
+        if (rawSize > MAX_FILE_BYTES) throw new Error('A file in this archive exceeds the 2 GB preview limit.');
         declaredBytes += rawSize;
-        if (declaredBytes > MAX_TOTAL_BYTES) throw new Error('The extracted archive would exceed the 256 MB preview limit.');
+        if (declaredBytes > MAX_TOTAL_BYTES) throw new Error('The extracted archive would exceed the 2 GB preview limit.');
       }
       files.push({ path, entry, size: Number.isFinite(rawSize) ? rawSize : null });
       if (files.length > MAX_FILES) throw new Error('This archive contains more than 5,000 files.');
@@ -108,9 +110,9 @@
       const item = files[i];
       status.textContent = 'Extracting ' + (i + 1) + ' of ' + files.length + '…';
       const data = await item.entry.async('uint8array');
-      if (data.byteLength > MAX_FILE_BYTES) throw new Error('A file in this archive exceeds the 64 MB preview limit.');
+      if (data.byteLength > MAX_FILE_BYTES) throw new Error('A file in this archive exceeds the 2 GB preview limit.');
       totalBytes += data.byteLength;
-      if (totalBytes > MAX_TOTAL_BYTES) throw new Error('The extracted archive exceeds the 256 MB preview limit.');
+      if (totalBytes > MAX_TOTAL_BYTES) throw new Error('The extracted archive exceeds the 2 GB preview limit.');
       extracted.push({ path: item.path, data });
       if (i % 12 === 0) await new Promise(resolve => setTimeout(resolve, 0));
     }
@@ -395,6 +397,8 @@
         try {
           const binary = ctx.readBinary();
           if (!binary || !binary.length) throw new Error('This archive is empty.');
+          const archiveBytes = Number(binary.byteLength ?? binary.length) || 0;
+          if (archiveBytes > MAX_ARCHIVE_BYTES) throw new Error('This archive exceeds the 2 GB preview limit.');
           const isZip = /\.zip$/i.test(ctx.file.name) || ['application/zip', 'application/x-zip-compressed'].includes(String(ctx.file.mime || '').toLowerCase());
           const loaded = isZip
             ? await loadZipArchive(ctx, binary, archiveStatus)

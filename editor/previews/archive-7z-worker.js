@@ -1,8 +1,9 @@
 importScripts('../../browser/external/7zz.js');
 
 const MAX_FILES = 5000;
-const MAX_FILE_BYTES = 64 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 
 function safeArchivePath(value) {
   let path = String(value || '').replace(/\\/g, '/');
@@ -36,6 +37,8 @@ function parseListing(output) {
 }
 
 async function unpack(buffer, extension) {
+  if (!(buffer instanceof ArrayBuffer) || buffer.byteLength === 0) throw new Error('This archive is empty.');
+  if (buffer.byteLength > MAX_ARCHIVE_BYTES) throw new Error('This archive exceeds the 2 GB preview limit.');
   if (typeof self.SevenZip !== 'function') throw new Error('The 7-Zip WebAssembly module could not be loaded.');
   postMessage({ type: 'progress', message: 'Starting 7-Zip…' });
 
@@ -75,11 +78,11 @@ async function unpack(buffer, extension) {
     if (!path || isDirectory) continue;
     const size = Number(record.Size);
     if (!Number.isFinite(size) || size < 0) throw new Error('The archive contains a file with an invalid size.');
-    if (size > MAX_FILE_BYTES) throw new Error('A file in this archive exceeds the 64 MB preview limit.');
+    if (size > MAX_FILE_BYTES) throw new Error('A file in this archive exceeds the 2 GB preview limit.');
     declaredFiles++;
     declaredBytes += size;
     if (declaredFiles > MAX_FILES) throw new Error('This archive contains more than 5,000 files.');
-    if (declaredBytes > MAX_TOTAL_BYTES) throw new Error('The extracted archive would exceed the 256 MB preview limit.');
+    if (declaredBytes > MAX_TOTAL_BYTES) throw new Error('The extracted archive would exceed the 2 GB preview limit.');
   }
 
   postMessage({ type: 'progress', message: 'Extracting ' + declaredFiles + ' files…' });
@@ -110,9 +113,9 @@ async function unpack(buffer, extension) {
         continue;
       }
       if (!FS.isFile(stat.mode)) continue;
-      if (stat.size > MAX_FILE_BYTES) throw new Error('An extracted file exceeds the 64 MB preview limit.');
+      if (stat.size > MAX_FILE_BYTES) throw new Error('An extracted file exceeds the 2 GB preview limit.');
       extractedBytes += stat.size;
-      if (extractedBytes > MAX_TOTAL_BYTES) throw new Error('The extracted archive exceeds the 256 MB preview limit.');
+      if (extractedBytes > MAX_TOTAL_BYTES) throw new Error('The extracted archive exceeds the 2 GB preview limit.');
       extractedFiles++;
       if (extractedFiles > MAX_FILES) throw new Error('This archive contains more than 5,000 files.');
       const bytes = FS.readFile(fullPath);
