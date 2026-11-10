@@ -2704,7 +2704,7 @@
               return wrapDOMValue(value);
             },
             has(target, prop) {
-              if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\\d*)$/.test(prop)) {
+              if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
                 return Number(prop) < visibleItems().length;
               }
               if (isNamedNodeMap && prop === 'length') return true;
@@ -2714,10 +2714,10 @@
               if (!isNamedNodeMap) return Reflect.ownKeys(target);
               const originalKeys = Reflect.ownKeys(target);
               const numericKeys = originalKeys.filter(key =>
-                typeof key === 'string' && /^(?:0|[1-9]\\d*)$/.test(key)
+                typeof key === 'string' && /^(?:0|[1-9]\d*)$/.test(key)
               );
               const otherKeys = originalKeys.filter(key =>
-                !(typeof key === 'string' && /^(?:0|[1-9]\\d*)$/.test(key))
+                !(typeof key === 'string' && /^(?:0|[1-9]\d*)$/.test(key))
               );
               const visibleLength = Math.min(visibleItems().length, numericKeys.length);
               return [
@@ -2726,7 +2726,7 @@
               ];
             },
             getOwnPropertyDescriptor(target, prop) {
-              if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\\d*)$/.test(prop)) {
+              if (isNamedNodeMap && typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
                 const item = visibleItems()[Number(prop)];
                 if (!item) return undefined;
                 return {
