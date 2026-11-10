@@ -3057,6 +3057,13 @@
             return items;
           };
           proxy = new Proxy(collection, {
+            apply(target, thisArg, args) {
+              return wrapDOMValue(Reflect.apply(
+                target,
+                target,
+                Array.from(args || [], unwrapDOMValue)
+              ));
+            },
             get(target, prop) {
               if (prop === Symbol.iterator || prop === 'values') {
                 return function*() {
