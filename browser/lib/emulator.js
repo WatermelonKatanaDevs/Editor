@@ -1336,15 +1336,42 @@
           const data = event.data;
           if (!data || (data.turbowarp !== 'ready' && data.turbowarp !== 'storage')) return;
 
+          let matchedChildWindow = null;
           const childPage = (pageEmulator.children || []).find(child => {
-            const nativeWindow = child?.iframe?.__wkNativeContentWindow;
-            // Sandboxed message events are exposed through the child's virtual
-            // Window proxy by the EventTarget wrapper. Other origins may still
-            // expose the native WindowProxy, so accept either identity.
-            return !!event.source && (
-              event.source === nativeWindow ||
-              event.source === child?.__windowProxy
-            );
+            const iframe = child?.iframe;
+            if (!iframe || !event.source) return false;
+
+            // Static iframes can be registered during HTML preprocessing before
+            // wrapElement() ever installs __wkNativeContentWindow. Read the
+            // browser's native contentWindow getter as a fallback so the
+            // WindowProxy in MessageEvent.source can still be matched.
+            let nativeWindow = iframe.__wkNativeContentWindow || null;
+            if (!nativeWindow) {
+              try {
+                const getter = Object.getOwnPropertyDescriptor(
+                  HTMLIFrameElement.prototype,
+                  'contentWindow'
+                )?.get;
+                if (getter) nativeWindow = Reflect.apply(getter, iframe, []);
+                if (nativeWindow) {
+                  try {
+                    Object.defineProperty(iframe, '__wkNativeContentWindow', {
+                      value: nativeWindow,
+                      writable: true,
+                      configurable: true
+                    });
+                  } catch (_) {}
+                }
+              } catch (_) {}
+            }
+
+            // Sandboxed message events can also expose the child's virtual
+            // Window proxy, depending on which listener wrapped the event.
+            if (event.source === nativeWindow || event.source === child.__windowProxy) {
+              matchedChildWindow = nativeWindow;
+              return true;
+            }
+            return false;
           });
           if (!childPage) return;
 
@@ -1380,7 +1407,7 @@
               // Use the captured native target directly. event.source can be
               // the child's virtual proxy, whose postMessage receiver is not
               // necessarily the frame we intend to reply to from this context.
-              const targetWindow = childPage.iframe?.__wkNativeContentWindow;
+              const targetWindow = matchedChildWindow || childPage.iframe?.__wkNativeContentWindow;
               targetWindow?.postMessage({ turbowarp: 'init', userid: null, storage: snapshot }, '*');
             } catch (_) {}
             return;
