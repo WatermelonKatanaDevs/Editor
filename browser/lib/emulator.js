@@ -730,14 +730,17 @@
 
         // IIFE: (function(){})(), including a function wrapped for source tracking.
         if (
-          callee.type === "FunctionExpression" ||
-          (callee.type === "CallExpression" &&
-            (
-              callee.callee?.type === "Identifier" &&
-              callee.callee.name === "__wkRegisterFunctionSource" ||
-              callee.callee?.type === "MemberExpression" &&
-              callee.callee.object?.name === "__wkRegisterFunctionSource"
-            ))
+          !options.preserveIIFEThis &&
+          (
+            callee.type === "FunctionExpression" ||
+            (callee.type === "CallExpression" &&
+              (
+                callee.callee?.type === "Identifier" &&
+                callee.callee.name === "__wkRegisterFunctionSource" ||
+                callee.callee?.type === "MemberExpression" &&
+                callee.callee.object?.name === "__wkRegisterFunctionSource"
+              ))
+          )
         ) {
           node.callee = {
             type: "MemberExpression",
@@ -996,7 +999,7 @@
     };
   }
 
-  function editCode(code) {
+  function editCode(code, options = {}) {
     // Allow passing a function directly
     if (typeof code === 'function') {
       code = extractFunctionBody(code);
@@ -1010,7 +1013,7 @@
     const ast = parseCode(code, 'script');
 
     // Transform AST while preserving exact source slices for code inspection.
-    transformAST(ast, { source: code });
+    transformAST(ast, { ...options, source: code });
 
     // Regenerate code
     const transformed = astring.generate(ast);
@@ -5229,7 +5232,7 @@
           })();
         `;
 
-        __codeString = window.__usefulHelpers.editCode(__codeString);
+        __codeString = window.__usefulHelpers.editCode(__codeString, { preserveIIFEThis: true });
         
         return __rawReflectApply(async function(window, self, globalThis, parent, top, frames, opener, frameElement, location, document, navigator, screen, devicePixelRatio, orientation) {
           let __execResult;
@@ -5273,7 +5276,7 @@
         enumerable: false
       });
 
-      function __invokeDynamicFunction(source, parameters, kind, thisArg, args) {
+      function __invokeDynamicFunction(source, parameters, kind, thisArg, args, newTarget) {
         const allowYield = kind === 'generator' || kind === 'asyncGenerator';
         const ast = acorn.parse(source, {
           ...acornParseOptions,
@@ -5317,6 +5320,9 @@
             return eval(functionSource);
           }
         }, __windowProxy, [dynamicGlobalScope]);
+        if (newTarget && kind === 'normal') {
+          return Reflect.construct(dynamicFunction, args || [], newTarget);
+        }
         return __rawReflectApply(dynamicFunction, thisArg, args || []);
       }
 
@@ -5441,7 +5447,7 @@
           const invocation = 'window.__invokeDynamicFunction(' +
             JSON.stringify(body) + ',' +
             JSON.stringify(parameters) + ',' +
-            JSON.stringify(kind) + ',this,arguments)';
+            JSON.stringify(kind) + ',this,arguments,new.target)';
           const trampolineExecution = kind === 'generator' || kind === 'asyncGenerator'
             ? 'yield* ' + invocation + ';'
             : 'return ' + invocation + ';';
@@ -5455,7 +5461,7 @@
               return Reflect.apply(target, thisArg, callArgs);
             },
             construct(target, callArgs, newTarget) {
-              return Reflect.construct(target, callArgs, newTarget === scopedFunction ? target : newTarget);
+              return Reflect.construct(target, callArgs, newTarget);
             }
           });
 
