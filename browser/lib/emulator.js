@@ -1338,7 +1338,13 @@
 
           const childPage = (pageEmulator.children || []).find(child => {
             const nativeWindow = child?.iframe?.__wkNativeContentWindow;
-            return nativeWindow && nativeWindow === event.source;
+            // Sandboxed message events are exposed through the child's virtual
+            // Window proxy by the EventTarget wrapper. Other origins may still
+            // expose the native WindowProxy, so accept either identity.
+            return !!event.source && (
+              event.source === nativeWindow ||
+              event.source === child?.__windowProxy
+            );
           });
           if (!childPage) return;
 
@@ -1371,7 +1377,11 @@
             } catch (_) {}
 
             try {
-              event.source.postMessage({ turbowarp: 'init', userid: null, storage: snapshot }, '*');
+              // Use the captured native target directly. event.source can be
+              // the child's virtual proxy, whose postMessage receiver is not
+              // necessarily the frame we intend to reply to from this context.
+              const targetWindow = childPage.iframe?.__wkNativeContentWindow;
+              targetWindow?.postMessage({ turbowarp: 'init', userid: null, storage: snapshot }, '*');
             } catch (_) {}
             return;
           }
