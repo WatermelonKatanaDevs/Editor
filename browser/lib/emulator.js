@@ -3961,6 +3961,15 @@
             }
           }
 
+          let isWindowReference = false;
+          try {
+            isWindowReference =
+              (typeof Window !== 'undefined' && value instanceof Window) ||
+              hasDOMBrand(value, 'Window') ||
+              value.window === value;
+          } catch (_) {}
+          if (!isWindowReference) return null;
+
           let root = pageEmulator;
           const rootSeen = new Set();
           while (root?.parent && root.parent !== false && !rootSeen.has(root)) {
