@@ -21,8 +21,9 @@
     const pattern = /(\x60{3,}[\s\S]*?\x60{3,}|~{3,}[\s\S]*?~{3,}|\x60[^\x60\n]*\x60|\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^$\n]+\$)/g;
     const text = source.replace(pattern, match => {
       if (match.startsWith('\x60') || match.startsWith('~~~')) return match;
-      const display = match.startsWith('$') || match.startsWith('\\[');
-      const delimiterLength = match.startsWith('$') || match.startsWith('\\[') || match.startsWith('\\(') ? 2 : 1;
+      const doubleDollar = match.charCodeAt(0) === 36 && match.charCodeAt(1) === 36;
+      const display = doubleDollar || match.startsWith('\\[');
+      const delimiterLength = doubleDollar || match.startsWith('\\[') || match.startsWith('\\(') ? 2 : 1;
       expressions.push({tex:match.slice(delimiterLength,-delimiterLength),display,raw:match});
       return 'KATEXMATH' + (expressions.length - 1) + 'TOKEN';
     });
