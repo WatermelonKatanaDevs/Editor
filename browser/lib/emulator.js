@@ -2813,6 +2813,19 @@
                   const rawAttribute = unwrapDOMValue(attribute);
                   const owner = target.ownerElement;
                   if (
+                    owner instanceof HTMLScriptElement &&
+                    rawAttribute instanceof Attr &&
+                    !rawAttribute.ownerElement &&
+                    rawAttribute.namespaceURI == null &&
+                    rawAttribute.name.toLowerCase() === 'type' &&
+                    rawAttribute.ownerDocument === owner.ownerDocument
+                  ) {
+                    const oldAttribute = Reflect.apply(target.getNamedItem, target, ['type']);
+                    clearSavedScriptType(owner, 'type');
+                    Reflect.apply(owner.setAttribute, owner, ['type', rawAttribute.value]);
+                    return wrapDOMValue(oldAttribute);
+                  }
+                  if (
                     owner &&
                     rawAttribute instanceof Attr &&
                     !rawAttribute.ownerElement &&
@@ -3060,6 +3073,21 @@
                 return function(name, force) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return false;
+                  if (isVirtualizedResourceAttribute(target, attributeName)) {
+                    const currentlyPresent = Reflect.apply(target.hasAttribute, target, [attributeName]);
+                    const shouldExist = arguments.length > 1 ? !!force : !currentlyPresent;
+                    if (shouldExist) {
+                      if (target instanceof HTMLScriptElement && attributeName === 'type') clearSavedScriptType(target, attributeName);
+                      Reflect.apply(target.setAttribute, target, [attributeName, '']);
+                      return true;
+                    }
+                    Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
+                    if (target instanceof HTMLScriptElement && attributeName === 'type') {
+                      Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-type']);
+                    }
+                    Reflect.apply(nativeElementRemoveAttribute, target, [attributeName]);
+                    return false;
+                  }
                   if (/^on[a-z]/i.test(attributeName)) {
                     const currentlyPresent = Reflect.apply(target.hasAttribute, target, [attributeName]);
                     const shouldExist = arguments.length > 1 ? !!force : !currentlyPresent;
@@ -3075,6 +3103,20 @@
                   }
                   const method = Reflect.get(target, prop, target);
                   return Reflect.apply(method, target, arguments);
+                };
+              }
+              if (prop === 'removeAttributeNS' && target instanceof Element) {
+                return function(namespace, name) {
+                  const attributeName = String(name || '').toLowerCase();
+                  if (namespace == null || namespace === '') {
+                    if (isVirtualizedResourceAttribute(target, attributeName)) {
+                      Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
+                    }
+                    if (target instanceof HTMLScriptElement && attributeName === 'type') {
+                      Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-type']);
+                    }
+                  }
+                  return Reflect.apply(target.removeAttributeNS, target, [namespace, name]);
                 };
               }
               if (prop === 'removeAttribute' && target instanceof Element) {
@@ -3166,6 +3208,17 @@
               ) {
                 return function(attribute) {
                   const rawAttribute = unwrapDOMValue(attribute);
+                  if (
+                    rawAttribute instanceof Attr &&
+                    rawAttribute.namespaceURI == null &&
+                    target instanceof HTMLScriptElement &&
+                    rawAttribute.name.toLowerCase() === 'type'
+                  ) {
+                    const oldAttribute = Reflect.apply(target.getAttributeNode, target, ['type']);
+                    clearSavedScriptType(target, 'type');
+                    Reflect.apply(target.setAttribute, target, ['type', rawAttribute.value]);
+                    return wrapDOMValue(oldAttribute);
+                  }
                   if (
                     rawAttribute instanceof Attr &&
                     rawAttribute.namespaceURI == null &&
