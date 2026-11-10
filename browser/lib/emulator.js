@@ -2878,13 +2878,19 @@
         }
 
         function getPublicAliasName(attribute) {
-          if (!attribute || !isInternalDOMAttribute(attribute.name)) return null;
+          if (
+            !attribute ||
+            !attribute.ownerElement ||
+            !isInternalDOMAttribute(attribute.name)
+          ) return null;
           const name = String(attribute.name).toLowerCase();
           if (!name.startsWith('data-raw-')) return null;
           const publicName = name.slice(9);
           if (!publicName || publicName === 'script' || publicName === 'style-text' ||
               isInternalDOMAttribute('data-' + publicName)) return null;
-          return publicName;
+          return isVirtualPublicAttribute(attribute.ownerElement, publicName)
+            ? publicName
+            : null;
         }
 
         function wrapDOMCollection(collection) {
