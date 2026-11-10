@@ -2881,35 +2881,43 @@
           }
         }
 
+        const DOMCollectionBrands = new Set([
+          'HTMLCollection', 'NodeList', 'NamedNodeMap', 'StyleSheetList'
+        ]);
+        const DOMPlatformObjectBrands = new Set([
+          'Range', 'Selection', 'TreeWalker', 'NodeIterator', 'TouchList', 'Touch',
+          'CSSStyleSheet', 'CSSStyleDeclaration', 'CSSRule', 'CSSRuleList', 'MediaList',
+          'DOMTokenList', 'DOMStringMap', 'DOMImplementation', 'MutationRecord',
+          'IntersectionObserverEntry', 'ResizeObserverEntry', 'PerformanceEntry',
+          'XPathResult', 'XPathExpression', 'XPathEvaluator', 'MutationObserver',
+          'IntersectionObserver', 'ResizeObserver', 'PerformanceObserver', 'MediaQueryList',
+          'Navigator', 'Screen', 'ScreenOrientation', 'History', 'CustomElementRegistry',
+          'BarProp', 'Performance', 'Crypto', 'SubtleCrypto', 'StorageManager',
+          'PermissionStatus', 'Permissions', 'Geolocation', 'MediaDevices', 'Clipboard',
+          'NetworkInformation', 'LockManager', 'IDBFactory', 'CacheStorage',
+          'Animation', 'KeyframeEffect', 'AnimationTimeline', 'DocumentTimeline',
+          'ScrollTimeline', 'ViewTimeline', 'VisualViewport', 'CanvasRenderingContext2D',
+          'OffscreenCanvasRenderingContext2D', 'ImageBitmapRenderingContext',
+          'WebGLRenderingContext', 'WebGL2RenderingContext', 'Location', 'DOMStringList'
+        ]);
+        function getDOMBrand(value) {
+          try {
+            const tag = Object.prototype.toString.call(value);
+            return tag.startsWith('[object ') && tag.endsWith(']')
+              ? tag.slice(8, -1)
+              : null;
+          } catch (_) {
+            return null;
+          }
+        }
         function hasDOMBrand(value, name) {
-          try { return Object.prototype.toString.call(value) === '[object ' + name + ']'; }
-          catch (_) { return false; }
+          return getDOMBrand(value) === name;
         }
-
         function isDOMCollectionValue(value) {
-          return hasDOMBrand(value, 'HTMLCollection') ||
-            hasDOMBrand(value, 'NodeList') ||
-            hasDOMBrand(value, 'NamedNodeMap') ||
-            hasDOMBrand(value, 'StyleSheetList');
+          return DOMCollectionBrands.has(getDOMBrand(value));
         }
-
         function isDOMPlatformObject(value) {
-          return [
-            'Range', 'Selection', 'TreeWalker', 'NodeIterator', 'TouchList', 'Touch',
-            'CSSStyleSheet', 'CSSStyleDeclaration', 'CSSRule', 'CSSRuleList', 'MediaList',
-            'DOMTokenList', 'DOMStringMap', 'DOMImplementation', 'MutationRecord',
-            'IntersectionObserverEntry', 'ResizeObserverEntry', 'PerformanceEntry',
-            'XPathResult', 'XPathExpression', 'XPathEvaluator', 'MutationObserver',
-            'IntersectionObserver', 'ResizeObserver', 'PerformanceObserver', 'MediaQueryList',
-            'Navigator', 'Screen', 'ScreenOrientation', 'History', 'CustomElementRegistry',
-            'BarProp', 'Performance', 'Crypto', 'SubtleCrypto', 'StorageManager',
-            'PermissionStatus', 'Permissions', 'Geolocation', 'MediaDevices', 'Clipboard',
-            'NetworkInformation', 'LockManager', 'IDBFactory', 'CacheStorage',
-            'Animation', 'KeyframeEffect', 'AnimationTimeline', 'DocumentTimeline',
-            'ScrollTimeline', 'ViewTimeline', 'VisualViewport', 'CanvasRenderingContext2D',
-            'OffscreenCanvasRenderingContext2D', 'ImageBitmapRenderingContext',
-            'WebGLRenderingContext', 'WebGL2RenderingContext', 'Location', 'DOMStringList'
-          ].some(name => hasDOMBrand(value, name));
+          return DOMPlatformObjectBrands.has(getDOMBrand(value));
         }
 
         function unwrapDOMValue(value) {
