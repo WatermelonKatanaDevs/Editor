@@ -6275,8 +6275,8 @@
         patchPublicNativeGetter(document, 'defaultView', nativeValue =>
           wrapDOMValue(nativeValue)
         );
-        patchPublicNativeGetter(document, 'location', nativeValue =>
-          document === window.document ? virtualLocation : wrapDOMValue(nativeValue)
+        patchPublicNativeGetter(document, 'location', (nativeValue, receiver) =>
+          receiver === document ? virtualLocation : wrapDOMValue(nativeValue)
         );
         patchPublicNativeGetter(Node.prototype, 'ownerDocument', nativeValue =>
           wrapDOMValue(nativeValue)
