@@ -2107,6 +2107,45 @@
           return applyNodeMethod(nativeReplaceChild, this, [newNode, oldNode]);
         };
 
+        function wrapInsertionMethod(prototype, name, nodeArguments = () => []) {
+          if (!prototype || typeof prototype[name] !== 'function') return;
+          const nativeMethod = prototype[name];
+          const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+          if (descriptor && descriptor.configurable === false && descriptor.writable === false) return;
+          const wrappedMethod = function(...args) {
+            for (const index of nodeArguments(args)) {
+              const candidate = args[index];
+              if (candidate instanceof Node) prepareInsertedScripts(candidate);
+            }
+            return Reflect.apply(nativeMethod, this, args);
+          };
+          try {
+            Object.defineProperty(prototype, name, {
+              ...(descriptor || {}),
+              value: wrappedMethod
+            });
+          } catch (_) {}
+        }
+
+        // These ParentNode/ChildNode APIs insert nodes without calling
+        // Node.appendChild/insertBefore, so prepare handlers/scripts beforehand.
+        for (const prototype of [Element.prototype, Document.prototype, DocumentFragment.prototype]) {
+          wrapInsertionMethod(prototype, 'append', args => args.map((_, index) => index));
+          wrapInsertionMethod(prototype, 'prepend', args => args.map((_, index) => index));
+          wrapInsertionMethod(prototype, 'replaceChildren', args => args.map((_, index) => index));
+        }
+        for (const prototype of [Element.prototype, CharacterData.prototype, DocumentType.prototype]) {
+          wrapInsertionMethod(prototype, 'before', args => args.map((_, index) => index));
+          wrapInsertionMethod(prototype, 'after', args => args.map((_, index) => index));
+          wrapInsertionMethod(prototype, 'replaceWith', args => args.map((_, index) => index));
+        }
+        wrapInsertionMethod(Element.prototype, 'insertAdjacentElement', () => [1]);
+        if (typeof Range !== 'undefined') {
+          wrapInsertionMethod(Range.prototype, 'insertNode', () => [0]);
+        }
+        wrapInsertionMethod(Document.prototype, 'importNode', () => [0]);
+        wrapInsertionMethod(Document.prototype, 'adoptNode', () => [0]);
+
         function checkNodeAndChildren(node) {
           if (node.nodeType !== Node.ELEMENT_NODE) return;
           if (node.__editingAttribute) return;
