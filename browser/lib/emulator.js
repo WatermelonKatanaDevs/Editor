@@ -6117,11 +6117,10 @@
             }
             if (prop === 'getOwnPropertyDescriptor') {
               return function(object, key) {
-                const descriptor = rawReflectApply(target.getOwnPropertyDescriptor, target, [
-                  unwrapDOMValue(object),
-                  key
-                ]);
-                return descriptor ? wrapDOMValue(descriptor) : descriptor;
+                // Keep the public proxy as the reflection target so its
+                // getOwnPropertyDescriptor trap can virtualize values instead
+                // of exposing descriptors from the native frame/DOM object.
+                return rawReflectApply(target.getOwnPropertyDescriptor, target, [object, key]);
               };
             }
             const value = rawReflectApply(target.get, target, [target, prop, target]);
