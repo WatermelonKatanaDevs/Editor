@@ -4214,11 +4214,31 @@
           return proxy;
         }
 
+        // Capture Promise primitives before page code can replace them.
+        const NativePromise = Promise;
+        const nativePromiseResolve = NativePromise.resolve;
+        const nativePromiseThen = NativePromise.prototype.then;
+        const nativePromiseReflectApply = Reflect.apply;
+        const nativePromiseObjectToString = Object.prototype.toString;
+
         function wrapAsyncDOMResult(value) {
-          if (value && getDOMBrand(value) === 'Promise') {
-            return Promise.resolve(value).then(result => wrapDOMValue(result));
+          if (value == null || (typeof value !== 'object' && typeof value !== 'function')) {
+            return wrapDOMValue(value);
           }
-          return wrapDOMValue(value);
+
+          let isPromise = false;
+          try {
+            isPromise = value instanceof NativePromise ||
+              nativePromiseReflectApply(nativePromiseObjectToString, value, []) === '[object Promise]';
+          } catch (_) {}
+
+          if (!isPromise) return wrapDOMValue(value);
+          const normalized = nativePromiseReflectApply(nativePromiseResolve, NativePromise, [value]);
+          return nativePromiseReflectApply(
+            nativePromiseThen,
+            normalized,
+            [result => wrapDOMValue(result)]
+          );
         }
 
         function wrapDOMValue(value) {
