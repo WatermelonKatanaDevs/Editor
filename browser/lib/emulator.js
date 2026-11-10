@@ -3173,8 +3173,6 @@
             return originalAddEventListener.call(this, type, listener, options);
           }
           const wrappedListener = function(event) {
-            if (isTurboWarpPlayUrl(CURRENT_PAGE_URL) && event?.data?.turbowarp === 'init') turboDebug('init-delivered-to-message-listener', { sourceOrigin: event.origin || '', hasSource: !!event.source, listenerName: listener.name || 'anonymous' });
-
             // Keep message.source consistent with the virtual contentWindow
             // exposed by this emulator, even when srcdoc inherits a non-opaque
             // origin. Only rewrite the origin for opaque/srcdoc messages.
@@ -3198,6 +3196,19 @@
               }
             } catch (_) {}
             const rewriteOrigin = !event.origin || event.origin === 'null' || event.origin === 'about:srcdoc';
+            if (isTurboWarpPlayUrl(CURRENT_PAGE_URL) && event?.data?.turbowarp === 'init') {
+              let expectedParentProxy = null;
+              try {
+                const parentPage = pageEmulator?.parent && pageEmulator.parent !== false ? pageEmulator.parent : null;
+                if (parentPage) expectedParentProxy = getCallerWindowProxy(parentPage, window.parent);
+              } catch (_) {}
+              turboDebug('init-delivered-to-message-listener', {
+                sourceOrigin: event.origin || '',
+                hasSource: !!event.source,
+                sourceMatchesParent: !!expectedParentProxy && sourceProxy === expectedParentProxy,
+                listenerName: listener.name || 'anonymous'
+              });
+            }
             if (!sourceProxy && !rewriteOrigin) {
               return listener.call(this, event);
             }
