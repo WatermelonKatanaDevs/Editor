@@ -24,7 +24,7 @@
         try { ctx.state.fileManager?.refresh?.(); } catch (_) {}
       }
     });
-    const bridgeId = 'wk-blockbench-' (window.crypto?.randomUUID?.() || (Date.now().toString(36) + Math.random().toString(36).slice(2)));
+    const bridgeId = 'wk-blockbench-' + (window.crypto?.randomUUID?.() || (Date.now().toString(36) + Math.random().toString(36).slice(2)));
     window.__WKBlockbenchBridges = window.__WKBlockbenchBridges || Object.create(null);
 
     const bridge = {
