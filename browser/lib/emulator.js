@@ -3997,10 +3997,13 @@
             if (!candidate || seen.has(candidate)) continue;
             seen.add(candidate);
             if (candidate === pageEmulator && value === window) return windowProxy;
-            if (candidate.iframe?.__wkNativeContentWindow === value) {
-              return candidate === pageEmulator
-                ? windowProxy
-                : getCallerWindowProxy(candidate, value);
+            if (
+              candidate.__windowProxy === value ||
+              candidate.iframe?.__wkNativeContentWindow === value
+            ) {
+              if (candidate === pageEmulator) return windowProxy;
+              const nativeWindow = candidate.iframe?.__wkNativeContentWindow || null;
+              return getCallerWindowProxy(candidate, nativeWindow);
             }
             for (const child of candidate.children || []) pending.push(child);
           }
@@ -4447,6 +4450,15 @@
               return wrapEvent(event);
             }
           });
+          try {
+            const descriptor = Object.getOwnPropertyDescriptor(NativeEventConstructor.prototype, 'constructor');
+            if (descriptor?.configurable) {
+              Object.defineProperty(NativeEventConstructor.prototype, 'constructor', {
+                ...descriptor,
+                value: ScopedEventConstructor
+              });
+            }
+          } catch (_) {}
           window[eventName] = ScopedEventConstructor;
         });
 
