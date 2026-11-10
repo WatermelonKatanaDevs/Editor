@@ -1529,21 +1529,62 @@
           }
         }
 
+        // Rewrite dynamic inline scripts before inserting them into the live DOM.
+        // Native browsers execute classic inline scripts during appendChild /
+        // insertBefore / replaceChild, before MutationObserver callbacks run.
+        function prepareInlineScript(node) {
+          if (!node || node.nodeType !== Node.ELEMENT_NODE || node.tagName !== 'SCRIPT') return;
+          if (node.getAttribute('src') || !node.textContent || node.hasAttribute('data-raw-script')) return;
+          if (node.textContent.includes('__executeCode')) return;
+
+          const rawScript = node.textContent;
+          node.setAttribute('data-raw-script', rawScript);
+
+          const isModule = node.getAttribute('type') === 'module';
+          if (isModule) node.removeAttribute('type');
+
+          const execFn = isModule ? '__executeCodeModule' : '__executeCode';
+          node.textContent = `window.${execFn}(${JSON.stringify(rawScript)}, ${JSON.stringify(CURRENT_PAGE_URL)}, this);\\n`;
+        }
+
+        function prepareInsertedScripts(node) {
+          if (!node) return;
+          prepareInlineScript(node);
+          if (typeof node.querySelectorAll === 'function') {
+            node.querySelectorAll('script').forEach(prepareInlineScript);
+          }
+        }
+
+        // Intercept native insertion synchronously. Preserve native method
+        // receivers, arguments, return values, and exceptions.
+        const applyNodeMethod = Reflect.apply;
+        const nativeAppendChild = Node.prototype.appendChild;
+        const nativeInsertBefore = Node.prototype.insertBefore;
+        const nativeReplaceChild = Node.prototype.replaceChild;
+
+        Node.prototype.appendChild = function(node) {
+          prepareInsertedScripts(node);
+          return applyNodeMethod(nativeAppendChild, this, [node]);
+        };
+
+        Node.prototype.insertBefore = function(node, referenceNode) {
+          prepareInsertedScripts(node);
+          return applyNodeMethod(nativeInsertBefore, this, [node, referenceNode]);
+        };
+
+        Node.prototype.replaceChild = function(newNode, oldNode) {
+          prepareInsertedScripts(newNode);
+          return applyNodeMethod(nativeReplaceChild, this, [newNode, oldNode]);
+        };
+
         function checkNodeAndChildren(node) {
           if (node.nodeType !== Node.ELEMENT_NODE) return;
           if (node.__editingAttribute) return;
           node.__editingAttribute = true;
 
-          // 1. Rewrite dynamic event handlers
+          // 1. Rewrite dynamic event handlers and inline scripts
           patchInlineEvents(node);
-          if (node.tagName === 'SCRIPT' && !node.getAttribute('src') && node.textContent && !node.textContent.includes('__executeCode') && !node.hasAttribute('data-raw-script')) {
-            const rawScript = node.textContent;
-            node.setAttribute('data-raw-script', rawScript);
-            const isModule = node.getAttribute('type') === 'module';
-            if (isModule) node.removeAttribute('type');
-            const execFn = isModule ? '__executeCodeModule' : '__executeCode';
-            node.textContent = `window.${execFn}(${JSON.stringify(rawScript)}, ${JSON.stringify(CURRENT_PAGE_URL)}, this);\n`;
-          }
+          prepareInlineScript(node);
 
           // 2. Process inline styles and <style> tags
           processStyleNode(node);
