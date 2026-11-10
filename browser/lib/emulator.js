@@ -2075,7 +2075,11 @@
           { selector: 'script[src]', attr: 'src',
             filter: async function(response, absoluteUrl, origin, element) {
               const source = await response.clone().text();
-              const scriptType = (element?.getAttribute('type') || '').trim();
+              const scriptType = (
+                element?.getAttribute('data-raw-type') ||
+                element?.getAttribute('type') ||
+                ''
+              ).trim();
               const isModule = scriptType.toLowerCase() === 'module';
               const isClassicScript = !scriptType ||
                 /^(?:text|application)\/(?:java|ecma)script(?:\s*;|$)/i.test(scriptType);
