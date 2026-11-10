@@ -3285,10 +3285,10 @@
               const member = Reflect.get(target, prop, target);
               if (typeof member === 'function') {
                 return function(...args) {
-                  return wrapDOMValue(Reflect.apply(member, target, args.map(unwrapDOMValue)));
+                  return wrapAsyncDOMResult(Reflect.apply(member, target, args.map(unwrapDOMValue)));
                 };
               }
-              return wrapDOMValue(member);
+              return wrapAsyncDOMResult(member);
             },
             set(target, prop, nextValue) {
               if (typeof DOMStringMap !== 'undefined' && target instanceof DOMStringMap &&
@@ -3840,10 +3840,10 @@
               const member = Reflect.get(target, prop, target);
               if (typeof member === 'function') {
                 return function(...args) {
-                  return wrapDOMValue(Reflect.apply(member, target, args.map(unwrapDOMValue)));
+                  return wrapAsyncDOMResult(Reflect.apply(member, target, args.map(unwrapDOMValue)));
                 };
               }
-              return wrapDOMValue(member);
+              return wrapAsyncDOMResult(member);
             },
             set(target, prop, nextValue) {
               const virtualAttributeName = typeof Attr !== 'undefined' && isDOMAttrValue(target)
@@ -4043,7 +4043,7 @@
                   const receiver = thisArg === proxyReceiver
                     ? nativeReceiver
                     : unwrapDOMValue(thisArg);
-                  return wrapDOMValue(Reflect.apply(target, receiver, args.map(unwrapDOMValue)));
+                  return wrapAsyncDOMResult(Reflect.apply(target, receiver, args.map(unwrapDOMValue)));
                 },
                 construct(target, args, newTarget) {
                   return wrapDOMValue(Reflect.construct(
@@ -4064,7 +4064,7 @@
             if (typeof descriptor.get === 'function') {
               const getter = descriptor.get;
               wrapped.get = function() {
-                return wrapDOMValue(Reflect.apply(getter, nativeReceiver, []));
+                return wrapAsyncDOMResult(Reflect.apply(getter, nativeReceiver, []));
               };
             }
             if (typeof descriptor.set === 'function') {
@@ -4206,6 +4206,13 @@
 
           wrappedDOMConstructors.set(constructor, proxy);
           return proxy;
+        }
+
+        function wrapAsyncDOMResult(value) {
+          if (value && getDOMBrand(value) === 'Promise') {
+            return Promise.resolve(value).then(result => wrapDOMValue(result));
+          }
+          return wrapDOMValue(value);
         }
 
         function wrapDOMValue(value) {
@@ -5851,14 +5858,14 @@
             if (isNativeFunction(value) && !value.prototype && prop != 'constructor') {
               return function(){
                 const args = Array.from(arguments).map(unwrapDOMValue);
-                return wrapDocumentValue(Reflect.apply(value, document, args));
+                return wrapAsyncDOMResult(Reflect.apply(value, document, args));
               };
             }
             if (typeof value == 'function' && prop != 'constructor') {
               return function(){
                 const receiver = this == documentProxy ? document : unwrapDOMValue(this);
                 const args = Array.from(arguments).map(unwrapDOMValue);
-                return wrapDocumentValue(Reflect.apply(value, receiver, args));
+                return wrapAsyncDOMResult(Reflect.apply(value, receiver, args));
               };
             }
             return wrapDocumentValue(value);
@@ -6391,7 +6398,7 @@
             }
             if (isNativeFunction(value) && !value.prototype) {
               return function(...args) {
-                return wrapDOMValue(Reflect.apply(value, window, args.map(unwrapDOMValue)));
+                return wrapAsyncDOMResult(Reflect.apply(value, window, args.map(unwrapDOMValue)));
               };
             }
             return wrapDOMValue(value);
@@ -6665,7 +6672,7 @@
                   normalizedThis,
                   normalizedArgs
                 ]);
-                return nativeTarget ? wrapDOMValue(result) : result;
+                return nativeTarget ? wrapAsyncDOMResult(result) : result;
               };
             }
             if (prop === 'construct') {
@@ -6675,7 +6682,7 @@
                   Array.from(args || [], unwrapDOMValue),
                   newTarget
                 ]);
-                return wrapDOMValue(result);
+                return wrapAsyncDOMResult(result);
               };
             }
             if (prop === 'getOwnPropertyDescriptor') {
@@ -6731,7 +6738,7 @@
           const targetThis = normalizeThis(this, thisArg);
           const targetArgs = nativeTarget ? args.map(unwrapDOMValue) : args;
           const result = rawReflectApply(rawCall, this, [targetThis, ...targetArgs]);
-          return nativeTarget ? wrapDOMValue(result) : result;
+          return nativeTarget ? wrapAsyncDOMResult(result) : result;
         };
 
         Function.prototype.apply = function(thisArg, argsArray) {
@@ -6743,7 +6750,7 @@
               ? Array.from(argsArray, unwrapDOMValue)
               : argsArray;
           const result = rawReflectApply(rawApply, this, [targetThis, targetArgs]);
-          return nativeTarget ? wrapDOMValue(result) : result;
+          return nativeTarget ? wrapAsyncDOMResult(result) : result;
         };
 
         window.__windowProxy = windowProxy;
