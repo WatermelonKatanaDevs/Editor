@@ -762,34 +762,75 @@
     }
     beginInlineRename(node) {
       const li = [...this.tree.querySelectorAll('li[data-path]')].find(x => x.dataset.path === node.path);
-      if (!li) return;
-      const old = this.tree.querySelector('.tree-inline-name');
-      old?.remove();
-      const children = [...li.childNodes];
-      const textNode = children.reverse().find(x => x.nodeType === Node.TEXT_NODE);
-      if (!textNode) return;
+      if (!li) {
+        this.report(new Error('Could not find the selected file or folder in the explorer.'));
+        return;
+      }
+      const label = li.querySelector(':scope > .file-tree-label');
+      if (!label) {
+        this.report(new Error('Could not find the filename label to rename.'));
+        return;
+      }
+
+      const previousInput = this.tree.querySelector('.tree-inline-input');
+      if (previousInput) {
+        previousInput.blur();
+        if (this.tree.contains(previousInput)) previousInput.closest('li')?.querySelector('.file-tree-label')?.focus?.();
+      }
+
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'tree-inline-input';
       input.value = node.name;
-      textNode.replaceWith(input);
+      input.setAttribute('aria-label', 'Rename ' + node.name);
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      label.replaceWith(input);
       li.classList.add('tree-inline-name');
-      const finish = async (commit) => {
-        if (input.dataset.done) return;
-        input.dataset.done = '1';
-        const value = input.value.trim();
-        if (commit && value && value !== node.name) {
-          try { await this.renameNode(node, value); return; }
-          catch (err) { this.report(err); }
-        }
-        input.replaceWith(document.createTextNode(node.name + (node.isDir ? '/' : '')));
+
+      let finishing = false;
+      const restoreLabel = () => {
+        const restored = document.createElement('span');
+        restored.className = 'file-tree-label';
+        restored.textContent = node.name + (node.isDir ? '/' : '');
+        if (input.isConnected) input.replaceWith(restored);
         li.classList.remove('tree-inline-name');
       };
+      const finish = async commit => {
+        if (finishing || !input.isConnected) return;
+        const value = input.value.trim();
+        if (!commit || !value || value === node.name) {
+          restoreLabel();
+          return;
+        }
+
+        finishing = true;
+        input.classList.remove('tree-inline-input-error');
+        input.removeAttribute('aria-invalid');
+        try {
+          await this.renameNode(node, value);
+        } catch (err) {
+          this.report(err);
+          finishing = false;
+          input.classList.add('tree-inline-input-error');
+          input.setAttribute('aria-invalid', 'true');
+          input.focus();
+          input.select();
+        }
+      };
+
       input.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
-        else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          finish(true);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          restoreLabel();
+        }
       });
-      input.addEventListener('blur', () => finish(!!input.value.trim()));
+      input.addEventListener('blur', () => {
+        if (!finishing) finish(!!input.value.trim());
+      });
       input.focus();
       input.select();
     }

@@ -53,22 +53,6 @@
       this.provider.directories = this.directories;
     }
 
-    _rebuildDirectoryIndexSync() {
-      this.directories = new Set(['']);
-      this.children = new Map([['', new Set()]]);
-      for (const path of this.provider.directories || []) this._addParentDirectories(path);
-      for (const rawPath of this.provider.cache?.keys?.() || []) {
-        const path = this._normalize(rawPath);
-        if (!path) continue;
-        const separator = path.lastIndexOf('/');
-        const parent = separator >= 0 ? path.slice(0, separator) : '';
-        if (parent && !this.directories.has(parent)) this._addParentDirectories(parent);
-        const name = separator >= 0 ? path.slice(separator + 1) : path;
-        if (name) this._addDirectoryChild(parent, name);
-      }
-      this.provider.directories = this.directories;
-    }
-
     _addDirectoryChild(parent, name) {
       let children = this.children.get(parent);
       if (!children) this.children.set(parent, children = new Set());
@@ -215,13 +199,7 @@
         const files = this.listFilesSync().filter(path => path === source || path.startsWith(source + '/'));
         const dirs = this.listDirectoriesSync().filter(path => path === source || path.startsWith(source + '/'));
         this._addParentDirectories(destination);
-        const destinationDirs = dirs
-          .map(path => destination + path.slice(source.length))
-          .sort((a, b) => a.length - b.length);
-        for (const path of destinationDirs) {
-          this._addParentDirectories(path);
-          this.provider.mkdir?.(path);
-        }
+        for (const path of dirs) this._addParentDirectories(destination + path.slice(source.length));
         for (const path of files) {
           const target = destination + path.slice(source.length);
           const data = this.readFileSync(path, 'binary');
@@ -229,7 +207,7 @@
         }
         for (const path of files) this.deleteFileSync(path);
         for (const path of dirs.sort((a,b) => b.length - a.length)) this.directories.delete(path);
-        this._rebuildDirectoryIndexSync();
+        this._rebuildDirectoryIndex();
         this.provider.directories = this.directories;
         this.provider.removeDirectory?.(source);
       } else {
@@ -550,9 +528,7 @@
       this.cache = new Map();
       this.directories = new Set(['']);
       this.zip = null;
-      this.writeQueue = Promise.resolve();
-      this.writeErrors = [];
-      this.saveScheduled = false;
+      this.writing = false;
     }
     async init() {
       const file = await this.fileHandle.getFile();
@@ -565,65 +541,28 @@
       const parts = path.split('/').filter(Boolean);
       let curr = '';
       for (let i = 0; i < parts.length - 1; i++) { curr = curr ? curr + '/' + parts[i] : parts[i]; this.directories.add(curr); this.zip.folder(curr); }
-      if (this.sync) this._queueSave();
-    }
-    mkdir(path) {
-      let curr = '';
-      for (const part of String(path).split('/').filter(Boolean)) {
-        curr = curr ? curr + '/' + part : part;
-        this.directories.add(curr);
+      if (this.sync) {
+        this._autoSave();
       }
-      if (this.sync) this._queueSave();
-    }
-    removeDirectory(path) {
-      for (const dir of [...this.directories]) if (dir === path || dir.startsWith(path + '/')) this.directories.delete(dir);
-      this.zip.remove(path);
-      if (this.sync) this._queueSave();
     }
     delete(path) {
       const deleted = this.cache.delete(path);
       if (deleted) {
         this.zip.remove(path);
-        if (this.sync) this._queueSave();
+        if (this.sync) this._autoSave();
       }
       return deleted;
     }
-    _queueSave() {
-      if (!this.sync || this.saveScheduled) return this.writeQueue;
-      this.saveScheduled = true;
-      const task = this.writeQueue.catch(() => {}).then(async () => {
-        this.saveScheduled = false;
-        await this._saveNow();
-      });
-      this.writeQueue = task.catch(error => {
-        this.saveScheduled = false;
-        this.writeErrors.push(error);
-      });
-      return this.writeQueue;
-    }
-    async flush() {
-      let queue;
-      do {
-        queue = this.writeQueue;
-        await queue;
-      } while (queue !== this.writeQueue);
-      if (this.writeErrors.length) {
-        const errors = this.writeErrors.splice(0);
-        const error = new Error('Unable to persist ' + errors.length + ' filesystem operation' + (errors.length === 1 ? '' : 's') + '. ' + (errors[0]?.message || errors[0]));
-        error.errors = errors;
-        throw error;
-      }
-      return true;
+    async _autoSave() {
+      if (this.writing) return;
+      this.writing = true;
+      try { await this.save(); } finally { this.writing = false; }
     }
     async permissionState() {
       if (typeof this.fileHandle?.queryPermission !== 'function') return 'granted';
       try { return await this.fileHandle.queryPermission({ mode: 'readwrite' }); } catch (_) { return 'denied'; }
     }
     async save() {
-      await this.flush();
-      return await this._saveNow();
-    }
-    async _saveNow() {
       for (const dir of this.directories) if (dir) this.zip.folder(dir);
       this.cache.forEach((data, path) => this.zip.file(path, data));
       const blob = await this.zip.generateAsync({ type: 'blob' });

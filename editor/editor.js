@@ -732,7 +732,7 @@ window.__editorInitPromise = (async function () {
   function logError(e) {
     try {
       console.error(e?.stack || e);
-      state.fileManager?.showError?.(e);
+      state.fileManager?.report(e);
     } catch (_) {
       console.error(e);
     }
