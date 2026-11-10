@@ -203,6 +203,7 @@
         const isModule = element && element.getAttribute('type') === 'module';
 
         if (isModule) {
+          element.setAttribute('data-raw-type', element.getAttribute('type'));
           element.removeAttribute('type');
           text = `window.__executeCodeModule(${JSON.stringify(text)}, ${JSON.stringify(ourl)});`;
         } else {
@@ -2036,7 +2037,10 @@
             filter: async function(response, absoluteUrl, origin, element) {
               const source = await response.clone().text();
               const isModule = element && element.getAttribute('type') === 'module';
-              if (isModule) element.removeAttribute('type');
+              if (isModule) {
+                element.setAttribute('data-raw-type', element.getAttribute('type'));
+                element.removeAttribute('type');
+              }
               const executor = isModule ? '__executeCodeModule' : '__executeCode';
               const wrappedSource = 'window.' + executor + '(' +
                 JSON.stringify(source) + ', ' + JSON.stringify(absoluteUrl) + ');';
@@ -2116,7 +2120,10 @@
           node.setAttribute('data-raw-script', rawScript);
 
           const isModule = node.getAttribute('type') === 'module';
-          if (isModule) node.removeAttribute('type');
+          if (isModule) {
+            node.setAttribute('data-raw-type', node.getAttribute('type'));
+            node.removeAttribute('type');
+          }
 
           const execFn = isModule ? '__executeCodeModule' : '__executeCode';
           node.textContent = `window.${execFn}(${JSON.stringify(rawScript)}, ${JSON.stringify(CURRENT_PAGE_URL)}, this);\n`;
@@ -2809,6 +2816,11 @@
               }
               if (
                 target instanceof HTMLScriptElement &&
+                prop === 'type' &&
+                target.hasAttribute('data-raw-type')
+              ) return target.getAttribute('data-raw-type');
+              if (
+                target instanceof HTMLScriptElement &&
                 (prop === 'textContent' || prop === 'text')
               ) {
                 const original = target.getAttribute('data-raw-script');
@@ -2882,6 +2894,10 @@
                 return function(name) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return null;
+                  if (target instanceof HTMLScriptElement && attributeName === 'type') {
+                    const originalType = Reflect.apply(target.getAttribute, target, ['data-raw-type']);
+                    if (originalType != null) return originalType;
+                  }
                   if (attributeName.startsWith('on')) {
                     const rawHandler = Reflect.apply(target.getAttribute, target, ['data-raw-' + attributeName]);
                     if (rawHandler != null) return rawHandler;
@@ -2892,13 +2908,21 @@
               if (prop === 'hasAttribute') {
                 return function(name) {
                   if (isInternalDOMAttribute(name)) return false;
+                  if (target instanceof HTMLScriptElement && String(name).toLowerCase() === 'type' &&
+                      Reflect.apply(target.hasAttribute, target, ['data-raw-type'])) return true;
                   return Reflect.apply(target.hasAttribute, target, [name]);
                 };
               }
               if (prop === 'getAttributeNames') {
                 return function() {
-                  return Reflect.apply(target.getAttributeNames, target, [])
+                  const names = Reflect.apply(target.getAttributeNames, target, [])
                     .filter(name => !isInternalDOMAttribute(name));
+                  if (
+                    target instanceof HTMLScriptElement &&
+                    Reflect.apply(target.hasAttribute, target, ['data-raw-type']) &&
+                    !names.includes('type')
+                  ) names.push('type');
+                  return names;
                 };
               }
               if (prop === 'attributes') return wrapDOMCollection(Reflect.get(target, prop, target));
@@ -4422,15 +4446,22 @@
         });
         function virtualizeDocumentSelector(selector) {
           if (typeof selector !== 'string') return selector;
-          const logicalResourceSelector = selector.replace(
-            /(^|[,>+~\\s])script(\\s*)\\[src([\\s~|^$*]?=)/gi,
-            '$1script[data-wk-internal-script-src$3'
-          );
+          const logicalResourceSelector = selector
+            .replace(
+              /(^|[,>+~\\s])script(\\s*)\\[src([\\s~|^$*]?=)/gi,
+              '$1script[data-wk-internal-script-src$3'
+            )
+            .replace(
+              /(^|[,>+~\\s])script(\\s*)\\[type([\\s~|^$*]?=)/gi,
+              '$1script[data-wk-internal-script-type$3'
+            );
           const withoutPrivateAttributes = logicalResourceSelector.replace(
             /\\[\\s*data-(?:raw-[a-z0-9_-]+|page-id|embed-frame|embed-wrapper)(?:\\s*(?:[~|^$*]?=)[^\\]]*)?\\s*\\]/gi,
             ':not(*)'
           );
-          return withoutPrivateAttributes.replace(/data-wk-internal-script-src/gi, 'data-raw-src');
+          return withoutPrivateAttributes
+            .replace(/data-wk-internal-script-src/gi, 'data-raw-src')
+            .replace(/data-wk-internal-script-type/gi, 'data-raw-type');
         }
 
         const documentProxy = new Proxy(documentTarget, {
