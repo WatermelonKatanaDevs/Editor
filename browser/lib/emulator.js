@@ -3047,7 +3047,19 @@
             (typeof IntersectionObserver !== 'undefined' && value instanceof IntersectionObserver) ||
             (typeof ResizeObserver !== 'undefined' && value instanceof ResizeObserver) ||
             (typeof PerformanceObserver !== 'undefined' && value instanceof PerformanceObserver) ||
-            (typeof MediaQueryList !== 'undefined' && value instanceof MediaQueryList)
+            (typeof MediaQueryList !== 'undefined' && value instanceof MediaQueryList) ||
+            (typeof Animation !== 'undefined' && value instanceof Animation) ||
+            (typeof KeyframeEffect !== 'undefined' && value instanceof KeyframeEffect) ||
+            (typeof AnimationTimeline !== 'undefined' && value instanceof AnimationTimeline) ||
+            (typeof DocumentTimeline !== 'undefined' && value instanceof DocumentTimeline) ||
+            (typeof ScrollTimeline !== 'undefined' && value instanceof ScrollTimeline) ||
+            (typeof ViewTimeline !== 'undefined' && value instanceof ViewTimeline) ||
+            (typeof VisualViewport !== 'undefined' && value instanceof VisualViewport) ||
+            (typeof CanvasRenderingContext2D !== 'undefined' && value instanceof CanvasRenderingContext2D) ||
+            (typeof OffscreenCanvasRenderingContext2D !== 'undefined' && value instanceof OffscreenCanvasRenderingContext2D) ||
+            (typeof ImageBitmapRenderingContext !== 'undefined' && value instanceof ImageBitmapRenderingContext) ||
+            (typeof WebGLRenderingContext !== 'undefined' && value instanceof WebGLRenderingContext) ||
+            (typeof WebGL2RenderingContext !== 'undefined' && value instanceof WebGL2RenderingContext)
           ) return wrapDOMObject(value);
           return value;
         }
