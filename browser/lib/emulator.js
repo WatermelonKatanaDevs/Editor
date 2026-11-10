@@ -239,69 +239,20 @@
 
         ensureSandBoxSameOrigin(el);
 
-        let targetPath = '';
-        try { targetPath = src ? new URL(src, pageUrl).pathname : ''; } catch (_) {}
-        const isTurboWarpPlayer = targetPath === '/turbowarp/play';
-        const frameDiag = (stage, details = {}) => {
-          if (!isTurboWarpPlayer) return;
-          try {
-            page.sendEvent('console', 'warn', [
-              '[WK-TW-DIAG] ' + stage,
-              JSON.stringify(details)
-            ]);
-          } catch (_) {}
-        };
-        frameDiag('static-iframe-preprocess', {
-          parentPagePath: (() => { try { return new URL(pageUrl).pathname; } catch (_) { return ''; } })(),
-          childPath: targetPath,
-          hasSrc: !!src,
-          hasSrcdoc: !!srcdoc,
-          navigationId: el.__iframeNavigationId,
-          parentPageId: page.id || null,
-          registeredChildCountBefore: page.children?.length || 0
-        });
-
-        const createdPage = page.sendEvent('iframe-create',{
+        page.sendEvent('iframe-create',{
           iframe: el,
           src: src,
           srcdoc: srcdoc,
           is_doc: !src,
         });
-        const childPage = el.pageEmulator || createdPage || null;
-        frameDiag('static-iframe-registered', {
-          childPageId: childPage?.id || null,
-          childPageFound: !!childPage,
-          childParentMatches: childPage?.parent === page,
-          registeredChildCountAfter: page.children?.length || 0,
-          iframeConnected: !!el.isConnected
-        });
 
-        frameDiag('static-iframe-navigation-start', {
-          childPageId: childPage?.id || null,
-          childPath: targetPath,
-          navigationId: el.__iframeNavigationId
+        await page.sendAsyncEvent('iframe-navigate',{
+          iframe: el,
+          src: src,
+          srcdoc: srcdoc,
+          is_doc: !src,
+          navigationId: el.__iframeNavigationId,
         });
-        try {
-          await page.sendAsyncEvent('iframe-navigate',{
-            iframe: el,
-            src: src,
-            srcdoc: srcdoc,
-            is_doc: !src,
-            navigationId: el.__iframeNavigationId,
-          });
-          frameDiag('static-iframe-navigation-complete', {
-            childPageId: childPage?.id || null,
-            childLocationPath: (() => { try { return new URL(childPage?.location?.url || '').pathname; } catch (_) { return childPage?.location?.url || ''; } })(),
-            rawDocumentLength: childPage?.rawDocument?.length || 0,
-            iframeConnected: !!el.isConnected
-          });
-        } catch (error) {
-          frameDiag('static-iframe-navigation-threw', {
-            childPageId: childPage?.id || null,
-            error: error?.message || String(error)
-          });
-          throw error;
-        }
 
         return null;
       })),
@@ -1216,38 +1167,53 @@
       DOCUMENT_URL = DOCUMENT_URL || CURRENT_PAGE_URL;
       if (window.__windowProxy) return;
 
-      if (!window.frameElement.pageEmulator) {
-        // do registry search
-        let id = window.frameElement.getAttribute('data-page-id');
-        if (!id) {
-          window.__executeCode = window.eval.bind(window);
-          return alert("Finding page emulator failed: no id");
-        }
-        
+      const frameElement = window.frameElement;
+      if (!frameElement) {
+        window.__executeCode = window.eval.bind(window);
+        console.error("Finding page emulator failed: no frame element");
+        return;
+      }
+
+      if (!frameElement.pageEmulator) {
+        const id = frameElement.getAttribute('data-page-id');
         let browserWindow = window;
         while (browserWindow.parent !== browserWindow && !browserWindow.__pageRegistry) browserWindow = browserWindow.parent;
 
-        if (!browserWindow.__pageRegistry) {
+        const registry = browserWindow.__pageRegistry;
+        if (!registry) {
           window.__executeCode = window.eval.bind(window);
-          return alert("Finding page emulator failed: no registry");
+          console.error("Finding page emulator failed: no registry");
+          return;
         }
 
-        browserWindow.__pageRegistry[id].iframe = window.frameElement;
-        window.frameElement.pageEmulator = browserWindow.__pageRegistry[id];
-        window.frameElement.usefulHelpers = browserWindow.__pageRegistry.__usefulHelpers;
+        let registeredPage = id ? registry[id] : null;
+        if (!registeredPage) {
+          registeredPage = Object.values(registry).find(candidate => candidate?.iframe === frameElement) || null;
+        }
 
-        //window.__executeCode = window.eval.bind(window);
-        //return alert("Finding page emulator failed!");
+        if (!registeredPage) {
+          window.__executeCode = window.eval.bind(window);
+          console.error(id
+            ? "Finding page emulator failed: page id is not registered (" + id + ")"
+            : "Finding page emulator failed: no id or matching registered frame");
+          return;
+        }
+
+        if (registeredPage.id && id !== registeredPage.id) {
+          frameElement.setAttribute('data-page-id',registeredPage.id);
+        }
+        registeredPage.iframe = frameElement;
+        frameElement.pageEmulator = registeredPage;
+        frameElement.usefulHelpers = registry.__usefulHelpers;
       }
 
-      window.__frameElement = window.frameElement;
-      window.__pageEmulator = window.frameElement.pageEmulator;
-      window.__usefulHelpers = window.frameElement.usefulHelpers;
+      window.__frameElement = frameElement;
+      window.__pageEmulator = frameElement.pageEmulator;
+      window.__usefulHelpers = frameElement.usefulHelpers;
       // Shared by interceptor setup and the later runtime hooks below. Keep
       // these outside the setup IIFE so functions such as __executeCode and
       // dynamic-node processing can resolve them through the same closure.
       const isTurboWarpPlayUrl = value => { try { return new URL(value, BASE_ORIGIN).pathname === '/turbowarp/play'; } catch (_) { return false; } };
-      const turboDebug = (stage, details = {}) => { try { window.__pageEmulator?.sendEvent('console', 'warn', ['[WK-TW-DIAG] ' + stage, JSON.stringify(details)]); } catch (_) {} };
 
       window.__runSyncInterceptor = function(__elem,__elemWindow) {
         if (!__elemWindow) return;
@@ -1389,8 +1355,6 @@
 
         window.sendEvent = sendEvent;
 
-        if (isTurboWarpPlayUrl(CURRENT_PAGE_URL)) turboDebug('runtime-interceptor-ready', { pageId: pageEmulator?.id || null, parentPageId: pageEmulator?.parent?.id || null, scriptCount: document.scripts?.length ?? null });
-
         // The direct /turbowarp/play export expects to be hosted by the
         // /turbowarp wrapper, which normally answers its "ready" message with
         // a "turbowarp:init" payload. When /turbowarp/play is embedded directly
@@ -1402,11 +1366,9 @@
           if (!data || (data.turbowarp !== 'ready' && data.turbowarp !== 'storage')) return;
 
           let matchedChildWindow = null;
-          const childChecks = [];
           const childPage = (pageEmulator.children || []).find(child => {
             const iframe = child?.iframe;
             if (!iframe || !event.source) {
-              childChecks.push({ pageId: child?.id || null, hasIframe: !!iframe, matched: false });
               return false;
             }
             let nativeWindow = iframe.__wkNativeContentWindow || null;
@@ -1427,12 +1389,10 @@
             const matched = matchesNative || matchesProxy || matchesCallerProxy;
             let childPath = '';
             try { childPath = new URL(child.location?.url || '').pathname; } catch (_) {}
-            childChecks.push({ pageId: child.id || null, childPath, hadCachedWindow, nativeWindowAvailable: !!nativeWindow, childProxyAvailable: !!child.__windowProxy, matchesNative, matchesProxy, matchesCallerProxy, matched });
             if (matched) { matchedChildWindow = nativeWindow; return true; }
             return false;
           });
-          turboDebug('host-message-received', { type: data.turbowarp, parentPath: (() => { try { return new URL(CURRENT_PAGE_URL).pathname; } catch (_) { return ''; } })(), sourceOrigin: event.origin || '', childCount: (pageEmulator.children || []).length, candidates: childChecks });
-          if (!childPage) { turboDebug('host-message-unmatched', { type: data.turbowarp, childCount: (pageEmulator.children || []).length }); return; }
+          if (!childPage) return;
 
           let childUrl;
           let parentUrl;
@@ -1443,10 +1403,10 @@
             return;
           }
 
-          if (childUrl.pathname !== '/turbowarp/play') { turboDebug('host-message-ignored-wrong-child-path', { childPath: childUrl.pathname, parentPath: parentUrl.pathname }); return; }
-          if (parentUrl.pathname === '/turbowarp') { turboDebug('host-message-left-to-real-wrapper', { childPath: childUrl.pathname }); return; }
+          if (childUrl.pathname !== '/turbowarp/play') return;
+          if (parentUrl.pathname === '/turbowarp') return;
           const projectId = childUrl.searchParams.get('u');
-          if (!projectId) { turboDebug('host-message-missing-project-id', { childPath: childUrl.pathname }); return; }
+          if (!projectId) return;
           const storagePrefix = 'turbowarp:' + projectId + ':';
           const storage = window.localStorage;
 
@@ -1463,15 +1423,14 @@
 
             try {
               const targetWindow = matchedChildWindow || childPage.iframe?.__wkNativeContentWindow;
-              turboDebug('host-init-send-attempt', { childPageId: childPage.id || null, targetWindowAvailable: !!targetWindow, storageEntryCount: Object.keys(snapshot).length });
-              if (!targetWindow || typeof targetWindow.postMessage !== 'function') turboDebug('host-init-send-failed-no-target', { iframeConnected: !!childPage.iframe?.isConnected });
-              else { targetWindow.postMessage({ turbowarp: 'init', userid: null, storage: snapshot }, '*'); turboDebug('host-init-posted', { childPageId: childPage.id || null }); }
-            } catch (error) { turboDebug('host-init-send-threw', { error: error?.message || String(error) }); }
+              if (targetWindow && typeof targetWindow.postMessage === 'function') {
+                targetWindow.postMessage({ turbowarp: 'init', userid: null, storage: snapshot }, '*');
+              }
+            } catch (_) {}
             return;
           }
 
           // Match the storage bridge provided by /turbowarp's normal host page.
-          turboDebug('host-storage-message', { childPageId: childPage.id || null, operation: typeof data.op === 'string' ? data.op : 'unknown' });
           try {
             if (data.op === 'set') {
               storage.setItem(storagePrefix + String(data.key), String(data.value));
@@ -1706,7 +1665,6 @@
 
           const rawScript = node.textContent;
           node.setAttribute('data-raw-script', rawScript);
-          if (isTurboWarpPlayUrl(CURRENT_PAGE_URL)) turboDebug('dynamic-inline-script-prepared', { length: rawScript.length, containsSetup: rawScript.includes('function setup'), containsPreload: rawScript.includes('function preload'), containsDraw: rawScript.includes('function draw') });
 
           const isModule = node.getAttribute('type') === 'module';
           if (isModule) node.removeAttribute('type');
@@ -3196,19 +3154,6 @@
               }
             } catch (_) {}
             const rewriteOrigin = !event.origin || event.origin === 'null' || event.origin === 'about:srcdoc';
-            if (isTurboWarpPlayUrl(CURRENT_PAGE_URL) && event?.data?.turbowarp === 'init') {
-              let expectedParentProxy = null;
-              try {
-                const parentPage = pageEmulator?.parent && pageEmulator.parent !== false ? pageEmulator.parent : null;
-                if (parentPage) expectedParentProxy = getCallerWindowProxy(parentPage, window.parent);
-              } catch (_) {}
-              turboDebug('init-delivered-to-message-listener', {
-                sourceOrigin: event.origin || '',
-                hasSource: !!event.source,
-                sourceMatchesParent: !!expectedParentProxy && sourceProxy === expectedParentProxy,
-                listenerName: listener.name || 'anonymous'
-              });
-            }
             if (!sourceProxy && !rewriteOrigin) {
               return listener.call(this, event);
             }
@@ -3667,27 +3612,10 @@
             get(target, prop) {
               if (prop === 'postMessage') {
                 return function(message, targetOrigin, transfer) {
-                  const turboMessageType = message && typeof message === 'object' && ['ready', 'init', 'storage'].includes(message.turbowarp) ? message.turbowarp : null;
-                  const logTurboMessage = !!turboMessageType;
-                  if (logTurboMessage) turboDebug('postmessage-request', {
-                    type: turboMessageType,
-                    senderPageId: pageEmulator?.id || null,
-                    senderPath: (() => { try { return new URL(CURRENT_PAGE_URL).pathname; } catch (_) { return ''; } })(),
-                    receiverPageId: targetPage.id || null
-                  });
                   try {
                     const origin = targetOrigin || '*';
                     nativeTargetWindow.postMessage(message, origin, transfer);
-                    if (logTurboMessage) turboDebug('postmessage-posted', {
-                      type: turboMessageType,
-                      receiverPageId: targetPage.id || null,
-                      targetOrigin: origin
-                    });
                   } catch (error) {
-                    if (logTurboMessage) turboDebug('postmessage-threw', {
-                      type: turboMessageType,
-                      error: error?.message || String(error)
-                    });
                     try { nativeTargetWindow.postMessage(message, '*'); } catch (_) {}
                   }
                 };
@@ -3842,9 +3770,6 @@
             }
             if (prop === 'postMessage') {
               return function(message, targetOrigin, transfer) {
-                const turboMessageType = message && typeof message === 'object' && ['ready', 'init', 'storage'].includes(message.turbowarp) ? message.turbowarp : null;
-                const logTurboMessage = !!turboMessageType;
-                if (logTurboMessage) turboDebug('postmessage-request', { type: turboMessageType, senderPageId: pageEmulator?.id || null, senderPath: (() => { try { return new URL(CURRENT_PAGE_URL).pathname; } catch (_) { return ''; } })() });
                 // postMessage is a method of the Window being referenced.
                 // In particular, window.top.postMessage() must target top,
                 // not resolve the target from the child that created this proxy.
@@ -3890,15 +3815,12 @@
                   try { targetWindow = targetFrame.contentWindow; } catch(e) {}
                 }
                 if (!targetWindow || targetWindow === receiverPage?.__windowProxy || typeof targetWindow.postMessage !== 'function') {
-                  if (logTurboMessage) turboDebug('postmessage-no-target', { type: turboMessageType, receiverPageId: receiverPage?.id || null, hasTargetFrame: !!targetFrame, hasTargetWindow: !!targetWindow, targetEqualsReceiverProxy: targetWindow === receiverPage?.__windowProxy });
                   return;
                 }
                 try {
                   var origin = targetOrigin || '*';
                   targetWindow.postMessage(message, origin, transfer);
-                  if (logTurboMessage) turboDebug('postmessage-posted', { type: turboMessageType, receiverPageId: receiverPage?.id || null, targetOrigin: origin });
                 } catch(e) {
-                  if (logTurboMessage) turboDebug('postmessage-threw', { type: turboMessageType, error: e?.message || String(e) });
                   try { targetWindow.postMessage(message, '*'); } catch(_) {}
                 }
               };
@@ -4029,7 +3951,6 @@
       })();
 
       window.__executeCode = function(__codeString, __sourceURL, __thisArg, __event) {
-        if (isTurboWarpPlayUrl(CURRENT_PAGE_URL)) turboDebug('execute-code-enter', { source: String(__sourceURL || ''), codeLength: typeof __codeString === 'string' ? __codeString.length : -1, thisArgTag: __thisArg?.tagName || null });
         var { __importModule } = __createModuleControls(__getScriptFileName());
         var __requireModule = __importModule;
 
