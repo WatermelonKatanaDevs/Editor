@@ -4675,6 +4675,43 @@
       });
 
       const dynamicFunctionSources = new WeakMap();
+
+      function __wkRegisterFunctionSource(fn, source, inferredName) {
+        if (typeof fn !== 'function') return fn;
+        if (inferredName && !fn.name) {
+          try { Object.defineProperty(fn, 'name', { value: inferredName, configurable: true }); } catch (_) {}
+        }
+        dynamicFunctionSources.set(fn, source);
+        return fn;
+      }
+
+      function __wkRegisterObjectFunctionSources(object, entries) {
+        if (!object || typeof object !== 'object') return object;
+        for (const entry of entries || []) {
+          const descriptor = Object.getOwnPropertyDescriptor(object, entry.key);
+          if (!descriptor) continue;
+          const fn = entry.kind === 'get' ? descriptor.get :
+            entry.kind === 'set' ? descriptor.set : descriptor.value;
+          __wkRegisterFunctionSource(fn, entry.source);
+        }
+        return object;
+      }
+
+      function __wkRegisterClassFunctionSources(classValue, source, entries, inferredName) {
+        __wkRegisterFunctionSource(classValue, source, inferredName);
+        if (typeof classValue !== 'function') return classValue;
+        for (const entry of entries || []) {
+          const owner = entry.static ? classValue : classValue.prototype;
+          if (!owner) continue;
+          const descriptor = Object.getOwnPropertyDescriptor(owner, entry.key);
+          if (!descriptor) continue;
+          const fn = entry.kind === 'get' ? descriptor.get :
+            entry.kind === 'set' ? descriptor.set : descriptor.value;
+          __wkRegisterFunctionSource(fn, entry.source);
+        }
+        return classValue;
+      }
+
       function constructorString(value) {
         if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
         return String(value);
