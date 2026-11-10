@@ -6255,8 +6255,15 @@
                   Object.defineProperty(owner, property, {
                     ...descriptor,
                     get: function() {
-                      const value = Reflect.apply(nativeGetter, this, []);
-                      return mapper(value, this);
+                      const publicWindow = wrapWindowReference(this);
+                      if (publicWindow) {
+                        return Reflect.get(publicWindow, property, publicWindow);
+                      }
+                      const nativeReceiver = this === documentProxy
+                        ? document
+                        : unwrapDOMValue(this);
+                      const value = Reflect.apply(nativeGetter, nativeReceiver, []);
+                      return mapper(value, nativeReceiver);
                     }
                   });
                 } else if ('value' in descriptor) {
