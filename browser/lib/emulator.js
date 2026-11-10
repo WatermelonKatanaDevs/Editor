@@ -2925,10 +2925,38 @@
           return proxy;
         }
 
+        function wrapWindowReference(value) {
+          if (!value) return value;
+          if (value === window || value === windowProxy) return windowProxy;
+
+          let root = pageEmulator;
+          const rootSeen = new Set();
+          while (root?.parent && root.parent !== false && !rootSeen.has(root)) {
+            rootSeen.add(root);
+            root = root.parent;
+          }
+
+          const pending = [root];
+          const seen = new Set();
+          while (pending.length) {
+            const candidate = pending.shift();
+            if (!candidate || seen.has(candidate)) continue;
+            seen.add(candidate);
+            if (candidate === pageEmulator && value === window) return windowProxy;
+            if (candidate.iframe?.__wkNativeContentWindow === value) {
+              return candidate === pageEmulator
+                ? windowProxy
+                : getCallerWindowProxy(candidate, value);
+            }
+            for (const child of candidate.children || []) pending.push(child);
+          }
+          return null;
+        }
+
         function wrapDOMValue(value) {
           if (value == null) return value;
           if (Array.isArray(value)) return value.map(wrapDOMValue);
-          if (value === window) return windowProxy;
+          if (value === window || value === windowProxy) return windowProxy;
           if (value === document) return documentProxy;
           if (typeof Event !== 'undefined' && value instanceof Event) return wrapEvent(value);
           if (value instanceof Node) return wrapDOMNode(value);
@@ -4066,6 +4094,7 @@
           proxy = new Proxy(event, {
             get(target, prop) {
               if (prop === 'source' && isMessage) return sourceProxy;
+              if (prop === 'view') return wrapWindowReference(Reflect.get(target, prop, target));
               if (prop === 'origin' && rewriteOrigin) return BASE_ORIGIN;
               if (prop === 'composedPath') {
                 return function() {
