@@ -5047,7 +5047,7 @@
           return proxy;
         }
 
-        function normalizeListenerOptions(options) {
+        function normalizeAddListenerOptions(options) {
           if (typeof options === 'boolean' || options == null) {
             return { capture: !!options, nativeOptions: options };
           }
@@ -5055,17 +5055,29 @@
             return { capture: false, nativeOptions: options };
           }
 
-          // Read capture once for listener identity; unwrap AbortSignal without
-          // changing the other WebIDL dictionary defaults (notably passive).
+          // Follow Web IDL dictionary member order: inherited capture first,
+          // then passive, once, and signal. AbortSignal must cross the wrapper
+          // boundary as its native instance.
           const capture = !!options.capture;
           const normalized = { capture };
-          const once = options.once;
           const passive = options.passive;
+          const once = options.once;
           const signal = options.signal;
-          if (once !== undefined) normalized.once = once;
           if (passive !== undefined) normalized.passive = passive;
+          if (once !== undefined) normalized.once = once;
           if (signal !== undefined) normalized.signal = unwrapDOMValue(signal);
           return { capture, nativeOptions: normalized };
+        }
+
+        function normalizeRemoveListenerOptions(options) {
+          if (typeof options === 'boolean' || options == null) {
+            return { capture: !!options, nativeOptions: options };
+          }
+          if (typeof options !== 'object' && typeof options !== 'function') {
+            return { capture: false, nativeOptions: options };
+          }
+          const capture = !!options.capture;
+          return { capture, nativeOptions: { capture } };
         }
 
         function getWrappedListener(type, listener, capture) {
@@ -5094,8 +5106,8 @@
         }
 
         EventTarget.prototype.addEventListener = function(type, listener, options) {
-          const eventType = String(type);
-          const normalizedOptions = normalizeListenerOptions(options);
+          const eventType = '' + type;
+          const normalizedOptions = normalizeAddListenerOptions(options);
           const wrappedListener = getWrappedListener(eventType, listener, normalizedOptions.capture);
           return originalAddEventListener.call(
             unwrapDOMValue(this),
@@ -5106,8 +5118,8 @@
         };
 
         EventTarget.prototype.removeEventListener = function(type, listener, options) {
-          const eventType = String(type);
-          const normalizedOptions = normalizeListenerOptions(options);
+          const eventType = '' + type;
+          const normalizedOptions = normalizeRemoveListenerOptions(options);
           const nativeTarget = unwrapDOMValue(this);
           if (listener && (typeof listener === 'function' || typeof listener === 'object')) {
             const wrappedListener = getWrappedListener(eventType, listener, normalizedOptions.capture);
