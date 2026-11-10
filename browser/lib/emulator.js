@@ -4451,15 +4451,15 @@
           if (typeof selector !== 'string') return selector;
           const logicalResourceSelector = selector
             .replace(
-              /(^|[,>+~\\s])script(\\s*)\\[src([\\s~|^$*]?=)/gi,
+              /(^|[,>+~\s])script(\s*)\[src([\s~|^$*]?=)/gi,
               '$1script[data-wk-internal-script-src$3'
             )
             .replace(
-              /(^|[,>+~\\s])script(\\s*)\\[type([\\s~|^$*]?=)/gi,
+              /(^|[,>+~\s])script(\s*)\[type([\s~|^$*]?=)/gi,
               '$1script[data-wk-internal-script-type$3'
             );
           const withoutPrivateAttributes = logicalResourceSelector.replace(
-            /\\[\\s*data-(?:raw-[a-z0-9_-]+|page-id|embed-frame|embed-wrapper)(?:\\s*(?:[~|^$*]?=)[^\\]]*)?\\s*\\]/gi,
+            /\[\s*data-(?:raw-[a-z0-9_-]+|page-id|embed-frame|embed-wrapper)(?:\s*(?:[~|^$*]?=)[^\]]*)?\s*\]/gi,
             ':not(*)'
           );
           return withoutPrivateAttributes
