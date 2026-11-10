@@ -1375,6 +1375,10 @@
 
         window.sendEvent = sendEvent;
 
+        const isTurboWarpPlayUrl = value => { try { return new URL(value, BASE_ORIGIN).pathname === '/turbowarp/play'; } catch (_) { return false; } };
+        const turboDebug = (stage, details = {}) => { try { sendEvent('console', 'warn', ['[WK-TW-DIAG] ' + stage, JSON.stringify(details)]); } catch (_) {} };
+        if (isTurboWarpPlayUrl(CURRENT_PAGE_URL)) turboDebug('runtime-interceptor-ready', { pageId: pageEmulator?.id || null, parentPageId: pageEmulator?.parent?.id || null, scriptCount: document.scripts?.length ?? null });
+
         // The direct /turbowarp/play export expects to be hosted by the
         // /turbowarp wrapper, which normally answers its "ready" message with
         // a "turbowarp:init" payload. When /turbowarp/play is embedded directly
@@ -1386,43 +1390,35 @@
           if (!data || (data.turbowarp !== 'ready' && data.turbowarp !== 'storage')) return;
 
           let matchedChildWindow = null;
+          const childChecks = [];
           const childPage = (pageEmulator.children || []).find(child => {
             const iframe = child?.iframe;
-            if (!iframe || !event.source) return false;
-
-            // Static iframes can be registered during HTML preprocessing before
-            // wrapElement() ever installs __wkNativeContentWindow. Read the
-            // browser's native contentWindow getter as a fallback so the
-            // WindowProxy in MessageEvent.source can still be matched.
+            if (!iframe || !event.source) {
+              childChecks.push({ pageId: child?.id || null, hasIframe: !!iframe, matched: false });
+              return false;
+            }
             let nativeWindow = iframe.__wkNativeContentWindow || null;
+            const hadCachedWindow = !!nativeWindow;
             if (!nativeWindow) {
               try {
-                const getter = Object.getOwnPropertyDescriptor(
-                  HTMLIFrameElement.prototype,
-                  'contentWindow'
-                )?.get;
+                const getter = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow')?.get;
                 if (getter) nativeWindow = Reflect.apply(getter, iframe, []);
                 if (nativeWindow) {
-                  try {
-                    Object.defineProperty(iframe, '__wkNativeContentWindow', {
-                      value: nativeWindow,
-                      writable: true,
-                      configurable: true
-                    });
-                  } catch (_) {}
+                  try { Object.defineProperty(iframe, '__wkNativeContentWindow', { value: nativeWindow, writable: true, configurable: true }); } catch (_) {}
                 }
               } catch (_) {}
             }
-
-            // Sandboxed message events can also expose the child's virtual
-            // Window proxy, depending on which listener wrapped the event.
-            if (event.source === nativeWindow || event.source === child.__windowProxy) {
-              matchedChildWindow = nativeWindow;
-              return true;
-            }
+            const matchesNative = event.source === nativeWindow;
+            const matchesProxy = event.source === child.__windowProxy;
+            const matched = matchesNative || matchesProxy;
+            let childPath = '';
+            try { childPath = new URL(child.location?.url || '').pathname; } catch (_) {}
+            childChecks.push({ pageId: child.id || null, childPath, hadCachedWindow, nativeWindowAvailable: !!nativeWindow, childProxyAvailable: !!child.__windowProxy, matchesNative, matchesProxy, matched });
+            if (matched) { matchedChildWindow = nativeWindow; return true; }
             return false;
           });
-          if (!childPage) return;
+          turboDebug('host-message-received', { type: data.turbowarp, parentPath: (() => { try { return new URL(CURRENT_PAGE_URL).pathname; } catch (_) { return ''; } })(), sourceOrigin: event.origin || '', childCount: (pageEmulator.children || []).length, candidates: childChecks });
+          if (!childPage) { turboDebug('host-message-unmatched', { type: data.turbowarp, childCount: (pageEmulator.children || []).length }); return; }
 
           let childUrl;
           let parentUrl;
@@ -1433,11 +1429,10 @@
             return;
           }
 
-          if (childUrl.pathname.replace(/\/+$/, '') !== '/turbowarp/play') return;
-          if (parentUrl.pathname.replace(/\/+$/, '') === '/turbowarp') return;
-
+          if (childUrl.pathname !== '/turbowarp/play') { turboDebug('host-message-ignored-wrong-child-path', { childPath: childUrl.pathname, parentPath: parentUrl.pathname }); return; }
+          if (parentUrl.pathname === '/turbowarp') { turboDebug('host-message-left-to-real-wrapper', { childPath: childUrl.pathname }); return; }
           const projectId = childUrl.searchParams.get('u');
-          if (!projectId) return;
+          if (!projectId) { turboDebug('host-message-missing-project-id', { childPath: childUrl.pathname }); return; }
           const storagePrefix = 'turbowarp:' + projectId + ':';
           const storage = window.localStorage;
 
@@ -1453,16 +1448,16 @@
             } catch (_) {}
 
             try {
-              // Use the captured native target directly. event.source can be
-              // the child's virtual proxy, whose postMessage receiver is not
-              // necessarily the frame we intend to reply to from this context.
               const targetWindow = matchedChildWindow || childPage.iframe?.__wkNativeContentWindow;
-              targetWindow?.postMessage({ turbowarp: 'init', userid: null, storage: snapshot }, '*');
-            } catch (_) {}
+              turboDebug('host-init-send-attempt', { childPageId: childPage.id || null, targetWindowAvailable: !!targetWindow, storageEntryCount: Object.keys(snapshot).length });
+              if (!targetWindow || typeof targetWindow.postMessage !== 'function') turboDebug('host-init-send-failed-no-target', { iframeConnected: !!childPage.iframe?.isConnected });
+              else { targetWindow.postMessage({ turbowarp: 'init', userid: null, storage: snapshot }, '*'); turboDebug('host-init-posted', { childPageId: childPage.id || null }); }
+            } catch (error) { turboDebug('host-init-send-threw', { error: error?.message || String(error) }); }
             return;
           }
 
           // Match the storage bridge provided by /turbowarp's normal host page.
+          turboDebug('host-storage-message', { childPageId: childPage.id || null, operation: typeof data.op === 'string' ? data.op : 'unknown' });
           try {
             if (data.op === 'set') {
               storage.setItem(storagePrefix + String(data.key), String(data.value));
@@ -1697,6 +1692,7 @@
 
           const rawScript = node.textContent;
           node.setAttribute('data-raw-script', rawScript);
+          if (isTurboWarpPlayUrl(CURRENT_PAGE_URL)) turboDebug('dynamic-inline-script-prepared', { length: rawScript.length, containsSetup: rawScript.includes('function setup'), containsPreload: rawScript.includes('function preload'), containsDraw: rawScript.includes('function draw') });
 
           const isModule = node.getAttribute('type') === 'module';
           if (isModule) node.removeAttribute('type');
@@ -3163,6 +3159,7 @@
             return originalAddEventListener.call(this, type, listener, options);
           }
           const wrappedListener = function(event) {
+            if (isTurboWarpPlayUrl(CURRENT_PAGE_URL) && event?.data?.turbowarp === 'init') turboDebug('init-delivered-to-message-listener', { sourceOrigin: event.origin || '', hasSource: !!event.source, listenerName: listener.name || 'anonymous' });
             if (event.origin !== 'null' && event.origin !== 'about:srcdoc' && event.origin) {
               return listener.call(this, event);
             }
@@ -3685,6 +3682,9 @@
             if (prop === 'parent') return pageEmulator?.parent && pageEmulator.parent !== false && pageEmulator.parent.__windowProxy ? pageEmulator.parent.__windowProxy : windowProxy;
             if (prop === 'postMessage') {
               return function(message, targetOrigin, transfer) {
+                const turboMessageType = message && typeof message === 'object' && ['ready', 'init', 'storage'].includes(message.turbowarp) ? message.turbowarp : null;
+                const logTurboMessage = !!turboMessageType;
+                if (logTurboMessage) turboDebug('postmessage-request', { type: turboMessageType, senderPageId: pageEmulator?.id || null, senderPath: (() => { try { return new URL(CURRENT_PAGE_URL).pathname; } catch (_) { return ''; } })() });
                 // postMessage is a method of the Window being referenced.
                 // In particular, window.top.postMessage() must target top,
                 // not resolve the target from the child that created this proxy.
@@ -3729,12 +3729,16 @@
                 if (!targetWindow && targetFrame) {
                   try { targetWindow = targetFrame.contentWindow; } catch(e) {}
                 }
-                if (!targetWindow || targetWindow === receiverPage?.__windowProxy || typeof targetWindow.postMessage !== 'function') return;
-
+                if (!targetWindow || targetWindow === receiverPage?.__windowProxy || typeof targetWindow.postMessage !== 'function') {
+                  if (logTurboMessage) turboDebug('postmessage-no-target', { type: turboMessageType, receiverPageId: receiverPage?.id || null, hasTargetFrame: !!targetFrame, hasTargetWindow: !!targetWindow, targetEqualsReceiverProxy: targetWindow === receiverPage?.__windowProxy });
+                  return;
+                }
                 try {
                   var origin = targetOrigin || '*';
                   targetWindow.postMessage(message, origin, transfer);
+                  if (logTurboMessage) turboDebug('postmessage-posted', { type: turboMessageType, receiverPageId: receiverPage?.id || null, targetOrigin: origin });
                 } catch(e) {
+                  if (logTurboMessage) turboDebug('postmessage-threw', { type: turboMessageType, error: e?.message || String(e) });
                   try { targetWindow.postMessage(message, '*'); } catch(_) {}
                 }
               };
@@ -3859,6 +3863,7 @@
       })();
 
       window.__executeCode = function(__codeString, __sourceURL, __thisArg, __event) {
+        if (isTurboWarpPlayUrl(CURRENT_PAGE_URL)) turboDebug('execute-code-enter', { source: String(__sourceURL || ''), codeLength: typeof __codeString === 'string' ? __codeString.length : -1, thisArgTag: __thisArg?.tagName || null });
         var { __importModule } = __createModuleControls(__getScriptFileName());
         var __requireModule = __importModule;
 
