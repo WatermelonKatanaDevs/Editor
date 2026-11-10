@@ -4290,25 +4290,6 @@
             }
             if (prop === 'document') return documentProxy;
             if (prop === 'eval') return __indirectEval;
-            if (['setTimeout', 'setInterval', 'requestAnimationFrame', 'requestIdleCallback', 'queueMicrotask'].includes(prop)) {
-              const nativeTimer = Reflect.get(window, prop, window);
-              if (typeof nativeTimer === 'function') {
-                return function(callback, ...args) {
-                  if (typeof callback === 'string' && (prop === 'setTimeout' || prop === 'setInterval')) {
-                    const source = callback;
-                    callback = function() {
-                      return window.__executeCode(source, '<anonymous timer>', __windowProxy);
-                    };
-                  } else if (typeof callback === 'function') {
-                    const originalCallback = callback;
-                    callback = function(...callbackArgs) {
-                      return Reflect.apply(originalCallback, __windowProxy, callbackArgs.map(unwrapDOMValue));
-                    };
-                  }
-                  return Reflect.apply(nativeTimer, window, [callback, ...args.map(unwrapDOMValue)]);
-                };
-              }
-            }
             if (prop === 'opener') {
               const nativeOpener = Reflect.get(window, 'opener', window);
               if (!nativeOpener) return null;
@@ -4464,6 +4445,40 @@
               Reflect.deleteProperty(window, prop);
             } catch(e) {}
             return Reflect.deleteProperty(target, prop);
+          }
+        });
+
+        // Install the timer wrappers on the actual frame global as well as the
+        // window proxy. Bare global calls (setTimeout(...)) must not bypass the
+        // string-code executor simply because they do not use window.setTimeout.
+        const nativeTimerFunctions = Object.create(null);
+        ['setTimeout', 'setInterval', 'requestAnimationFrame', 'requestIdleCallback', 'queueMicrotask'].forEach(name => {
+          const nativeTimer = window[name];
+          if (typeof nativeTimer !== 'function') return;
+          nativeTimerFunctions[name] = nativeTimer;
+          const wrappedTimer = function(callback, ...args) {
+            if (typeof callback === 'string' && (name === 'setTimeout' || name === 'setInterval')) {
+              const source = callback;
+              callback = function() {
+                return window.__executeCode(source, '<anonymous timer>', __windowProxy);
+              };
+            } else if (typeof callback === 'function') {
+              const originalCallback = callback;
+              callback = function(...callbackArgs) {
+                return Reflect.apply(originalCallback, __windowProxy, callbackArgs.map(unwrapDOMValue));
+              };
+            }
+            return Reflect.apply(nativeTimer, window, [callback, ...args.map(unwrapDOMValue)]);
+          };
+          try {
+            Object.defineProperty(window, name, {
+              value: wrappedTimer,
+              writable: true,
+              configurable: true,
+              enumerable: true
+            });
+          } catch (_) {
+            try { window[name] = wrappedTimer; } catch (_) {}
           }
         });
 
