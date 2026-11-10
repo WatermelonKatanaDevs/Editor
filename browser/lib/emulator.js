@@ -1716,6 +1716,7 @@
         'frameElement', 'browserWindow', 'registry', 'registeredPage', 'isTurboWarpPlayUrl',
         '__getScriptFileName', '__createModuleControls',
         '__codeString', '__sourceURL', '__thisArg', '__requireModule', '__currentModuleExports',
+        'arguments',
         '__nativeEval', '__indirectEval', '__invokeDynamicFunction',
         'NativeFunction', 'NativeAsyncFunction', 'NativeGeneratorFunction', 'NativeAsyncGeneratorFunction',
         'ScopedFunction', 'ScopedAsyncFunction', 'ScopedGeneratorFunction', 'ScopedAsyncGeneratorFunction',
@@ -1766,15 +1767,17 @@
         return new Proxy(__globalLexicalScope, {
           has(target, prop) {
             if (prop === __scopeUnscopables) return false;
-            return __privateScriptNames[prop] === true ||
-              __scopeReflectApply(__scopeHasOwn, target, [prop]) ||
-              __scopeReflectApply(__scopeHasOwn, bindings, [prop]);
+            if (__privateScriptNames[prop] === true) return true;
+            return __scopeReflectApply(__scopeHasOwn, target, [prop]) ||
+              __scopeReflectApply(__scopeHasOwn, bindings, [prop]) ||
+              (typeof prop === 'string' && Reflect.has(windowProxy, prop));
           },
           get(target, prop) {
             if (prop === __scopeUnscopables) return undefined;
             if (__scopeReflectApply(__scopeHasOwn, bindings, [prop])) return bindings[prop];
             if (__privateScriptNames[prop] === true) return undefined;
-            return target[prop];
+            if (__scopeReflectApply(__scopeHasOwn, target, [prop])) return target[prop];
+            return Reflect.get(windowProxy, prop, windowProxy);
           },
           set(target, prop, value) {
             if (__scopeReflectApply(__scopeHasOwn, bindings, [prop])) {
@@ -1787,7 +1790,10 @@
               return true;
             }
             if (__privateScriptNames[prop] === true) return true;
-            return __scopeReflectApply(__scopeReflectSet, Reflect, [target, prop, value, target]);
+            if (__scopeReflectApply(__scopeHasOwn, target, [prop])) {
+              return __scopeReflectApply(__scopeReflectSet, Reflect, [target, prop, value, target]);
+            }
+            return Reflect.set(windowProxy, prop, value, windowProxy);
           }
         });
       }
