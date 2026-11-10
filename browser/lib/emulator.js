@@ -5701,6 +5701,7 @@
               return true;
             }
             if (typeof prop === 'string' && /^\d+$/.test(prop)) return Number(prop) < (pageEmulator?.children || []).length;
+            if (typeof prop === 'string' && getChildPage(prop)) return true;
             return Reflect.has(target, prop) || Reflect.has(window, prop);
           },
           get(target, prop) {
