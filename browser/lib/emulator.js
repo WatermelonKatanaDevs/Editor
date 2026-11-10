@@ -567,7 +567,11 @@
       const functionNameHint = (parent,key,child) => {
         if (!parent) return null;
         if (parent.type === "VariableDeclarator" && parent.init === child && parent.id.type === "Identifier") return parent.id.name;
-        if (parent.type === "AssignmentExpression" && parent.right === child && parent.left.type === "Identifier") return parent.left.name;
+        if (parent.type === "AssignmentExpression" && parent.right === child) {
+          if (parent.left.type === "Identifier") return parent.left.name;
+          if (parent.left.type === "MemberExpression" && !parent.left.computed && parent.left.property.type === "Identifier") return parent.left.property.name;
+          if (parent.left.type === "MemberExpression" && parent.left.computed && parent.left.property.type === "Literal") return String(parent.left.property.value);
+        }
         if (parent.type === "Property" && parent.value === child && !parent.computed) return staticKey(parent.key);
         if (parent.type === "PropertyDefinition" && parent.value === child && !parent.computed) return staticKey(parent.key);
         return null;
@@ -714,8 +718,12 @@
         if (
           callee.type === "FunctionExpression" ||
           (callee.type === "CallExpression" &&
-            callee.callee?.type === "Identifier" &&
-            callee.callee.name === "__wkRegisterFunctionSource")
+            (
+              callee.callee?.type === "Identifier" &&
+              callee.callee.name === "__wkRegisterFunctionSource" ||
+              callee.callee?.type === "MemberExpression" &&
+              callee.callee.object?.name === "__wkRegisterFunctionSource"
+            ))
         ) {
           node.callee = {
             type: "MemberExpression",
@@ -759,8 +767,12 @@
             last.type === "Identifier" ||
             last.type === "MemberExpression" ||
             (last.type === "CallExpression" &&
-              last.callee?.type === "Identifier" &&
-              last.callee.name === "__wkRegisterFunctionSource")
+              (
+                last.callee?.type === "Identifier" &&
+                last.callee.name === "__wkRegisterFunctionSource" ||
+                last.callee?.type === "MemberExpression" &&
+                last.callee.object?.name === "__wkRegisterFunctionSource"
+              ))
           ) {
             node.callee = {
               type: "MemberExpression",
@@ -869,32 +881,21 @@
 
           node.type = "ClassExpression";
 
-          const classValue = typeof options.source === 'string'
-            ? {
+          const classSource = typeof options.source === 'string'
+            ? options.source.slice(node.start,node.end)
+            : null;
+          const classValue = classSource === null
+            ? node
+            : {
                 type: "CallExpression",
                 callee: { type: "Identifier", name: "__wkRegisterClassFunctionSources" },
                 arguments: [
                   node,
-                  { type: "Literal", value: options.source.slice(node.start,node.end), raw: JSON.stringify(options.source.slice(node.start,node.end)) },
-                  {
-                    type: "ArrayExpression",
-                    elements: (node.body?.body || [])
-                      .filter(method => method.type === "MethodDefinition" &&
-                        (method.key.type === "Identifier" || method.key.type === "Literal"))
-                      .map(method => ({
-                        type: "ObjectExpression",
-                        properties: [
-                          { type: "Property", key: {type:"Identifier",name:"key"}, value: {type:"Literal",value:method.key.type === "Identifier" ? method.key.name : String(method.key.value),raw:JSON.stringify(method.key.type === "Identifier" ? method.key.name : String(method.key.value))}, kind:"init", method:false, shorthand:false, computed:false },
-                          { type: "Property", key: {type:"Identifier",name:"kind"}, value: {type:"Literal",value:method.kind === "get" || method.kind === "set" ? method.kind : "value",raw:JSON.stringify(method.kind === "get" || method.kind === "set" ? method.kind : "value")}, kind:"init", method:false, shorthand:false, computed:false },
-                          { type: "Property", key: {type:"Identifier",name:"static"}, value: {type:"Literal",value:!!method.static,raw:String(!!method.static)}, kind:"init", method:false, shorthand:false, computed:false },
-                          { type: "Property", key: {type:"Identifier",name:"source"}, value: {type:"Literal",value:options.source.slice(method.start,method.end),raw:JSON.stringify(options.source.slice(method.start,method.end))}, kind:"init", method:false, shorthand:false, computed:false }
-                        ]
-                      }))
-                  },
+                  { type: "Literal", value: classSource, raw: JSON.stringify(classSource) },
+                  entriesNode(methodEntries(node,true)),
                   { type: "Literal", value: null, raw: "null" }
                 ]
-              }
-            : node;
+              };
 
           newBody.push(createGlobalAssignment(name, classValue));
         }
