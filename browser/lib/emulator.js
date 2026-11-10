@@ -1563,8 +1563,13 @@
           
           try {
             __currentModuleExports = await window.__executeCodeModule(sourceCode, resolvedUrl, window.__windowProxy, undefined, resolvedUrl);
-          } catch(e) {}
-          
+          } catch(error) {
+            const detail = error?.message || String(error);
+            const moduleError = new Error(`Failed to evaluate imported module "${resolvedUrl}": ${detail}`);
+            try { moduleError.cause = error; } catch (_) {}
+            throw moduleError;
+          }
+
           const finalizedExports = { ...__currentModuleExports };
           window.__moduleRegistry.set(resolvedUrl, finalizedExports);
           
@@ -4585,6 +4590,7 @@
           let __execResult;
           with (__globalLexicalScope) {
             await eval(`
+            "use strict";
             ${__event ? 'let event = __event;' : ''}
             ${__codeString.code}
             \n//# sourceURL=`+__sourceURL);
