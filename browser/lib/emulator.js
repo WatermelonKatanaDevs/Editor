@@ -2886,6 +2886,32 @@
           catch (_) { return false; }
         }
 
+        function isDOMCollectionValue(value) {
+          return hasDOMBrand(value, 'HTMLCollection') ||
+            hasDOMBrand(value, 'NodeList') ||
+            hasDOMBrand(value, 'NamedNodeMap') ||
+            hasDOMBrand(value, 'StyleSheetList');
+        }
+
+        function isDOMPlatformObject(value) {
+          return [
+            'Range', 'Selection', 'TreeWalker', 'NodeIterator', 'TouchList', 'Touch',
+            'CSSStyleSheet', 'CSSStyleDeclaration', 'CSSRule', 'CSSRuleList', 'MediaList',
+            'DOMTokenList', 'DOMStringMap', 'DOMImplementation', 'MutationRecord',
+            'IntersectionObserverEntry', 'ResizeObserverEntry', 'PerformanceEntry',
+            'XPathResult', 'XPathExpression', 'XPathEvaluator', 'MutationObserver',
+            'IntersectionObserver', 'ResizeObserver', 'PerformanceObserver', 'MediaQueryList',
+            'Navigator', 'Screen', 'ScreenOrientation', 'History', 'CustomElementRegistry',
+            'BarProp', 'Performance', 'Crypto', 'SubtleCrypto', 'StorageManager',
+            'PermissionStatus', 'Permissions', 'Geolocation', 'MediaDevices', 'Clipboard',
+            'NetworkInformation', 'LockManager', 'IDBFactory', 'CacheStorage',
+            'Animation', 'KeyframeEffect', 'AnimationTimeline', 'DocumentTimeline',
+            'ScrollTimeline', 'ViewTimeline', 'VisualViewport', 'CanvasRenderingContext2D',
+            'OffscreenCanvasRenderingContext2D', 'ImageBitmapRenderingContext',
+            'WebGLRenderingContext', 'WebGL2RenderingContext', 'Location', 'DOMStringList'
+          ].some(name => hasDOMBrand(value, name));
+        }
+
         function unwrapDOMValue(value) {
           if (!value || (typeof value !== 'object' && typeof value !== 'function')) return value;
           if (typeof windowProxy !== 'undefined' && value === windowProxy) return window;
@@ -2936,13 +2962,10 @@
         function wrapDOMCollection(collection) {
           if (!collection || unwrappedDOMCollections.has(collection)) return collection;
           if (wrappedDOMCollections.has(collection)) return wrappedDOMCollections.get(collection);
-          if (
-            !(collection instanceof HTMLCollection) &&
-            !(collection instanceof NodeList) &&
-            !(typeof NamedNodeMap !== 'undefined' && collection instanceof NamedNodeMap) &&
-            !(typeof StyleSheetList !== 'undefined' && collection instanceof StyleSheetList)
-          ) return collection;
-          const isNamedNodeMap = typeof NamedNodeMap !== 'undefined' && collection instanceof NamedNodeMap;
+          if (!isDOMCollectionValue(collection)) return collection;
+          const isNamedNodeMap =
+            (typeof NamedNodeMap !== 'undefined' && collection instanceof NamedNodeMap) ||
+            hasDOMBrand(collection, 'NamedNodeMap');
           let proxy;
           const visibleItems = () => {
             if (!isNamedNodeMap) return Array.from(collection);
@@ -4022,12 +4045,7 @@
             (typeof EventTarget !== 'undefined' && value instanceof EventTarget) ||
             (typeof value.addEventListener === 'function' && typeof value.removeEventListener === 'function')
           ) return wrapDOMObject(value);
-          if (
-            value instanceof HTMLCollection ||
-            value instanceof NodeList ||
-            (typeof NamedNodeMap !== 'undefined' && value instanceof NamedNodeMap) ||
-            (typeof StyleSheetList !== 'undefined' && value instanceof StyleSheetList)
-          ) return wrapDOMCollection(value);
+          if (isDOMCollectionValue(value)) return wrapDOMCollection(value);
           if (
             (typeof Range !== 'undefined' && value instanceof Range) ||
             (typeof Selection !== 'undefined' && value instanceof Selection) ||
@@ -4087,6 +4105,7 @@
             (typeof WebGLRenderingContext !== 'undefined' && value instanceof WebGLRenderingContext) ||
             (typeof WebGL2RenderingContext !== 'undefined' && value instanceof WebGL2RenderingContext)
           ) return wrapDOMObject(value);
+          if (isDOMPlatformObject(value)) return wrapDOMObject(value);
           return value;
         }
 
