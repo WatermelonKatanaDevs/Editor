@@ -2974,6 +2974,15 @@
           return proxy;
         }
 
+        function clearSavedScriptType(element, name) {
+          if (
+            element instanceof HTMLScriptElement &&
+            String(name || '').toLowerCase() === 'type'
+          ) {
+            Reflect.apply(nativeElementRemoveAttribute, element, ['data-raw-type']);
+          }
+        }
+
         function isVirtualizedResourceAttribute(element, name) {
           if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
           const attr = String(name || '').toLowerCase();
@@ -3039,6 +3048,7 @@
                 return function(name, value) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return;
+                  clearSavedScriptType(target, attributeName);
                   if (/^on[a-z]/i.test(attributeName)) {
                     return rewriteInlineEventAttribute(target, attributeName, value);
                   }
@@ -3086,6 +3096,9 @@
               if (prop === 'setAttributeNS' && target instanceof Element) {
                 return function(namespace, name, value) {
                   const attributeName = String(name || '').toLowerCase();
+                  if ((namespace == null || namespace === '') && target instanceof HTMLScriptElement && attributeName === 'type') {
+                    clearSavedScriptType(target, attributeName);
+                  }
                   if ((namespace == null || namespace === '') && /^on[a-z]/i.test(attributeName)) {
                     return rewriteInlineEventAttribute(target, attributeName, value);
                   }
@@ -3156,6 +3169,17 @@
                   if (
                     rawAttribute instanceof Attr &&
                     rawAttribute.namespaceURI == null &&
+                    target instanceof HTMLScriptElement &&
+                    rawAttribute.name.toLowerCase() === 'type'
+                  ) {
+                    const oldAttribute = Reflect.apply(target.getAttributeNode, target, ['type']);
+                    clearSavedScriptType(target, 'type');
+                    Reflect.apply(target.setAttribute, target, ['type', rawAttribute.value]);
+                    return wrapDOMValue(oldAttribute);
+                  }
+                  if (
+                    rawAttribute instanceof Attr &&
+                    rawAttribute.namespaceURI == null &&
                     isVirtualizedResourceAttribute(target, rawAttribute.name)
                   ) {
                     const oldAttribute = prop === 'setAttributeNodeNS'
@@ -3220,6 +3244,16 @@
               if (
                 typeof Attr !== 'undefined' &&
                 target instanceof Attr &&
+                target.ownerElement instanceof HTMLScriptElement &&
+                target.name.toLowerCase() === 'type' &&
+                (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')
+              ) {
+                target.ownerElement.setAttribute('type', String(nextValue));
+                return true;
+              }
+              if (
+                typeof Attr !== 'undefined' &&
+                target instanceof Attr &&
                 isVirtualizedResourceAttribute(target.ownerElement, target.name) &&
                 (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')
               ) {
@@ -3245,6 +3279,10 @@
                   return true;
                 }
               }
+              if (
+                target instanceof HTMLScriptElement &&
+                prop === 'type'
+              ) clearSavedScriptType(target, 'type');
               if (
                 target instanceof HTMLScriptElement &&
                 (prop === 'textContent' || prop === 'text')
