@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Web Editor</title><link rel="stylesheet" href="editor/editor.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/katex.min.css"><script type="importmap">{"imports":{"three":"./editor/previews/vendor/threejs/build/three.module.js","three/addons/":"./editor/previews/vendor/threejs/examples/jsm/","fflate":"./editor/previews/vendor/threejs/examples/jsm/libs/fflate.module.js"}}</script>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Web Editor</title><link rel="stylesheet" href="editor/editor.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/katex.min.css" integrity="sha384-WwGtaC6ywCHxA5cstpj/3+xIZvTez8dq2IcBQaXRkenHZ7FVVq1ZROtURwfbtTlG" crossorigin="anonymous"><script type="importmap">{"imports":{"three":"./editor/previews/vendor/threejs/build/three.module.js","three/addons/":"./editor/previews/vendor/threejs/examples/jsm/","fflate":"./editor/previews/vendor/threejs/examples/jsm/libs/fflate.module.js"}}</script>
 <script>window.__workersConfigReady=fetch(new URL('workers.json',location.href),{cache:'no-store'}).then(async r=>{if(!r.ok)throw new Error('Failed to load workers.json ('+r.status+')');const c=await r.json();if(!c||typeof c!=='object')throw new Error('Invalid workers.json');window.WorkerConfig=c;return c;}).catch(e=>{console.error(e);window.WorkerConfig={proxy:'',fallbackProxy:false,github:''};return window.WorkerConfig;});</script>
 <script src="browser/external/jszip.js"></script>
 <script src="browser/lib/filesystem.js"></script>
@@ -53,7 +53,7 @@
 <script src="editor/builtins/run-config.js"></script>
 <script src="editor/builtins/environment.js"></script>
 <script src="editor/builtins/github-repository.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/katex.min.js" integrity="sha384-a1WQdjRj162i159OYq041X6I4K8NenkrI09LlPmiHg0YOb7CR+wJOraXwK9abpnE" crossorigin="anonymous"></script>
 <script src="editor/builtins/ai.js"></script>
 <script src="editor/sidebar/explorer.js"></script>
 <script src="editor/sidebar/run-debug.js"></script>
