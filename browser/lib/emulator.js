@@ -601,6 +601,54 @@
       }
     });
 
+    if (acorn.walk.ancestor) {
+      acorn.walk.ancestor(ast, {
+        Identifier(node, ancestors) {
+          if (node.name !== "eval" || ancestors.length < 2) return;
+          const parent = ancestors[ancestors.length - 2];
+          if (parent.type === "CallExpression" && parent.callee === node) return;
+          if (parent.type === "CallExpression" &&
+              parent.callee?.name === "__prepareDirectEvalCode" &&
+              parent.arguments?.[1] === node) return;
+          if (parent.type === "MemberExpression" && parent.property === node && !parent.computed) return;
+          if (parent.type === "Property" && parent.key === node && !parent.computed && !parent.shorthand) return;
+          if (parent.type === "VariableDeclarator" && parent.id === node) return;
+          if (
+            (parent.type === "FunctionDeclaration" || parent.type === "FunctionExpression") &&
+            (parent.id === node || parent.params.includes(node))
+          ) return;
+          if (parent.type === "ClassDeclaration" && parent.id === node) return;
+          if (parent.type === "CatchClause" && parent.param === node) return;
+          if (parent.type === "AssignmentExpression" && parent.left === node) return;
+          if (parent.type === "UpdateExpression" && parent.argument === node) return;
+
+          const replacement = {
+            type: "CallExpression",
+            callee: { type: "Identifier", name: "__getIndirectEval" },
+            arguments: [{ type: "Identifier", name: "eval" }]
+          };
+          if (parent.type === "Property" && parent.shorthand && parent.value === node) {
+            parent.value = replacement;
+            parent.shorthand = false;
+            return;
+          }
+          for (const key of Object.keys(parent)) {
+            if (parent[key] === node) {
+              parent[key] = replacement;
+              return;
+            }
+            if (Array.isArray(parent[key])) {
+              const index = parent[key].indexOf(node);
+              if (index >= 0) {
+                parent[key][index] = replacement;
+                return;
+              }
+            }
+          }
+        }
+      });
+    }
+
     if (options.rewriteGlobals === false) return;
 
     const rootBody = ast.body;
@@ -2216,6 +2264,17 @@
           proxy = new Proxy(node, {
             get(target, prop) {
               if (
+                target instanceof HTMLScriptElement &&
+                (prop === 'textContent' || prop === 'text')
+              ) {
+                const original = target.getAttribute('data-raw-script');
+                if (original != null) return original;
+              }
+              if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+                const entry = getEventHandlerEntry(target, prop);
+                if (entry && Reflect.get(target, prop, target) === entry.wrapped) return entry.original;
+              }
+              if (
                 target.nodeType === Node.TEXT_NODE &&
                 (prop === 'textContent' || prop === 'nodeValue' || prop === 'data') &&
                 target.parentElement?.tagName === 'SCRIPT'
@@ -2262,6 +2321,18 @@
               return wrapDOMValue(member);
             },
             set(target, prop, nextValue) {
+              if (
+                target instanceof HTMLScriptElement &&
+                (prop === 'textContent' || prop === 'text')
+              ) target.removeAttribute('data-raw-script');
+              if (target.nodeType === Node.TEXT_NODE &&
+                  (prop === 'textContent' || prop === 'nodeValue' || prop === 'data') &&
+                  target.parentElement?.tagName === 'SCRIPT') {
+                target.parentElement.removeAttribute('data-raw-script');
+              }
+              if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+                return setWrappedEventHandler(target, prop, nextValue);
+              }
               return Reflect.set(target, prop, unwrapDOMValue(nextValue), target);
             }
           });
@@ -2288,7 +2359,13 @@
             (typeof TreeWalker !== 'undefined' && value instanceof TreeWalker) ||
             (typeof NodeIterator !== 'undefined' && value instanceof NodeIterator) ||
             (typeof TouchList !== 'undefined' && value instanceof TouchList) ||
-            (typeof Touch !== 'undefined' && value instanceof Touch)
+            (typeof Touch !== 'undefined' && value instanceof Touch) ||
+            (typeof CSSStyleSheet !== 'undefined' && value instanceof CSSStyleSheet) ||
+            (typeof CSSStyleDeclaration !== 'undefined' && value instanceof CSSStyleDeclaration) ||
+            (typeof CSSRule !== 'undefined' && value instanceof CSSRule) ||
+            (typeof CSSRuleList !== 'undefined' && value instanceof CSSRuleList) ||
+            (typeof MediaList !== 'undefined' && value instanceof MediaList) ||
+            (typeof DOMTokenList !== 'undefined' && value instanceof DOMTokenList)
           ) return wrapDOMObject(value);
           return value;
         }
@@ -3295,6 +3372,28 @@
         const originalRemoveEventListener = EventTarget.prototype.removeEventListener;
         const listenerMap = new WeakMap();
         const wrappedEvents = new WeakMap();
+        const eventHandlerMap = new WeakMap();
+
+        function getEventHandlerEntry(target, prop) {
+          return eventHandlerMap.get(target)?.get(prop) || null;
+        }
+
+        function setWrappedEventHandler(target, prop, handler) {
+          let handlers = eventHandlerMap.get(target);
+          if (!handlers) {
+            handlers = new Map();
+            eventHandlerMap.set(target, handlers);
+          }
+          if (typeof handler !== 'function') {
+            handlers.delete(prop);
+            return Reflect.set(target, prop, handler, target);
+          }
+          const wrapped = function(event) {
+            return Reflect.apply(handler, wrapDOMValue(this), [wrapEvent(event)]);
+          };
+          handlers.set(prop, { original: handler, wrapped });
+          return Reflect.set(target, prop, wrapped, target);
+        }
 
         function resolveVirtualMessageSource(event) {
           const source = event?.source;
@@ -3595,6 +3694,10 @@
             
             // Force document.location to return the virtual location object
             if (prop === 'location') return virtualLocation;
+            if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+              const entry = getEventHandlerEntry(document, prop);
+              if (entry && Reflect.get(document, prop, document) === entry.wrapped) return entry.original;
+            }
             if (prop === 'referrer') return '';
             if (prop === 'documentURI') return DOCUMENT_URL;
             if (prop === 'URL') return DOCUMENT_URL;
@@ -3664,6 +3767,9 @@
             if (prop === 'location') {
               virtualLocation.assign(value);
               return true;
+            }
+            if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+              return setWrappedEventHandler(document, prop, value);
             }
             const ret = Reflect.set(document, prop, value, document);
             const desc = Object.getOwnPropertyDescriptor(document, prop);
@@ -3970,6 +4076,47 @@
               }
             }
             if (prop === 'document') return documentProxy;
+            if (prop === 'eval') return __indirectEval;
+            if (['setTimeout', 'setInterval', 'requestAnimationFrame', 'requestIdleCallback', 'queueMicrotask'].includes(prop)) {
+              const nativeTimer = Reflect.get(window, prop, window);
+              if (typeof nativeTimer === 'function') {
+                return function(callback, ...args) {
+                  if (typeof callback === 'string' && (prop === 'setTimeout' || prop === 'setInterval')) {
+                    const source = callback;
+                    callback = function() {
+                      return window.__executeCode(source, '<anonymous timer>', __windowProxy);
+                    };
+                  } else if (typeof callback === 'function') {
+                    const originalCallback = callback;
+                    callback = function(...callbackArgs) {
+                      return Reflect.apply(originalCallback, __windowProxy, callbackArgs.map(unwrapDOMValue));
+                    };
+                  }
+                  return Reflect.apply(nativeTimer, window, [callback, ...args.map(unwrapDOMValue)]);
+                };
+              }
+            }
+            if (prop === 'opener') {
+              const nativeOpener = Reflect.get(window, 'opener', window);
+              if (!nativeOpener) return null;
+              if (nativeOpener === window) return windowProxy;
+              const pending = [getTopPage()];
+              const seen = new Set();
+              while (pending.length) {
+                const candidate = pending.shift();
+                if (!candidate || seen.has(candidate)) continue;
+                seen.add(candidate);
+                if (candidate.iframe?.__wkNativeContentWindow === nativeOpener) {
+                  return getCallerWindowProxy(candidate, nativeOpener);
+                }
+                for (const child of candidate.children || []) pending.push(child);
+              }
+              return null;
+            }
+            if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+              const entry = getEventHandlerEntry(window, prop);
+              if (entry && Reflect.get(window, prop, window) === entry.wrapped) return entry.original;
+            }
             if (['window','globalThis','self','frames'].includes(prop)) return windowProxy;
             if (prop === 'length') return (pageEmulator?.children || []).length;
             if (prop === 'top') {
@@ -4064,14 +4211,19 @@
             }
             const value = Reflect.get(window, prop, window);
             if (isNativeFunction(value) && !value.prototype) {
-              return value.bind(window);
+              return function(...args) {
+                return wrapDOMValue(Reflect.apply(value, window, args.map(unwrapDOMValue)));
+              };
             }
-            return value;
+            return wrapDOMValue(value);
           },
           set(target, prop, value) {
             if (prop === 'location') {
               virtualLocation.assign(value);
               return true;
+            }
+            if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+              return setWrappedEventHandler(window, prop, value);
             }
             const ret = Reflect.set(window, prop, value, window);
             const desc = Object.getOwnPropertyDescriptor(window, prop);
@@ -4248,6 +4400,14 @@
         }
       }
 
+      const __indirectEval = function(source) {
+        if (typeof source !== 'string') return source;
+        return window.__executeCode(source, '<anonymous indirect eval>', __windowProxy);
+      };
+      function __getIndirectEval(value) {
+        return value === __nativeEval ? __indirectEval : value;
+      }
+
       Object.defineProperty(window, '__prepareDirectEvalCode', {
         value: __prepareDirectEvalCode,
         configurable: true,
@@ -4280,6 +4440,7 @@
               return __globalLexicalScope[prop];
             }
             if (prop === '__prepareDirectEvalCode') return __prepareDirectEvalCode;
+            if (prop === '__getIndirectEval') return __getIndirectEval;
             return Reflect.get(__windowProxy, prop, __windowProxy);
           },
           set(_target, prop, value) {
@@ -4334,9 +4495,10 @@
             JSON.stringify(body) + ',' +
             JSON.stringify(parameters) + ',' +
             JSON.stringify(kind) + ',this,arguments)';
-          const trampolineBody = kind === 'generator' || kind === 'asyncGenerator'
+          const trampolineExecution = kind === 'generator' || kind === 'asyncGenerator'
             ? 'yield* ' + invocation + ';'
             : 'return ' + invocation + ';';
+          const trampolineBody = (strict ? '"use strict";\\n' : '') + trampolineExecution;
           const trampoline = Reflect.construct(nativeConstructor, [...parameters, trampolineBody]);
 
           let scopedFunction;
