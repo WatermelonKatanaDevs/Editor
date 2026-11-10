@@ -1243,6 +1243,11 @@
       window.__frameElement = window.frameElement;
       window.__pageEmulator = window.frameElement.pageEmulator;
       window.__usefulHelpers = window.frameElement.usefulHelpers;
+      // Shared by interceptor setup and the later runtime hooks below. Keep
+      // these outside the setup IIFE so functions such as __executeCode and
+      // dynamic-node processing can resolve them through the same closure.
+      const isTurboWarpPlayUrl = value => { try { return new URL(value, BASE_ORIGIN).pathname === '/turbowarp/play'; } catch (_) { return false; } };
+      const turboDebug = (stage, details = {}) => { try { window.__pageEmulator?.sendEvent('console', 'warn', ['[WK-TW-DIAG] ' + stage, JSON.stringify(details)]); } catch (_) {} };
 
       window.__runSyncInterceptor = function(__elem,__elemWindow) {
         if (!__elemWindow) return;
@@ -1375,8 +1380,6 @@
 
         window.sendEvent = sendEvent;
 
-        const isTurboWarpPlayUrl = value => { try { return new URL(value, BASE_ORIGIN).pathname === '/turbowarp/play'; } catch (_) { return false; } };
-        const turboDebug = (stage, details = {}) => { try { sendEvent('console', 'warn', ['[WK-TW-DIAG] ' + stage, JSON.stringify(details)]); } catch (_) {} };
         if (isTurboWarpPlayUrl(CURRENT_PAGE_URL)) turboDebug('runtime-interceptor-ready', { pageId: pageEmulator?.id || null, parentPageId: pageEmulator?.parent?.id || null, scriptCount: document.scripts?.length ?? null });
 
         // The direct /turbowarp/play export expects to be hosted by the
