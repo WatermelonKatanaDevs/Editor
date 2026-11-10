@@ -558,9 +558,9 @@
         shorthand: false,
         computed: false
       });
-      const staticKey = property => {
+      const staticKey = (property, computed = false) => {
         if (!property || property.type === "PrivateIdentifier") return null;
-        if (property.type === "Identifier" && !property.computed) return property.name;
+        if (property.type === "Identifier" && !computed) return property.name;
         if (property.type === "Literal" && (typeof property.value === "string" || typeof property.value === "number")) return String(property.value);
         return null;
       };
@@ -572,8 +572,8 @@
           if (parent.left.type === "MemberExpression" && !parent.left.computed && parent.left.property.type === "Identifier") return parent.left.property.name;
           if (parent.left.type === "MemberExpression" && parent.left.computed && parent.left.property.type === "Literal") return String(parent.left.property.value);
         }
-        if (parent.type === "Property" && parent.value === child && !parent.computed) return staticKey(parent.key);
-        if (parent.type === "PropertyDefinition" && parent.value === child && !parent.computed) return staticKey(parent.key);
+        if (parent.type === "Property" && parent.value === child && !parent.computed) return staticKey(parent.key,false);
+        if (parent.type === "PropertyDefinition" && parent.value === child && !parent.computed) return staticKey(parent.key,false);
         return null;
       };
       const methodEntries = (container,isClass) => {
@@ -581,7 +581,7 @@
         const properties = isClass ? (container.body?.body || []) : (container.properties || []);
         for (const property of properties) {
           if (isClass ? property.type !== "MethodDefinition" : property.type !== "Property") continue;
-          const key = staticKey(property.key);
+          const key = staticKey(property.key, !!property.computed);
           if (key == null) continue;
           const isMethod = isClass || property.method || property.kind === "get" || property.kind === "set";
           if (!isMethod) continue;
