@@ -1826,6 +1826,11 @@
         }
 
 
+        // Capture native attribute methods before page code can replace them.
+        const nativeElementSetAttribute = Element.prototype.setAttribute;
+        const nativeElementGetAttribute = Element.prototype.getAttribute;
+        const nativeElementRemoveAttribute = Element.prototype.removeAttribute;
+
         // --- Dynamic Inline On* Handler Rewriter ---
         function patchInlineEvents(node) {
           if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -1833,14 +1838,24 @@
           Array.from(node.attributes || []).forEach(attr => {
             if (attr.name.startsWith('on') && attr.value && !attr.value.includes('__executeCode')) {
               const rawCode = attr.value;
-              if (!node.hasAttribute('data-raw-' + attr.name)) node.setAttribute('data-raw-' + attr.name, rawCode);
-              // Override attribute value to dispatch through sandboxed executor
-              node.setAttribute(
-                attr.name, 
+              if (!node.hasAttribute('data-raw-' + attr.name)) {
+                Reflect.apply(nativeElementSetAttribute, node, ['data-raw-' + attr.name, rawCode]);
+              }
+              // Override attribute value to dispatch through sandboxed executor.
+              Reflect.apply(nativeElementSetAttribute, node, [
+                attr.name,
                 `return window.__executeCode(${JSON.stringify(rawCode)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? event : undefined)`
-              );
+              ]);
             }
           });
+        }
+
+        function patchInlineEventsInTree(root) {
+          if (!root) return;
+          if (root.nodeType === Node.ELEMENT_NODE) patchInlineEvents(root);
+          if (typeof root.querySelectorAll === 'function') {
+            root.querySelectorAll('*').forEach(patchInlineEvents);
+          }
         }
 
         // --- Nested Frame / Embed Interception ---
@@ -2005,6 +2020,7 @@
 
         function prepareInsertedScripts(node) {
           if (!node) return;
+          patchInlineEventsInTree(node);
           prepareInlineScript(node);
           if (typeof node.querySelectorAll === 'function') {
             node.querySelectorAll('script').forEach(prepareInlineScript);
@@ -2539,6 +2555,15 @@
           proxy = new Proxy(node, {
             get(target, prop) {
               if (
+                typeof Attr !== 'undefined' &&
+                target instanceof Attr &&
+                /^on[a-z]/i.test(target.name) &&
+                (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')
+              ) {
+                const raw = target.ownerElement?.getAttribute('data-raw-' + target.name.toLowerCase());
+                if (raw != null) return raw;
+              }
+              if (
                 target instanceof HTMLScriptElement &&
                 (prop === 'textContent' || prop === 'text')
               ) {
@@ -2558,6 +2583,46 @@
                 if (original != null) return original;
               }
 
+              if (prop === 'setAttribute' && target instanceof Element) {
+                return function(name, value) {
+                  const attributeName = String(name || '').toLowerCase();
+                  if (isInternalDOMAttribute(attributeName)) return;
+                  if (/^on[a-z]/i.test(attributeName)) {
+                    Reflect.apply(nativeElementSetAttribute, target, ['data-raw-' + attributeName, value]);
+                    const rawCode = Reflect.apply(nativeElementGetAttribute, target, ['data-raw-' + attributeName]) || '';
+                    return Reflect.apply(nativeElementSetAttribute, target, [
+                      attributeName,
+                      `return window.__executeCode(${JSON.stringify(rawCode)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? event : undefined)`
+                    ]);
+                  }
+                  const setter = Reflect.get(target, prop, target);
+                  return Reflect.apply(setter, target, [name, unwrapDOMValue(value)]);
+                };
+              }
+              if (prop === 'removeAttribute' && target instanceof Element) {
+                return function(name) {
+                  const attributeName = String(name || '').toLowerCase();
+                  if (isInternalDOMAttribute(attributeName)) return;
+                  if (/^on[a-z]/i.test(attributeName)) {
+                    Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
+                  }
+                  return Reflect.apply(nativeElementRemoveAttribute, target, [name]);
+                };
+              }
+              if (prop === 'setAttributeNS' && target instanceof Element) {
+                return function(namespace, name, value) {
+                  const attributeName = String(name || '').toLowerCase();
+                  if ((namespace == null || namespace === '') && /^on[a-z]/i.test(attributeName)) {
+                    Reflect.apply(nativeElementSetAttribute, target, ['data-raw-' + attributeName, value]);
+                    const rawCode = Reflect.apply(nativeElementGetAttribute, target, ['data-raw-' + attributeName]) || '';
+                    return Reflect.apply(nativeElementSetAttribute, target, [
+                      attributeName,
+                      `return window.__executeCode(${JSON.stringify(rawCode)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? event : undefined)`
+                    ]);
+                  }
+                  return Reflect.apply(target.setAttributeNS, target, [namespace, name, unwrapDOMValue(value)]);
+                };
+              }
               if (prop === 'getAttribute') {
                 return function(name) {
                   const attributeName = String(name || '').toLowerCase();
@@ -2582,6 +2647,13 @@
                 };
               }
               if (prop === 'attributes') return wrapDOMCollection(Reflect.get(target, prop, target));
+              if (prop === 'getAttributeNode' && target instanceof Element) {
+                return function(name) {
+                  const attributeName = String(name || '').toLowerCase();
+                  if (isInternalDOMAttribute(attributeName)) return null;
+                  return wrapDOMValue(Reflect.apply(target.getAttributeNode, target, [name]));
+                };
+              }
               if (prop === 'ownerDocument') {
                 const owner = Reflect.get(target, prop, target);
                 return owner === document ? documentProxy : wrapDOMValue(owner);
@@ -2596,6 +2668,23 @@
               return wrapDOMValue(member);
             },
             set(target, prop, nextValue) {
+              if (
+                typeof Attr !== 'undefined' &&
+                target instanceof Attr &&
+                /^on[a-z]/i.test(target.name) &&
+                (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')
+              ) {
+                const raw = String(nextValue);
+                const name = target.name.toLowerCase();
+                if (target.ownerElement) {
+                  Reflect.apply(nativeElementSetAttribute, target.ownerElement, ['data-raw-' + name, raw]);
+                  Reflect.apply(nativeElementSetAttribute, target.ownerElement, [
+                    name,
+                    `return window.__executeCode(${JSON.stringify(raw)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? event : undefined)`
+                  ]);
+                  return true;
+                }
+              }
               if (
                 target instanceof HTMLScriptElement &&
                 (prop === 'textContent' || prop === 'text')
@@ -5180,11 +5269,25 @@
         get() { return serializePageElement(this, false); },
         set(value) {
           nativeElementInnerHTML.set.call(this, value);
+          patchInlineEventsInTree(this);
           const nodes = Array.from(this.childNodes);
           primeAssignedResources(nodes);
           queueAssignedNodes(nodes);
         }
       });
+
+      const nativeInsertAdjacentHTML = Element.prototype.insertAdjacentHTML;
+      if (nativeInsertAdjacentHTML) {
+        Element.prototype.insertAdjacentHTML = function(position, html) {
+          const result = Reflect.apply(nativeInsertAdjacentHTML, this, [position, html]);
+          const normalizedPosition = String(position).toLowerCase();
+          const root = normalizedPosition === 'beforebegin' || normalizedPosition === 'afterend'
+            ? this.parentElement
+            : this;
+          if (root) patchInlineEventsInTree(root);
+          return result;
+        };
+      }
 
       Object.defineProperty(Element.prototype, 'outerHTML', {
         configurable: nativeElementOuterHTML.configurable,
@@ -5197,6 +5300,7 @@
 
           if (!parent || !before) return;
           const nodes = Array.from(parent.childNodes).filter(node => !before.has(node));
+          nodes.forEach(patchInlineEventsInTree);
           primeAssignedResources(nodes);
           queueAssignedNodes(nodes);
         }
