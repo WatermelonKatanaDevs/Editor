@@ -2766,18 +2766,39 @@
           return newPage.__windowProxy || null;
         };
 
-        ['MouseEvent', 'KeyboardEvent', 'FocusEvent', 'UIEvent'].forEach(eventName => {
-          if (window[eventName]) {
-            window[eventName] = new Proxy(window[eventName], {
-              construct(target, args) {
-                const [type, params] = args;
-                if (params && params.view) {
-                  params.view = params.view.__trueWindow || params.view;
-                }
-                return Reflect.construct(target, args, target);
+        [
+          'Event', 'CustomEvent', 'UIEvent', 'MouseEvent', 'KeyboardEvent',
+          'FocusEvent', 'InputEvent', 'PointerEvent', 'WheelEvent', 'DragEvent',
+          'ClipboardEvent', 'CompositionEvent', 'SubmitEvent', 'ProgressEvent',
+          'MessageEvent', 'ErrorEvent', 'CloseEvent', 'PageTransitionEvent',
+          'HashChangeEvent', 'PopStateEvent', 'StorageEvent', 'BeforeUnloadEvent',
+          'AnimationEvent', 'TransitionEvent', 'TouchEvent'
+        ].forEach(eventName => {
+          const NativeEventConstructor = window[eventName];
+          if (typeof NativeEventConstructor !== 'function') return;
+          let ScopedEventConstructor;
+          ScopedEventConstructor = new Proxy(NativeEventConstructor, {
+            construct(target, args, newTarget) {
+              const constructorArgs = args.slice();
+              const init = constructorArgs[1];
+              if (init && typeof init === 'object') {
+                constructorArgs[1] = new Proxy(init, {
+                  get(initTarget, prop, receiver) {
+                    const value = Reflect.get(initTarget, prop, receiver);
+                    if (prop === 'view' || prop === 'source') return unwrapDOMValue(value);
+                    return value;
+                  }
+                });
               }
-            });
-          }
+              const event = Reflect.construct(
+                target,
+                constructorArgs,
+                newTarget === ScopedEventConstructor ? target : newTarget
+              );
+              return wrapEvent(event);
+            }
+          });
+          window[eventName] = ScopedEventConstructor;
         });
 
         // Catch file input activation before the native file picker can open.
@@ -3717,7 +3738,12 @@
             }
             for (const child of candidate.children || []) pending.push(child);
           }
-          return null;
+          // MessageEvent.source can also be a MessagePort or ServiceWorker.
+          // Those are not WindowProxy leaks and must retain their identity.
+          try {
+            if (source instanceof Window || source.window === source) return null;
+          } catch (_) {}
+          return wrapDOMValue(source);
         }
 
         function wrapEvent(event) {
