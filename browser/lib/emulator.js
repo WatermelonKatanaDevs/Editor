@@ -5528,14 +5528,15 @@
             // Handle native methods (like document.getElementById, etc.)
             if (isNativeFunction(value) && !value.prototype && prop != 'constructor') {
               return function(){
-                const args = Array.from(arguments).map(v => v == documentProxy ? document : v);
+                const args = Array.from(arguments).map(unwrapDOMValue);
                 return wrapDocumentValue(Reflect.apply(value, document, args));
               };
             }
             if (typeof value == 'function' && prop != 'constructor') {
               return function(){
-                const receiver = this == documentProxy ? document : this;
-                return wrapDocumentValue(Reflect.apply(value, receiver, arguments));
+                const receiver = this == documentProxy ? document : unwrapDOMValue(this);
+                const args = Array.from(arguments).map(unwrapDOMValue);
+                return wrapDocumentValue(Reflect.apply(value, receiver, args));
               };
             }
             return wrapDocumentValue(value);
@@ -5548,7 +5549,7 @@
             if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
               return setWrappedEventHandler(document, prop, value);
             }
-            const ret = Reflect.set(document, prop, value, document);
+            const ret = Reflect.set(document, prop, unwrapDOMValue(value), document);
             const desc = Object.getOwnPropertyDescriptor(document, prop);
             if (desc && desc.configurable) {
               Reflect.defineProperty(target, prop, desc);
@@ -5575,12 +5576,14 @@
             );
           },
           defineProperty(target, prop, desc) {
+            const nativeDescriptor = { ...desc };
+            if ('value' in nativeDescriptor) nativeDescriptor.value = unwrapDOMValue(nativeDescriptor.value);
             try {
-              Object.defineProperty(document, prop, desc);
+              Object.defineProperty(document, prop, nativeDescriptor);
             } catch (e) {
               console.warn("Failed to define property on true document:", prop, e);
             }
-            return Reflect.defineProperty(target, prop, desc);
+            return Reflect.defineProperty(target, prop, nativeDescriptor);
           },
           deleteProperty(target, prop) {
             try {
@@ -6058,7 +6061,7 @@
             if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
               return setWrappedEventHandler(window, prop, value);
             }
-            const ret = Reflect.set(window, prop, value, window);
+            const ret = Reflect.set(window, prop, unwrapDOMValue(value), window);
             const desc = Object.getOwnPropertyDescriptor(window, prop);
             if (desc && desc.configurable) {
               Reflect.defineProperty(target, prop, desc);
@@ -6089,12 +6092,14 @@
             );
           },
           defineProperty(target, prop, desc) {
+            const nativeDescriptor = { ...desc };
+            if ('value' in nativeDescriptor) nativeDescriptor.value = unwrapDOMValue(nativeDescriptor.value);
             try {
-              Object.defineProperty(window, prop, desc);
+              Object.defineProperty(window, prop, nativeDescriptor);
             } catch (e) {
               console.warn("Failed to define property on true window:", prop, e);
             }
-            return Reflect.defineProperty(target, prop, desc);
+            return Reflect.defineProperty(target, prop, nativeDescriptor);
           },
           deleteProperty(target, prop) {
             try {
