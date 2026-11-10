@@ -5829,6 +5829,7 @@
             }
             if (prop === 'document') return documentProxy;
             if (prop === 'Reflect') return pageReflect;
+            if (prop === 'eval') return Reflect.get(target, prop, target);
             if (prop === 'opener') {
               const nativeOpener = Reflect.get(window, 'opener', window);
               if (!nativeOpener) return null;
