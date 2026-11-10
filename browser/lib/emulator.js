@@ -1776,10 +1776,14 @@
             if (prop === __scopeUnscopables) return undefined;
             if (__scopeReflectApply(__scopeHasOwn, bindings, [prop])) return bindings[prop];
             if (__privateScriptNames[prop] === true) return undefined;
-            // Bare eval must resolve to the native intrinsic to retain direct-eval
-            // lexical semantics. window.eval remains the emulated indirect form.
-            if (prop === 'eval') return __nativeEval;
             if (__scopeReflectApply(__scopeHasOwn, target, [prop])) return target[prop];
+            // Bare eval is direct only while the public Window eval binding is
+            // still the emulator's indirect wrapper. If page code replaces
+            // window.eval, the bare global binding must observe that replacement.
+            if (prop === 'eval') {
+              const publicEval = Reflect.get(windowProxy, 'eval', windowProxy);
+              return publicEval === __indirectEval ? __nativeEval : publicEval;
+            }
             return Reflect.get(windowProxy, prop, windowProxy);
           },
           set(target, prop, value) {
@@ -5825,7 +5829,6 @@
             }
             if (prop === 'document') return documentProxy;
             if (prop === 'Reflect') return pageReflect;
-            if (prop === 'eval') return __indirectEval;
             if (prop === 'opener') {
               const nativeOpener = Reflect.get(window, 'opener', window);
               if (!nativeOpener) return null;
@@ -5976,7 +5979,7 @@
                 configurable: descriptor.configurable,
                 enumerable: descriptor.enumerable,
                 writable: true,
-                value: __indirectEval
+                value: Reflect.get(target, prop, target)
               };
             }
             return wrapPublicPropertyDescriptor(
