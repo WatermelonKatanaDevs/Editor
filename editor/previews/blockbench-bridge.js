@@ -556,6 +556,27 @@
     }
   }, true);
 
+  (() => {
+    const minecraftCategory = Array.from(document.getElementsByClassName('format_category')).find(element => element.textContent.includes('Minecraft'));
+    minecraftCategory?.remove();
+
+    const runner = () => {
+      const item = document.querySelector('[menu_item="new"]');
+      if (!item || item.__wkMinecraftMenuPatched) return;
+      item.__wkMinecraftMenuPatched = true;
+      item.addEventListener('mouseenter', () => {
+        ["java_block", "bedrock", "bedrock_block", "bedrock_old", "modded_entity", "optifine_entity", "optifine_part", "skin", "bedrock_player_model"].forEach(name => {
+          document.querySelector('[menu_item="' + name + '"]')?.remove();
+        });
+        document.querySelector('[menu_separator_id="loaders"]')?.remove();
+      });
+    };
+
+    const fileMenu = Array.from(document.getElementsByClassName('menu_bar_point')).find(element => element.textContent.includes('File'));
+    fileMenu?.addEventListener('click', runner);
+    fileMenu?.addEventListener('mouseenter', runner);
+  })();
+
   console.info('WatermelonKatana Blockbench workspace integration enabled.', {
     bridgeId,
     filesystemApiReady: !!fileSystemApi,
