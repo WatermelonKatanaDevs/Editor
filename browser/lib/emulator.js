@@ -226,7 +226,6 @@
     await Promise.all([
       processElements('script[src]', 'src', 'data-raw-src', async function(response, url, ourl, element) {
         let text = await response.clone().text();
-        if (element) element.setAttribute('data-raw-script', text);
         const scriptType = (element?.getAttribute('type') || '').trim();
         const isModule = scriptType.toLowerCase() === 'module';
         const isClassicScript = !scriptType ||
@@ -2076,7 +2075,6 @@
           { selector: 'script[src]', attr: 'src',
             filter: async function(response, absoluteUrl, origin, element) {
               const source = await response.clone().text();
-              if (element) element.setAttribute('data-raw-script', source);
               const scriptType = (element?.getAttribute('type') || '').trim();
               const isModule = scriptType.toLowerCase() === 'module';
               const isClassicScript = !scriptType ||
