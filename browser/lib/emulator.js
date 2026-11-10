@@ -2732,6 +2732,9 @@
         const virtualDOMAttributeNames = new WeakMap();
         const wrappedDOMObjects = new WeakMap();
         const unwrappedDOMObjects = new WeakMap();
+        const wrappedEvents = new WeakMap();
+        const unwrappedEvents = new WeakMap();
+        let documentProxy;
 
         function unwrapDOMValue(value) {
           if (!value || (typeof value !== 'object' && typeof value !== 'function')) return value;
@@ -2775,14 +2778,14 @@
         }
 
         function wrapDOMCollection(collection) {
+          if (!collection || unwrappedDOMCollections.has(collection)) return collection;
+          if (wrappedDOMCollections.has(collection)) return wrappedDOMCollections.get(collection);
           if (
             !(collection instanceof HTMLCollection) &&
             !(collection instanceof NodeList) &&
             !(typeof NamedNodeMap !== 'undefined' && collection instanceof NamedNodeMap) &&
             !(typeof StyleSheetList !== 'undefined' && collection instanceof StyleSheetList)
           ) return collection;
-          if (wrappedDOMCollections.has(collection)) return wrappedDOMCollections.get(collection);
-
           const isNamedNodeMap = typeof NamedNodeMap !== 'undefined' && collection instanceof NamedNodeMap;
           let proxy;
           const visibleItems = () => {
@@ -2987,6 +2990,7 @@
 
         function wrapDOMObject(value) {
           if (!value || (typeof value !== 'object' && typeof value !== 'function')) return value;
+          if (unwrappedDOMObjects.has(value)) return value;
           if (wrappedDOMObjects.has(value)) return wrappedDOMObjects.get(value);
           const proxy = new Proxy(value, {
             get(target, prop) {
@@ -3069,6 +3073,7 @@
 
         function wrapDOMNode(node) {
           if (!node || !(node instanceof Node)) return node;
+          if (unwrappedDOMNodes.has(node)) return node;
           if (node === document) return documentProxy;
           if (wrappedDOMNodes.has(node)) return wrappedDOMNodes.get(node);
           if (node instanceof HTMLElement) wrapElement(node);
@@ -3466,6 +3471,12 @@
         function wrapDOMValue(value) {
           if (value == null) return value;
           if (Array.isArray(value)) return value.map(wrapDOMValue);
+          if (
+            unwrappedDOMNodes.has(value) ||
+            unwrappedDOMCollections.has(value) ||
+            unwrappedDOMObjects.has(value) ||
+            unwrappedEvents.has(value)
+          ) return value;
           if (value === window || value === windowProxy) return windowProxy;
           if (value === document) return documentProxy;
           if (typeof Event !== 'undefined' && value instanceof Event) return wrapEvent(value);
@@ -4543,8 +4554,6 @@
         const originalAddEventListener = EventTarget.prototype.addEventListener;
         const originalRemoveEventListener = EventTarget.prototype.removeEventListener;
         const listenerMap = new WeakMap();
-        const wrappedEvents = new WeakMap();
-        const unwrappedEvents = new WeakMap();
         const eventHandlerMap = new WeakMap();
 
         function getEventHandlerEntry(target, prop) {
@@ -4607,6 +4616,7 @@
 
         function wrapEvent(event) {
           if (!event || typeof event !== 'object') return event;
+          if (unwrappedEvents.has(event)) return event;
           if (wrappedEvents.has(event)) return wrappedEvents.get(event);
 
           const isMessage = typeof MessageEvent !== 'undefined' && event instanceof MessageEvent;
@@ -4889,7 +4899,7 @@
             .replace(/data-wk-internal-script-type/gi, 'data-raw-type');
         }
 
-        const documentProxy = new Proxy(documentTarget, {
+        documentProxy = new Proxy(documentTarget, {
           has(target, prop) {
             if (prop === 'location') return true;
             return Reflect.has(document, prop);
