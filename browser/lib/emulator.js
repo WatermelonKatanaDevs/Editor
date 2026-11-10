@@ -88,6 +88,23 @@
     }
   }
 
+  function isExecutableJavaScriptType(type) {
+    const normalized = String(type || '').trim().toLowerCase();
+    return !normalized ||
+      normalized === 'module' ||
+      /^(?:text|application)\/(?:java|ecma)script(?:\s*;|$)/i.test(normalized);
+  }
+
+  function blockUnprocessedScript(element) {
+    if (!element || element.tagName !== 'SCRIPT') return;
+    if (!element.hasAttribute('data-raw-script')) {
+      element.setAttribute('data-raw-script', element.textContent || '');
+    }
+    element.removeAttribute('src');
+    element.textContent = '';
+    try { Object.defineProperty(element, '__wkScriptBlocked', { value: true, configurable: true }); } catch (_) {}
+  }
+
   async function preprocessHtml(rawHtml, page, baseUrlOverride = null) {
     let pageUrl = baseUrlOverride || getPageBaseUrl(page);
     let dynamicBaseOrigin = (() => { try { return new URL(pageUrl).origin; } catch (_) { return page.location.origin; } })();
@@ -162,42 +179,51 @@
 
     const processElements = (selector, attr, rawAttr = 'data-raw-src', filter = f => f) => {
       const elements = Array.from(doc.querySelectorAll(selector));
-
       return elements.map(async (el) => {
         const originalUrl = el.getAttribute(attr);
         if (!originalUrl) return;
 
-        const embeddedScript = el.tagName === 'SCRIPT' && /^(?:data|blob):/i.test(originalUrl);
-        if (embeddedScript) {
-          const response = await fetch(originalUrl);
-          if (!response || !response.ok) return;
-          el.setAttribute(rawAttr, originalUrl);
-          const processedRes = await filter(response, originalUrl, originalUrl, el);
-          if (!processedRes) return;
-          const dataUri = await createDataUri(processedRes);
-          if (dataUri) el.setAttribute(attr, dataUri);
-          return;
-        }
-        if (originalUrl.startsWith('data:') || originalUrl.startsWith('blob:')) return;
+        const isScript = el.tagName === 'SCRIPT' && attr === 'src';
+        const shouldExecute = isScript && isExecutableJavaScriptType(el.getAttribute('type'));
+        const blockIfNeeded = () => { if (shouldExecute) blockUnprocessedScript(el); };
 
-        const absoluteUrl = resolveUrl(originalUrl);
         el.setAttribute(rawAttr, originalUrl);
+        try {
+          const response = /^(?:data|blob):/i.test(originalUrl)
+            ? await fetch(originalUrl)
+            : await page.network.request(resolveUrl(originalUrl), dynamicBaseOrigin, {}, selector);
 
-        const response = await page.network.request(absoluteUrl, dynamicBaseOrigin, {}, selector);
+          if (!response || !response.ok) {
+            blockIfNeeded();
+            return;
+          }
 
-        if (!response || !response.ok) return;
+          const processedRes = await filter(
+            response,
+            resolveUrl(originalUrl),
+            originalUrl,
+            el
+          );
+          if (!processedRes) {
+            blockIfNeeded();
+            return;
+          }
 
-        const processedRes = await filter(response, absoluteUrl, originalUrl, el);
-
-        if (!processedRes) return;
-
-        const dataUri = await createDataUri(processedRes);
-
-        if (dataUri) el.setAttribute(attr, dataUri);
+          const dataUri = await createDataUri(processedRes);
+          if (dataUri) {
+            el.setAttribute(attr, dataUri);
+          } else {
+            blockIfNeeded();
+          }
+        } catch (error) {
+          blockIfNeeded();
+          if (!shouldExecute) throw error;
+          console.warn('Blocked script whose source could not be virtualized:', originalUrl, error);
+        }
       });
     };
 
-    await Promise.all([
+    await Promise.all([    await Promise.all([
       processElements('script[src]', 'src', 'data-raw-src', async function(response, url, ourl, element) {
         let text = await response.clone().text();
         const scriptType = (element?.getAttribute('type') || '').trim();
@@ -2080,28 +2106,39 @@
         ];
 
         async function interceptElementAttribute(el, attr, rawAttr = 'data-raw-src', filter = f => f) {
-          const val = el.tagName === 'SCRIPT' && attr === 'src'
+          const isScript = el?.tagName === 'SCRIPT' && attr === 'src';
+          const val = isScript
             ? (el.getAttribute(rawAttr) || Reflect.apply(nativeElementGetAttribute, el, [attr]))
             : el.getAttribute(attr);
           if (!val) return;
 
-          if (
-            el.tagName === 'SCRIPT' &&
-            attr === 'src' &&
-            /^(?:data|blob):/i.test(val) &&
-            !el.hasAttribute('data-raw-src')
-          ) {
+          const shouldExecute = isScript && isExecutableJavaScriptType(
+            el.getAttribute('data-raw-type') || el.getAttribute('type')
+          );
+          const blockIfNeeded = () => { if (shouldExecute) blockUnprocessedScript(el); };
+
+          if (isScript && /^(?:data|blob):/i.test(val) && !el.hasAttribute('data-raw-src')) {
             el.__processing_attr = true;
             try {
               Reflect.apply(nativeElementSetAttribute, el, ['data-raw-src', val]);
               const response = await fetch(val);
-              if (!response || !response.ok) return;
-              const scriptFilter = ATTRIBUTE_MAP.find(rule => rule.selector === 'script[src]')?.filter || (value => value);
-              const processed = await scriptFilter(response, val, val, el);
-              if (!processed) return;
+              if (!response || !response.ok) {
+                blockIfNeeded();
+                return;
+              }
+              const processed = await filter(response, val, val, el);
+              if (!processed) {
+                blockIfNeeded();
+                return;
+              }
               const dataUri = await createDataUri(processed);
-              if (dataUri) Reflect.apply(nativeElementSetAttribute, el, ['src', dataUri]);
+              if (dataUri) {
+                Reflect.apply(nativeElementSetAttribute, el, ['src', dataUri]);
+              } else {
+                blockIfNeeded();
+              }
             } catch (error) {
+              blockIfNeeded();
               console.warn('Failed to virtualize embedded script source:', error);
             } finally {
               el.__processing_attr = false;
@@ -2109,23 +2146,36 @@
             return;
           }
 
-          if (val.startsWith('data:') || val.startsWith('blob:')) return;
-
+          if (/^(?:data|blob):/i.test(val) && !isScript) return;
           if (!el.hasAttribute(rawAttr)) {
             const resolvedUrl = new URL(val, CURRENT_PAGE_URL).href;
             el.setAttribute(rawAttr, resolvedUrl);
-
-            const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, el.tagName);
-            if (response && response.ok) {
-              const processedRes = await filter(response, resolvedUrl, BASE_ORIGIN, el);
-              if (processedRes) {
-                el.setAttribute(attr, await createDataUri(processedRes));
+            try {
+              const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, el.tagName);
+              if (!response || !response.ok) {
+                blockIfNeeded();
+                return;
               }
+              const processedRes = await filter(response, resolvedUrl, BASE_ORIGIN, el);
+              if (!processedRes) {
+                blockIfNeeded();
+                return;
+              }
+              const dataUri = await createDataUri(processedRes);
+              if (dataUri) {
+                el.setAttribute(attr, dataUri);
+              } else {
+                blockIfNeeded();
+              }
+            } catch (error) {
+              blockIfNeeded();
+              if (!shouldExecute) throw error;
+              console.warn('Blocked script whose source could not be virtualized:', resolvedUrl, error);
             }
           }
         }
 
-        // Rewrite dynamic inline scripts before inserting them into the live DOM.
+        // Rewrite dynamic inline scripts before inserting them into the live DOM.        // Rewrite dynamic inline scripts before inserting them into the live DOM.
         // Native browsers execute classic inline scripts during appendChild /
         // insertBefore / replaceChild, before MutationObserver callbacks run.
         function prepareInlineScript(node) {
@@ -2514,6 +2564,7 @@
 
           var oldSetAttribute = elem.setAttribute;
           var oldGetAttribute = elem.getAttribute;
+          var oldRemoveAttribute = elem.removeAttribute;
           elem.setAttribute = function(prop, value) {
             const lowerProp = prop.toLowerCase();
 
@@ -2530,7 +2581,14 @@
 
               oldSetAttribute.call(this, propObj[lowerProp], value);
 
-              if (value.startsWith("data:") || value.startsWith("blob:") || value.startsWith("javascript:")) {
+              const isScriptSource = tagName === 'script' && lowerProp === 'src';
+              const shouldExecuteScript = isScriptSource && isExecutableJavaScriptType(
+                this.getAttribute('data-raw-type') || this.getAttribute('type')
+              );
+              if (
+                (value.startsWith("data:") || value.startsWith("blob:") || value.startsWith("javascript:")) &&
+                !isScriptSource
+              ) {
                 return oldSetAttribute.call(this, prop, value);
               }
 
@@ -2539,9 +2597,6 @@
               // Async resolution
               (async () => {
                 if (this.tagName == 'IFRAME') {
-                  // Keep iframe src/srcdoc virtual. Setting the native attribute
-                  // first starts a real browser navigation that races the
-                  // emulator's own fetch + srcdoc navigation.
                   this.__sandboxed = false;
                   try {
                     await setupNestedFrame(this);
@@ -2550,19 +2605,46 @@
                   }
                   return;
                 }
-                
+
+                const blockScript = () => {
+                  if (!shouldExecuteScript) {
+                    oldSetAttribute.call(this, prop, value);
+                    return;
+                  }
+                  if (!this.hasAttribute('data-raw-script')) {
+                    oldSetAttribute.call(this, 'data-raw-script', this.textContent || '');
+                  }
+                  oldRemoveAttribute.call(this, prop);
+                  this.textContent = '';
+                  try { Object.defineProperty(this, '__wkScriptBlocked', { value: true, configurable: true }); } catch (_) {}
+                };
+
                 try {
                   const resolvedUrl = new URL(value, CURRENT_PAGE_URL).href;
-                  const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, tagName);
-                  if (response && response.ok) {
-                    const dataUri = await createDataUri(response);
-                    if (dataUri) {
-                      return oldSetAttribute.call(this, prop, dataUri);
-                    }
+                  const response = /^(?:data|blob):/i.test(value)
+                    ? await fetch(value)
+                    : await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, tagName);
+                  if (!response || !response.ok) {
+                    blockScript();
+                    return;
                   }
-                  oldSetAttribute.call(this, prop, value);
+                  let processedResponse = response;
+                  if (isScriptSource) {
+                    const scriptFilter = ATTRIBUTE_MAP.find(rule => rule.selector === 'script[src]')?.filter;
+                    if (scriptFilter) processedResponse = await scriptFilter(response, resolvedUrl, BASE_ORIGIN, this);
+                  }
+                  if (!processedResponse) {
+                    blockScript();
+                    return;
+                  }
+                  const dataUri = await createDataUri(processedResponse);
+                  if (dataUri) {
+                    return oldSetAttribute.call(this, prop, dataUri);
+                  }
+                  blockScript();
                 } catch (err) {
-                  oldSetAttribute.call(this, prop, value);
+                  blockScript();
+                  if (!shouldExecuteScript) console.warn('Failed to virtualize resource:', value, err);
                 } finally {
                   this.__processing_attr = false;
                 }
