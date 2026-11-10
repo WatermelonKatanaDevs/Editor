@@ -203,7 +203,7 @@
         const scriptType = (element?.getAttribute('type') || '').trim();
         const isModule = scriptType.toLowerCase() === 'module';
         const isClassicScript = !scriptType ||
-          /^(?:text|application)\\/(?:java|ecma)script(?:\\s*;|$)/i.test(scriptType);
+          /^(?:text|application)\/(?:java|ecma)script(?:\s*;|$)/i.test(scriptType);
         if (!isModule && !isClassicScript) return response;
 
         if (isModule) {
@@ -312,7 +312,7 @@
       const scriptType = (script.getAttribute('type') || '').trim();
       const isModule = scriptType.toLowerCase() === 'module';
       const isClassicScript = !scriptType ||
-        /^(?:text|application)\\/(?:java|ecma)script(?:\\s*;|$)/i.test(scriptType);
+        /^(?:text|application)\/(?:java|ecma)script(?:\s*;|$)/i.test(scriptType);
       if ((!isModule && !isClassicScript) || !script.textContent || script.textContent.includes('__executeCode')) return;
       {
         const rawScript = script.textContent;
@@ -2052,7 +2052,7 @@
               const scriptType = (element?.getAttribute('type') || '').trim();
               const isModule = scriptType.toLowerCase() === 'module';
               const isClassicScript = !scriptType ||
-                /^(?:text|application)\\/(?:java|ecma)script(?:\\s*;|$)/i.test(scriptType);
+                /^(?:text|application)\/(?:java|ecma)script(?:\s*;|$)/i.test(scriptType);
               if (!isModule && !isClassicScript) return response;
               if (isModule) {
                 element.setAttribute('data-raw-type', element.getAttribute('type'));
@@ -2136,7 +2136,7 @@
           const scriptType = (node.getAttribute('type') || '').trim();
           const isModule = scriptType.toLowerCase() === 'module';
           const isClassicScript = !scriptType ||
-            /^(?:text|application)\\/(?:java|ecma)script(?:\\s*;|$)/i.test(scriptType);
+            /^(?:text|application)\/(?:java|ecma)script(?:\s*;|$)/i.test(scriptType);
           if (!isModule && !isClassicScript) return;
 
           const rawScript = node.textContent;
