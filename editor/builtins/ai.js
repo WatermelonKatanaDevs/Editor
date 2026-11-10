@@ -14,6 +14,47 @@
     } catch (_) {}
     return '<p>' + escapeHtml(text).replace(/\n/g,'<br>') + '</p>';
   }
+
+  function protectMath(value) {
+    const source = String(value || '');
+    const expressions = [];
+    const pattern = /(\x60{3,}[\s\S]*?\x60{3,}|~{3,}[\s\S]*?~{3,}|\x60[^\x60\n]*\x60|\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^$\n]+\$)/g;
+    const text = source.replace(pattern, match => {
+      if (match.startsWith('\x60') || match.startsWith('~~~')) return match;
+      const display = match.startsWith('$') || match.startsWith('\\[');
+      const delimiterLength = match.startsWith('$') || match.startsWith('\\[') || match.startsWith('\\(') ? 2 : 1;
+      expressions.push({tex:match.slice(delimiterLength,-delimiterLength),display,raw:match});
+      return 'KATEXMATH' + (expressions.length - 1) + 'TOKEN';
+    });
+    return {text,expressions};
+  }
+  function renderMathExpressions(container, expressions) {
+    if (!expressions.length || typeof window.katex?.renderToString !== 'function') return;
+    const nodes = [];
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) if (node.nodeValue.includes('KATEXMATH')) nodes.push(node);
+    for (const textNode of nodes) {
+      const parts = textNode.nodeValue.split(/KATEXMATH(\d+)TOKEN/g);
+      const fragment = document.createDocumentFragment();
+      for (let i = 0; i < parts.length; i++) {
+        if (i % 2 === 0) {
+          if (parts[i]) fragment.appendChild(document.createTextNode(parts[i]));
+          continue;
+        }
+        const expression = expressions[Number(parts[i])];
+        if (!expression) continue;
+        const element = document.createElement('span');
+        element.className = expression.display ? 'ai-katex-display' : 'ai-katex-inline';
+        try {
+          element.innerHTML = window.katex.renderToString(expression.tex,{displayMode:expression.display,throwOnError:false,strict:'ignore',trust:false});
+        } catch (_) { element.textContent = expression.raw; }
+        fragment.appendChild(element);
+      }
+      textNode.replaceWith(fragment);
+    }
+  }
+
   function sanitizeHtml(html) {
     const parser = new DOMParser();
     const doc = parser.parseFromString('<div>' + String(html || '') + '</div>', 'text/html');
@@ -50,7 +91,9 @@
     return state.lastTextTab?.kind === 'file' ? state.lastTextTab : null;
   }
   function renderMessage(container, text, onInsertCode) {
-    container.innerHTML = sanitizeHtml(markdown(text));
+    const math = protectMath(text);
+    container.innerHTML = sanitizeHtml(markdown(math.text));
+    renderMathExpressions(container, math.expressions);
     container.querySelectorAll('pre').forEach(pre => {
       const info = getCodeInfo(pre); if (!info) return;
       const wrap = document.createElement('div'); wrap.className = 'ai-code-wrap';
