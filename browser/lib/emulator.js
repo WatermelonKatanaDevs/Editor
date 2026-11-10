@@ -3642,8 +3642,17 @@
         const callerWindowProxyCache = new Map();
         function getCallerWindowProxy(targetPage, nativeTargetWindow) {
           if (!targetPage || targetPage === pageEmulator) return windowProxy;
+          if (!targetPage.__windowProxy && nativeTargetWindow && targetPage.iframe && typeof window.__runSyncInterceptor === 'function') {
+            // A frame may be reachable before its runtime interceptor has been
+            // installed. Initialize its emulator proxy rather than exposing the
+            // native WindowProxy as a temporary fallback.
+            try {
+              window.__runSyncInterceptor(targetPage.iframe, nativeTargetWindow);
+            } catch (_) {}
+          }
           if (!targetPage.__windowProxy || !nativeTargetWindow) {
-            return targetPage.__windowProxy || nativeTargetWindow || windowProxy;
+            // Never return a native WindowProxy to code running in the emulated page.
+            return targetPage.__windowProxy || windowProxy;
           }
           const cacheKey = targetPage;
           const targetWindowProxy = targetPage.__windowProxy;
