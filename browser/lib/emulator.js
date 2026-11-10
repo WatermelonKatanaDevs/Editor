@@ -1723,7 +1723,16 @@
         'installScopedDOMConstructor', 'constructorString', 'makeScopedFunctionConstructor',
         '__createScriptExecutionScope', '__privateScriptNames', '__scopeHasOwn',
         '__scopeReflectApply', '__scopeReflectSet', '__scopeGetOwnPropertyDescriptor',
-        '__scriptBindings', '__scriptScope', '__execResult'
+        '__scopeUnscopables', '__scriptBindings', '__scriptScope', '__execResult',
+        '__event', '__globalLexicalScope', '__windowProxy', '__importModule', '__exportModule',
+        '__declareGlobalLexicalConstant', '__declareGlobalLexicalVariable',
+        '__prepareDirectEvalCode', '__getIndirectEval',
+        '__wkRegisterFunctionSource', '__wkRegisterObjectFunctionSources', '__wkRegisterClassFunctionSources',
+        'interceptorFunction', '__interceptorCode', '__childProxy', '__childPage', '__getCallerProxy',
+        'nativeTimerFunctions', 'wrappedTimer', 'nativeTimer', 'originalCallback',
+        'rawCall', 'rawApply', 'rawBind', 'rawToString', 'rawReflectApply',
+        'normalizeThis', 'isNativeFunction', 'callerWindowProxyCache',
+        'windowTarget', 'documentTarget', 'virtualLocation', 'virtualHistory'
       ].forEach(name => { __privateScriptNames[name] = true; });
 
       const __scopeHasOwn = Object.prototype.hasOwnProperty;
@@ -1731,6 +1740,27 @@
       const __scopeReflectSet = Reflect.set;
       const __scopeGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
       const __scopeUnscopables = Symbol.unscopables;
+      const __scriptLexicalFacade = new Proxy(Object.create(null), {
+        get(_target, prop) {
+          if (prop === __scopeUnscopables) return undefined;
+          return Reflect.get(__globalLexicalScope, prop, __globalLexicalScope);
+        },
+        set(_target, prop, value) {
+          return Reflect.set(__globalLexicalScope, prop, value, __globalLexicalScope);
+        },
+        has(_target, prop) {
+          return __scopeReflectApply(__scopeHasOwn, __globalLexicalScope, [prop]);
+        },
+        ownKeys() {
+          return [];
+        },
+        getOwnPropertyDescriptor() {
+          return undefined;
+        },
+        getPrototypeOf() {
+          return null;
+        }
+      });
 
       function __createScriptExecutionScope(bindings) {
         return new Proxy(__globalLexicalScope, {
@@ -5813,7 +5843,7 @@
         __codeString = window.__usefulHelpers.editCode(__codeString);
         const __scriptBindings = {
           __windowProxy: window.__windowProxy,
-          __globalLexicalScope,
+          __globalLexicalScope: __scriptLexicalFacade,
           __declareGlobalLexicalConstant,
           __declareGlobalLexicalVariable,
           __prepareDirectEvalCode,
@@ -5846,7 +5876,7 @@
         let __execResult;
         const __scriptBindings = {
           __windowProxy: window.__windowProxy,
-          __globalLexicalScope,
+          __globalLexicalScope: __scriptLexicalFacade,
           __declareGlobalLexicalConstant,
           __declareGlobalLexicalVariable,
           __prepareDirectEvalCode,
@@ -5898,7 +5928,7 @@
         __codeString = window.__usefulHelpers.editCode(__codeString, { preserveIIFEThis: true });
         const __scriptBindings = {
           __windowProxy: window.__windowProxy,
-          __globalLexicalScope,
+          __globalLexicalScope: __scriptLexicalFacade,
           __declareGlobalLexicalConstant,
           __declareGlobalLexicalVariable,
           __prepareDirectEvalCode,
