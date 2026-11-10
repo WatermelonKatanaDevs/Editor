@@ -2153,6 +2153,7 @@
           if (unwrappedDOMNodes.has(value)) return unwrappedDOMNodes.get(value);
           if (unwrappedDOMCollections.has(value)) return unwrappedDOMCollections.get(value);
           if (unwrappedDOMObjects.has(value)) return unwrappedDOMObjects.get(value);
+          if (unwrappedEvents && unwrappedEvents.has(value)) return unwrappedEvents.get(value);
           if (Array.isArray(value)) return value.map(unwrapDOMValue);
           return value;
         }
@@ -2346,6 +2347,7 @@
           if (value == null) return value;
           if (value === window) return windowProxy;
           if (value === document) return documentProxy;
+          if (typeof Event !== 'undefined' && value instanceof Event) return wrapEvent(value);
           if (value instanceof Node) return wrapDOMNode(value);
           if (
             value instanceof HTMLCollection ||
@@ -2469,9 +2471,11 @@
           if (newPage.__windowProxy) return newPage.__windowProxy;
           if (newPage.iframe) {
             const contentWindow = newPage.iframe.contentWindow;
-            return contentWindow?.__windowProxy || contentWindow || newPage;
+            const virtualWindow = contentWindow?.__windowProxy ||
+              window.__runSyncInterceptor(newPage.iframe, contentWindow);
+            return virtualWindow || null;
           }
-          return newPage;
+          return newPage.__windowProxy || null;
         };
 
         ['MouseEvent', 'KeyboardEvent', 'FocusEvent', 'UIEvent'].forEach(eventName => {
@@ -3372,6 +3376,7 @@
         const originalRemoveEventListener = EventTarget.prototype.removeEventListener;
         const listenerMap = new WeakMap();
         const wrappedEvents = new WeakMap();
+        const unwrappedEvents = new WeakMap();
         const eventHandlerMap = new WeakMap();
 
         function getEventHandlerEntry(target, prop) {
@@ -3457,6 +3462,7 @@
             }
           });
           wrappedEvents.set(event, proxy);
+          unwrappedEvents.set(proxy, event);
           return proxy;
         }
 
@@ -4338,7 +4344,7 @@
             ${__codeString.code}
             \n//# sourceURL=`+__sourceURL);
           }
-        }, __thisArg == null ? __windowProxy : __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
+        }, (__thisArg == null || __thisArg === window) ? __windowProxy : wrapDOMValue(unwrapDOMValue(__thisArg)), [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
       };
 
       window.__executeCodeAsync = function(__codeString, __sourceURL, __thisArg, __event) {
@@ -4358,7 +4364,7 @@
             \n//# sourceURL=`+__sourceURL);
           }
           return { value: __execResult };
-        }, __thisArg == null ? __windowProxy : __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
+        }, (__thisArg == null || __thisArg === window) ? __windowProxy : wrapDOMValue(unwrapDOMValue(__thisArg)), [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
       };
 
       window.__executeCodeModule = function(__codeString, __sourceURL, __thisArg, __event, __scriptFileName) {
@@ -4383,7 +4389,7 @@
             \n//# sourceURL=`+__sourceURL);
           }
           return __currentModuleExports;
-        }, __thisArg == null ? __windowProxy : __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
+        }, (__thisArg == null || __thisArg === window) ? __windowProxy : wrapDOMValue(unwrapDOMValue(__thisArg)), [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
 
 
       };
@@ -4426,8 +4432,8 @@
         const prefix = kind === 'async' || kind === 'asyncGenerator' ? 'async ' : '';
         const generator = kind === 'generator' || kind === 'asyncGenerator' ? '*' : '';
         const functionSource = '(' + prefix + 'function' + generator +
-          ' anonymous(' + parameters.join(',') + ') {\\n' +
-          transformedBody + '\\n})';
+          ' anonymous(' + parameters.join(',') + ') {\n' +
+          transformedBody + '\n})';
 
         const dynamicGlobalScope = new Proxy(Object.create(null), {
           has(_target, prop) {
@@ -4517,7 +4523,7 @@
           dynamicFunctionSources.set(
             scopedFunction,
             prefix + 'function' + generator + ' anonymous(' +
-              parameters.join(',') + ') {\\n' + body + '\\n}'
+              parameters.join(',') + ') {\n' + body + '\n}'
           );
           return scopedFunction;
         }
