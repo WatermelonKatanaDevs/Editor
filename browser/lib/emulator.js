@@ -3658,6 +3658,14 @@
           return wrapDOMValue(value);
         }
 
+        // The public executors are defined outside this setup scope. Give them
+        // a one-way wrapper hook; never expose unwrapDOMValue to page code.
+        Object.defineProperty(window, '__wrapDOMValue', {
+          value: wrapDOMValue,
+          configurable: true,
+          enumerable: false
+        });
+
         const originalInsertRule = CSSStyleSheet.prototype.insertRule;
         CSSStyleSheet.prototype.insertRule = function(rule, index) {
           if (rule && rule.includes('url(')) {
@@ -5750,11 +5758,11 @@
         return __rawReflectApply(function(window, self, globalThis, parent, top, frames, opener, frameElement, location, document, navigator, screen, devicePixelRatio, orientation) {
           with (__globalLexicalScope) {
             return eval(`
-            ${__event != null ? 'let event = wrapDOMValue(__event);' : ''}
+            ${__event != null ? 'let event = window.__wrapDOMValue(__event);' : ''}
             ${__codeString.code}
             \n//# sourceURL=`+__sourceURL);
           }
-        }, (__thisArg == null || __thisArg === window) ? __windowProxy : wrapDOMValue(unwrapDOMValue(__thisArg)), [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.frames, __windowProxy.opener, __windowProxy.frameElement, __windowProxy.location, __windowProxy.document, __windowProxy.navigator, __windowProxy.screen, __windowProxy.devicePixelRatio, __windowProxy.orientation]);
+        }, (__thisArg == null || __thisArg === window) ? __windowProxy : window.__wrapDOMValue(__thisArg), [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.frames, __windowProxy.opener, __windowProxy.frameElement, __windowProxy.location, __windowProxy.document, __windowProxy.navigator, __windowProxy.screen, __windowProxy.devicePixelRatio, __windowProxy.orientation]);
       };
 
       window.__executeCodeAsync = function(__codeString, __sourceURL, __thisArg, __event) {
@@ -5767,14 +5775,14 @@
           let __execResult;
           with (__globalLexicalScope) {
             await eval(`
-            ${__event != null ? 'let event = wrapDOMValue(__event);' : ''}
+            ${__event != null ? 'let event = window.__wrapDOMValue(__event);' : ''}
             (async function(){
               ${__codeString.code}
             }).call(this);
             \n//# sourceURL=`+__sourceURL);
           }
           return { value: __execResult };
-        }, (__thisArg == null || __thisArg === window) ? __windowProxy : wrapDOMValue(unwrapDOMValue(__thisArg)), [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.frames, __windowProxy.opener, __windowProxy.frameElement, __windowProxy.location, __windowProxy.document, __windowProxy.navigator, __windowProxy.screen, __windowProxy.devicePixelRatio, __windowProxy.orientation]);
+        }, (__thisArg == null || __thisArg === window) ? __windowProxy : window.__wrapDOMValue(__thisArg), [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.frames, __windowProxy.opener, __windowProxy.frameElement, __windowProxy.location, __windowProxy.document, __windowProxy.navigator, __windowProxy.screen, __windowProxy.devicePixelRatio, __windowProxy.orientation]);
       };
 
       window.__executeCodeModule = function(__codeString, __sourceURL, __thisArg, __event, __scriptFileName) {
@@ -5795,12 +5803,12 @@
           with (__globalLexicalScope) {
             await eval(`
             "use strict";
-            ${__event != null ? 'let event = wrapDOMValue(__event);' : ''}
+            ${__event != null ? 'let event = window.__wrapDOMValue(__event);' : ''}
             ${__codeString.code}
             \n//# sourceURL=`+__sourceURL);
           }
           return __currentModuleExports;
-        }, (__thisArg == null || __thisArg === window) ? __windowProxy : wrapDOMValue(unwrapDOMValue(__thisArg)), [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.frames, __windowProxy.opener, __windowProxy.frameElement, __windowProxy.location, __windowProxy.document, __windowProxy.navigator, __windowProxy.screen, __windowProxy.devicePixelRatio, __windowProxy.orientation]);
+        }, (__thisArg == null || __thisArg === window) ? __windowProxy : window.__wrapDOMValue(__thisArg), [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.frames, __windowProxy.opener, __windowProxy.frameElement, __windowProxy.location, __windowProxy.document, __windowProxy.navigator, __windowProxy.screen, __windowProxy.devicePixelRatio, __windowProxy.orientation]);
 
 
       };
