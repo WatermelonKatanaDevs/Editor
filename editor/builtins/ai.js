@@ -18,9 +18,9 @@
   function protectMath(value) {
     const source = String(value || '');
     const expressions = [];
-    const pattern = /(\x60{3,}[\s\S]*?\x60{3,}|~{3,}[\s\S]*?~{3,}|\x60[^\x60\n]*\x60|\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^$\n]+\$)/g;
+    const pattern = /(\x60{3,}[\s\S]*?\x60{3,}|~{3,}[\s\S]*?~{3,}|\x60[^\x60\n]*\x60|\x24\x24[\s\S]+?\x24\x24|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\]|\x24[^\x24\n]+\x24)/g;
     const text = source.replace(pattern, match => {
-      if (match.startsWith('\x60') || match.startsWith('~~~')) return match;
+      if (match.charCodeAt(0) === 96 || match.startsWith('~~~')) return match;
       const doubleDollar = match.charCodeAt(0) === 36 && match.charCodeAt(1) === 36;
       const display = doubleDollar || match.startsWith('\\[');
       const delimiterLength = doubleDollar || match.startsWith('\\[') || match.startsWith('\\(') ? 2 : 1;
@@ -48,19 +48,12 @@
         if (!expression) continue;
         const element = document.createElement('span');
         element.className = expression.display ? 'ai-katex-display' : 'ai-katex-inline';
-        try {
-          if (!katexReady) element.textContent = expression.raw;
-          else {
-            try {
-              element.innerHTML = window.katex.renderToString(expression.tex,{displayMode:expression.display,throwOnError:false,strict:'ignore',trust:false});
-            } catch (_) { element.textContent = expression.raw; }
-          }
-          fragment.appendChild(element);
+        if (!katexReady) element.textContent = expression.raw;
+        else {
+          try {
+            element.innerHTML = window.katex.renderToString(expression.tex,{displayMode:expression.display,throwOnError:false,strict:'ignore',trust:false});
+          } catch (_) { element.textContent = expression.raw; }
         }
-        textNode.replaceWith(fragment);
-      }
-    }
-        } catch (_) { element.textContent = expression.raw; }
         fragment.appendChild(element);
       }
       textNode.replaceWith(fragment);
