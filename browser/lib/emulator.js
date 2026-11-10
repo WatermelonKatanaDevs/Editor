@@ -3184,7 +3184,57 @@
               if (typeof DOMStringMap !== 'undefined' && target instanceof DOMStringMap &&
                   typeof prop === 'string' &&
                   /^(?:raw[A-Z]|pageId$|embedFrame$|embedWrapper$)/.test(prop)) return undefined;
-              return Reflect.getOwnPropertyDescriptor(target, prop);
+
+              const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
+              if (!descriptor) return descriptor;
+
+              if ('value' in descriptor) {
+                if (
+                  descriptor.configurable === false &&
+                  descriptor.writable === false
+                ) return descriptor;
+
+                if (typeof prop === 'string' && /^on[a-z]/i.test(prop)) {
+                  const entry = getEventHandlerEntry(target, prop);
+                  if (entry && descriptor.value === entry.wrapped) {
+                    return { ...descriptor, value: entry.original };
+                  }
+                }
+
+                return { ...descriptor, value: wrapDOMValue(descriptor.value) };
+              }
+
+              if (descriptor.configurable === false) return descriptor;
+              const wrappedDescriptor = { ...descriptor };
+              if (typeof descriptor.get === 'function') {
+                const getter = descriptor.get;
+                wrappedDescriptor.get = function() {
+                  return wrapDOMValue(Reflect.apply(getter, target, []));
+                };
+              }
+              if (typeof descriptor.set === 'function') {
+                const setter = descriptor.set;
+                wrappedDescriptor.set = function(nextValue) {
+                  return Reflect.apply(setter, target, [unwrapDOMValue(nextValue)]);
+                };
+              }
+              return wrappedDescriptor;
+            },
+            defineProperty(target, prop, descriptor) {
+              if (typeof DOMStringMap !== 'undefined' && target instanceof DOMStringMap &&
+                  typeof prop === 'string' &&
+                  /^(?:raw[A-Z]|pageId$|embedFrame$|embedWrapper$)/.test(prop)) return true;
+              const nextDescriptor = { ...descriptor };
+              if ('value' in nextDescriptor) {
+                nextDescriptor.value = unwrapDOMValue(nextDescriptor.value);
+              }
+              return Reflect.defineProperty(target, prop, nextDescriptor);
+            },
+            deleteProperty(target, prop) {
+              if (typeof DOMStringMap !== 'undefined' && target instanceof DOMStringMap &&
+                  typeof prop === 'string' &&
+                  /^(?:raw[A-Z]|pageId$|embedFrame$|embedWrapper$)/.test(prop)) return true;
+              return Reflect.deleteProperty(target, prop);
             }
           });
           wrappedDOMObjects.set(value, proxy);
