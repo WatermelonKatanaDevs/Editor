@@ -3263,7 +3263,7 @@
               if (typeof DOMStringMap !== 'undefined' && target instanceof DOMStringMap &&
                   typeof prop === 'string' &&
                   /^(?:raw[A-Z]|pageId$|embedFrame$|embedWrapper$)/.test(prop)) return undefined;
-              if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
+              if (typeof prop === 'string') {
                 const entry = getEventHandlerEntry(target, prop);
                 if (entry) return entry.original;
               }
@@ -3465,7 +3465,7 @@
                 const original = target.getAttribute('data-raw-script');
                 if (original != null) return original;
               }
-              if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
+              if (typeof prop === 'string') {
                 const entry = getEventHandlerEntry(target, prop);
                 if (entry) return entry.original;
               }
@@ -5778,7 +5778,7 @@
             
             // Force document.location to return the virtual location object
             if (prop === 'location') return virtualLocation;
-            if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
+            if (typeof prop === 'string') {
               const entry = getEventHandlerEntry(document, prop);
               if (entry) return entry.original;
             }
@@ -6267,7 +6267,7 @@
               }
               return null;
             }
-            if (typeof prop === 'string' && __isEventHandlerProperty(prop)) {
+            if (typeof prop === 'string') {
               const entry = getEventHandlerEntry(window, prop);
               if (entry) return entry.original;
             }
