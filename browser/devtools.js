@@ -1232,15 +1232,48 @@ var DevToolsInternal = {
       return active;
     }
 
+    function getFrameElementForRecord(record) {
+      return record?.page?.iframe || record?.tab?.frameElement || record?.tab?.iframe || null;
+    }
+
+    function frameURLLabel(record,active,frameElement) {
+      let rawUrl = String(record?.page?.location?.url || record?.tab?.url || '').trim();
+      if (!rawUrl || rawUrl === 'about:blank' || rawUrl === 'about:srcdoc') {
+        rawUrl = String(frameElement?.getAttribute?.('data-raw-src') || frameElement?.getAttribute?.('src') || rawUrl).trim();
+      }
+      if (!rawUrl) return '';
+      if (rawUrl === 'about:srcdoc') return 'srcdoc';
+      try {
+        const parentUrl = record?.parent?.location?.url || active?.page?.location?.url || active?.url;
+        const parsed = new URL(rawUrl,parentUrl);
+        const path = (parsed.pathname || '/') + parsed.search + parsed.hash;
+        let topOrigin = '';
+        try { topOrigin = new URL(active?.page?.location?.url || active?.url).origin; } catch(e) {}
+        return parsed.origin && parsed.origin === topOrigin ? path : (parsed.host ? parsed.host + path : parsed.href);
+      } catch(e) { return rawUrl; }
+    }
+
     function refreshFrameSelector() {
       const select = getUIElement('consoleFrame');
       const active = getActiveTab();
       if (!select || !active) return;
 
       const previous = executionFrameTabId || active.id;
-      const records = Array.from(pageRecords.values()).filter(record =>
-        record?.rootPage === active.page && record?.tab
-      );
+      const seenFrames = new Set();
+      const stalePages = [];
+      const records = [];
+      for (const record of pageRecords.values()) {
+        if (record?.rootPage !== active.page || !record?.tab || record.tab.id === active.id) continue;
+        const frameElement = getFrameElementForRecord(record);
+        if (!frameElement?.isConnected) { stalePages.push(record.page); continue; }
+        if (frameElement.pageEmulator && frameElement.pageEmulator !== record.page) { stalePages.push(record.page); continue; }
+        if (seenFrames.has(frameElement)) continue;
+        seenFrames.add(frameElement);
+        record.tab.iframe = frameElement;
+        record.tab.frameElement = frameElement;
+        records.push(record);
+      }
+      stalePages.forEach(page => unregisterPage(page));
 
       select.innerHTML = '';
       const topOption = document.createElement('option');
@@ -1248,22 +1281,26 @@ var DevToolsInternal = {
       topOption.textContent = 'Top';
       select.appendChild(topOption);
 
-      records.filter(record => record.tab.id !== active.id).forEach(record => {
+      records.forEach(record => {
         const option = document.createElement('option');
         option.value = record.tab.id;
-        const title = String(record.tab.title || '').trim();
-        let url = String(record.tab.url || record.page?.location?.url || '').trim();
-        if (url.length > 72) url = url.slice(0, 69) + '…';
-
+        const frameElement = getFrameElementForRecord(record);
+        const name = String(frameElement?.getAttribute?.('name') || frameElement?.getAttribute?.('title') || frameElement?.getAttribute?.('aria-label') || frameElement?.id || (record.tab.title && record.tab.title !== 'iframe' ? record.tab.title : '')).trim();
+        const url = frameURLLabel(record,active,frameElement);
+        let ordinal = 'Frame';
+        try {
+          const siblings = Array.from(frameElement.ownerDocument.querySelectorAll('iframe,frame'));
+          const index = siblings.indexOf(frameElement);
+          if (index >= 0) ordinal = 'Frame ' + (index + 1);
+        } catch(e) {}
+        const description = name ? name + (url ? ' — ' + url : '') : (url || ordinal);
         let depth = 1;
         let parent = record.parent;
         while (parent && parent !== active.page && depth < 20) {
           depth++;
           parent = pageRecords.get(parent)?.parent || null;
         }
-
-        option.textContent = '↳ '.repeat(Math.min(depth, 4)) +
-          (title ? title + (url ? ' — ' + url : '') : ('Frame' + (url ? ' — ' + url : '')));
+        option.textContent = '↳ '.repeat(Math.min(depth,4)) + description;
         select.appendChild(option);
       });
 
@@ -3549,30 +3586,34 @@ var DevToolsInternal = {
       const existing = frameDocumentTrackers.get(frameTab);
       const doc = getDocumentSnapshot(frameElement);
       if (!doc) return;
-      if (existing?.doc === doc) return;
+      if (existing?.doc === doc && existing?.element === frameElement) return;
 
-      if (existing?.observer) {
-        try { existing.observer.disconnect(); } catch(e) {}
+      const tracker = existing || {doc:null,observer:null,element:null,loadHandler:null};
+      if (tracker.observer) { try { tracker.observer.disconnect(); } catch(e) {} }
+      if (tracker.element && tracker.element !== frameElement && tracker.loadHandler) {
+        try { tracker.element.removeEventListener('load',tracker.loadHandler); } catch(e) {}
       }
-
-      const tracker = {doc,observer:null};
+      tracker.doc = doc;
+      tracker.element = frameElement;
+      tracker.observer = null;
+      if (!tracker.loadHandler) {
+        tracker.loadHandler = () => {
+          const current = frameDocumentTrackers.get(frameTab);
+          const element = current?.element || frameElement;
+          const nextDoc = getDocumentSnapshot(element);
+          if (nextDoc && current?.doc !== nextDoc) installFrameDocumentTracker(frameTab,element);
+          syncFrameDocument(frameTab,element,true);
+        };
+      }
       frameDocumentTrackers.set(frameTab,tracker);
-
       syncFrameDocument(frameTab,frameElement,false);
-
       try {
         tracker.observer = new MutationObserver(() => syncFrameDocument(frameTab,frameElement,true));
         tracker.observer.observe(doc,{subtree:true,childList:true,attributes:true,characterData:true});
       } catch(e) {}
-
-      try {
-        frameElement.addEventListener('load',() => {
-          const nextDoc = getDocumentSnapshot(frameElement);
-          const current = frameDocumentTrackers.get(frameTab);
-          if (!current || current.doc !== nextDoc) installFrameDocumentTracker(frameTab,frameElement);
-          syncFrameDocument(frameTab,frameElement,true);
-        });
-      } catch(e) {}
+      if (existing?.element !== frameElement) {
+        try { frameElement.addEventListener('load',tracker.loadHandler); } catch(e) {}
+      }
     }
 
     function getServedFramePairs(tab,doc) {
@@ -4562,6 +4603,7 @@ var DevToolsInternal = {
     }
     if(handlers?.keydown) page.removeEventListener?.('keydown',handlers.keydown);
     releaseCollector(rec.rootPage,page);
+    try { DevToolsInternal.sources.clearTab(rec.tab); } catch(e) {}
     pageEventHandlers.delete(page);
     pageRecords.delete(page);
     attachedPages.delete(page);
