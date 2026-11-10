@@ -560,6 +560,21 @@
     const minecraftCategory = Array.from(document.getElementsByClassName('format_category')).find(element => element.textContent.includes('Minecraft'));
     minecraftCategory?.remove();
 
+    const closeButton = document.getElementsByClassName('start_screen_close_button')[0];
+    if (closeButton) closeButton.innerHTML = '';
+
+    const style = document.createElement('style');
+    style.innerHTML = `
+.contextMenu {
+  background: #1d1f25;
+  color: #c9cad3;
+}
+.menu_separator {
+  background-color: #2d2f35;
+}
+`;
+    document.head.appendChild(style);
+
     const runner = () => {
       const item = document.querySelector('[menu_item="new"]');
       if (!item || item.__wkMinecraftMenuPatched) return;
