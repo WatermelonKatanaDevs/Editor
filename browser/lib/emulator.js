@@ -6248,16 +6248,26 @@
             let descriptor;
             try { descriptor = Object.getOwnPropertyDescriptor(owner, property); } catch (_) {}
             if (descriptor) {
-              if (typeof descriptor.get !== 'function' || descriptor.configurable === false) return false;
-              const nativeGetter = descriptor.get;
+              if (descriptor.configurable === false) return false;
               try {
-                Object.defineProperty(owner, property, {
-                  ...descriptor,
-                  get: function() {
-                    const value = Reflect.apply(nativeGetter, this, []);
-                    return mapper(value, this);
-                  }
-                });
+                if (typeof descriptor.get === 'function') {
+                  const nativeGetter = descriptor.get;
+                  Object.defineProperty(owner, property, {
+                    ...descriptor,
+                    get: function() {
+                      const value = Reflect.apply(nativeGetter, this, []);
+                      return mapper(value, this);
+                    }
+                  });
+                } else if ('value' in descriptor) {
+                  const mappedValue = mapper(descriptor.value, startObject);
+                  Object.defineProperty(owner, property, {
+                    ...descriptor,
+                    value: mappedValue
+                  });
+                } else {
+                  return false;
+                }
                 return true;
               } catch (_) {
                 return false;
