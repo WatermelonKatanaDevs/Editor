@@ -5748,7 +5748,7 @@
           // data-raw-* while their live DOM attributes contain rewritten data.
           // Make CSS selectors test either the live or logical/original value.
           const withLogicalAttributeAliases = selector.replace(
-            /\[\s*(src|href|srcset|poster|srcdoc|data|style|type|on[a-z][a-z0-9_-]*)\b([^\]]*)\]/gi,
+            /\[\s*(src|href|srcset|poster|srcdoc|data|style|type|on[a-z][a-z0-9_-]*)(?=\s*(?:[~|^$*]?=|\]))([^\]]*)\]/gi,
             (_match, attribute, qualifier) => {
               const publicName = String(attribute).toLowerCase();
               return ':is([' + publicName + qualifier + '],[data-wk-internal-' +
