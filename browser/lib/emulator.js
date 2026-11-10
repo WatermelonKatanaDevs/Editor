@@ -3790,6 +3790,58 @@
           return null;
         }
 
+        function wrapPublicPropertyDescriptor(descriptor, nativeReceiver, proxyReceiver) {
+          if (!descriptor) return descriptor;
+          const wrapped = { ...descriptor };
+
+          if ('value' in descriptor) {
+            if (
+              descriptor.configurable === false &&
+              descriptor.writable === false
+            ) return descriptor;
+
+            const originalValue = descriptor.value;
+            if (typeof originalValue === 'function') {
+              let publicFunction;
+              publicFunction = new Proxy(originalValue, {
+                apply(target, thisArg, args) {
+                  const receiver = thisArg === proxyReceiver
+                    ? nativeReceiver
+                    : unwrapDOMValue(thisArg);
+                  return wrapDOMValue(Reflect.apply(target, receiver, args.map(unwrapDOMValue)));
+                },
+                construct(target, args, newTarget) {
+                  return wrapDOMValue(Reflect.construct(
+                    target,
+                    args.map(unwrapDOMValue),
+                    newTarget === publicFunction ? target : newTarget
+                  ));
+                }
+              });
+              wrapped.value = publicFunction;
+            } else {
+              wrapped.value = wrapDOMValue(originalValue);
+            }
+            return wrapped;
+          }
+
+          if (descriptor.configurable !== false) {
+            if (typeof descriptor.get === 'function') {
+              const getter = descriptor.get;
+              wrapped.get = function() {
+                return wrapDOMValue(Reflect.apply(getter, nativeReceiver, []));
+              };
+            }
+            if (typeof descriptor.set === 'function') {
+              const setter = descriptor.set;
+              wrapped.set = function(value) {
+                return Reflect.apply(setter, nativeReceiver, [unwrapDOMValue(value)]);
+              };
+            }
+          }
+          return wrapped;
+        }
+
         function wrapDOMValue(value) {
           if (value == null) return value;
           if (Array.isArray(value)) return value.map(wrapDOMValue);
@@ -5378,7 +5430,11 @@
                 set: undefined
               };
             }
-            return Reflect.getOwnPropertyDescriptor(target, prop);
+            return wrapPublicPropertyDescriptor(
+              Reflect.getOwnPropertyDescriptor(target, prop),
+              document,
+              documentProxy
+            );
           },
           defineProperty(target, prop, desc) {
             try {
@@ -5866,7 +5922,11 @@
                 value: __indirectEval
               };
             }
-            return Reflect.getOwnPropertyDescriptor(target, prop);
+            return wrapPublicPropertyDescriptor(
+              Reflect.getOwnPropertyDescriptor(target, prop),
+              window,
+              windowProxy
+            );
           },
           defineProperty(target, prop, desc) {
             try {
