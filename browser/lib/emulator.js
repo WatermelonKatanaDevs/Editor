@@ -4163,6 +4163,19 @@
             }
           });
 
+          // constructor access through an instance must not reveal
+          // the unwrapped native constructor again.
+          try {
+            const prototype = constructor.prototype;
+            const descriptor = prototype && Object.getOwnPropertyDescriptor(prototype, 'constructor');
+            if (descriptor?.configurable) {
+              Object.defineProperty(prototype, 'constructor', {
+                ...descriptor,
+                value: proxy
+              });
+            }
+          } catch (_) {}
+
           wrappedDOMConstructors.set(constructor, proxy);
           return proxy;
         }
