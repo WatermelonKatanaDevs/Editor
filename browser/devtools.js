@@ -1246,7 +1246,9 @@ var DevToolsInternal = {
       try {
         const parentUrl = record?.parent?.location?.url || active?.page?.location?.url || active?.url;
         const parsed = new URL(rawUrl,parentUrl);
-        const path = (parsed.pathname || '/') + parsed.search + parsed.hash;
+        // The frame picker is a path-oriented label, not a full request URL.
+        // Query parameters (for example the parent's ?u= project selector) add noise.
+        const path = (parsed.pathname || '/') + parsed.hash;
         let topOrigin = '';
         try { topOrigin = new URL(active?.page?.location?.url || active?.url).origin; } catch(e) {}
         return parsed.origin && parsed.origin === topOrigin ? path : (parsed.host ? parsed.host + path : parsed.href);
@@ -1260,20 +1262,21 @@ var DevToolsInternal = {
 
       const previous = executionFrameTabId || active.id;
       const seenFrames = new Set();
-      const stalePages = [];
       const records = [];
       for (const record of pageRecords.values()) {
         if (record?.rootPage !== active.page || !record?.tab || record.tab.id === active.id) continue;
         const frameElement = getFrameElementForRecord(record);
-        if (!frameElement?.isConnected) { stalePages.push(record.page); continue; }
-        if (frameElement.pageEmulator && frameElement.pageEmulator !== record.page) { stalePages.push(record.page); continue; }
+        // A PageEmulator is often created while its parsed iframe is still in a
+        // detached document. Keep that registration alive until the same frame
+        // is reattached to the live document and becomes selectable.
+        if (!frameElement?.isConnected) continue;
+        if (frameElement.pageEmulator && frameElement.pageEmulator !== record.page) continue;
         if (seenFrames.has(frameElement)) continue;
         seenFrames.add(frameElement);
         record.tab.iframe = frameElement;
         record.tab.frameElement = frameElement;
         records.push(record);
       }
-      stalePages.forEach(page => unregisterPage(page));
 
       select.innerHTML = '';
       const topOption = document.createElement('option');
@@ -4492,7 +4495,9 @@ var DevToolsInternal = {
       load:function(){
         var rec=pageRecords.get(page); if(!rec) return;
         var owner=getOwner(); if(!owner) return;
+        if(page.location?.url) rec.tab.url=page.location.url;
         owner.internal.sources.captureProcessed(rec.tab);
+        owner.internal.console.refreshFrameSelector();
         rootData.events.dispatchEvent('documentready',rec.tab);
       }
     };
@@ -4547,11 +4552,30 @@ var DevToolsInternal = {
       if(!parent) activePage=page;
       record.tab.subframe=!!record.parent;
       record.tab.parentTab=record.parent ? pageRecords.get(record.parent)?.tab || null : null;
+      record.tab.iframe=page.iframe || record.tab.iframe;
+      record.tab.frameElement=page.iframe || record.tab.frameElement;
+
+      // A serialized iframe can be replaced by a fresh DOM node while keeping
+      // the same PageEmulator. Move the load listener to that live element.
+      var collector=rootData?.collectors.get(page);
+      var nextFrame=page.iframe || null;
+      if(record.frameLoadElement!==nextFrame){
+        if(record.frameLoadElement?.removeEventListener && collector?.handlers?.load){
+          record.frameLoadElement.removeEventListener('load',collector.handlers.load);
+        }
+        record.frameLoadElement=nextFrame;
+        if(record.frameLoadElement?.addEventListener && collector?.handlers?.load){
+          record.frameLoadElement.addEventListener('load',collector.handlers.load);
+        }
+      }
+
+      DevToolsInternal.console.refreshFrameSelector();
+      DevToolsInternal.ui.refreshActiveViews();
       return;
     }
 
     var tab=makeTab(page,parent);
-    pageRecords.set(page,{page,parent:parent,rootPage,tab});
+    pageRecords.set(page,{page,parent:parent,rootPage,tab,frameLoadElement:page.iframe || null});
     attachedPages.add(page);
     if(!parent) activePage=page;
     if(previous!==activePage) DevToolsInternal.console.resetHistory();
@@ -4591,6 +4615,7 @@ var DevToolsInternal = {
     pageEventHandlers.set(page,handler);
 
     if(page.iframe?.contentDocument?.documentElement) DevToolsInternal.sources.captureProcessed(tab);
+    if(parent && rootPage===activePage) DevToolsInternal.console.refreshFrameSelector();
   }
 
   function unregisterPage(page){
@@ -4618,6 +4643,7 @@ var DevToolsInternal = {
       if(rec.rootPage.devtools===rootData) delete rec.rootPage.devtools;
     }
     if(activePage===page) activePage=Array.from(attachedPages).find(function(p){return !pageRecords.get(p)?.parent;}) || null;
+    if(rec.rootPage===activePage) DevToolsInternal.console.refreshFrameSelector();
   }
 
   function setupGlobalHooks(){
