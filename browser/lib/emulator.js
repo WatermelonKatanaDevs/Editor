@@ -3334,6 +3334,11 @@
               if (prop === 'getAttributeNodeNS' && target instanceof Element) {
                 return function(namespace, name) {
                   if (isInternalDOMAttribute(name)) return null;
+                  if (namespace == null || namespace === '') {
+                    const publicName = String(name || '').toLowerCase();
+                    const rawAttribute = Reflect.apply(target.getAttributeNode, target, ['data-raw-' + publicName]);
+                    if (rawAttribute) return wrapVirtualAttribute(rawAttribute, publicName);
+                  }
                   return wrapDOMValue(Reflect.apply(target.getAttributeNodeNS, target, [namespace, name]));
                 };
               }
@@ -3357,6 +3362,16 @@
               return wrapDOMValue(member);
             },
             set(target, prop, nextValue) {
+              const virtualAttributeName = typeof Attr !== 'undefined' && target instanceof Attr
+                ? virtualDOMAttributeNames.get(target)
+                : null;
+              if (virtualAttributeName &&
+                  (prop === 'value' || prop === 'nodeValue' || prop === 'textContent')) {
+                if (target.ownerElement) {
+                  target.ownerElement.setAttribute(virtualAttributeName, String(nextValue));
+                  return true;
+                }
+              }
               if (
                 typeof Attr !== 'undefined' &&
                 target instanceof Attr &&
@@ -5957,7 +5972,10 @@
           for (const attr of Array.from(el.attributes || [])) {
             if (!attr.name.startsWith('data-raw-')) continue;
             const publicName = attr.name.slice('data-raw-'.length);
-            if (publicName === 'script') { el.removeAttribute(attr.name); continue; }
+            if (publicName === 'script' || publicName === 'style-text') {
+              el.removeAttribute(attr.name);
+              continue;
+            }
             if (publicName) el.setAttribute(publicName, attr.value);
             el.removeAttribute(attr.name);
           }
