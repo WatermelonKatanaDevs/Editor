@@ -3817,12 +3817,8 @@
                 return function() {
                   const nativeNames = Reflect.apply(target.getAttributeNames, target, []);
                   if (nativeNames.some(name => !isInternalDOMAttribute(name))) return true;
-                  return ['src', 'href', 'srcset', 'poster', 'srcdoc', 'data'].some(name =>
-                    isVirtualizedResourceAttribute(target, name) &&
-                    Reflect.apply(target.hasAttribute, target, ['data-raw-' + name])
-                  ) || (
-                    (isDOMElementValue(target) && target.tagName === 'SCRIPT') &&
-                    Reflect.apply(target.hasAttribute, target, ['data-raw-type'])
+                  return Array.from(target.attributes || []).some(attribute =>
+                    !!getPublicAliasName(attribute)
                   );
                 };
               }
