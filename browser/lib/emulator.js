@@ -5332,14 +5332,20 @@
         enumerable: false
       });
 
-      const dynamicFunctionSources = new WeakMap();
+      // Function-source registrations are injected at the start of this scope,
+      // before ordinary declarations execute. Lazily initialize a hoisted var
+      // so early registrations cannot hit a const temporal dead zone.
+      var dynamicFunctionSources;
+      function getDynamicFunctionSources() {
+        return dynamicFunctionSources || (dynamicFunctionSources = new WeakMap());
+      }
 
       function __wkRegisterFunctionSource(fn, source, inferredName) {
         if (typeof fn !== 'function') return fn;
         if (inferredName && !fn.name) {
           try { Object.defineProperty(fn, 'name', { value: inferredName, configurable: true }); } catch (_) {}
         }
-        dynamicFunctionSources.set(fn, source);
+        getDynamicFunctionSources().set(fn, source);
         return fn;
       }
 
@@ -5405,7 +5411,7 @@
           try { window[name] = ScopedConstructor; } catch (_) {}
         }
         syncWindowTargetProperty(name, ScopedConstructor);
-        dynamicFunctionSources.set(ScopedConstructor, 'function ' + name + '() { [native code] }');
+        getDynamicFunctionSources().set(ScopedConstructor, 'function ' + name + '() { [native code] }');
       }
 
       [
@@ -5467,7 +5473,7 @@
 
           const prefix = kind === 'async' || kind === 'asyncGenerator' ? 'async ' : '';
           const generator = kind === 'generator' || kind === 'asyncGenerator' ? '*' : '';
-          dynamicFunctionSources.set(
+          getDynamicFunctionSources().set(
             scopedFunction,
             prefix + 'function' + generator + ' anonymous(' +
               parameters.join(',') + ') {\n' + body + '\n}'
@@ -5506,14 +5512,14 @@
       Object.defineProperty(asyncGeneratorFunctionPrototype, 'constructor', { ...Object.getOwnPropertyDescriptor(asyncGeneratorFunctionPrototype, 'constructor'), value: ScopedAsyncGeneratorFunction });
 
       const nativeFunctionToString = rawToString;
-      dynamicFunctionSources.set(__indirectEval, 'function eval() { [native code] }');
+      getDynamicFunctionSources().set(__indirectEval, 'function eval() { [native code] }');
       ['setTimeout', 'setInterval', 'requestAnimationFrame', 'requestIdleCallback', 'queueMicrotask'].forEach(name => {
-        if (typeof window[name] === 'function') dynamicFunctionSources.set(window[name], 'function ' + name + '() { [native code] }');
+        if (typeof window[name] === 'function') getDynamicFunctionSources().set(window[name], 'function ' + name + '() { [native code] }');
       });
-      dynamicFunctionSources.set(EventTarget.prototype.addEventListener, 'function addEventListener() { [native code] }');
-      dynamicFunctionSources.set(EventTarget.prototype.removeEventListener, 'function removeEventListener() { [native code] }');
+      getDynamicFunctionSources().set(EventTarget.prototype.addEventListener, 'function addEventListener() { [native code] }');
+      getDynamicFunctionSources().set(EventTarget.prototype.removeEventListener, 'function removeEventListener() { [native code] }');
       Function.prototype.toString = function() {
-        const originalSource = dynamicFunctionSources.get(this);
+        const originalSource = getDynamicFunctionSources().get(this);
         return originalSource === undefined
           ? Reflect.apply(nativeFunctionToString, this, [])
           : originalSource;
