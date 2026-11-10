@@ -18,7 +18,7 @@
   function protectMath(value) {
     const source = String(value || '');
     const expressions = [];
-    const pattern = /(\x60{3,}[\s\S]*?\x60{3,}|~{3,}[\s\S]*?~{3,}|\x60[^\x60\n]*\x60|\x24\x24[\s\S]+?\x24\x24|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\]|\x24[^\x24\n]+\x24)/g;
+    const pattern = /(\x60{3,}[\s\S]*?\x60{3,}|~{3,}[\s\S]*?~{3,}|\x60[^\x60\n]*\x60|\x24\x24[\s\S]+?\x24\x24|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\x24[^\x24\n]+\x24)/g;
     const text = source.replace(pattern, match => {
       if (match.charCodeAt(0) === 96 || match.startsWith('~~~')) return match;
       const doubleDollar = match.charCodeAt(0) === 36 && match.charCodeAt(1) === 36;
