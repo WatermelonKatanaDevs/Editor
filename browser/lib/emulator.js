@@ -3163,13 +3163,21 @@
           }
           const wrappedListener = function(event) {
             if (isTurboWarpPlayUrl(CURRENT_PAGE_URL) && event?.data?.turbowarp === 'init') turboDebug('init-delivered-to-message-listener', { sourceOrigin: event.origin || '', hasSource: !!event.source, listenerName: listener.name || 'anonymous' });
-            if (event.origin !== 'null' && event.origin !== 'about:srcdoc' && event.origin) {
+
+            // Keep message.source consistent with the virtual contentWindow
+            // exposed by this emulator, even when srcdoc inherits a non-opaque
+            // origin. Only rewrite the origin for opaque/srcdoc messages.
+            let sourceProxy = null;
+            try { sourceProxy = event.source?.__windowProxy || null; } catch (_) {}
+            const rewriteOrigin = !event.origin || event.origin === 'null' || event.origin === 'about:srcdoc';
+            if (!sourceProxy && !rewriteOrigin) {
               return listener.call(this, event);
             }
+
             const proxyEvent = new Proxy(event, {
               get(target, prop) {
-                if (prop === 'origin') return BASE_ORIGIN;
-                if (prop === 'source' && target.source?.__windowProxy) return target.source.__windowProxy;
+                if (prop === 'origin' && rewriteOrigin) return BASE_ORIGIN;
+                if (prop === 'source' && sourceProxy) return sourceProxy;
                 const val = target[prop];
                 return typeof val === 'function' ? val.bind(target) : val;
               }
@@ -3598,8 +3606,9 @@
           if (!targetPage.__windowProxy || !nativeTargetWindow) {
             return targetPage.__windowProxy || nativeTargetWindow || windowProxy;
           }
-          const cacheKey = targetPage.id || targetPage;
-          if (callerWindowProxyCache.has(cacheKey)) return callerWindowProxyCache.get(cacheKey);
+          const cacheKey = targetPage;
+          const cachedProxy = callerWindowProxyCache.get(cacheKey);
+          if (cachedProxy && cachedProxy.nativeTargetWindow === nativeTargetWindow) return cachedProxy.proxy;
 
           const callerProxy = new Proxy(targetPage.__windowProxy, {
             get(target, prop) {
@@ -3655,7 +3664,7 @@
             }
           });
 
-          callerWindowProxyCache.set(cacheKey, callerProxy);
+          callerWindowProxyCache.set(cacheKey, { nativeTargetWindow, proxy: callerProxy });
           return callerProxy;
         }
 
