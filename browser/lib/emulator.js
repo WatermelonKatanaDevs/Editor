@@ -2729,6 +2729,7 @@
         const unwrappedDOMCollections = new WeakMap();
         const wrappedDOMNodes = new WeakMap();
         const unwrappedDOMNodes = new WeakMap();
+        const virtualDOMAttributeNames = new WeakMap();
         const wrappedDOMObjects = new WeakMap();
         const unwrappedDOMObjects = new WeakMap();
 
@@ -2757,6 +2758,22 @@
             attr === 'data-embed-wrapper';
         }
 
+        function wrapVirtualAttribute(attribute, publicName) {
+          if (!attribute || !(attribute instanceof Attr)) return null;
+          virtualDOMAttributeNames.set(attribute, publicName);
+          return wrapDOMNode(attribute);
+        }
+
+        function getPublicAliasName(attribute) {
+          if (!attribute || !isInternalDOMAttribute(attribute.name)) return null;
+          const name = String(attribute.name).toLowerCase();
+          if (!name.startsWith('data-raw-')) return null;
+          const publicName = name.slice(9);
+          if (!publicName || publicName === 'script' || publicName === 'style-text' ||
+              isInternalDOMAttribute('data-' + publicName)) return null;
+          return publicName;
+        }
+
         function wrapDOMCollection(collection) {
           if (
             !(collection instanceof HTMLCollection) &&
@@ -2769,11 +2786,33 @@
           const isNamedNodeMap = typeof NamedNodeMap !== 'undefined' && collection instanceof NamedNodeMap;
           let proxy;
           const visibleItems = () => {
+            if (!isNamedNodeMap) return Array.from(collection);
+            const aliases = new Map();
+            for (let i = 0; i < collection.length; i++) {
+              const alias = getPublicAliasName(collection[i]);
+              if (alias) aliases.set(alias, collection[i]);
+            }
             const items = [];
+            const used = new Set();
             for (let i = 0; i < collection.length; i++) {
               const item = collection[i];
-              if (isNamedNodeMap && isInternalDOMAttribute(item?.name)) continue;
-              items.push(item);
+              if (isInternalDOMAttribute(item?.name)) {
+                const alias = getPublicAliasName(item);
+                if (alias && !Reflect.apply(collection.getNamedItem, collection, [alias])) {
+                  items.push(wrapVirtualAttribute(item, alias));
+                  used.add(alias);
+                }
+                continue;
+              }
+              if (aliases.has(item.name)) {
+                items.push(wrapVirtualAttribute(aliases.get(item.name), item.name));
+                used.add(item.name);
+              } else items.push(item);
+            }
+            for (const [alias, item] of aliases) {
+              if (!used.has(alias) && !Reflect.apply(collection.getNamedItem, collection, [alias])) {
+                items.push(wrapVirtualAttribute(item, alias));
+              }
             }
             return items;
           };
@@ -2877,6 +2916,16 @@
                   return wrapDOMValue(result);
                 };
               }
+              if (isNamedNodeMap && (prop === 'getNamedItem' || prop === 'getNamedItemNS')) {
+                return function(...args) {
+                  const name = String(args[prop === 'getNamedItemNS' ? 1 : 0] || '');
+                  if (prop === 'getNamedItemNS' && args[0] != null && args[0] !== '') {
+                    return wrapDOMValue(Reflect.apply(target[prop], target, args));
+                  }
+                  const item = visibleItems().find(entry => entry?.name === name);
+                  return item ? wrapDOMValue(item) : null;
+                };
+              }
               if ((prop === 'item' || prop === 'namedItem') && typeof target[prop] === 'function') {
                 return function(...args) {
                   if (isNamedNodeMap && prop === 'namedItem' && isInternalDOMAttribute(args[0])) return null;
@@ -2886,6 +2935,10 @@
               }
               if (typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
                 return wrapDOMValue(isNamedNodeMap ? visibleItems()[Number(prop)] : Reflect.get(target, prop, target));
+              }
+              if (isNamedNodeMap && typeof prop === 'string') {
+                const named = visibleItems().find(item => item?.name === prop);
+                if (named) return wrapDOMValue(named);
               }
               const value = Reflect.get(target, prop, target);
               if (typeof value === 'function') return value.bind(target);
@@ -3023,6 +3076,14 @@
           let proxy;
           proxy = new Proxy(node, {
             get(target, prop) {
+              const virtualAttributeName = typeof Attr !== 'undefined' && target instanceof Attr
+                ? virtualDOMAttributeNames.get(target)
+                : null;
+              if (virtualAttributeName) {
+                if (prop === 'name' || prop === 'nodeName' || prop === 'localName') return virtualAttributeName;
+                if (prop === 'ownerElement') return wrapDOMValue(target.ownerElement);
+                if (prop === 'ownerDocument') return target.ownerDocument === document ? documentProxy : wrapDOMValue(target.ownerDocument);
+              }
               if (
                 typeof Attr !== 'undefined' &&
                 target instanceof Attr &&
@@ -3265,6 +3326,8 @@
                 return function(name) {
                   const attributeName = String(name || '').toLowerCase();
                   if (isInternalDOMAttribute(attributeName)) return null;
+                  const rawAttribute = Reflect.apply(target.getAttributeNode, target, ['data-raw-' + attributeName]);
+                  if (rawAttribute) return wrapVirtualAttribute(rawAttribute, attributeName);
                   return wrapDOMValue(Reflect.apply(target.getAttributeNode, target, [name]));
                 };
               }
