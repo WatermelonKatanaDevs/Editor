@@ -227,7 +227,7 @@
       Promise.all(Array.from(doc.querySelectorAll('iframe')).map(async function(el) {
         var src = el.getAttribute("src");
         var srcdoc = el.getAttribute("srcdoc");
-        if (!src && !srcdoc) srcdoc = `<html><head></head><body></body></html>`;
+        if (!src && !srcdoc) srcdoc = '<html><head></head><body></body></html>';
         el.removeAttribute("data-raw-src");
         el.removeAttribute("data-raw-srcdoc");
         if (src) el.setAttribute('data-raw-src',src);
@@ -239,20 +239,69 @@
 
         ensureSandBoxSameOrigin(el);
 
-        page.sendEvent('iframe-create',{
-          iframe: el,
-          src: src,
-          srcdoc: srcdoc,
-          is_doc: !src,
+        let targetPath = '';
+        try { targetPath = src ? new URL(src, pageUrl).pathname : ''; } catch (_) {}
+        const isTurboWarpPlayer = targetPath === '/turbowarp/play';
+        const frameDiag = (stage, details = {}) => {
+          if (!isTurboWarpPlayer) return;
+          try {
+            page.sendEvent('console', 'warn', [
+              '[WK-TW-DIAG] ' + stage,
+              JSON.stringify(details)
+            ]);
+          } catch (_) {}
+        };
+        frameDiag('static-iframe-preprocess', {
+          parentPagePath: (() => { try { return new URL(pageUrl).pathname; } catch (_) { return ''; } })(),
+          childPath: targetPath,
+          hasSrc: !!src,
+          hasSrcdoc: !!srcdoc,
+          navigationId: el.__iframeNavigationId,
+          parentPageId: page.id || null,
+          registeredChildCountBefore: page.children?.length || 0
         });
 
-        await page.sendAsyncEvent('iframe-navigate',{
+        const createdPage = page.sendEvent('iframe-create',{
           iframe: el,
           src: src,
           srcdoc: srcdoc,
           is_doc: !src,
-          navigationId: el.__iframeNavigationId,
         });
+        const childPage = el.pageEmulator || createdPage || null;
+        frameDiag('static-iframe-registered', {
+          childPageId: childPage?.id || null,
+          childPageFound: !!childPage,
+          childParentMatches: childPage?.parent === page,
+          registeredChildCountAfter: page.children?.length || 0,
+          iframeConnected: !!el.isConnected
+        });
+
+        frameDiag('static-iframe-navigation-start', {
+          childPageId: childPage?.id || null,
+          childPath: targetPath,
+          navigationId: el.__iframeNavigationId
+        });
+        try {
+          await page.sendAsyncEvent('iframe-navigate',{
+            iframe: el,
+            src: src,
+            srcdoc: srcdoc,
+            is_doc: !src,
+            navigationId: el.__iframeNavigationId,
+          });
+          frameDiag('static-iframe-navigation-complete', {
+            childPageId: childPage?.id || null,
+            childLocationPath: (() => { try { return new URL(childPage?.location?.url || '').pathname; } catch (_) { return childPage?.location?.url || ''; } })(),
+            rawDocumentLength: childPage?.rawDocument?.length || 0,
+            iframeConnected: !!el.isConnected
+          });
+        } catch (error) {
+          frameDiag('static-iframe-navigation-threw', {
+            childPageId: childPage?.id || null,
+            error: error?.message || String(error)
+          });
+          throw error;
+        }
 
         return null;
       })),
