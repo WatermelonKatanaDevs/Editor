@@ -2925,7 +2925,8 @@
                   const name = String(args[args.length - 1] || '').toLowerCase();
                   const owner = target.ownerElement;
                   const isVirtualResource = owner && isVirtualizedResourceAttribute(owner, name);
-                  const rawAlias = (isVirtualResource || /^on[a-z]/i.test(name))
+                  const hasVirtualAlias = owner && isVirtualPublicAttribute(owner, name);
+                  const rawAlias = hasVirtualAlias
                     ? Reflect.apply(target.getNamedItem, target, ['data-raw-' + name])
                     : null;
                   if (rawAlias) {
@@ -2938,7 +2939,7 @@
                   try {
                     result = Reflect.apply(target[prop], target, args);
                   } catch (error) {
-                    if (!isVirtualResource) throw error;
+                    if (!hasVirtualAlias) throw error;
                     const rawAttribute = Reflect.apply(target.getNamedItem, target, ['data-raw-' + name]);
                     if (!rawAttribute) throw error;
                     Reflect.apply(nativeElementRemoveAttribute, target.ownerElement, ['data-raw-' + name]);
@@ -3108,6 +3109,15 @@
           return (map[element.tagName.toLowerCase()] || []).includes(attr);
         }
 
+        function isVirtualPublicAttribute(element, name) {
+          if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
+          const attr = String(name || '').toLowerCase();
+          return isVirtualizedResourceAttribute(element, attr) ||
+            (element instanceof HTMLScriptElement && attr === 'type') ||
+            /^on[a-z]/i.test(attr) ||
+            (attr === 'style' && Reflect.apply(element.hasAttribute, element, ['data-raw-style']));
+        }
+
         function wrapDOMNode(node) {
           if (!node || !(node instanceof Node)) return node;
           if (unwrappedDOMNodes.has(node)) return node;
@@ -3227,7 +3237,7 @@
                 return function(namespace, name) {
                   const attributeName = String(name || '').toLowerCase();
                   if (namespace == null || namespace === '') {
-                    if (isVirtualizedResourceAttribute(target, attributeName)) {
+                    if (isVirtualPublicAttribute(target, attributeName)) {
                       Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + attributeName]);
                     }
                     if (target instanceof HTMLScriptElement && attributeName === 'type') {
@@ -3279,6 +3289,10 @@
                     const originalType = Reflect.apply(target.getAttribute, target, ['data-raw-type']);
                     if (originalType != null) return originalType;
                   }
+                  if (attributeName === 'style') {
+                    const originalStyle = Reflect.apply(target.getAttribute, target, ['data-raw-style']);
+                    if (originalStyle != null) return originalStyle;
+                  }
                   if (attributeName.startsWith('on')) {
                     const rawHandler = Reflect.apply(target.getAttribute, target, ['data-raw-' + attributeName]);
                     if (rawHandler != null) return rawHandler;
@@ -3296,7 +3310,7 @@
                     Reflect.apply(target.hasAttribute, target, ['data-raw-type'])
                   ) return true;
                   if (
-                    isVirtualizedResourceAttribute(target, publicName) &&
+                    isVirtualPublicAttribute(target, publicName) &&
                     Reflect.apply(target.hasAttribute, target, ['data-raw-' + publicName])
                   ) return true;
                   return Reflect.apply(target.hasAttribute, target, [name]);
@@ -3311,7 +3325,7 @@
                       !names.includes('type')) names.push('type');
                   for (const name of ['src', 'href', 'srcset', 'poster', 'srcdoc', 'data']) {
                     if (
-                      isVirtualizedResourceAttribute(target, name) &&
+                      isVirtualPublicAttribute(target, name) &&
                       Reflect.apply(target.hasAttribute, target, ['data-raw-' + name]) &&
                       !names.includes(name)
                     ) names.push(name);
@@ -3375,12 +3389,16 @@
                   if (
                     rawAttribute instanceof Attr &&
                     rawAttribute.namespaceURI == null &&
-                    isVirtualizedResourceAttribute(target, logicalName)
+                    isVirtualPublicAttribute(target, logicalName)
                   ) {
                     const oldAttribute = prop === 'setAttributeNodeNS'
                       ? Reflect.apply(target.getAttributeNodeNS, target, [null, logicalName])
                       : Reflect.apply(target.getAttributeNode, target, [logicalName]);
-                    Reflect.apply(target.setAttribute, target, [logicalName, rawAttribute.value]);
+                    if (/^on[a-z]/i.test(String(logicalName))) {
+                      rewriteInlineEventAttribute(target, logicalName, rawAttribute.value);
+                    } else {
+                      Reflect.apply(target.setAttribute, target, [logicalName, rawAttribute.value]);
+                    }
                     return wrapDOMValue(oldAttribute);
                   }
                   return wrapDOMValue(Reflect.apply(target[prop], target, [rawAttribute]));
@@ -3411,9 +3429,10 @@
                   }
                   if (
                     rawAttribute instanceof Attr &&
-                    isVirtualizedResourceAttribute(target, logicalName) &&
+                    isVirtualPublicAttribute(target, logicalName) &&
                     getVirtualAttributeName(rawAttribute)
                   ) {
+                    Reflect.apply(nativeElementRemoveAttribute, target, ['data-raw-' + String(logicalName).toLowerCase()]);
                     Reflect.apply(nativeElementRemoveAttribute, target, [String(logicalName)]);
                     return wrapDOMValue(rawAttribute);
                   }
