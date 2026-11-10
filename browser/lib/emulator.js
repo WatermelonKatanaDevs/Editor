@@ -1776,6 +1776,9 @@
             if (prop === __scopeUnscopables) return undefined;
             if (__scopeReflectApply(__scopeHasOwn, bindings, [prop])) return bindings[prop];
             if (__privateScriptNames[prop] === true) return undefined;
+            // Bare eval must resolve to the native intrinsic to retain direct-eval
+            // lexical semantics. window.eval remains the emulated indirect form.
+            if (prop === 'eval') return __nativeEval;
             if (__scopeReflectApply(__scopeHasOwn, target, [prop])) return target[prop];
             return Reflect.get(windowProxy, prop, windowProxy);
           },
