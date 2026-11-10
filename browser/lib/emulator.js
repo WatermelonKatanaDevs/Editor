@@ -1497,7 +1497,9 @@
 
       const frameElement = window.frameElement;
       if (!frameElement) {
-        window.__executeCode = window.eval.bind(window);
+        window.__executeCode = function() {
+          throw new Error('WatermelonKatana emulator initialization failed; refusing to execute user code in the native frame.');
+        };
         console.error("Finding page emulator failed: no frame element");
         return;
       }
@@ -1509,7 +1511,9 @@
 
         const registry = browserWindow.__pageRegistry;
         if (!registry) {
-          window.__executeCode = window.eval.bind(window);
+          window.__executeCode = function() {
+          throw new Error('WatermelonKatana emulator initialization failed; refusing to execute user code in the native frame.');
+        };
           console.error("Finding page emulator failed: no registry");
           return;
         }
@@ -1520,7 +1524,9 @@
         }
 
         if (!registeredPage) {
-          window.__executeCode = window.eval.bind(window);
+          window.__executeCode = function() {
+          throw new Error('WatermelonKatana emulator initialization failed; refusing to execute user code in the native frame.');
+        };
           console.error(id
             ? "Finding page emulator failed: page id is not registered (" + id + ")"
             : "Finding page emulator failed: no id or matching registered frame");
