@@ -1705,6 +1705,62 @@
       }
       
       // do code later
+
+      // Isolate scripts from the implementation locals of the executor. The
+      // proxy exposes the emulated global lexical bindings plus an explicit
+      // allowlist of transformer/module helpers; private runtime locals never
+      // resolve as user-script globals.
+      const __privateScriptNames = Object.create(null);
+      [
+        'BASE_ORIGIN', 'CURRENT_PAGE_URL', 'DOCUMENT_URL',
+        'frameElement', 'browserWindow', 'registry', 'registeredPage', 'isTurboWarpPlayUrl',
+        '__getScriptFileName', '__createModuleControls',
+        '__codeString', '__sourceURL', '__thisArg', '__requireModule', '__currentModuleExports',
+        '__nativeEval', '__indirectEval', '__invokeDynamicFunction',
+        'NativeFunction', 'NativeAsyncFunction', 'NativeGeneratorFunction', 'NativeAsyncGeneratorFunction',
+        'ScopedFunction', 'ScopedAsyncFunction', 'ScopedGeneratorFunction', 'ScopedAsyncGeneratorFunction',
+        'dynamicFunctionSources', 'getDynamicFunctionSources',
+        'installScopedDOMConstructor', 'constructorString', 'makeScopedFunctionConstructor',
+        '__createScriptExecutionScope', '__privateScriptNames', '__scopeHasOwn',
+        '__scopeReflectApply', '__scopeReflectSet', '__scopeGetOwnPropertyDescriptor',
+        '__scriptBindings', '__scriptScope', '__execResult'
+      ].forEach(name => { __privateScriptNames[name] = true; });
+
+      const __scopeHasOwn = Object.prototype.hasOwnProperty;
+      const __scopeReflectApply = Reflect.apply;
+      const __scopeReflectSet = Reflect.set;
+      const __scopeGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+      const __scopeUnscopables = Symbol.unscopables;
+
+      function __createScriptExecutionScope(bindings) {
+        return new Proxy(__globalLexicalScope, {
+          has(target, prop) {
+            if (prop === __scopeUnscopables) return false;
+            return __privateScriptNames[prop] === true ||
+              __scopeReflectApply(__scopeHasOwn, target, [prop]) ||
+              __scopeReflectApply(__scopeHasOwn, bindings, [prop]);
+          },
+          get(target, prop) {
+            if (prop === __scopeUnscopables) return undefined;
+            if (__scopeReflectApply(__scopeHasOwn, bindings, [prop])) return bindings[prop];
+            if (__privateScriptNames[prop] === true) return undefined;
+            return target[prop];
+          },
+          set(target, prop, value) {
+            if (__scopeReflectApply(__scopeHasOwn, bindings, [prop])) {
+              const descriptor = __scopeReflectApply(__scopeGetOwnPropertyDescriptor, Object, [bindings, prop]);
+              if (descriptor?.set) {
+                __scopeReflectApply(descriptor.set, bindings, [value]);
+              } else if (descriptor?.writable) {
+                bindings[prop] = value;
+              }
+              return true;
+            }
+            if (__privateScriptNames[prop] === true) return true;
+            return __scopeReflectApply(__scopeReflectSet, Reflect, [target, prop, value, target]);
+          }
+        });
+      }
       (function() { 
         
         const parentWindow = window.parent;
@@ -5755,8 +5811,24 @@
         var __requireModule = __importModule;
 
         __codeString = window.__usefulHelpers.editCode(__codeString);
+        const __scriptBindings = {
+          __windowProxy: window.__windowProxy,
+          __globalLexicalScope,
+          __declareGlobalLexicalConstant,
+          __declareGlobalLexicalVariable,
+          __prepareDirectEvalCode,
+          __getIndirectEval,
+          __wkRegisterFunctionSource,
+          __wkRegisterObjectFunctionSources,
+          __wkRegisterClassFunctionSources,
+          __importModule,
+          __requireModule: __importModule,
+          __event: __event == null ? undefined : window.__wrapDOMValue(__event),
+          frameElement: window.__windowProxy.frameElement
+        };
+        const __scriptScope = __createScriptExecutionScope(__scriptBindings);
         return __rawReflectApply(function(window, self, globalThis, parent, top, frames, opener, frameElement, location, document, navigator, screen, devicePixelRatio, orientation) {
-          with (__globalLexicalScope) {
+          with (__scriptScope) {
             return eval(`
             ${__event != null ? 'let event = window.__wrapDOMValue(__event);' : ''}
             ${__codeString.code}
@@ -5771,9 +5843,36 @@
         
         __codeString = window.__usefulHelpers.editCode(__codeString);
         __codeString = window.__usefulHelpers.editCodeAsync(__codeString);
+        let __execResult;
+        const __scriptBindings = {
+          __windowProxy: window.__windowProxy,
+          __globalLexicalScope,
+          __declareGlobalLexicalConstant,
+          __declareGlobalLexicalVariable,
+          __prepareDirectEvalCode,
+          __getIndirectEval,
+          __wkRegisterFunctionSource,
+          __wkRegisterObjectFunctionSources,
+          __wkRegisterClassFunctionSources,
+          __importModule,
+          __requireModule: __importModule,
+          __event: __event == null ? undefined : window.__wrapDOMValue(__event)
+        };
+        Object.defineProperty(__scriptBindings, '__execResult', {
+          enumerable: true,
+          configurable: false,
+          get: () => __execResult,
+          set: value => { __execResult = value; }
+        });
+        Object.defineProperty(__scriptBindings, 'frameElement', {
+          enumerable: true,
+          configurable: false,
+          value: window.__windowProxy.frameElement,
+          writable: false
+        });
+        const __scriptScope = __createScriptExecutionScope(__scriptBindings);
         return __rawReflectApply(async function(window, self, globalThis, parent, top, frames, opener, frameElement, location, document, navigator, screen, devicePixelRatio, orientation) {
-          let __execResult;
-          with (__globalLexicalScope) {
+          with (__scriptScope) {
             await eval(`
             ${__event != null ? 'let event = window.__wrapDOMValue(__event);' : ''}
             (async function(){
@@ -5797,10 +5896,25 @@
         `;
 
         __codeString = window.__usefulHelpers.editCode(__codeString, { preserveIIFEThis: true });
-        
+        const __scriptBindings = {
+          __windowProxy: window.__windowProxy,
+          __globalLexicalScope,
+          __declareGlobalLexicalConstant,
+          __declareGlobalLexicalVariable,
+          __prepareDirectEvalCode,
+          __getIndirectEval,
+          __wkRegisterFunctionSource,
+          __wkRegisterObjectFunctionSources,
+          __wkRegisterClassFunctionSources,
+          __importModule,
+          __exportModule,
+          __requireModule: __importModule,
+          __event: __event == null ? undefined : window.__wrapDOMValue(__event),
+          frameElement: window.__windowProxy.frameElement
+        };
+        const __scriptScope = __createScriptExecutionScope(__scriptBindings);
         return __rawReflectApply(async function(window, self, globalThis, parent, top, frames, opener, frameElement, location, document, navigator, screen, devicePixelRatio, orientation) {
-          let __execResult;
-          with (__globalLexicalScope) {
+          with (__scriptScope) {
             await eval(`
             "use strict";
             ${__event != null ? 'let event = window.__wrapDOMValue(__event);' : ''}
