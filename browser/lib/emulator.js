@@ -3393,11 +3393,11 @@
         }
 
         function wrapDOMNode(node) {
+          if (typeof documentProxy !== 'undefined' && node === documentProxy) return documentProxy;
           if (!node || !isDOMNodeValue(node)) return node;
           if (unwrappedDOMNodes.has(node)) return node;
           if (
-            typeof Attr !== 'undefined' &&
-            node instanceof Attr &&
+            isDOMAttrValue(node) &&
             node.ownerElement &&
             isInternalDOMAttribute(node.name)
           ) {
@@ -4047,7 +4047,7 @@
             unwrappedEvents.has(value)
           ) return value;
           if (value === window || value === windowProxy) return windowProxy;
-          if (value === document) return documentProxy;
+          if (value === document || (typeof documentProxy !== 'undefined' && value === documentProxy)) return documentProxy;
           if (typeof Window !== 'undefined') {
             try {
               if (value instanceof Window || value.window === value) {
