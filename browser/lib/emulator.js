@@ -223,7 +223,7 @@
       });
     };
 
-    await Promise.all([    await Promise.all([
+    await Promise.all([
       processElements('script[src]', 'src', 'data-raw-src', async function(response, url, ourl, element) {
         let text = await response.clone().text();
         const scriptType = (element?.getAttribute('type') || '').trim();
