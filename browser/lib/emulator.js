@@ -1251,20 +1251,29 @@
 
       window.__runSyncInterceptor = function(__elem,__elemWindow) {
         if (!__elemWindow) return;
-        if (__elemWindow.__windowProxy) return __elemWindow.__windowProxy;
-        var PATH_URL = new URL(__elem.getAttribute('src') || "about:srcdoc", BASE_ORIGIN);
         var __childPage = __elemWindow.__pageEmulator || __elem.pageEmulator || null;
+        var __getCallerProxy = window.__pageEmulator?.__getCallerWindowProxy;
+        if (__elemWindow.__windowProxy) {
+          return __childPage && typeof __getCallerProxy === 'function'
+            ? __getCallerProxy(__childPage, __elemWindow)
+            : __elemWindow.__windowProxy;
+        }
+        var PATH_URL = new URL(__elem.getAttribute('src') || "about:srcdoc", BASE_ORIGIN);
         var __baseUrl = PATH_URL.href;
         try {
           if (/^about:srcdoc$/i.test(PATH_URL.href) && __childPage?.parent?.location?.url) __baseUrl = __childPage.parent.location.url;
         } catch (e) {}
         var __interceptorCode = window.__usefulHelpers.createRuntimeInterceptor(PATH_URL.href, BASE_ORIGIN, undefined, __baseUrl);
-        return (function(window, document){
+        var __childProxy = (function(window, document){
           with (window) {
             eval(__interceptorCode);
           }
           return window.__windowProxy;
         })(__elemWindow, __elemWindow.document);
+        __getCallerProxy = window.__pageEmulator?.__getCallerWindowProxy;
+        return __childPage && typeof __getCallerProxy === 'function'
+          ? __getCallerProxy(__childPage, __elemWindow)
+          : __childProxy;
       };
 
       // Module Registry
@@ -1411,12 +1420,14 @@
                 }
               } catch (_) {}
             }
+            const callerWindow = nativeWindow ? getCallerWindowProxy(child, nativeWindow) : null;
             const matchesNative = event.source === nativeWindow;
             const matchesProxy = event.source === child.__windowProxy;
-            const matched = matchesNative || matchesProxy;
+            const matchesCallerProxy = event.source === callerWindow;
+            const matched = matchesNative || matchesProxy || matchesCallerProxy;
             let childPath = '';
             try { childPath = new URL(child.location?.url || '').pathname; } catch (_) {}
-            childChecks.push({ pageId: child.id || null, childPath, hadCachedWindow, nativeWindowAvailable: !!nativeWindow, childProxyAvailable: !!child.__windowProxy, matchesNative, matchesProxy, matched });
+            childChecks.push({ pageId: child.id || null, childPath, hadCachedWindow, nativeWindowAvailable: !!nativeWindow, childProxyAvailable: !!child.__windowProxy, matchesNative, matchesProxy, matchesCallerProxy, matched });
             if (matched) { matchedChildWindow = nativeWindow; return true; }
             return false;
           });
@@ -3168,7 +3179,24 @@
             // exposed by this emulator, even when srcdoc inherits a non-opaque
             // origin. Only rewrite the origin for opaque/srcdoc messages.
             let sourceProxy = null;
-            try { sourceProxy = event.source?.__windowProxy || null; } catch (_) {}
+            try {
+              const nativeParentWindow = window.parent;
+              const parentPage = pageEmulator?.parent && pageEmulator.parent !== false ? pageEmulator.parent : null;
+              if (parentPage && event.source === nativeParentWindow) {
+                // window.parent and MessageEvent.source must use the exact same
+                // caller-realm proxy for TurboWarp's strict source check.
+                sourceProxy = getCallerWindowProxy(parentPage, nativeParentWindow);
+              } else {
+                const sourcePage = (pageEmulator?.children || []).find(child =>
+                  child?.iframe?.__wkNativeContentWindow === event.source
+                );
+                if (sourcePage) {
+                  sourceProxy = getCallerWindowProxy(sourcePage, event.source);
+                } else {
+                  sourceProxy = event.source?.__windowProxy || null;
+                }
+              }
+            } catch (_) {}
             const rewriteOrigin = !event.origin || event.origin === 'null' || event.origin === 'about:srcdoc';
             if (!sourceProxy && !rewriteOrigin) {
               return listener.call(this, event);
@@ -3848,11 +3876,16 @@
             }
             if (typeof prop === 'string' && /^\d+$/.test(prop)) {
               const child = getChildPage(prop);
-              return child?.__windowProxy || undefined;
+              if (!child) return undefined;
+              const nativeChildWindow = child.iframe?.__wkNativeContentWindow || null;
+              return nativeChildWindow ? getCallerWindowProxy(child, nativeChildWindow) : child.__windowProxy || undefined;
             }
             if (typeof prop === 'string') {
               const child = getChildPage(prop);
-              if (child?.__windowProxy) return child.__windowProxy;
+              if (child?.__windowProxy) {
+                const nativeChildWindow = child.iframe?.__wkNativeContentWindow || null;
+                return nativeChildWindow ? getCallerWindowProxy(child, nativeChildWindow) : child.__windowProxy;
+              }
             }
             const value = Reflect.get(window, prop, window);
             if (isNativeFunction(value) && !value.prototype) {
@@ -3960,6 +3993,7 @@
 
         window.__windowProxy = windowProxy;
         pageEmulator.__windowProxy = windowProxy;
+        pageEmulator.__getCallerWindowProxy = getCallerWindowProxy;
         window.__rawReflectApply = rawReflectApply;
         window.__hostURL = window.top.location.href;
         window.__hostOrigin = window.top.location.origin;
