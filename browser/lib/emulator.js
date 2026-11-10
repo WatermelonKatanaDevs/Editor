@@ -4050,13 +4050,13 @@
           if (value === document || (typeof documentProxy !== 'undefined' && value === documentProxy)) return documentProxy;
           if (typeof Window !== 'undefined') {
             try {
-              if (value instanceof Window || value.window === value) {
-                return wrapWindowReference(value);
-              }
+              if (
+                value instanceof Window ||
+                hasDOMBrand(value, 'Window') ||
+                value.window === value
+              ) return wrapWindowReference(value);
             } catch (_) {
-              try {
-                if (value.window === value) return wrapWindowReference(value);
-              } catch (_) {}
+              if (hasDOMBrand(value, 'Window')) return wrapWindowReference(value);
             }
           }
           if (
