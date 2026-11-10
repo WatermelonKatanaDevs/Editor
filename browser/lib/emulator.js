@@ -4033,6 +4033,168 @@
 
 
       };
+      const __nativeEval = window.eval;
+
+      function __prepareDirectEvalCode(source, evalFunction) {
+        if (evalFunction !== __nativeEval || typeof source !== 'string') return source;
+        try {
+          const ast = parseCode(source, 'script');
+          transformAST(ast, { rewriteGlobals: false });
+          return astring.generate(ast);
+        } catch (_) {
+          return source;
+        }
+      }
+
+      Object.defineProperty(window, '__prepareDirectEvalCode', {
+        value: __prepareDirectEvalCode,
+        configurable: true,
+        enumerable: false
+      });
+
+      function __invokeDynamicFunction(source, parameters, kind, thisArg, args) {
+        const allowYield = kind === 'generator' || kind === 'asyncGenerator';
+        const ast = acorn.parse(source, {
+          ...acornParseOptions,
+          sourceType: 'script',
+          allowYieldOutsideFunction: allowYield
+        });
+        transformAST(ast, { rewriteGlobals: false });
+        const transformedBody = astring.generate(ast);
+        const prefix = kind === 'async' || kind === 'asyncGenerator' ? 'async ' : '';
+        const generator = kind === 'generator' || kind === 'asyncGenerator' ? '*' : '';
+        const functionSource = '(' + prefix + 'function' + generator +
+          ' anonymous(' + parameters.join(',') + ') {\\n' +
+          transformedBody + '\\n})';
+
+        const dynamicGlobalScope = new Proxy(Object.create(null), {
+          has(_target, prop) {
+            return prop !== Symbol.unscopables;
+          },
+          get(_target, prop) {
+            if (prop === Symbol.unscopables) return undefined;
+            if (prop === 'eval') return __nativeEval;
+            if (Object.prototype.hasOwnProperty.call(__globalLexicalScope, prop)) {
+              return __globalLexicalScope[prop];
+            }
+            if (prop === '__prepareDirectEvalCode') return __prepareDirectEvalCode;
+            return Reflect.get(__windowProxy, prop, __windowProxy);
+          },
+          set(_target, prop, value) {
+            if (Object.prototype.hasOwnProperty.call(__globalLexicalScope, prop)) {
+              __globalLexicalScope[prop] = value;
+            } else {
+              Reflect.set(__windowProxy, prop, value, __windowProxy);
+            }
+            return true;
+          }
+        });
+
+        const dynamicFunction = __rawReflectApply(function(scopeSource) {
+          with (scopeSource) {
+            return eval(functionSource);
+          }
+        }, __windowProxy, [dynamicGlobalScope]);
+        return __rawReflectApply(dynamicFunction, thisArg, args || []);
+      }
+
+      Object.defineProperty(window, '__invokeDynamicFunction', {
+        value: __invokeDynamicFunction,
+        configurable: true,
+        enumerable: false
+      });
+
+      const dynamicFunctionSources = new WeakMap();
+      function constructorString(value) {
+        if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+        return String(value);
+      }
+
+      function makeScopedFunctionConstructor(nativeConstructor, kind) {
+        function createScopedFunction(args) {
+          const strings = Array.from(args || [], constructorString);
+          const body = strings.length ? strings[strings.length - 1] : '';
+          const parameters = strings.length ? strings.slice(0, -1) : [];
+
+          Reflect.construct(nativeConstructor, strings);
+
+          let strict = false;
+          try {
+            const parsedBody = acorn.parse(body, {
+              ...acornParseOptions,
+              sourceType: 'script',
+              allowYieldOutsideFunction: kind === 'generator' || kind === 'asyncGenerator'
+            });
+            strict = parsedBody.body[0]?.directive === 'use strict';
+          } catch (_) {}
+
+          const invocation = 'window.__invokeDynamicFunction(' +
+            JSON.stringify(body) + ',' +
+            JSON.stringify(parameters) + ',' +
+            JSON.stringify(kind) + ',this,arguments)';
+          const trampolineBody = kind === 'generator' || kind === 'asyncGenerator'
+            ? 'yield* ' + invocation + ';'
+            : 'return ' + invocation + ';';
+          const trampoline = Reflect.construct(nativeConstructor, [...parameters, trampolineBody]);
+
+          let scopedFunction;
+          scopedFunction = new Proxy(trampoline, {
+            apply(target, thisArg, callArgs) {
+              if (thisArg === window || (!strict && thisArg == null)) thisArg = __windowProxy;
+              return Reflect.apply(target, thisArg, callArgs);
+            },
+            construct(target, callArgs, newTarget) {
+              return Reflect.construct(target, callArgs, newTarget === scopedFunction ? target : newTarget);
+            }
+          });
+
+          const prefix = kind === 'async' || kind === 'asyncGenerator' ? 'async ' : '';
+          const generator = kind === 'generator' || kind === 'asyncGenerator' ? '*' : '';
+          dynamicFunctionSources.set(
+            scopedFunction,
+            prefix + 'function' + generator + ' anonymous(' +
+              parameters.join(',') + ') {\\n' + body + '\\n}'
+          );
+          return scopedFunction;
+        }
+
+        return new Proxy(nativeConstructor, {
+          apply(_target, _thisArg, args) {
+            return createScopedFunction(args);
+          },
+          construct(_target, args) {
+            return createScopedFunction(args);
+          }
+        });
+      }
+
+      const NativeFunction = window.Function;
+      const NativeAsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
+      const NativeGeneratorFunction = Object.getPrototypeOf(function*() {}).constructor;
+      const NativeAsyncGeneratorFunction = Object.getPrototypeOf(async function*() {}).constructor;
+      const ScopedFunction = makeScopedFunctionConstructor(NativeFunction, 'normal');
+      const ScopedAsyncFunction = makeScopedFunctionConstructor(NativeAsyncFunction, 'async');
+      const ScopedGeneratorFunction = makeScopedFunctionConstructor(NativeGeneratorFunction, 'generator');
+      const ScopedAsyncGeneratorFunction = makeScopedFunctionConstructor(NativeAsyncGeneratorFunction, 'asyncGenerator');
+
+      window.Function = ScopedFunction;
+      const nativeFunctionPrototype = NativeFunction.prototype;
+      const asyncFunctionPrototype = Object.getPrototypeOf(async function() {});
+      const generatorFunctionPrototype = Object.getPrototypeOf(function*() {});
+      const asyncGeneratorFunctionPrototype = Object.getPrototypeOf(async function*() {});
+      Object.defineProperty(nativeFunctionPrototype, 'constructor', { ...Object.getOwnPropertyDescriptor(nativeFunctionPrototype, 'constructor'), value: ScopedFunction });
+      Object.defineProperty(asyncFunctionPrototype, 'constructor', { ...Object.getOwnPropertyDescriptor(asyncFunctionPrototype, 'constructor'), value: ScopedAsyncFunction });
+      Object.defineProperty(generatorFunctionPrototype, 'constructor', { ...Object.getOwnPropertyDescriptor(generatorFunctionPrototype, 'constructor'), value: ScopedGeneratorFunction });
+      Object.defineProperty(asyncGeneratorFunctionPrototype, 'constructor', { ...Object.getOwnPropertyDescriptor(asyncGeneratorFunctionPrototype, 'constructor'), value: ScopedAsyncGeneratorFunction });
+
+      const nativeFunctionToString = rawToString;
+      Function.prototype.toString = function() {
+        const originalSource = dynamicFunctionSources.get(this);
+        return originalSource === undefined
+          ? Reflect.apply(nativeFunctionToString, this, [])
+          : originalSource;
+      };
+
       // Hide emulator-only DOM state when page code serializes HTML.
       const nativeElementInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
       const nativeElementOuterHTML = Object.getOwnPropertyDescriptor(Element.prototype, 'outerHTML');
