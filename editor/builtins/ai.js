@@ -30,7 +30,8 @@
     return {text,expressions};
   }
   function renderMathExpressions(container, expressions) {
-    if (!expressions.length || typeof window.katex?.renderToString !== 'function') return;
+    if (!expressions.length) return;
+    const katexReady = typeof window.katex?.renderToString === 'function';
     const nodes = [];
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
     let node;
@@ -48,7 +49,17 @@
         const element = document.createElement('span');
         element.className = expression.display ? 'ai-katex-display' : 'ai-katex-inline';
         try {
-          element.innerHTML = window.katex.renderToString(expression.tex,{displayMode:expression.display,throwOnError:false,strict:'ignore',trust:false});
+          if (!katexReady) element.textContent = expression.raw;
+          else {
+            try {
+              element.innerHTML = window.katex.renderToString(expression.tex,{displayMode:expression.display,throwOnError:false,strict:'ignore',trust:false});
+            } catch (_) { element.textContent = expression.raw; }
+          }
+          fragment.appendChild(element);
+        }
+        textNode.replaceWith(fragment);
+      }
+    }
         } catch (_) { element.textContent = expression.raw; }
         fragment.appendChild(element);
       }
