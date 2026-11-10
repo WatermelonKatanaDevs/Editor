@@ -4184,11 +4184,7 @@
               const wrappedInstance = wrapDOMValue(instance);
               if (
                 wrappedInstance === instance &&
-                [
-                  'DOMParser', 'XMLSerializer', 'XSLTProcessor',
-                  'XPathEvaluator', 'MessageChannel', 'SharedWorker',
-                  'AbortController'
-                ].includes(name)
+                DOMConstructorNames.has(name)
               ) return wrapDOMObject(instance);
               return wrappedInstance;
             }
