@@ -2091,63 +2091,210 @@
           return elem;
         }
 
-        // Keep native live DOM collections, but wrap elements as they are read
-        // so collections such as document.scripts expose the same virtualized
-        // element properties as querySelector()/getElementById().
+        // Stable DOM proxies ensure every Node returned by public DOM APIs
+        // exposes the emulated document/window rather than the native iframe.
         const wrappedDOMCollections = new WeakMap();
+        const unwrappedDOMCollections = new WeakMap();
+        const wrappedDOMNodes = new WeakMap();
+        const unwrappedDOMNodes = new WeakMap();
+        const wrappedDOMObjects = new WeakMap();
+        const unwrappedDOMObjects = new WeakMap();
+
+        function unwrapDOMValue(value) {
+          if (!value || (typeof value !== 'object' && typeof value !== 'function')) return value;
+          if (unwrappedDOMNodes.has(value)) return unwrappedDOMNodes.get(value);
+          if (unwrappedDOMCollections.has(value)) return unwrappedDOMCollections.get(value);
+          if (unwrappedDOMObjects.has(value)) return unwrappedDOMObjects.get(value);
+          if (Array.isArray(value)) return value.map(unwrapDOMValue);
+          return value;
+        }
+
+        function isInternalDOMAttribute(name) {
+          const attr = String(name || '').toLowerCase();
+          return attr.startsWith('data-raw-') ||
+            attr === 'data-page-id' ||
+            attr === 'data-embed-frame' ||
+            attr === 'data-embed-wrapper';
+        }
 
         function wrapDOMCollection(collection) {
-          if (!(collection instanceof HTMLCollection) && !(collection instanceof NodeList)) return collection;
+          if (
+            !(collection instanceof HTMLCollection) &&
+            !(collection instanceof NodeList) &&
+            !(typeof NamedNodeMap !== 'undefined' && collection instanceof NamedNodeMap) &&
+            !(typeof StyleSheetList !== 'undefined' && collection instanceof StyleSheetList)
+          ) return collection;
           if (wrappedDOMCollections.has(collection)) return wrappedDOMCollections.get(collection);
 
+          const isNamedNodeMap = typeof NamedNodeMap !== 'undefined' && collection instanceof NamedNodeMap;
           let proxy;
+          const visibleItems = () => {
+            const items = [];
+            for (let i = 0; i < collection.length; i++) {
+              const item = collection[i];
+              if (isNamedNodeMap && isInternalDOMAttribute(item?.name)) continue;
+              items.push(item);
+            }
+            return items;
+          };
           proxy = new Proxy(collection, {
             get(target, prop) {
               if (prop === Symbol.iterator || prop === 'values') {
-                return function* () {
-                  for (let i = 0; i < target.length; i++) yield wrapElement(target[i]);
+                return function*() {
+                  for (const item of visibleItems()) yield wrapDOMValue(item);
                 };
               }
               if (prop === 'keys') {
-                return function* () {
-                  for (let i = 0; i < target.length; i++) yield i;
+                return function*() {
+                  const items = visibleItems();
+                  for (let i = 0; i < items.length; i++) yield i;
                 };
               }
               if (prop === 'entries') {
-                return function* () {
-                  for (let i = 0; i < target.length; i++) yield [i, wrapElement(target[i])];
+                return function*() {
+                  const items = visibleItems();
+                  for (let i = 0; i < items.length; i++) yield [i, wrapDOMValue(items[i])];
                 };
               }
-              if (prop === 'forEach' && target instanceof NodeList) {
+              if (prop === 'forEach' && (target instanceof NodeList || isNamedNodeMap)) {
                 return function(callback, thisArg) {
-                  for (let i = 0; i < target.length; i++) {
-                    Reflect.apply(callback, thisArg, [wrapElement(target[i]), i, proxy]);
-                  }
+                  visibleItems().forEach((item, index) => {
+                    Reflect.apply(callback, thisArg, [wrapDOMValue(item), index, proxy]);
+                  });
                 };
               }
+              if (prop === 'length' && isNamedNodeMap) return visibleItems().length;
               if ((prop === 'item' || prop === 'namedItem') && typeof target[prop] === 'function') {
                 return function(...args) {
-                  return wrapElement(Reflect.apply(target[prop], target, args));
+                  if (isNamedNodeMap && prop === 'namedItem' && isInternalDOMAttribute(args[0])) return null;
+                  if (isNamedNodeMap && prop === 'item') return wrapDOMValue(visibleItems()[Number(args[0])] || null);
+                  return wrapDOMValue(Reflect.apply(target[prop], target, args));
                 };
               }
               if (typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) {
-                return wrapElement(Reflect.get(target, prop, target));
+                return wrapDOMValue(isNamedNodeMap ? visibleItems()[Number(prop)] : Reflect.get(target, prop, target));
               }
-
               const value = Reflect.get(target, prop, target);
               if (typeof value === 'function') return value.bind(target);
-              return wrapElement(value);
+              return wrapDOMValue(value);
             }
           });
-
           wrappedDOMCollections.set(collection, proxy);
+          unwrappedDOMCollections.set(proxy, collection);
           return proxy;
         }
 
-        function wrapDocumentValue(value) {
-          if (value instanceof HTMLElement) return wrapElement(value);
-          if (value instanceof HTMLCollection || value instanceof NodeList) return wrapDOMCollection(value);
+        function wrapDOMObject(value) {
+          if (!value || (typeof value !== 'object' && typeof value !== 'function')) return value;
+          if (wrappedDOMObjects.has(value)) return wrappedDOMObjects.get(value);
+          const proxy = new Proxy(value, {
+            get(target, prop) {
+              const member = Reflect.get(target, prop, target);
+              if (typeof member === 'function') {
+                return function(...args) {
+                  return wrapDOMValue(Reflect.apply(member, target, args.map(unwrapDOMValue)));
+                };
+              }
+              return wrapDOMValue(member);
+            },
+            set(target, prop, nextValue) {
+              return Reflect.set(target, prop, unwrapDOMValue(nextValue), target);
+            }
+          });
+          wrappedDOMObjects.set(value, proxy);
+          unwrappedDOMObjects.set(proxy, value);
+          return proxy;
+        }
+
+        function wrapDOMNode(node) {
+          if (!node || !(node instanceof Node)) return node;
+          if (node === document) return documentProxy;
+          if (wrappedDOMNodes.has(node)) return wrappedDOMNodes.get(node);
+          if (node instanceof HTMLElement) wrapElement(node);
+
+          let proxy;
+          proxy = new Proxy(node, {
+            get(target, prop) {
+              if (
+                target.nodeType === Node.TEXT_NODE &&
+                (prop === 'textContent' || prop === 'nodeValue' || prop === 'data') &&
+                target.parentElement?.tagName === 'SCRIPT'
+              ) {
+                const original = target.parentElement.getAttribute('data-raw-script');
+                if (original != null) return original;
+              }
+
+              if (prop === 'getAttribute') {
+                return function(name) {
+                  const attributeName = String(name || '').toLowerCase();
+                  if (isInternalDOMAttribute(attributeName)) return null;
+                  if (attributeName.startsWith('on')) {
+                    const rawHandler = Reflect.apply(target.getAttribute, target, ['data-raw-' + attributeName]);
+                    if (rawHandler != null) return rawHandler;
+                  }
+                  return Reflect.apply(target.getAttribute, target, [name]);
+                };
+              }
+              if (prop === 'hasAttribute') {
+                return function(name) {
+                  if (isInternalDOMAttribute(name)) return false;
+                  return Reflect.apply(target.hasAttribute, target, [name]);
+                };
+              }
+              if (prop === 'getAttributeNames') {
+                return function() {
+                  return Reflect.apply(target.getAttributeNames, target, [])
+                    .filter(name => !isInternalDOMAttribute(name));
+                };
+              }
+              if (prop === 'attributes') return wrapDOMCollection(Reflect.get(target, prop, target));
+              if (prop === 'ownerDocument') {
+                const owner = Reflect.get(target, prop, target);
+                return owner === document ? documentProxy : wrapDOMValue(owner);
+              }
+
+              const member = Reflect.get(target, prop, target);
+              if (typeof member === 'function') {
+                return function(...args) {
+                  return wrapDOMValue(Reflect.apply(member, target, args.map(unwrapDOMValue)));
+                };
+              }
+              return wrapDOMValue(member);
+            },
+            set(target, prop, nextValue) {
+              return Reflect.set(target, prop, unwrapDOMValue(nextValue), target);
+            }
+          });
+
+          wrappedDOMNodes.set(node, proxy);
+          unwrappedDOMNodes.set(proxy, node);
+          return proxy;
+        }
+
+        function wrapDOMValue(value) {
+          if (value == null) return value;
+          if (value === window) return windowProxy;
+          if (value === document) return documentProxy;
+          if (value instanceof Node) return wrapDOMNode(value);
+          if (
+            value instanceof HTMLCollection ||
+            value instanceof NodeList ||
+            (typeof NamedNodeMap !== 'undefined' && value instanceof NamedNodeMap) ||
+            (typeof StyleSheetList !== 'undefined' && value instanceof StyleSheetList)
+          ) return wrapDOMCollection(value);
+          if (
+            (typeof Range !== 'undefined' && value instanceof Range) ||
+            (typeof Selection !== 'undefined' && value instanceof Selection) ||
+            (typeof TreeWalker !== 'undefined' && value instanceof TreeWalker) ||
+            (typeof NodeIterator !== 'undefined' && value instanceof NodeIterator) ||
+            (typeof TouchList !== 'undefined' && value instanceof TouchList) ||
+            (typeof Touch !== 'undefined' && value instanceof Touch)
+          ) return wrapDOMObject(value);
           return value;
+        }
+
+        function wrapDocumentValue(value) {
+          return wrapDOMValue(value);
         }
 
         const originalInsertRule = CSSStyleSheet.prototype.insertRule;
@@ -3147,62 +3294,117 @@
         const originalAddEventListener = EventTarget.prototype.addEventListener;
         const originalRemoveEventListener = EventTarget.prototype.removeEventListener;
         const listenerMap = new WeakMap();
+        const wrappedEvents = new WeakMap();
+
+        function resolveVirtualMessageSource(event) {
+          const source = event?.source;
+          if (!source) return source;
+          if (source === window || source === windowProxy) return windowProxy;
+
+          let root = pageEmulator;
+          const rootSeen = new Set();
+          while (root?.parent && root.parent !== false && !rootSeen.has(root)) {
+            rootSeen.add(root);
+            root = root.parent;
+          }
+
+          const pending = [root];
+          const seen = new Set();
+          while (pending.length) {
+            const candidate = pending.shift();
+            if (!candidate || seen.has(candidate)) continue;
+            seen.add(candidate);
+            if (
+              candidate.__windowProxy === source ||
+              candidate.iframe?.__wkNativeContentWindow === source
+            ) {
+              const nativeWindow = candidate.iframe?.__wkNativeContentWindow || source;
+              return candidate === pageEmulator
+                ? windowProxy
+                : getCallerWindowProxy(candidate, nativeWindow);
+            }
+            for (const child of candidate.children || []) pending.push(child);
+          }
+          return null;
+        }
+
+        function wrapEvent(event) {
+          if (!event || typeof event !== 'object') return event;
+          if (wrappedEvents.has(event)) return wrappedEvents.get(event);
+
+          const isMessage = typeof MessageEvent !== 'undefined' && event instanceof MessageEvent;
+          const sourceProxy = isMessage ? resolveVirtualMessageSource(event) : undefined;
+          const rewriteOrigin = isMessage && (!event.origin || event.origin === 'null' || event.origin === 'about:srcdoc');
+          let proxy;
+          proxy = new Proxy(event, {
+            get(target, prop) {
+              if (prop === 'source' && isMessage) return sourceProxy;
+              if (prop === 'origin' && rewriteOrigin) return BASE_ORIGIN;
+              if (prop === 'composedPath') {
+                return function() {
+                  return Reflect.apply(target.composedPath, target, []).map(wrapDOMValue);
+                };
+              }
+              const value = Reflect.get(target, prop, target);
+              if (typeof value === 'function') {
+                return function(...args) {
+                  return wrapDOMValue(Reflect.apply(value, target, args.map(unwrapDOMValue)));
+                };
+              }
+              return wrapDOMValue(value);
+            },
+            set(target, prop, value) {
+              return Reflect.set(target, prop, unwrapDOMValue(value), target);
+            }
+          });
+          wrappedEvents.set(event, proxy);
+          return proxy;
+        }
+
+        function captureOption(options) {
+          return typeof options === 'boolean' ? options : !!options?.capture;
+        }
+
+        function getWrappedListener(type, listener, options) {
+          if (!listener || (typeof listener !== 'function' && typeof listener !== 'object')) return listener;
+          let perListener = listenerMap.get(listener);
+          if (!perListener) {
+            perListener = new Map();
+            listenerMap.set(listener, perListener);
+          }
+          const key = String(type) + '|' + (captureOption(options) ? '1' : '0');
+          if (perListener.has(key)) return perListener.get(key);
+
+          const wrappedListener = function(event) {
+            const publicEvent = wrapEvent(event);
+            const publicThis = wrapDOMValue(this);
+            if (typeof listener === 'function') {
+              return Reflect.apply(listener, publicThis, [publicEvent]);
+            }
+            const handleEvent = listener.handleEvent;
+            if (typeof handleEvent === 'function') {
+              return Reflect.apply(handleEvent, listener, [publicEvent]);
+            }
+          };
+          perListener.set(key, wrappedListener);
+          return wrappedListener;
+        }
 
         EventTarget.prototype.addEventListener = function(type, listener, options) {
-          if (type !== 'message' || typeof listener !== 'function') {
-            return originalAddEventListener.call(this, type, listener, options);
-          }
-          const wrappedListener = function(event) {
-            // Keep message.source consistent with the virtual contentWindow
-            // exposed by this emulator, even when srcdoc inherits a non-opaque
-            // origin. Only rewrite the origin for opaque/srcdoc messages.
-            let sourceProxy = null;
-            try {
-              const nativeParentWindow = window.parent;
-              const parentPage = pageEmulator?.parent && pageEmulator.parent !== false ? pageEmulator.parent : null;
-              if (parentPage && event.source === nativeParentWindow) {
-                // window.parent and MessageEvent.source must use the exact same
-                // caller-realm proxy for TurboWarp's strict source check.
-                sourceProxy = getCallerWindowProxy(parentPage, nativeParentWindow);
-              } else {
-                const sourcePage = (pageEmulator?.children || []).find(child =>
-                  child?.iframe?.__wkNativeContentWindow === event.source
-                );
-                if (sourcePage) {
-                  sourceProxy = getCallerWindowProxy(sourcePage, event.source);
-                } else {
-                  sourceProxy = event.source?.__windowProxy || null;
-                }
-              }
-            } catch (_) {}
-            const rewriteOrigin = !event.origin || event.origin === 'null' || event.origin === 'about:srcdoc';
-            if (!sourceProxy && !rewriteOrigin) {
-              return listener.call(this, event);
-            }
-
-            const proxyEvent = new Proxy(event, {
-              get(target, prop) {
-                if (prop === 'origin' && rewriteOrigin) return BASE_ORIGIN;
-                if (prop === 'source' && sourceProxy) return sourceProxy;
-                const val = target[prop];
-                return typeof val === 'function' ? val.bind(target) : val;
-              }
-            });
-            return listener.call(this, proxyEvent);
-          };
-          listenerMap.set(listener, wrappedListener);
+          const wrappedListener = getWrappedListener(type, listener, options);
           return originalAddEventListener.call(this, type, wrappedListener, options);
         };
 
         EventTarget.prototype.removeEventListener = function(type, listener, options) {
-          if (type === 'message' && typeof listener === 'function' && listenerMap.has(listener)) {
-            return originalRemoveEventListener.call(this, type, listenerMap.get(listener), options);
+          if (listener && (typeof listener === 'function' || typeof listener === 'object')) {
+            const wrappedListener = getWrappedListener(type, listener, options);
+            return originalRemoveEventListener.call(this, type, wrappedListener, options);
           }
           return originalRemoveEventListener.call(this, type, listener, options);
         };
 
         Object.defineProperty(window, 'frameElement', {
-          get: function() { return isTopLevel ? null : wrapElement(window.__frameElement); },
+          get: function() { return isTopLevel ? null : wrapDOMValue(wrapElement(window.__frameElement)); },
           set: undefined,
           configurable: true,
           enumerable: true
@@ -3438,8 +3640,8 @@
               return function(selector) {
                 const virtualSelector = virtualizeDocumentSelector(selector);
                 const result = value.call(document, virtualSelector);
-                if (prop === 'querySelectorAll') return Array.from(result).map(wrapElement);
-                return wrapElement(result);
+                if (prop === 'querySelectorAll') return Array.from(result).map(wrapDOMValue);
+                return wrapDOMValue(result);
               };
             }
 
