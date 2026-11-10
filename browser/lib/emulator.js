@@ -3959,19 +3959,20 @@
           if (value === document) return documentProxy;
           if (typeof Window !== 'undefined') {
             try {
-              if (value instanceof Window) return wrapWindowReference(value);
-            } catch (_) {}
+              if (value instanceof Window || value.window === value) {
+                return wrapWindowReference(value);
+              }
+            } catch (_) {
+              try {
+                if (value.window === value) return wrapWindowReference(value);
+              } catch (_) {}
+            }
           }
           if (
             typeof Storage !== 'undefined' &&
             value instanceof Storage &&
             nativeStorageProxies.has(value)
           ) return nativeStorageProxies.get(value);
-          if (typeof Window !== 'undefined') {
-            try {
-              if (value instanceof Window) return wrapWindowReference(value);
-            } catch (_) {}
-          }
           if (typeof Event !== 'undefined' && value instanceof Event) return wrapEvent(value);
           if (value instanceof Node) return wrapDOMNode(value);
           if (typeof EventTarget !== 'undefined' && value instanceof EventTarget) return wrapDOMObject(value);
@@ -5906,7 +5907,7 @@
                       };
                     }
                   };
-                  return new Proxy(nativeNavigator, {
+                  return wrapDOMValue(new Proxy(nativeNavigator, {
                     get(target, key) {
                       if (key === 'userAgent') return emulation.userAgent || (ios
                         ? (emulation.deviceId === 'ipad-mini'
@@ -5920,11 +5921,11 @@
                       const value = Reflect.get(target, key, target);
                       return typeof value === 'function' ? value.bind(target) : value;
                     }
-                  });
+                  }));
                 }
                 if (prop === 'screen') {
                   const nativeScreen = Reflect.get(window, 'screen', window);
-                  return new Proxy(nativeScreen, {
+                  return wrapDOMValue(new Proxy(nativeScreen, {
                     get(target, key) {
                       if (key === 'width' || key === 'availWidth') return width;
                       if (key === 'height' || key === 'availHeight') return height;
@@ -5943,7 +5944,7 @@
                       const value = Reflect.get(target, key, target);
                       return typeof value === 'function' ? value.bind(target) : value;
                     }
-                  });
+                  }));
                 }
               }
             }
