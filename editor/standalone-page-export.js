@@ -195,6 +195,14 @@
       '  const dataNode = document.getElementById("wk-standalone-data");',
       '  if (!dataNode) throw new Error("Standalone deployment data is missing.");',
       '  const bundle = JSON.parse(dataNode.textContent || "{}");',
+      '  const assetNodes = Array.from(document.querySelectorAll("script.wk-standalone-asset"));',
+      '  const embeddedAssets = assetNodes.map(node => ({',
+      '    path: node.getAttribute("data-path") || "",',
+      '    url: node.getAttribute("data-url") || "",',
+      '    base64: node.textContent.trim()',
+      '  }));',
+      '  if (!Array.isArray(bundle.assets) || !bundle.assets.length) bundle.assets = embeddedAssets;',
+      '  if (!Array.isArray(bundle.assets) || !bundle.assets.length) throw new Error("Standalone HTML is missing its embedded deployment dependencies.");',
       '  window.__WKStandaloneData = bundle;',
       '  window.__peerLayer = String(bundle.runConfig && bundle.runConfig.peerLayer || "peer").trim() || "peer";',
       '  const dataUrl = asset => "data:text/javascript;charset=utf-8;base64," + asset.base64;',
@@ -298,11 +306,19 @@
       throw new Error('Unable to replace the deployment page asset loader.');
     }
 
-    const {archiveChunks, ...metadata} = bundle;
+    const {archiveChunks, assets, ...metadata} = bundle;
     const metadataJson = escapeJsonForHtml(metadata);
+    const escapeAttribute = value => String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
     const payloadParts = [
       '<script type="application/json" id="' + DATA_ID + '">' + metadataJson + '</script>\n'
     ];
+    for (const asset of assets) {
+      payloadParts.push('<script type="application/octet-stream" class="wk-standalone-asset" data-path="' + escapeAttribute(asset.path) + '" data-url="' + escapeAttribute(asset.url) + '">' + asset.base64 + '</script>\n');
+    }
     for (const chunk of archiveChunks) {
       payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\n');
     }
