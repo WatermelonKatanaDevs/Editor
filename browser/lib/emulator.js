@@ -4192,14 +4192,14 @@
         var __requireModule = __importModule;
 
         __codeString = window.__usefulHelpers.editCode(__codeString);
-        return __rawReflectApply(function(window, self, globalThis, parent, top, location, document) {
+        return __rawReflectApply(function(window, self, globalThis, parent, top, location, document, __windowProxy) {
           with (__globalLexicalScope) {
             return eval(`
             ${__event ? 'let event = __event;' : ''}
             ${__codeString.code}
             \n//# sourceURL=`+__sourceURL);
           }
-        }, __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
+        }, __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document, window.__windowProxy]);
       };
 
       window.__executeCodeAsync = function(__codeString, __sourceURL, __thisArg, __event) {
@@ -4208,7 +4208,7 @@
         
         __codeString = window.__usefulHelpers.editCode(__codeString);
         __codeString = window.__usefulHelpers.editCodeAsync(__codeString);
-        return __rawReflectApply(async function(window, self, globalThis, parent, top, location, document) {
+        return __rawReflectApply(async function(window, self, globalThis, parent, top, location, document, __windowProxy) {
           let __execResult;
           with (__globalLexicalScope) {
             await eval(`
@@ -4219,7 +4219,7 @@
             \n//# sourceURL=`+__sourceURL);
           }
           return { value: __execResult };
-        }, __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
+        }, __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document, window.__windowProxy]);
       };
 
       window.__executeCodeModule = function(__codeString, __sourceURL, __thisArg, __event, __scriptFileName) {
@@ -4234,7 +4234,7 @@
 
         __codeString = window.__usefulHelpers.editCode(__codeString);
         
-        return __rawReflectApply(async function(window, self, globalThis, parent, top, location, document) {
+        return __rawReflectApply(async function(window, self, globalThis, parent, top, location, document, __windowProxy) {
           let __execResult;
           with (__globalLexicalScope) {
             await eval(`
@@ -4243,7 +4243,7 @@
             \n//# sourceURL=`+__sourceURL);
           }
           return __currentModuleExports;
-        }, __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
+        }, __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document, window.__windowProxy]);
 
 
       };
