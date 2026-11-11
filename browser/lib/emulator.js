@@ -141,9 +141,9 @@
     const parser = new DOMParser();
     const doc = parser.parseFromString(rawHtml, 'text/html');
     const codeOrgGameLab = /studio\.code\.org\/projects\/gamelab\//i.test(rawHtml) && /gamelab-api\.js/i.test(rawHtml);
+    page.__codeOrgGameLab = codeOrgGameLab;
     let codeOrgChannel = null;
     if (codeOrgGameLab) {
-      page.__codeOrgGameLab = true;
       const configScript = Array.from(doc.querySelectorAll('script:not([src])'))
         .find(script => /_FCONFIG_/.test(script.textContent || '') && /channel\s*:/.test(script.textContent || ''));
       codeOrgChannel = configScript?.textContent.match(/channel\s*:\s*["']([^"']+)["']/)?.[1] || null;
