@@ -450,7 +450,11 @@
       .replace(/"/g, '&quot;'));
     html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>' + safeTitle + '</title>');
     html = html.replace(loaderPattern, payloadParts.join('') + loaderTag);
-    html = html.replace(/<meta\s+charset=["']?[^"'>\s]+["']?\s*>/i, '<meta charset="windows-1252">');
+    const charsetPattern = /<meta\s+charset=["']?[^"'>\s]+["']?\s*>/i;
+    if (!charsetPattern.test(html)) {
+      throw new Error('The deployment template must declare a character encoding before raw archive bytes can be embedded.');
+    }
+    html = html.replace(charsetPattern, '<meta charset="windows-1252">');
     return new Blob([encodeWindows1252(html)], {type:'text/html;charset=windows-1252'});
   }
 
