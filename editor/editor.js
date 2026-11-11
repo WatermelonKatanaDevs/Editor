@@ -3950,6 +3950,15 @@ window.__editorInitPromise = (async function () {
       projectOwner: state.projectOwner !== false,
       hasGitHubRepository: !!(state.gitRemote?.provider === 'github' && state.gitRemote.owner && state.gitRemote.repo)
     }),
+    getSinglePageSnapshot: async () => {
+      if (!state.fs) throw new Error('No workspace is open.');
+      return {
+        archive: await state.fs.exportZip(),
+        projectName: state.projectName || 'Workspace',
+        runConfig: state.runConfig?.config ? {...state.runConfig.config} : {},
+        deploymentSettings: state.deploymentSettings ? {...state.deploymentSettings} : {}
+      };
+    },
     getDeploymentPreview: () => {
       if (typeof state.getDeploymentPreview !== 'function') {
         throw new Error('Deployment Preview is not available.');
