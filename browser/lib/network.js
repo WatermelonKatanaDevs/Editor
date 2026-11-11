@@ -54,12 +54,12 @@ function isLoopbackHostname(hostname) {
     (parts.length === 4 && Number(parts[0]) === 127 && parts.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255));
 }
 
-function isEmulatedLoopbackRequest(request, baseOrigin) {
-  if (!baseOrigin) return false;
+function isEmulatedLoopbackRequest(request) {
   try {
-    const base = new URL(baseOrigin);
+    // A loopback URL inside the emulated browser is a virtual origin. This
+    // applies even when callers pass a prebuilt Request and omit baseOrigin.
     const target = new URL(request.url);
-    return base.origin === target.origin && isLoopbackHostname(base.hostname);
+    return isLoopbackHostname(target.hostname);
   } catch (_) {
     return false;
   }
@@ -77,15 +77,15 @@ class Network extends EventHandler {
   async _requestURL(url,baseOrigin,data,type,filter) {
     const absoluteUrl = resolveNetworkURL(url, baseOrigin);
     const request = new Request(absoluteUrl, data);
-    return await this._requestObject(request,type,filter,baseOrigin);
+    return await this._requestObject(request,type,filter);
   }
-  async _requestObject(request,type,filter,baseOrigin) {
+  async _requestObject(request,type,filter) {
     request.__original_url = request.url;
     request.request_type = type;
     this.dispatchEvent('requeststart',request,type);
     // localhost is the emulated page origin, not a real server that the
     // browser should contact. Only in-process virtual endpoints may handle it.
-    const endpointList = isEmulatedLoopbackRequest(request, baseOrigin)
+    const endpointList = isEmulatedLoopbackRequest(request)
       ? this.endpoints.filter(endpoint =>
           endpoint &&
           !endpoint.__browserDefaultFallback &&
