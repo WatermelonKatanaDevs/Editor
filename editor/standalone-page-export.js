@@ -331,7 +331,6 @@
       .replace(/"/g, '&quot;');
     html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>' + safeTitle + '</title>');
     return new Blob([html.slice(0, scriptStart), ...payloadParts, loaderTag, html.slice(scriptEnd + 9)], {type:'text/html;charset=utf-8'});
-    return html;
   }
 
   async function compile(snapshot, options = {}) {
