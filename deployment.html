@@ -439,7 +439,17 @@ window.__deploymentNetworkReady = (async function() {
       const normalizedNodeModulesPath = nodeModulesPath.replace(/^\/+|\/+$/g, '');
       const hasNodeModules = fs.isDirectorySync?.(nodeModulesPath) ||
         fs.listFilesSync().some(path => String(path || '').replace(/^\/+/, '').startsWith(normalizedNodeModulesPath + '/'));
-      if (fs.existsSync(packageJsonPath) && !hasNodeModules) {
+      let hasDeclaredDependencies = fs.existsSync(packageJsonPath);
+      if (hasDeclaredDependencies) {
+        try {
+          const manifest = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8') || '{}');
+          hasDeclaredDependencies = [manifest.dependencies, manifest.devDependencies, manifest.optionalDependencies]
+            .some(dependencies => dependencies && typeof dependencies === 'object' && Object.keys(dependencies).length > 0);
+        } catch (_) {
+          // Leave installation enabled so npm reports an invalid package.json.
+        }
+      }
+      if (hasDeclaredDependencies && !hasNodeModules) {
         let useCi = false;
         if (fs.existsSync(packageLockPath)) {
           try {
