@@ -1323,35 +1323,93 @@
       DOCUMENT_URL = DOCUMENT_URL || CURRENT_PAGE_URL;
       if (window.__windowProxy) return;
 
+      const blockUnattachedExecution = reason => {
+        const blocked = function() {
+          throw new Error('[Browser Emulator] Refusing to execute page code without a registered PageEmulator: ' + reason);
+        };
+        window.__executeCode = blocked;
+        window.__executeCodeAsync = blocked;
+        window.__executeCodeModule = blocked;
+        console.error('[Browser Emulator] Page execution blocked:', reason);
+      };
+
       const frameElement = window.frameElement;
       if (!frameElement) {
-        window.__executeCode = window.eval.bind(window);
-        console.error("Finding page emulator failed: no frame element");
+        blockUnattachedExecution('no frame element');
+        return;
+      }
+
+      let browserWindow = window;
+      while (browserWindow.parent !== browserWindow && !browserWindow.__pageRegistry) browserWindow = browserWindow.parent;
+
+      const registry = browserWindow.__pageRegistry;
+      if (!registry) {
+        blockUnattachedExecution('no page registry');
         return;
       }
 
       if (!frameElement.pageEmulator) {
         const id = frameElement.getAttribute('data-page-id');
-        let browserWindow = window;
-        while (browserWindow.parent !== browserWindow && !browserWindow.__pageRegistry) browserWindow = browserWindow.parent;
-
-        const registry = browserWindow.__pageRegistry;
-        if (!registry) {
-          window.__executeCode = window.eval.bind(window);
-          console.error("Finding page emulator failed: no registry");
-          return;
-        }
-
+        const frameId = frameElement.id || frameElement.getAttribute('id') || '';
         let registeredPage = id ? registry[id] : null;
+
         if (!registeredPage) {
-          registeredPage = Object.values(registry).find(candidate => candidate?.iframe === frameElement) || null;
+          // Accessing the same iframe element from its child browsing context
+          // can produce a different realm wrapper. Prefer the stable DOM id
+          // over JavaScript object identity when reattaching a replaced frame.
+          registeredPage = Object.values(registry).find(candidate => {
+            const frames = [
+              candidate?.iframe,
+              candidate?.tab?.iframe,
+              candidate?.tab?.frameElement
+            ];
+            return frames.some(frame =>
+              frame === frameElement ||
+              (!!frameId && frame?.id === frameId)
+            );
+          }) || null;
         }
 
         if (!registeredPage) {
-          window.__executeCode = window.eval.bind(window);
-          console.error(id
-            ? "Finding page emulator failed: page id is not registered (" + id + ")"
-            : "Finding page emulator failed: no id or matching registered frame");
+          // Some preview hosts recreate an iframe without preserving its
+          // data-page-id expando. Recover it through the ancestor browser shell
+          // when possible; otherwise create a standalone emulator sharing the
+          // existing virtual network. Never fall back to native eval here.
+          const parentWindow = window.parent !== window ? window.parent : null;
+          const parentPage = parentWindow?.__pageEmulator ||
+            Object.values(registry).find(candidate => candidate?.iframe?.contentWindow === parentWindow) ||
+            null;
+          const sharedPage = Object.values(registry).find(candidate => candidate?.network) || null;
+          const sharedNetwork = browserWindow.browserNetwork ||
+            browserWindow.__sharedBrowserNetwork ||
+            parentPage?.network ||
+            sharedPage?.network ||
+            null;
+
+          try {
+            if (typeof browserWindow.createNewPage === 'function') {
+              registeredPage = browserWindow.createNewPage(frameElement, parentPage);
+            } else {
+              const PageEmulatorConstructor = browserWindow.PageEmulator || window.PageEmulator;
+              const NetworkConstructor = browserWindow.Network || window.Network;
+              if (typeof PageEmulatorConstructor === 'function') {
+                registeredPage = new PageEmulatorConstructor(frameElement, {
+                  network: sharedNetwork || (typeof NetworkConstructor === 'function' ? new NetworkConstructor() : undefined)
+                });
+                if (parentPage && typeof parentPage.addChild === 'function') parentPage.addChild(registeredPage);
+              }
+            }
+            if (registeredPage?.setLocation) registeredPage.setLocation(CURRENT_PAGE_URL, BASE_ORIGIN);
+          } catch (error) {
+            console.error('[Browser Emulator] Could not recover the iframe PageEmulator:', error);
+            registeredPage = null;
+          }
+        }
+
+        if (!registeredPage) {
+          blockUnattachedExecution(id
+            ? 'page id is not registered (' + id + ')'
+            : 'no id or matching registered frame');
           return;
         }
 
@@ -2844,6 +2902,7 @@
             let replayingWorkerMessage = false;
             const workerScriptUrls = new Map();
             const workerScriptBlobUrls = [];
+            const bundledAmdModuleIds = new Set();
 
             function receiveInitialMessage(event) {
               if (replayingWorkerMessage) return;
@@ -2953,7 +3012,8 @@
                 typeof baseUrl === 'string' &&
                 typeof moduleId === 'string' &&
                 /^vs\/[A-Za-z0-9_./-]+$/.test(moduleId) &&
-                !moduleId.split('/').includes('..');
+                !moduleId.split('/').includes('..') &&
+                !bundledAmdModuleIds.has(moduleId);
             }
 
             async function preloadMonacoModule(moduleId) {
@@ -3317,6 +3377,9 @@
             async function startWorkerSource(payload) {
               workerBaseURL = payload.url;
               workerType = payload.type || 'classic';
+              for (const moduleId of payload.bundledAmdModuleIds || []) {
+                if (typeof moduleId === 'string') bundledAmdModuleIds.add(moduleId);
+              }
               installNetworkPatches(payload.url);
 
               const scriptEntries = new Map(payload.scripts.map(item => [item.url, item]));
@@ -3397,8 +3460,24 @@
                   (response ? ' (HTTP ' + response.status + ')' : ''));
               }
               const source = await response.text();
-              const entry = { url, source, dependencies: [] };
+              const entry = { url, source, dependencies: [], bundledAmdModuleIds: [] };
               scripts.set(url, entry);
+
+              // workerMain.js is a self-contained AMD bundle. Its J array lists
+              // module IDs whose implementations are already registered by
+              // that file; they do not have separate .js resources in the
+              // published Monaco distribution (notably simpleWorker).
+              try {
+                const workerPath = new URL(url).pathname;
+                if (type === 'classic' && /\/vs\/base\/worker\/workerMain\.js$/.test(workerPath)) {
+                  const moduleTable = /\bvar J=(\[[^\]]*\])/.exec(source);
+                  if (moduleTable) {
+                    entry.bundledAmdModuleIds = JSON.parse(moduleTable[1])
+                      .filter(moduleId => typeof moduleId === 'string' && /^vs\//.test(moduleId));
+                  }
+                }
+              } catch (_) {}
+
               const dependencies = usefulHelpers.getStaticWorkerDependencies(source, type);
               for (const dependency of dependencies) {
                 let dependencyUrl;
@@ -3571,6 +3650,9 @@
                     }
 
                     const scripts = Array.from(scriptsByUrl.values());
+                    const bundledAmdModuleIds = Array.from(new Set(
+                      scripts.flatMap(entry => entry.bundledAmdModuleIds || [])
+                    ));
                     updateWorkerRecord({
                       status: 'loading',
                       sources: scripts.map(entry => ({
@@ -3584,7 +3666,8 @@
                       kind: 'start',
                       url: sourceUrl,
                       type,
-                      scripts
+                      scripts,
+                      bundledAmdModuleIds
                     });
                     releaseSourceUrl();
                     const pendingMessages = this.__wkPendingInitMessages.splice(0);
