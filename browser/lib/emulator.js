@@ -2840,8 +2840,13 @@
             let initialized = false;
             let bridgePort = null;
             let workerBaseURL = self.location.href;
+            let workerType = 'classic';
+            let replayingWorkerMessage = false;
+            const workerScriptUrls = new Map();
+            const workerScriptBlobUrls = [];
 
             function receiveInitialMessage(event) {
+              if (replayingWorkerMessage) return;
               if (event.data && event.data.__wkEmulatorInit === true && event.ports && event.ports[0]) {
                 bridgePort = event.ports[0];
                 bridgePort.onmessage = receiveBridgeMessage;
@@ -2849,12 +2854,29 @@
                 bridgePort.postMessage({ kind: 'bridge-ready' });
                 return;
               }
-              if (!initialized) queuedMessages.push({
+
+              const message = {
                 data: event.data,
                 origin: event.origin,
                 lastEventId: event.lastEventId,
                 ports: Array.from(event.ports || [])
-              });
+              };
+              if (!initialized) {
+                queuedMessages.push(message);
+                return;
+              }
+
+              if (isMonacoModuleMessage(message)) {
+                event.stopImmediatePropagation();
+                dispatchQueuedWorkerMessage(message).catch(error => {
+                  try {
+                    self.dispatchEvent(new ErrorEvent('error', {
+                      message: error && error.message || String(error),
+                      error
+                    }));
+                  } catch (_) {}
+                });
+              }
             }
 
             const pendingRequests = new Map();
@@ -2922,6 +2944,57 @@
                   reject(error);
                 }
               });
+            }
+
+            function isMonacoModuleMessage(message) {
+              const baseUrl = self.MonacoEnvironment && self.MonacoEnvironment.baseUrl;
+              const moduleId = message && message.data;
+              return workerType === 'classic' &&
+                typeof baseUrl === 'string' &&
+                typeof moduleId === 'string' &&
+                /^vs\/[A-Za-z0-9_./-]+$/.test(moduleId) &&
+                !moduleId.split('/').includes('..');
+            }
+
+            async function preloadMonacoModule(moduleId) {
+              const baseUrl = self.MonacoEnvironment && self.MonacoEnvironment.baseUrl;
+              if (typeof baseUrl !== 'string') {
+                throw new Error('Monaco worker did not expose MonacoEnvironment.baseUrl.');
+              }
+              const modulePath = moduleId.endsWith('.js') ? moduleId : moduleId + '.js';
+              const moduleUrl = new URL(modulePath, baseUrl).href;
+              if (workerScriptUrls.has(moduleUrl)) return;
+
+              const result = await rpc('preload-worker-module', { url: moduleUrl });
+              const scripts = result && Array.isArray(result.scripts) ? result.scripts : [];
+              for (const entry of scripts) {
+                if (!entry || !entry.url || typeof entry.source !== 'string' || workerScriptUrls.has(entry.url)) continue;
+                const blobUrl = URL.createObjectURL(new Blob([entry.source], { type: 'text/javascript' }));
+                workerScriptBlobUrls.push(blobUrl);
+                workerScriptUrls.set(entry.url, blobUrl);
+              }
+              if (!workerScriptUrls.has(moduleUrl)) {
+                throw new Error('Monaco worker module was not loaded through the virtual network: ' + moduleUrl);
+              }
+            }
+
+            function dispatchWorkerMessage(message) {
+              replayingWorkerMessage = true;
+              try {
+                self.dispatchEvent(new MessageEvent('message', {
+                  data: message.data,
+                  origin: message.origin,
+                  lastEventId: message.lastEventId,
+                  ports: message.ports
+                }));
+              } finally {
+                replayingWorkerMessage = false;
+              }
+            }
+
+            async function dispatchQueuedWorkerMessage(message) {
+              if (isMonacoModuleMessage(message)) await preloadMonacoModule(message.data);
+              dispatchWorkerMessage(message);
             }
 
             async function virtualFetch(input, init) {
@@ -3243,6 +3316,7 @@
 
             async function startWorkerSource(payload) {
               workerBaseURL = payload.url;
+              workerType = payload.type || 'classic';
               installNetworkPatches(payload.url);
 
               const scriptEntries = new Map(payload.scripts.map(item => [item.url, item]));
@@ -3270,10 +3344,10 @@
                 await import(rootUrl);
               } else {
                 if (!nativeImportScripts) throw new Error('Classic worker importScripts() is unavailable.');
-                const scriptUrls = new Map();
-                const blobUrls = [];
+                const scriptUrls = workerScriptUrls;
+                const blobUrls = workerScriptBlobUrls;
                 for (const entry of payload.scripts) {
-                  if (entry.url === payload.url) continue;
+                  if (entry.url === payload.url || scriptUrls.has(entry.url)) continue;
                   const blobUrl = URL.createObjectURL(new Blob([entry.source], { type: 'text/javascript' }));
                   blobUrls.push(blobUrl);
                   scriptUrls.set(entry.url, blobUrl);
@@ -3299,14 +3373,8 @@
               }
 
               initialized = true;
-              self.removeEventListener('message', receiveInitialMessage);
               for (const message of queuedMessages.splice(0)) {
-                self.dispatchEvent(new MessageEvent('message', {
-                  data: message.data,
-                  origin: message.origin,
-                  lastEventId: message.lastEventId,
-                  ports: message.ports
-                }));
+                await dispatchQueuedWorkerMessage(message);
               }
               try { bridgePort.postMessage({ kind: 'worker-ready' }); } catch (_) {}
             }
@@ -3609,6 +3677,33 @@
                     port.postMessage({ kind: 'rpc-result', id: message.id, response: { fallback: false } });
                   } catch (_) {
                     port.postMessage({ kind: 'rpc-result', id: message.id, response: { fallback: true } });
+                  }
+                  return;
+                }
+
+                if (message.operation === 'preload-worker-module') {
+                  const controller = new AbortController();
+                  this.__wkWorkerRequests = this.__wkWorkerRequests || new Map();
+                  this.__wkWorkerRequests.set(message.id, controller);
+                  try {
+                    const payload = message.payload || {};
+                    const scripts = await fetchWorkerGraph(payload.url, 'classic', controller.signal);
+                    const sourceMap = new Map((workerRecord.sources || []).map(item => [item.url, item]));
+                    for (const entry of scripts) {
+                      sourceMap.set(entry.url, { url: entry.url, source: entry.source, module: false });
+                    }
+                    updateWorkerRecord({ sources: Array.from(sourceMap.values()) }, 'sources');
+                    port.postMessage({
+                      kind: 'rpc-result',
+                      id: message.id,
+                      response: {
+                        scripts: scripts.map(entry => ({ url: entry.url, source: entry.source }))
+                      }
+                    });
+                  } catch (error) {
+                    port.postMessage({ kind: 'rpc-result', id: message.id, error: error && error.message || String(error) });
+                  } finally {
+                    if (this.__wkWorkerRequests) this.__wkWorkerRequests.delete(message.id);
                   }
                   return;
                 }
