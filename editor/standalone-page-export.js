@@ -414,6 +414,7 @@
       button.dataset.busy = '1';
       button.disabled = true;
       const originalText = button.textContent;
+      button.textContent = 'Compiling Page…';
       try {
         const editor = global.EditorApp;
         if (!editor || typeof editor.getSinglePageSnapshot !== 'function') {
