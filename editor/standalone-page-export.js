@@ -260,27 +260,42 @@
 
   function prepareHtmlForISO88592(value) {
     const source = String(value);
-    const rawTextPattern = /(<(script|style)\b[^>]*>)([\s\S]*?)(<\/\2\s*>)/gi;
+    const openingPattern = /<(script|style)\b[^>]*>/ig;
     let output = '';
-    let lastIndex = 0;
-    let match;
-    while ((match = rawTextPattern.exec(source))) {
-      output += escapeDocumentCharacters(source.slice(lastIndex, match.index), 'html');
-      output += match[1];
+    let cursor = 0;
 
-      // The ZIP chunks already contain an ISO-8859-2-safe reversible
-      // representation. Never rewrite their characters during document
-      // charset preparation, including C1 controls and escape markers.
-      const isArchiveChunk = match[2].toLowerCase() === 'script' &&
-        /\bclass\s*=\s*["'][^"']*\bwk-standalone-archive-chunk\b[^"']*["']/i.test(match[1]);
-      output += isArchiveChunk
-        ? match[3]
-        : escapeDocumentCharacters(match[3], match[2].toLowerCase());
+    while (cursor < source.length) {
+      openingPattern.lastIndex = cursor;
+      const opening = openingPattern.exec(source);
+      if (!opening) {
+        output += escapeDocumentCharacters(source.slice(cursor), 'html');
+        break;
+      }
 
-      output += match[4];
-      lastIndex = rawTextPattern.lastIndex;
+      output += escapeDocumentCharacters(source.slice(cursor, opening.index), 'html');
+
+      const tagName = opening[1].toLowerCase();
+      const closingPattern = new RegExp('</' + tagName + '\\s*>', 'ig');
+      closingPattern.lastIndex = openingPattern.lastIndex;
+      const closing = closingPattern.exec(source);
+      if (!closing) {
+        throw new Error('The standalone HTML contains an unterminated ' + tagName + ' element.');
+      }
+
+      const rawText = source.slice(openingPattern.lastIndex, closing.index);
+      const isArchiveChunk = tagName === 'script' &&
+        /\bclass\s*=\s*["'][^"']*\bwk-standalone-archive-chunk\b[^"']*["']/i.test(opening[0]);
+
+      // Script/style contents are raw text: opening tags inside them are
+      // not nested elements. In particular, never scan inside ZIP chunks,
+      // whose contents can contain arbitrary "<script" sequences.
+      output += opening[0];
+      output += isArchiveChunk ? rawText : escapeDocumentCharacters(rawText, tagName);
+      output += closing[0];
+      cursor = closingPattern.lastIndex;
     }
-    output += escapeDocumentCharacters(source.slice(lastIndex), 'html');
+
+    if (!source.length) return '';
     return output;
   }
 
