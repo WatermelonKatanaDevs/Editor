@@ -201,6 +201,7 @@ window.__deploymentNetworkReady = (async function() {
       ? (error.message || String(error)) + '\\n\\n' + error.stack
       : (error?.message || String(error));
     status.className = 'error';
+    if (!status.isConnected) document.body.appendChild(status);
   }
 
   // Surface failures that happen before main() is reached, especially
@@ -431,11 +432,17 @@ window.__deploymentNetworkReady = (async function() {
       try { target.apply(console, Array.isArray(args) ? args : [args]); } catch (_) {}
     }
 
+    let deploymentStartupComplete = false;
     function forwardError(error, location) {
       const message = error?.message || String(error);
       const stack = error?.error?.stack || error?.stack || '';
       const suffix = location ? ` (${location})` : '';
       try { console.error(`Uncaught Error${suffix}: ${message}`, stack); } catch (_) {}
+      if (!deploymentStartupComplete) {
+        const startupError = new Error(`The project failed while its initial page was starting: ${message}${suffix}`);
+        if (stack) startupError.stack = stack;
+        showError(startupError);
+      }
     }
 
     if (type === 'static') {
@@ -649,6 +656,7 @@ window.__deploymentNetworkReady = (async function() {
     }
 
     function observeDeploymentMetadata() {
+      deploymentStartupComplete = true;
       let targetDocument;
       try { targetDocument = iframe.contentDocument; } catch (_) { return; }
       if (!targetDocument?.documentElement) return;
