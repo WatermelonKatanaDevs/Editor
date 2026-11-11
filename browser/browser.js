@@ -1868,6 +1868,25 @@ async function navigateToInTab(tab, rawUrl, isNewNavigation = true, reloadCurren
     absoluteUrl = absoluteUrl.includes('.') && !absoluteUrl.includes(' ') ? 'https://' + absoluteUrl : appSettings.searchEngine + encodeURIComponent(absoluteUrl);
   }
 
+  // Static filesystem endpoints treat their configured mount path as a
+  // directory entry. Canonicalize that exact entry to a slash-terminated URL
+  // before it becomes the document base URL, so relative resources resolve
+  // inside the mount instead of against its parent directory.
+  try {
+    const requestedUrl = new URL(absoluteUrl);
+    const matchingDirectoryEndpoint = browserNetwork.endpoints.find(endpoint =>
+      endpoint instanceof StaticEndpoint &&
+      endpoint.enabled !== false &&
+      endpoint.domain === requestedUrl.origin &&
+      endpoint.path !== '/' &&
+      requestedUrl.pathname === endpoint.path
+    );
+    if (matchingDirectoryEndpoint) {
+      requestedUrl.pathname += '/';
+      absoluteUrl = requestedUrl.href;
+    }
+  } catch (_) {}
+
   tab.url = absoluteUrl;
 
   const isHistoryStateChange = isNewNavigation && !reloadCurrentTab && !isReload;
