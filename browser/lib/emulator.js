@@ -405,10 +405,36 @@
   function getStaticWorkerDependencies(source, type) {
     const ast = parseCode(source, type === 'module' ? 'module' : 'script');
     const dependencies = [];
+
+    // importScripts(new URL('./worker.js', self.location.href).href) is a
+    // common worker bootstrap pattern (including Monaco). It is still a
+    // statically-known dependency even though the CallExpression argument
+    // is not itself a string literal.
+    const getStaticString = node => {
+      if (!node) return null;
+      if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+      if (node.type === 'TemplateLiteral' && node.expressions.length === 0) {
+        return node.quasis[0]?.value?.cooked ?? node.quasis[0]?.value?.raw ?? null;
+      }
+      if (
+        node.type === 'MemberExpression' &&
+        !node.computed &&
+        node.property?.type === 'Identifier' &&
+        node.property.name === 'href' &&
+        node.object?.type === 'NewExpression' &&
+        node.object.callee?.type === 'Identifier' &&
+        node.object.callee.name === 'URL'
+      ) {
+        return getStaticString(node.object.arguments?.[0]);
+      }
+      return null;
+    };
+
     const add = node => {
-      if (node && node.type === 'Literal' && typeof node.value === 'string') {
+      const specifier = getStaticString(node);
+      if (typeof specifier === 'string' && specifier) {
         dependencies.push({
-          specifier: node.value,
+          specifier,
           start: node.start,
           end: node.end
         });
@@ -3139,6 +3165,42 @@
 
             function installNetworkPatches(baseURL) {
               workerBaseURL = baseURL;
+
+              // The native Worker is physically started from the bootstrap
+              // Blob, but its page-visible location must remain the URL
+              // originally passed to new Worker(). This is required by worker
+              // entry scripts that resolve dependencies from self.location.
+              try {
+                const parsedLocation = new URL(baseURL);
+                const virtualLocation = {
+                  href: parsedLocation.href,
+                  origin: parsedLocation.origin,
+                  protocol: parsedLocation.protocol,
+                  host: parsedLocation.host,
+                  hostname: parsedLocation.hostname,
+                  port: parsedLocation.port,
+                  pathname: parsedLocation.pathname,
+                  search: parsedLocation.search,
+                  hash: parsedLocation.hash,
+                  toString() { return parsedLocation.href; },
+                  valueOf() { return parsedLocation.href; },
+                  [Symbol.toPrimitive]() { return parsedLocation.href; }
+                };
+                Object.freeze(virtualLocation);
+                Object.defineProperty(self, 'location', {
+                  configurable: true,
+                  enumerable: true,
+                  value: virtualLocation
+                });
+              } catch (error) {
+                try {
+                  bridgePort.postMessage({
+                    kind: 'bootstrap-warning',
+                    message: 'Could not expose the original Worker location: ' + (error && error.message || error)
+                  });
+                } catch (_) {}
+              }
+
               const NativeRequest = self.Request;
               class VirtualRequest extends NativeRequest {
                 constructor(input, init) {
@@ -3385,6 +3447,13 @@
                     releaseSourceUrl();
                     fail(error);
                   }
+                  return;
+                }
+
+                if (message.kind === 'bootstrap-warning') {
+                  try {
+                    pageEmulator.sendEvent('console', 'warn', ['[Worker Emulator] ' + String(message.message || 'Worker bootstrap warning')]);
+                  } catch (_) {}
                   return;
                 }
 
@@ -4986,6 +5055,7 @@
         var __requireModule = __importModule;
 
         __codeString = window.__usefulHelpers.editCode(__codeString);
+        const executionThis = __thisArg == null || __thisArg === window ? __windowProxy : __thisArg;
         return __rawReflectApply(function(window, self, globalThis, parent, top, location, document) {
           with (__globalLexicalScope) {
             return eval(`
@@ -4993,7 +5063,7 @@
             ${__codeString.code}
             \n//# sourceURL=`+__sourceURL);
           }
-        }, __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
+        }, executionThis, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
       };
 
       window.__executeCodeAsync = function(__codeString, __sourceURL, __thisArg, __event) {
@@ -5002,6 +5072,7 @@
         
         __codeString = window.__usefulHelpers.editCode(__codeString);
         __codeString = window.__usefulHelpers.editCodeAsync(__codeString);
+        const executionThis = __thisArg == null || __thisArg === window ? __windowProxy : __thisArg;
         return __rawReflectApply(async function(window, self, globalThis, parent, top, location, document) {
           let __execResult;
           with (__globalLexicalScope) {
@@ -5013,7 +5084,7 @@
             \n//# sourceURL=`+__sourceURL);
           }
           return { value: __execResult };
-        }, __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
+        }, executionThis, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
       };
 
       window.__executeCodeModule = function(__codeString, __sourceURL, __thisArg, __event, __scriptFileName) {
@@ -5028,6 +5099,7 @@
 
         __codeString = window.__usefulHelpers.editCode(__codeString);
         
+        const executionThis = __thisArg == null || __thisArg === window ? __windowProxy : __thisArg;
         return __rawReflectApply(async function(window, self, globalThis, parent, top, location, document) {
           let __execResult;
           with (__globalLexicalScope) {
@@ -5037,7 +5109,7 @@
             \n//# sourceURL=`+__sourceURL);
           }
           return __currentModuleExports;
-        }, __thisArg, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
+        }, executionThis, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
 
 
       };
