@@ -233,7 +233,7 @@
       if (byte === 0x3C && index + 7 < bytes.length &&
           bytes[index + 1] === 0x2F &&
           String.fromCharCode(...bytes.subarray(index + 2, index + 8)).toLowerCase() === 'script') {
-        output += '<\\x2Fscript';
+        output += '<\\x2F' + String.fromCharCode(...bytes.subarray(index + 2, index + 8));
         index += 7;
         continue;
       }
