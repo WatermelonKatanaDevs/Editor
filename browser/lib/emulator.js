@@ -3264,7 +3264,6 @@
               UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4
             });
 
-            const NativeWebSocket = self.WebSocket;
             let nextSocketId = 1;
             class VirtualWebSocket extends EventTarget {
               constructor(url, protocols) {
@@ -3276,23 +3275,28 @@
                 this.binaryType = 'blob';
                 this.bufferedAmount = 0;
                 this._socketId = nextSocketId++;
-                this._native = null;
                 workerSockets.set(this._socketId, this);
                 rpc('ws-open', {
                   socketId: this._socketId,
                   url: this.url,
-                  protocols
+                  protocols,
+                  binaryType: this.binaryType
                 }).then(result => {
-                  if (result && result.fallback) {
-                    this._native = protocols === undefined
-                      ? new NativeWebSocket(this.url)
-                      : new NativeWebSocket(this.url, protocols);
-                    this._native.binaryType = this.binaryType;
-                    for (const type of ['open', 'message', 'error', 'close']) {
-                      this._native.addEventListener(type, event => this._receive(type, event.data, event));
-                    }
+                  if (!result || result.fallback) {
+                    this._fail(new Error('The virtual network could not create a WebSocket for ' + this.url));
                   }
-                }).catch(() => this._receive('error'));
+                }).catch(error => this._fail(error));
+              }
+              _fail(error) {
+                if (this.readyState === VirtualWebSocket.CLOSED) return;
+                this.readyState = VirtualWebSocket.CLOSED;
+                this._emit('error', error instanceof Event ? error : new Event('error'));
+                this._emit('close', new CloseEvent('close', {
+                  code: 1006,
+                  reason: error && error.message ? String(error.message).slice(0, 123) : 'Virtual WebSocket connection failed',
+                  wasClean: false
+                }));
+                workerSockets.delete(this._socketId);
               }
               _emit(type, event) {
                 const dispatched = event || new Event(type);
@@ -3326,14 +3330,12 @@
               }
               send(data) {
                 if (this.readyState !== VirtualWebSocket.OPEN) throw new DOMException('WebSocket is not open.', 'InvalidStateError');
-                if (this._native) this._native.send(data);
-                else bridgePort.postMessage({ kind: 'ws-send', socketId: this._socketId, data });
+                bridgePort.postMessage({ kind: 'ws-send', socketId: this._socketId, data });
               }
               close(code, reason) {
                 if (this.readyState === VirtualWebSocket.CLOSED || this.readyState === VirtualWebSocket.CLOSING) return;
                 this.readyState = VirtualWebSocket.CLOSING;
-                if (this._native) this._native.close(code, reason);
-                else bridgePort.postMessage({ kind: 'ws-close', socketId: this._socketId, code, reason });
+                bridgePort.postMessage({ kind: 'ws-close', socketId: this._socketId, code, reason });
               }
             }
             Object.assign(VirtualWebSocket, {
@@ -3755,8 +3757,10 @@
                       message.payload.protocols
                     );
                     if (!socket || typeof socket.send !== 'function' || typeof socket.close !== 'function') {
-                      port.postMessage({ kind: 'rpc-result', id: message.id, response: { fallback: true } });
-                      return;
+                      throw new Error('The virtual network did not return a WebSocket for ' + String(message.payload.url || 'unknown URL'));
+                    }
+                    if (message.payload.binaryType && 'binaryType' in socket) {
+                      try { socket.binaryType = message.payload.binaryType; } catch (_) {}
                     }
                     sockets.set(message.payload.socketId, socket);
                     const forward = type => event => {
@@ -3780,8 +3784,12 @@
                       for (const type of ['open', 'message', 'error', 'close']) socket['on' + type] = forward(type);
                     }
                     port.postMessage({ kind: 'rpc-result', id: message.id, response: { fallback: false } });
-                  } catch (_) {
-                    port.postMessage({ kind: 'rpc-result', id: message.id, response: { fallback: true } });
+                  } catch (error) {
+                    port.postMessage({
+                      kind: 'rpc-result',
+                      id: message.id,
+                      error: error && error.message || String(error)
+                    });
                   }
                   return;
                 }
