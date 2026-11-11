@@ -5458,6 +5458,11 @@
         window.__hostOrigin = window.top.location.origin;
       })();
 
+      // The source transformer injects this identifier into rewritten calls.
+      // Keep a lexical binding in the runtime interceptor's closure instead of
+      // relying on a global-object property becoming an identifier binding.
+      const __windowProxy = window.__windowProxy;
+
       window.__executeCode = function(__codeString, __sourceURL, __thisArg, __event) {
         var { __importModule } = __createModuleControls(__getScriptFileName());
         var __requireModule = __importModule;
