@@ -4049,9 +4049,6 @@
                 this._flushQueue();
               };
               this._ws.onopen = handleOpen;
-              // Network.socket() verifies the handshake before returning. In
-              // that case the native open event has already fired.
-              if (this._ws.readyState === OriginalWebSocket.OPEN) handleOpen(new Event('open'));
               this._ws.onmessage = (e) => {
                 this.dispatchEvent(new MessageEvent('message', { data: e.data }));
                 if (this.onmessage) this.onmessage(e);
@@ -4067,6 +4064,10 @@
                 this.dispatchEvent(new Event('error'));
                 if (this.onerror) this.onerror(e);
               };
+              // Network.socket() verifies the handshake before returning. In
+              // that case the native open event has already fired. Dispatch it
+              // only after every other event handler has been installed.
+              if (this._ws.readyState === OriginalWebSocket.OPEN) handleOpen(new Event('open'));
             }
 
             _setupMock(mockBackend) {
