@@ -280,7 +280,7 @@
     return String(match ? (match[1] ?? match[2] ?? match[3] ?? '') : '').trim().toLowerCase();
   }
 
-  function minifyHTML(source, acorn) {
+  function minifyHTML(source, acorn, options = {}) {
     let output = '';
     let index = 0;
 
@@ -292,7 +292,7 @@
           break;
         }
         const comment = source.slice(index, end + 3);
-        if (/^<!--\s*(?:\[if\b|!|#)/i.test(comment)) output += comment;
+        if (options.scriptsOnly || /^<!--\s*(?:\[if\b|!|#)/i.test(comment)) output += comment;
         index = end + 3;
         continue;
       }
@@ -313,7 +313,7 @@
       }
 
       const rawTag = source.slice(index, tagEnd);
-      const tag = compactHTMLTag(rawTag);
+      const tag = options.scriptsOnly ? rawTag : compactHTMLTag(rawTag);
       output += tag;
       index = tagEnd;
 
@@ -333,7 +333,7 @@
 
       const content = source.slice(index, closeMatch.index);
       let optimized = content;
-      if (tagName === 'style') {
+      if (tagName === 'style' && !options.scriptsOnly) {
         optimized = minifyCSS(content);
       } else if (tagName === 'script') {
         const type = getScriptType(tag);
@@ -351,13 +351,17 @@
         output += source.slice(closeMatch.index);
         break;
       }
-      output += compactHTMLTag(source.slice(closeMatch.index, closeEnd));
+      output += options.scriptsOnly ? source.slice(closeMatch.index, closeEnd) : compactHTMLTag(source.slice(closeMatch.index, closeEnd));
       index = closeEnd;
     }
 
     return output;
   }
 
+  async function minifyInlineScripts(source, options = {}) {
+    const acorn = await loadAcorn(options.editorUrl);
+    return minifyHTML(String(source), acorn, {scriptsOnly:true});
+  }
   function utf8Size(value) {
     return new TextEncoder().encode(value).byteLength;
   }
@@ -438,6 +442,7 @@
   global.StandaloneMinifier = Object.freeze({
     isEnabled:minificationEnabled,
     minifyJavaScriptSource,
+    minifyInlineScripts,
     minifyArchive
   });
 })(window);
