@@ -648,6 +648,23 @@ window.__deploymentNetworkReady = (async function() {
     async function loadEmulatedPage(target, options = {}) {
       const targetPage = options.page || page;
       const resolved = new URL(target, getDeploymentPageBaseUrl(targetPage));
+
+      if (targetPage !== deploymentRootPage && resolved.href === 'about:blank') {
+        const inheritedOrigin = targetPage.parent?.location?.origin || targetPage.location?.origin || domain;
+        targetPage.setLocation('about:blank', inheritedOrigin);
+        await targetPage.setDocument('<!doctype html><html><head></head><body></body></html>', true);
+        targetPage.history = Array.isArray(targetPage.history) ? targetPage.history : [];
+        if (options.replaceHistory && targetPage.history.length) {
+          if (targetPage.historyIndex < 0) targetPage.historyIndex = targetPage.history.length - 1;
+          targetPage.history[targetPage.historyIndex] = 'about:blank';
+        } else if (options.recordHistory !== false) {
+          targetPage.history = targetPage.history.slice(0, targetPage.historyIndex + 1);
+          targetPage.history.push('about:blank');
+          targetPage.historyIndex = targetPage.history.length - 1;
+        }
+        return true;
+      }
+
       const supportedProtocol = ['http:', 'https:', 'data:', 'blob:'].includes(resolved.protocol);
 
       // Project documents are always emulated. Do not assign arbitrary
@@ -981,6 +998,9 @@ window.__deploymentNetworkReady = (async function() {
 
         if (targetUrl.href === 'about:blank') {
           child.setLocation('about:blank', currentPage.location?.origin || domain);
+          child.history = ['about:blank'];
+          child.historyIndex = 0;
+          await child.setDocument('<!doctype html><html><head></head><body></body></html>', true);
           return;
         }
 
@@ -1105,7 +1125,7 @@ window.__deploymentNetworkReady = (async function() {
           }
         } catch (_) {}
 
-        embed.setAttribute('src', targetUrl.href);
+        console.warn('Could not convert emulated embed response to a data URI:', targetUrl.href);
       });
 
       currentPage.interceptEvent('navigate', async function(url, ...args) {
