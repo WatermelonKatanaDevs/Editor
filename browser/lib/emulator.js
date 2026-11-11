@@ -3139,12 +3139,6 @@
 
             function installNetworkPatches(baseURL) {
               workerBaseURL = baseURL;
-              Object.defineProperty(self, '__wkWorkerURL', {
-                configurable: false,
-                enumerable: false,
-                writable: false,
-                value: baseURL
-              });
               const NativeRequest = self.Request;
               class VirtualRequest extends NativeRequest {
                 constructor(input, init) {
@@ -3382,7 +3376,10 @@
                     releaseSourceUrl();
                     const pendingMessages = this.__wkPendingInitMessages.splice(0);
                     for (const pending of pendingMessages) {
-                      NativeWorker.prototype.postMessage.call(this, pending);
+                      const transfers = (pending && pending.config && Array.isArray(pending.config.files)
+                        ? pending.config.files
+                        : []).map(file => file && file.data).filter(value => value instanceof ArrayBuffer);
+                      NativeWorker.prototype.postMessage.call(this, pending, transfers);
                     }
                   } catch (error) {
                     releaseSourceUrl();
