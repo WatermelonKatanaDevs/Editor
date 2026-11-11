@@ -2792,7 +2792,6 @@
 
             function receiveInitialMessage(event) {
               if (event.data && event.data.__wkEmulatorInit === true && event.ports && event.ports[0]) {
-                self.removeEventListener('message', receiveInitialMessage);
                 bridgePort = event.ports[0];
                 bridgePort.onmessage = receiveBridgeMessage;
                 if (bridgePort.start) bridgePort.start();
@@ -2838,7 +2837,7 @@
               }
               if (message.kind === 'ws-event') {
                 const socket = workerSockets.get(message.socketId);
-                if (socket) socket._receive(message.event, message.data);
+                if (socket) socket._receive(message.event, message.data, message);
               }
             }
 
@@ -3006,8 +3005,9 @@
                   this._emit('load');
                   this._emit('loadend');
                 }).catch(error => {
+                  if (this._timedOut || this._aborted) return;
                   if (this._controller && this._controller.signal.aborted) {
-                    if (!this._aborted && !this._timedOut) this._emit('abort');
+                    this._emit('abort');
                   } else {
                     this._emit('error');
                   }
@@ -3305,10 +3305,10 @@
           const VirtualWorker = class extends NativeWorker {
             constructor(scriptURL, options = {}) {
               const sourceUrl = new URL(String(scriptURL), CURRENT_PAGE_URL).href;
-              const releaseSourceUrl = retainWorkerBlobUrl(sourceUrl);
               const bootstrapBlob = new Blob([bootstrapSource], { type: 'text/javascript' });
               const bootstrapUrl = URL.createObjectURL(bootstrapBlob);
               super(bootstrapUrl, options || {});
+              const releaseSourceUrl = retainWorkerBlobUrl(sourceUrl);
 
               this.__wkPendingInitMessages = [];
               this.__wkStartSent = false;
@@ -3493,6 +3493,7 @@
                 return originalTerminate();
               };
               this.addEventListener('error', () => {
+                releaseSourceUrl();
                 abortController.abort();
                 revokeBootstrap();
               }, { once: true });
