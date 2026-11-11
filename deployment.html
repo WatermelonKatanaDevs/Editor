@@ -81,6 +81,23 @@ window.__deploymentNetworkReady = (async function() {
         });
   window.WorkerConfig = workers;
   const network = new Network();
+  const wkHostOriginValue = new URLSearchParams(location.search).get('wkHostOrigin');
+  if (wkHostOriginValue && network._requestObject) {
+    let wkHostOrigin = '';
+    try { wkHostOrigin = new URL(wkHostOriginValue).origin; } catch (_) {}
+    if (wkHostOrigin) {
+      const originalRequestObject = network._requestObject;
+      network._requestObject = function(request, ...args) {
+        if (!request?.url?.startsWith(wkHostOrigin)) {
+          return originalRequestObject.call(this, request, ...args);
+        }
+        const headers = new request.headers.constructor(request.headers);
+        if (!headers.has('X-From-Emulator')) headers.append('X-From-Emulator', '1');
+        const modifiedRequest = new request.constructor(request, {headers});
+        return originalRequestObject.call(this, modifiedRequest, ...args);
+      };
+    }
+  }
   const native = new NetworkEndpoint(true, true);
   native.__networkRole = 'native';
 
