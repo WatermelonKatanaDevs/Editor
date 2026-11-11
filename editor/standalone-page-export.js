@@ -601,12 +601,8 @@
     if (!html.includes(loaderPlaceholder)) {
       throw new Error('The deployment asset-loader placeholder was lost during HTML minification.');
     }
-    // Use a callback: dependency source legitimately contains "    html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>' + safeTitle + '</title>');
-    if (!html.includes(loaderPlaceholder)) {
-      throw new Error('The deployment asset-loader placeholder was lost during HTML minification.');
-    }
-    html = html.replace(loaderPlaceholder, payloadParts.join('') + loaderTag);", which
-    // String.replace would otherwise expand to the matched placeholder text.
+    // Use a callback because embedded dependencies contain literal "$&".
+    // String.replace would otherwise expand it to the matched placeholder.
     html = html.replace(loaderPlaceholder, () => payloadParts.join('') + loaderTag);
     const charsetPattern = /<meta\s+charset=["']?[^"'>\s]+["']?\s*>/i;
     if (!charsetPattern.test(html)) {
