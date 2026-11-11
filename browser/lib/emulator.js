@@ -402,6 +402,37 @@
     return acorn.parse(code, { ...acornParseOptions, sourceType });
   }
 
+  function getStaticWorkerDependencies(source, type) {
+    const ast = parseCode(source, type === 'module' ? 'module' : 'script');
+    const dependencies = [];
+    const add = node => {
+      if (node && node.type === 'Literal' && typeof node.value === 'string') {
+        dependencies.push({
+          specifier: node.value,
+          start: node.start,
+          end: node.end
+        });
+      }
+    };
+    if (type === 'module') {
+      acorn.walk.simple(ast, {
+        ImportDeclaration(node) { add(node.source); },
+        ExportNamedDeclaration(node) { if (node.source) add(node.source); },
+        ExportAllDeclaration(node) { add(node.source); },
+        ImportExpression(node) { add(node.source); }
+      });
+    } else {
+      acorn.walk.simple(ast, {
+        CallExpression(node) {
+          if (node.callee && node.callee.type === 'Identifier' && node.callee.name === 'importScripts') {
+            node.arguments.forEach(add);
+          }
+        }
+      });
+    }
+    return dependencies;
+  }
+
   function extractFunctionBody(funct) {
     const code = '('+funct.toString()+')();';
 
@@ -1251,6 +1282,7 @@
     ensureSandBoxSameOrigin,
     preprocessHtml,
     createRuntimeInterceptor,
+    getStaticWorkerDependencies,
   };
 
   __pageRegistry.__usefulHelpers = usefulHelpers;
@@ -2908,6 +2940,8 @@
                 this._controller = null;
                 this._timeoutId = null;
                 this._sent = false;
+                this._aborted = false;
+                this._timedOut = false;
               }
               _emit(type, event) {
                 const dispatched = event || new Event(type);
@@ -2935,6 +2969,8 @@
               send(body = null) {
                 if (this.readyState !== 1 || this._sent) throw new DOMException('XMLHttpRequest is not in the OPENED state.', 'InvalidStateError');
                 this._sent = true;
+                this._aborted = false;
+                this._timedOut = false;
                 this._controller = new AbortController();
                 const headers = { ...this._requestHeaders };
                 const options = {
@@ -2946,6 +2982,7 @@
                 if (!['GET', 'HEAD'].includes(this._method) && body !== null) options.body = body;
                 if (this.timeout > 0) {
                   this._timeoutId = setTimeout(() => {
+                    this._timedOut = true;
                     if (this._controller) this._controller.abort();
                     this._emit('timeout');
                     this._emit('loadend');
@@ -2970,7 +3007,7 @@
                   this._emit('loadend');
                 }).catch(error => {
                   if (this._controller && this._controller.signal.aborted) {
-                    this._emit('abort');
+                    if (!this._aborted && !this._timedOut) this._emit('abort');
                   } else {
                     this._emit('error');
                   }
@@ -2981,6 +3018,7 @@
                 });
               }
               abort() {
+                this._aborted = true;
                 if (this._controller) this._controller.abort();
                 this.readyState = 0;
                 this._sent = false;
@@ -3070,9 +3108,9 @@
                 } else if (type === 'close') {
                   this.readyState = VirtualWebSocket.CLOSED;
                   const event = new CloseEvent('close', {
-                    code: sourceEvent && sourceEvent.code || 1000,
-                    reason: sourceEvent && sourceEvent.reason || '',
-                    wasClean: sourceEvent ? !!sourceEvent.wasClean : true
+                    code: sourceEvent && sourceEvent.code || data && data.code || 1000,
+                    reason: sourceEvent && sourceEvent.reason || data && data.reason || '',
+                    wasClean: sourceEvent ? !!sourceEvent.wasClean : data ? !!data.wasClean : true
                   });
                   this._emit('close', event);
                   workerSockets.delete(this._socketId);
@@ -3186,41 +3224,6 @@
 
           const bootstrapSource = '(' + workerBootstrap.toString() + ')();';
 
-          function getStaticWorkerDependencies(source, type) {
-            const ast = acorn.parse(source, {
-              ecmaVersion: 'latest',
-              sourceType: type === 'module' ? 'module' : 'script',
-              allowAwaitOutsideFunction: true
-            });
-            const dependencies = [];
-            const add = node => {
-              if (node && node.type === 'Literal' && typeof node.value === 'string') {
-                dependencies.push({
-                  specifier: node.value,
-                  start: node.start,
-                  end: node.end
-                });
-              }
-            };
-            if (type === 'module') {
-              acorn.walk.simple(ast, {
-                ImportDeclaration(node) { add(node.source); },
-                ExportNamedDeclaration(node) { if (node.source) add(node.source); },
-                ExportAllDeclaration(node) { add(node.source); },
-                ImportExpression(node) { add(node.source); }
-              });
-            } else {
-              acorn.walk.simple(ast, {
-                CallExpression(node) {
-                  if (node.callee && node.callee.type === 'Identifier' && node.callee.name === 'importScripts') {
-                    node.arguments.forEach(add);
-                  }
-                }
-              });
-            }
-            return dependencies;
-          }
-
           async function fetchWorkerGraph(rootUrl, type, signal) {
             const scripts = new Map();
             async function visit(url) {
@@ -3234,7 +3237,7 @@
               const source = await response.text();
               const entry = { url, source, dependencies: [] };
               scripts.set(url, entry);
-              const dependencies = getStaticWorkerDependencies(source, type);
+              const dependencies = usefulHelpers.getStaticWorkerDependencies(source, type);
               for (const dependency of dependencies) {
                 let dependencyUrl;
                 try { dependencyUrl = new URL(dependency.specifier, url).href; }
