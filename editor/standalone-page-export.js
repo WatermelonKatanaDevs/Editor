@@ -300,11 +300,8 @@
       'project run configuration'
     );
 
-    const loaderMarker = 'window.__deploymentAssetsReady = (async function() {';
-    const loaderStart = html.indexOf(loaderMarker);
-    const scriptStart = html.lastIndexOf('<script', loaderStart);
-    const scriptEnd = html.indexOf('</script>', loaderStart);
-    if (loaderStart < 0 || scriptStart < 0 || scriptEnd < 0) {
+    const loaderPattern = /<script>\\s*window\\.__deploymentAssetsReady = \\(async function\\(\\) \\{[\\s\\S]*?<\\/script>/;
+    if (!loaderPattern.test(html)) {
       throw new Error('Unable to replace the deployment page asset loader.');
     }
 
@@ -316,23 +313,24 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
     const payloadParts = [
-      '<script type="application/octet-stream" id="' + DATA_ID + '">' + textToBase64(metadataJson) + '</script>\n'
+      '<script type="application/octet-stream" id="' + DATA_ID + '">' + textToBase64(metadataJson) + '</script>\\n'
     ];
     for (const asset of assets) {
-      payloadParts.push('<script type="application/octet-stream" class="wk-standalone-asset" data-path="' + escapeAttribute(asset.path) + '" data-url="' + escapeAttribute(asset.url) + '">' + asset.base64 + '</script>\n');
+      payloadParts.push('<script type="application/octet-stream" class="wk-standalone-asset" data-path="' + escapeAttribute(asset.path) + '" data-url="' + escapeAttribute(asset.url) + '">' + asset.base64 + '</script>\\n');
     }
     for (const chunk of archiveChunks) {
-      payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\n');
+      payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\\n');
     }
-    const loaderTag = '<script>\n' + createAssetLoader() + '\n</script>';
+    const loaderTag = '<script>\\n' + createAssetLoader() + '\\n</script>';
 
     const safeTitle = String(bundle.projectName || 'Workspace')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
-    html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>' + safeTitle + '</title>');
-    return new Blob([html.slice(0, scriptStart), ...payloadParts, loaderTag, html.slice(scriptEnd + 9)], {type:'text/html;charset=utf-8'});
+    html = html.replace(/<title>[\\s\\S]*?<\\/title>/i, '<title>' + safeTitle + '</title>');
+    html = html.replace(loaderPattern, payloadParts.join('') + loaderTag);
+    return new Blob([html], {type:'text/html;charset=utf-8'});
   }
 
   async function compile(snapshot, options = {}) {
