@@ -3595,6 +3595,7 @@
               const port = channel.port1;
               const abortController = new AbortController();
               const sockets = new Map();
+              const pendingSocketRequests = new Map();
               let nextSocketId = 1;
               const workerRecord = {
                 id: pageEmulator.nextWorkerId = (pageEmulator.nextWorkerId || 0) + 1,
@@ -3744,27 +3745,53 @@
                   if (socket) {
                     try { socket.close(message.code, message.reason); } catch (_) {}
                     sockets.delete(message.socketId);
+                  } else {
+                    const pending = pendingSocketRequests.get(message.socketId);
+                    if (pending) {
+                      pending.closeMessage = message;
+                      pending.controller.abort();
+                    }
                   }
                   return;
                 }
 
                 if (message.kind !== 'rpc') return;
                 if (message.operation === 'ws-open') {
+                  const socketId = message.payload.socketId;
+                  const pending = { controller: new AbortController(), closeMessage: null };
+                  pendingSocketRequests.set(socketId, pending);
                   try {
                     const socket = await pageEmulator.network.socket(
                       message.payload.url,
                       BASE_ORIGIN,
-                      message.payload.protocols
+                      message.payload.protocols,
+                      null,
+                      {
+                        signal: pending.controller.signal,
+                        binaryType: message.payload.binaryType
+                      }
                     );
+                    if (pending.closeMessage) {
+                      port.postMessage({ kind: 'rpc-result', id: message.id, response: { fallback: false } });
+                      port.postMessage({
+                        kind: 'ws-event',
+                        socketId,
+                        event: 'close',
+                        code: pending.closeMessage.code || 1000,
+                        reason: pending.closeMessage.reason || '',
+                        wasClean: true
+                      });
+                      return;
+                    }
                     if (!socket || typeof socket.send !== 'function' || typeof socket.close !== 'function') {
                       throw new Error('The virtual network did not return a WebSocket for ' + String(message.payload.url || 'unknown URL'));
                     }
                     if (message.payload.binaryType && 'binaryType' in socket) {
                       try { socket.binaryType = message.payload.binaryType; } catch (_) {}
                     }
-                    sockets.set(message.payload.socketId, socket);
+                    sockets.set(socketId, socket);
                     const forward = type => event => {
-                      const outgoing = { kind: 'ws-event', socketId: message.payload.socketId, event: type };
+                      const outgoing = { kind: 'ws-event', socketId, event: type };
                       if (type === 'message') outgoing.data = event.data;
                       if (type === 'open') {
                         outgoing.protocol = socket.protocol || '';
@@ -3776,20 +3803,37 @@
                         outgoing.wasClean = event.wasClean;
                       }
                       try { port.postMessage(outgoing); } catch (_) {}
-                      if (type === 'close') sockets.delete(message.payload.socketId);
+                      if (type === 'close') sockets.delete(socketId);
                     };
                     if (typeof socket.addEventListener === 'function') {
                       for (const type of ['open', 'message', 'error', 'close']) socket.addEventListener(type, forward(type));
                     } else {
                       for (const type of ['open', 'message', 'error', 'close']) socket['on' + type] = forward(type);
                     }
+                    // Network.socket() resolves only after the handshake succeeds,
+                    // so replay the already-fired open event to the worker bridge.
+                    if (socket.readyState === 1) forward('open')({ type: 'open' });
                     port.postMessage({ kind: 'rpc-result', id: message.id, response: { fallback: false } });
                   } catch (error) {
-                    port.postMessage({
-                      kind: 'rpc-result',
-                      id: message.id,
-                      error: error && error.message || String(error)
-                    });
+                    if (pending.closeMessage) {
+                      port.postMessage({ kind: 'rpc-result', id: message.id, response: { fallback: false } });
+                      port.postMessage({
+                        kind: 'ws-event',
+                        socketId,
+                        event: 'close',
+                        code: pending.closeMessage.code || 1000,
+                        reason: pending.closeMessage.reason || '',
+                        wasClean: true
+                      });
+                    } else {
+                      port.postMessage({
+                        kind: 'rpc-result',
+                        id: message.id,
+                        error: error && error.message || String(error)
+                      });
+                    }
+                  } finally {
+                    pendingSocketRequests.delete(socketId);
                   }
                   return;
                 }
@@ -3933,17 +3977,36 @@
               this._sendQueue = [];
               this._mock = null;
               this._serverFrameBuffer = new Uint8Array(0);
+              this._connectAbortController = new AbortController();
               this._init(this.url, protocols);
             }
 
             async _init(url, protocols) {
               const base = CURRENT_PAGE_URL;
               let response;
+              let networkError = null;
               try {
-                response = await pageEmulator.network.socket(url, base, protocols);
+                response = await pageEmulator.network.socket(
+                  url,
+                  base,
+                  protocols,
+                  null,
+                  {
+                    signal: this._connectAbortController.signal,
+                    binaryType: this.binaryType
+                  }
+                );
               } catch (e) {
-                console.error('[VirtualWS v10] WS NETWORK REQUEST THREW', e && e.stack || e);
-                response = null;
+                if (this._connectAbortController.signal.aborted || this.readyState === OriginalWebSocket.CLOSED) return;
+                networkError = e;
+                console.error('[VirtualWS] WebSocket network request failed:', e && e.stack || e);
+              }
+
+              if (this._connectAbortController.signal.aborted || this.readyState === OriginalWebSocket.CLOSED) {
+                if (response && typeof response.close === 'function') {
+                  try { response.close(); } catch (_) {}
+                }
+                return;
               }
 
               // Network sockets may come from a parent iframe, so instanceof is not reliable across realms.
@@ -3953,21 +4016,42 @@
               } else if (response && typeof response.onClientMessage === 'function') {
                 this._setupMock(response);
               } else {
-                this._setupReal(new OriginalWebSocket(url, protocols));
+                this._setupFailure(networkError || new Error('The virtual network could not establish a WebSocket connection to ' + url));
               }
+            }
+
+            _setupFailure(error) {
+              if (this.readyState === OriginalWebSocket.CLOSED) return;
+              this.readyState = OriginalWebSocket.CLOSED;
+              const errorEvent = new Event('error');
+              this.dispatchEvent(errorEvent);
+              if (this.onerror) this.onerror(errorEvent);
+              const closeEvent = new CloseEvent('close', {
+                code: 1006,
+                reason: error && error.message ? String(error.message).slice(0, 123) : 'WebSocket connection failed',
+                wasClean: false
+              });
+              this.dispatchEvent(closeEvent);
+              if (this.onclose) this.onclose(closeEvent);
             }
 
             _setupReal(wsInstance) {
               this._ws = wsInstance;
               this._ws.binaryType = this.binaryType;
-              this._ws.onopen = (e) => {
+              const handleOpen = (e) => {
+                if (this._opened) return;
+                this._opened = true;
                 this.readyState = OriginalWebSocket.OPEN;
                 this.protocol = this._ws.protocol;
                 this.extensions = this._ws.extensions;
                 this.dispatchEvent(new Event('open'));
-                if (this.onopen) this.onopen(e);
+                if (this.onopen) this.onopen(e || new Event('open'));
                 this._flushQueue();
               };
+              this._ws.onopen = handleOpen;
+              // Network.socket() verifies the handshake before returning. In
+              // that case the native open event has already fired.
+              if (this._ws.readyState === OriginalWebSocket.OPEN) handleOpen(new Event('open'));
               this._ws.onmessage = (e) => {
                 this.dispatchEvent(new MessageEvent('message', { data: e.data }));
                 if (this.onmessage) this.onmessage(e);
@@ -4264,7 +4348,15 @@
                 this.readyState = OriginalWebSocket.CLOSING;
                 this._mock.closeClient(code || 1000, reason || '');
               } else {
+                if (this._connectAbortController) this._connectAbortController.abort();
                 this.readyState = OriginalWebSocket.CLOSED;
+                const event = new CloseEvent('close', {
+                  code: code || 1000,
+                  reason: reason || '',
+                  wasClean: true
+                });
+                this.dispatchEvent(event);
+                if (this.onclose) this.onclose(event);
               }
             }
           }
