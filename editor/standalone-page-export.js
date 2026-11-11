@@ -191,7 +191,8 @@
   const WINDOWS_1252_REVERSE = new Map(WINDOWS_1252_SPECIAL.map((codePoint,index) => [codePoint, index + 0x80]));
 
   function windows1252Byte(codePoint) {
-    if (codePoint <= 0x7F || (codePoint >= 0xA0 && codePoint <= 0xFF)) return codePoint;
+    if (codePoint <= 0x7F || (codePoint >= 0x80 && codePoint <= 0x9F) ||
+        (codePoint >= 0xA0 && codePoint <= 0xFF)) return codePoint;
     return WINDOWS_1252_REVERSE.get(codePoint);
   }
 
@@ -213,7 +214,7 @@
     let output = '';
     for (const character of String(value)) {
       const codePoint = character.codePointAt(0);
-      output += windows1252Byte(codePoint) == null
+      output += (windows1252Byte(codePoint) == null || (codePoint >= 0x80 && codePoint <= 0x9F))
         ? '&#x' + codePoint.toString(16) + ';'
         : character;
     }
