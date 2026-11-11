@@ -307,7 +307,6 @@
       payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\n');
     }
     const loaderTag = '<script>\n' + createAssetLoader() + '\n</script>';
-    return new Blob([html.slice(0, scriptStart), ...payloadParts, loaderTag, html.slice(scriptEnd + 9)], {type:'text/html;charset=utf-8'});
 
     const safeTitle = String(bundle.projectName || 'Workspace')
       .replace(/&/g, '&amp;')
@@ -315,6 +314,7 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
     html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>' + safeTitle + '</title>');
+    return new Blob([html.slice(0, scriptStart), ...payloadParts, loaderTag, html.slice(scriptEnd + 9)], {type:'text/html;charset=utf-8'});
     return html;
   }
 
