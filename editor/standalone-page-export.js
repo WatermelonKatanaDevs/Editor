@@ -559,6 +559,24 @@
       throw new Error('Unable to replace the deployment page asset loader.');
     }
 
+    // Minify the deployment template's executable scripts before injecting
+    // the large template-literal asset loader. Re-parsing that generated
+    // loader as HTML can mistake script-like text inside embedded source for
+    // actual HTML tags, so the generated loader must be inserted afterwards.
+    const loaderPlaceholder = '<script type="application/x-wk-standalone-placeholder" id="wk-standalone-loader-placeholder"></script>';
+    html = html.replace(loaderPattern, loaderPlaceholder);
+    if (global.StandaloneMinifier?.isEnabled?.() &&
+        typeof global.StandaloneMinifier.minifyInlineScripts === 'function') {
+      reportProgress(options, 'Minifying deployment inline scripts…');
+      try {
+        html = await global.StandaloneMinifier.minifyInlineScripts(html, {
+          editorUrl: options.editorUrl || global.location.href
+        });
+      } catch (error) {
+        console.warn('[Compile Page] Kept deployment template scripts after minification failed:', error);
+      }
+    }
+
     const {archiveChunks, assets, ...metadata} = bundle;
     const metadataJson = escapeJsonForHtml(metadata);
     const payloadParts = [
@@ -580,18 +598,10 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;'));
     html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>' + safeTitle + '</title>');
-    html = html.replace(loaderPattern, payloadParts.join('') + loaderTag);
-    if (global.StandaloneMinifier?.isEnabled?.() &&
-        typeof global.StandaloneMinifier.minifyInlineScripts === 'function') {
-      reportProgress(options, 'Minifying standalone inline scripts…');
-      try {
-        html = await global.StandaloneMinifier.minifyInlineScripts(html, {
-          editorUrl: options.editorUrl || global.location.href
-        });
-      } catch (error) {
-        console.warn('[Compile Page] Kept standalone inline scripts after minification failed:', error);
-      }
+    if (!html.includes(loaderPlaceholder)) {
+      throw new Error('The deployment asset-loader placeholder was lost during HTML minification.');
     }
+    html = html.replace(loaderPlaceholder, payloadParts.join('') + loaderTag);
     const charsetPattern = /<meta\s+charset=["']?[^"'>\s]+["']?\s*>/i;
     if (!charsetPattern.test(html)) {
       throw new Error('The deployment template must declare a character encoding before raw archive bytes can be embedded.');
