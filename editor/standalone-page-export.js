@@ -97,7 +97,11 @@
   }
 
   function extractWorkersPath(html) {
-    const match = html.match(/\bconst\s+workers\s*=\s*await\s+fetch\(\s*(['"])([^'"]+)\1/);
+    // The deployment template validates embedded workers first and only fetches
+    // workers.json for normal deployments. Locate the fetch independently of
+    // the surrounding initialization expression so template guards can evolve.
+    const matches = [...html.matchAll(/\bfetch\s*\(\s*(['"])([^'"]+)\1/g)];
+    const match = matches.find(item => /(?:^|\/)workers\.json(?:[?#]|$)/.test(item[2]));
     if (!match) throw new Error('Unable to locate the deployment page workers.json dependency.');
     return match[2];
   }
@@ -270,13 +274,6 @@
       '    }'
     ].join('\n');
     html = replaceOnce(html, 'async function loadArchive(owner, repo, ref) {', archiveBranch, 'project archive loader');
-
-    html = replaceOnce(
-      html,
-      'const workers = await fetch(\'workers.json\'',
-      'const workers = window.__WKStandaloneData ? window.__WKStandaloneData.workers : await fetch(\'workers.json\'',
-      'workers.json loader'
-    );
 
     const paramsBranch = [
       'const params = new URLSearchParams(location.search);',
