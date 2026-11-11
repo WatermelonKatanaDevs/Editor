@@ -537,7 +537,7 @@
     }
     async exportZip(options = {}) {
       if (options.compressionLevel != null) {
-        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel, this.zip);
+        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel);
       }
       const zip = new JSZip();
       for (const [path, data] of this.cache) zip.file(path, data);
@@ -598,7 +598,7 @@
     }
     async exportZip(options = {}) {
       if (options.compressionLevel != null) {
-        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel, this.zip, path => this.physicalPath(path));
+        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel, this.zip);
       }
       for (const dir of this.directories) if (dir) this.zip.folder(dir);
       this.cache.forEach((data, path) => this.zip.file(path, data));
@@ -643,7 +643,7 @@
     }
     async exportZip(options = {}) {
       if (options.compressionLevel != null) {
-        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel);
+        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel, this.zip, path => this.physicalPath(path));
       }
       const zip = this.rootPrefix ? new JSZip() : this.zip;
       for (const dir of this.directories) if (dir) zip.folder(dir);
