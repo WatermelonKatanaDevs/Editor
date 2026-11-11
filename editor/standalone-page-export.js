@@ -444,9 +444,9 @@
       '  for (let i = 0; i < metadataBinary.length; i++) metadataBytes[i] = metadataBinary.charCodeAt(i);',
       '  const bundle = JSON.parse(new TextDecoder().decode(metadataBytes));',
       '  const embeddedAssets = [',
-      ...assets.map(asset =>
+      ...assets.map((asset, index) =>
         '    {path:' + escapeJsonForHtml(asset.path) + ', url:' + escapeJsonForHtml(asset.url) + ', source:`' +
-        encodeTemplateLiteral(asset.source) + '`}'
+        encodeTemplateLiteral(asset.source) + '`}' + (index < assets.length - 1 ? ',' : '')
       ),
       '  ];',
       '  bundle.assets = embeddedAssets;',
