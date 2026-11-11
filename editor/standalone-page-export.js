@@ -237,6 +237,11 @@
         output += '\\\\';
         continue;
       }
+      if (byte === 0x3C && index + 3 < bytes.length &&
+          bytes[index + 1] === 0x21 && bytes[index + 2] === 0x2D && bytes[index + 3] === 0x2D) {
+        output += '\\x3C';
+        continue;
+      }
       if (byte === 0x3C && index + 7 < bytes.length &&
           bytes[index + 1] === 0x2F &&
           String.fromCharCode(...bytes.subarray(index + 2, index + 8)).toLowerCase() === 'script') {
@@ -263,6 +268,12 @@
       '      else if (escaped === "r") code = 13;',
       '      else if (escaped === "\\\\") code = 92;',
       '      else if (escaped === "/") code = 47;',
+      '      else if (escaped === "x") {',
+      '        const hex = encoded.slice(index + 1, index + 3);',
+      '        if (!/^[0-9a-f]{2}$/i.test(hex)) throw new Error("Invalid raw archive hex escape at character " + (index - 1) + ".");',
+      '        code = parseInt(hex, 16);',
+      '        index += 2;',
+      '      }',
       '      else throw new Error("Invalid raw archive escape at character " + (index - 1) + ".");',
       '    }',
       '    const mapped = ' + JSON.stringify(reverse) + '[code];',
