@@ -7,6 +7,16 @@
     if (typeof options?.onProgress === 'function') options.onProgress(message);
   }
 
+  function readCompileSettings() {
+    let base122 = false;
+    let compressionLevel = 9;
+    try {
+      base122 = global.localStorage.getItem('node-editor.compile.base122') === 'true';
+      compressionLevel = global.localStorage.getItem('node-editor.compile.compression') === '6' ? 6 : 9;
+    } catch (_) {}
+    return {base122, compressionLevel};
+  }
+
   async function fetchText(url, label) {
     const response = await fetch(url, {cache:'no-store'});
     if (!response.ok) throw new Error('Unable to fetch ' + label + ' (' + response.status + '): ' + url);
@@ -115,22 +125,25 @@
     return btoa(binary);
   }
 
-  async function blobToBase64Chunks(blob, options = {}) {
+  async function blobToEncodedChunks(blob, encoding, options = {}) {
     if (!blob || typeof blob.size !== 'number') {
       throw new TypeError('The project archive is not a Blob.');
     }
+    if (encoding === 'base122' && (!global.Base122 || typeof global.Base122.encode !== 'function')) {
+      throw new Error('The Base122 encoder is unavailable.');
+    }
 
-    // Each encoded part is independently decodable. Keeping the raw binary
-    // string below a few megabytes avoids JavaScript's maximum string length.
+    // Each chunk is independently encoded and decoded so its final padding
+    // bits cannot shift the next chunk's byte alignment.
     const chunkSize = 3 * 1024 * 1024;
     const chunks = [];
     let processed = 0;
 
     async function encodePart(bytes) {
       if (!bytes.length) return;
-      chunks.push(bytesToBase64(bytes));
+      chunks.push(encoding === 'base122' ? global.Base122.encode(bytes) : bytesToBase64(bytes));
       processed += bytes.length;
-      reportProgress(options, 'Embedding project archive… ' +
+      reportProgress(options, (encoding === 'base122' ? 'Encoding project archive… ' : 'Embedding project archive… ') +
         Math.min(100, Math.round(processed / Math.max(1, blob.size) * 100)) + '%');
     }
 
@@ -196,6 +209,7 @@
   function createAssetLoader() {
     return [
       'window.__deploymentAssetsReady = (async function() {',
+      '  const decodeBase122 = ' + global.Base122.decode.toString() + ';',
       '  const dataNode = document.getElementById("wk-standalone-data");',
       '  if (!dataNode) throw new Error("Standalone deployment data is missing.");',
       '  const encodedMetadata = (dataNode.textContent || "").trim();',
@@ -268,11 +282,19 @@
       '      const archiveParts = [];',
       '      const archiveChunks = document.querySelectorAll("script.wk-standalone-archive-chunk");',
       '      if (!archiveChunks.length) throw new Error("The standalone project archive is missing.");',
+      '      const archiveEncoding = bundle.archiveEncoding || "base64";',
+      '      if (archiveEncoding !== "base64" && archiveEncoding !== "base122") throw new Error("Unknown standalone archive encoding: " + archiveEncoding);',
       '      for (const node of archiveChunks) {',
-      '        const binary = atob(node.textContent.trim());',
-      '        const bytes = new Uint8Array(binary.length);',
-      '        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);',
-      '        archiveParts.push(bytes);',
+      '        if (archiveEncoding === "base122") {',
+      '          const encoded = node.getAttribute("data-b122");',
+      '          if (encoded == null) throw new Error("A Base122 archive chunk is missing its encoded data.");',
+      '          archiveParts.push(decodeBase122(encoded));',
+      '        } else {',
+      '          const binary = atob(node.textContent.trim());',
+      '          const bytes = new Uint8Array(binary.length);',
+      '          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);',
+      '          archiveParts.push(bytes);',
+      '        }',
       '        node.remove();',
       '      }',
       '      return new Blob(archiveParts, {type:"application/zip"});',
@@ -319,7 +341,16 @@
       payloadParts.push('<script type="application/octet-stream" class="wk-standalone-asset" data-path="' + escapeAttribute(asset.path) + '" data-url="' + escapeAttribute(asset.url) + '">' + asset.base64 + '</script>\n');
     }
     for (const chunk of archiveChunks) {
-      payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\n');
+      if (bundle.archiveEncoding === 'base122') {
+        // Kevin Albertson's Base122 alphabet excludes characters that would
+        // terminate or corrupt this quoted HTML attribute.
+        if (/[&"\\\r\n\u0000]/.test(chunk)) {
+          throw new Error('Base122 produced a character that is unsafe in an HTML attribute.');
+        }
+        payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk" data-b122="' + chunk + '"></script>\n');
+      } else {
+        payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\n');
+      }
     }
     const loaderTag = '<script>\n' + createAssetLoader() + '\n</script>';
 
@@ -370,6 +401,7 @@
       reportProgress(options, 'Minifying project HTML, CSS, and JavaScript…');
       const result = await global.StandaloneMinifier.minifyArchive(snapshot.archive, {
         editorUrl: editorUrl.href,
+        compressionLevel: options.compressionLevel,
         onProgress: message => reportProgress(options, message),
         onFileError: (path, error) => console.warn('[Compile Page] Kept original file after minification failed:', path, error)
       });
@@ -380,8 +412,9 @@
       }
     }
 
-    reportProgress(options, 'Embedding project archive…');
-    const archiveChunks = await blobToBase64Chunks(projectArchive, options);
+    const archiveEncoding = options.archiveEncoding === 'base122' ? 'base122' : 'base64';
+    reportProgress(options, archiveEncoding === 'base122' ? 'Encoding project archive…' : 'Embedding project archive…');
+    const archiveChunks = await blobToEncodedChunks(projectArchive, archiveEncoding, options);
 
     const runConfig = snapshot.runConfig && typeof snapshot.runConfig === 'object'
       ? snapshot.runConfig
@@ -389,6 +422,7 @@
     const bundle = {
       version: 1,
       projectName: String(snapshot.projectName || 'Workspace'),
+      archiveEncoding,
       archiveChunks,
       assets,
       workers,
@@ -438,9 +472,14 @@
         if (!editor || typeof editor.getSinglePageSnapshot !== 'function') {
           throw new Error('The Editor standalone export API is unavailable.');
         }
-        const snapshot = await editor.getSinglePageSnapshot();
+        const compileSettings = readCompileSettings();
+        const snapshot = await editor.getSinglePageSnapshot({
+          compressionLevel: compileSettings.compressionLevel
+        });
         const html = await compile(snapshot, {
           editorUrl: global.location.href,
+          compressionLevel: compileSettings.compressionLevel,
+          archiveEncoding: compileSettings.base122 ? 'base122' : 'base64',
           onProgress: message => { button.textContent = message; }
         });
         download(html, snapshot.projectName);
