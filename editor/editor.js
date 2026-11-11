@@ -3956,7 +3956,7 @@ window.__editorInitPromise = (async function () {
       projectOwner: state.projectOwner !== false,
       hasGitHubRepository: !!(state.gitRemote?.provider === 'github' && state.gitRemote.owner && state.gitRemote.repo)
     }),
-    getSinglePageSnapshot: async () => {
+    getSinglePageSnapshot: async (options = {}) => {
       if (!state.fs) throw new Error('No workspace is open.');
       state.runConfig?.detect?.();
       const runConfig = state.runConfig?.config ? {...state.runConfig.config} : {};
@@ -3970,7 +3970,9 @@ window.__editorInitPromise = (async function () {
         await installNodeDependencies(runtime, runConfig);
       }
       return {
-        archive: await state.fs.exportZip(),
+        archive: await state.fs.exportZip(
+          options.compressionLevel == null ? {} : {compressionLevel:options.compressionLevel}
+        ),
         projectName: state.projectName || 'Workspace',
         runConfig,
         deploymentSettings: state.deploymentSettings ? {...state.deploymentSettings} : {}
