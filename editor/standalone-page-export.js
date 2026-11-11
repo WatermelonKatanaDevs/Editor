@@ -223,17 +223,24 @@
 
   function encodeRaw1252Chunk(bytes) {
     let output = '';
-    const hex = value => value.toString(16).padStart(2, '0').toUpperCase();
     for (let index = 0; index < bytes.length; index++) {
       const byte = bytes[index];
-      if (byte === 0x00 || byte === 0x0D || byte === 0x5C) {
-        output += '\\x' + hex(byte);
+      if (byte === 0x00) {
+        output += '\\0';
+        continue;
+      }
+      if (byte === 0x0D) {
+        output += '\\r';
+        continue;
+      }
+      if (byte === 0x5C) {
+        output += '\\\\';
         continue;
       }
       if (byte === 0x3C && index + 7 < bytes.length &&
           bytes[index + 1] === 0x2F &&
           String.fromCharCode(...bytes.subarray(index + 2, index + 8)).toLowerCase() === 'script') {
-        output += '<\\x2F' + String.fromCharCode(...bytes.subarray(index + 2, index + 8));
+        output += '<\\/' + String.fromCharCode(...bytes.subarray(index + 2, index + 8));
         index += 7;
         continue;
       }
@@ -251,14 +258,12 @@
       '  for (let index = 0; index < encoded.length; index++) {',
       '    let code = encoded.charCodeAt(index);',
       '    if (code === 92) {',
-      '      if (encoded[index + 1] === "x") {',
-      '        const hex = encoded.slice(index + 2, index + 4);',
-      '        if (!/^[0-9a-f]{2}$/i.test(hex)) throw new Error("Invalid raw archive escape at character " + index + ".");',
-      '        bytes[offset++] = parseInt(hex, 16);',
-      '        index += 3;',
-      '        continue;',
-      '      }',
-      '      throw new Error("Invalid raw archive escape at character " + index + ".");',
+      '      const escaped = encoded[++index];',
+      '      if (escaped === "0") code = 0;',
+      '      else if (escaped === "r") code = 13;',
+      '      else if (escaped === "\\\\") code = 92;',
+      '      else if (escaped === "/") code = 47;',
+      '      else throw new Error("Invalid raw archive escape at character " + (index - 1) + ".");',
       '    }',
       '    const mapped = ' + JSON.stringify(reverse) + '[code];',
       '    if (mapped != null) code = mapped;',
