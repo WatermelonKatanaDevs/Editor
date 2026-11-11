@@ -435,8 +435,10 @@ window.__deploymentNetworkReady = (async function() {
       const packageJsonPath = root === '/' ? '/package.json' : root + '/package.json';
       const packageLockPath = root === '/' ? '/package-lock.json' : root + '/package-lock.json';
       const nodeModulesPath = root === '/' ? '/node_modules' : root + '/node_modules';
-      const hasNodeModules = fs.existsSync(nodeModulesPath) ||
-        fs.listFilesSync().some(path => String(path || '').startsWith(nodeModulesPath.replace(/\/+$/, '') + '/'));
+      // FileSystem normalizes paths without a leading slash and tracks directories separately.
+      const normalizedNodeModulesPath = nodeModulesPath.replace(/^\/+|\/+$/g, '');
+      const hasNodeModules = fs.isDirectorySync?.(nodeModulesPath) ||
+        fs.listFilesSync().some(path => String(path || '').replace(/^\/+/, '').startsWith(normalizedNodeModulesPath + '/'));
       if (fs.existsSync(packageJsonPath) && !hasNodeModules) {
         let useCi = false;
         if (fs.existsSync(packageLockPath)) {
