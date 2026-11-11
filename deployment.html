@@ -167,7 +167,13 @@ window.__deploymentNetworkReady = (async function() {
     setProgress(label, 100, formatBytes(blob.size));
     return blob;
   }
-  const network = await window.__deploymentNetworkReady;
+  let network;
+  try {
+    network = await window.__deploymentNetworkReady;
+  } catch (error) {
+    showError(error);
+    return;
+  }
 
   function requiredParam(name) {
     if (!params.has(name)) throw new Error(`Deployment requires a ${name} query parameter.`);
@@ -189,11 +195,27 @@ window.__deploymentNetworkReady = (async function() {
   }
 
   function showError(error) {
-    console.error(error);
+    console.error('[Deployment startup]', error);
     hideProgress();
-    status.textContent = error?.message || String(error);
+    status.textContent = error?.stack
+      ? (error.message || String(error)) + '\\n\\n' + error.stack
+      : (error?.message || String(error));
     status.className = 'error';
   }
+
+  // Surface failures that happen before main() is reached, especially
+  // rejected embedded-asset and network bootstrap promises.
+  window.addEventListener('error', event => {
+    if (!stage.classList.contains('ready')) {
+      showError(event.error || event.message || 'A deployment startup script failed.');
+    }
+  });
+  window.addEventListener('unhandledrejection', event => {
+    if (!stage.classList.contains('ready')) {
+      showError(event.reason || 'A deployment startup promise was rejected.');
+    }
+  });
+
   function parseGithub(input) {
     let url;
     try { url = new URL(input); } catch (_) { throw new Error('Invalid GitHub URL.'); }
