@@ -2741,6 +2741,696 @@
           return await originalFetch.apply(this, arguments);
         };
 
+
+        // Workers have their own global scope, so page-realm patches do not
+        // reach them. Bootstrap each worker before its entry script and bridge
+        // its network APIs back through this PageEmulator.
+        (function installVirtualWorkers() {
+          const NativeWorker = window.Worker;
+          if (typeof NativeWorker !== 'function' || NativeWorker.__wkVirtualized) return;
+
+          function workerBootstrap() {
+            const nativeImportScripts = typeof self.importScripts === 'function'
+              ? self.importScripts.bind(self)
+              : null;
+            const queuedMessages = [];
+            let initialized = false;
+            let bridgePort = null;
+            let workerBaseURL = self.location.href;
+
+            function receiveInitialMessage(event) {
+              if (event.data && event.data.__wkEmulatorInit === true && event.ports && event.ports[0]) {
+                self.removeEventListener('message', receiveInitialMessage);
+                bridgePort = event.ports[0];
+                bridgePort.onmessage = receiveBridgeMessage;
+                if (bridgePort.start) bridgePort.start();
+                bridgePort.postMessage({ kind: 'bridge-ready' });
+                return;
+              }
+              if (!initialized) queuedMessages.push({
+                data: event.data,
+                origin: event.origin,
+                lastEventId: event.lastEventId,
+                ports: Array.from(event.ports || [])
+              });
+            }
+
+            const pendingRequests = new Map();
+            const workerSockets = new Map();
+            let nextRequestId = 1;
+
+            function receiveBridgeMessage(event) {
+              const message = event.data || {};
+              if (message.kind === 'start') {
+                startWorkerSource(message).catch(error => {
+                  try {
+                    bridgePort.postMessage({
+                      kind: 'bootstrap-error',
+                      message: error && error.message || String(error),
+                      stack: error && error.stack || ''
+                    });
+                  } catch (_) {}
+                });
+                return;
+              }
+              if (message.kind === 'rpc-result') {
+                const pending = pendingRequests.get(message.id);
+                if (!pending) return;
+                pendingRequests.delete(message.id);
+                if (pending.signal && pending.abortHandler) {
+                  pending.signal.removeEventListener('abort', pending.abortHandler);
+                }
+                if (message.error) pending.reject(new Error(message.error));
+                else pending.resolve(message.response);
+                return;
+              }
+              if (message.kind === 'ws-event') {
+                const socket = workerSockets.get(message.socketId);
+                if (socket) socket._receive(message.event, message.data);
+              }
+            }
+
+            function rpc(operation, payload, transfer, signal) {
+              const id = nextRequestId++;
+              return new Promise((resolve, reject) => {
+                const pending = { resolve, reject, signal, abortHandler: null };
+                if (signal) {
+                  if (signal.aborted) {
+                    reject(new DOMException('The operation was aborted.', 'AbortError'));
+                    return;
+                  }
+                  pending.abortHandler = () => {
+                    pendingRequests.delete(id);
+                    try { bridgePort.postMessage({ kind: 'cancel', id }); } catch (_) {}
+                    reject(new DOMException('The operation was aborted.', 'AbortError'));
+                  };
+                  signal.addEventListener('abort', pending.abortHandler, { once: true });
+                }
+                pendingRequests.set(id, pending);
+                try {
+                  bridgePort.postMessage({
+                    kind: 'rpc',
+                    id,
+                    operation,
+                    payload
+                  }, transfer || []);
+                } catch (error) {
+                  pendingRequests.delete(id);
+                  if (signal && pending.abortHandler) signal.removeEventListener('abort', pending.abortHandler);
+                  reject(error);
+                }
+              });
+            }
+
+            async function virtualFetch(input, init) {
+              const NativeRequest = self.Request;
+              const requestUrl = input instanceof NativeRequest
+                ? input.url
+                : new URL(String(input), workerBaseURL).href;
+              const request = input instanceof NativeRequest
+                ? new NativeRequest(input, init)
+                : new NativeRequest(requestUrl, init);
+              const clone = request.clone();
+              let body = null;
+              if (clone.body) body = await clone.arrayBuffer();
+              const options = {
+                method: request.method,
+                headers: Array.from(request.headers.entries()),
+                credentials: request.credentials,
+                mode: request.mode,
+                cache: request.cache,
+                redirect: request.redirect,
+                referrer: request.referrer,
+                referrerPolicy: request.referrerPolicy,
+                integrity: request.integrity,
+                keepalive: request.keepalive
+              };
+              if (body && body.byteLength) options.body = body;
+              const transfer = body && body.byteLength ? [body] : [];
+              const result = await rpc('fetch', {
+                url: request.url,
+                options,
+                body
+              }, transfer, request.signal);
+              const status = result.status || 200;
+              const responseBody = [204, 205, 304].includes(status) ? null : (result.body || null);
+              const response = new Response(responseBody, {
+                status,
+                statusText: result.statusText || '',
+                headers: result.headers || []
+              });
+              try {
+                Object.defineProperty(response, 'url', { configurable: true, value: result.url || request.url });
+              } catch (_) {}
+              try {
+                Object.defineProperty(response, 'redirected', { configurable: true, value: !!result.redirected });
+              } catch (_) {}
+              return response;
+            }
+
+            class VirtualXMLHttpRequest extends EventTarget {
+              constructor() {
+                super();
+                this.readyState = 0;
+                this.status = 0;
+                this.statusText = '';
+                this.responseURL = '';
+                this.responseType = '';
+                this.timeout = 0;
+                this.withCredentials = false;
+                this.upload = new EventTarget();
+                this._method = 'GET';
+                this._url = '';
+                this._async = true;
+                this._requestHeaders = {};
+                this._responseHeaders = new Headers();
+                this._responseBuffer = new ArrayBuffer(0);
+                this._controller = null;
+                this._timeoutId = null;
+                this._sent = false;
+              }
+              _emit(type, event) {
+                const dispatched = event || new Event(type);
+                this.dispatchEvent(dispatched);
+                const handler = this['on' + type];
+                if (typeof handler === 'function') handler.call(this, dispatched);
+              }
+              open(method, url, async = true) {
+                if (async === false) throw new DOMException('Synchronous XMLHttpRequest is not supported in virtual workers.', 'NotSupportedError');
+                this._method = String(method || 'GET').toUpperCase();
+                this._url = new URL(String(url), workerBaseURL).href;
+                this._async = true;
+                this._requestHeaders = {};
+                this._sent = false;
+                this.readyState = 1;
+                this._emit('readystatechange');
+              }
+              setRequestHeader(name, value) {
+                if (this.readyState !== 1 || this._sent) throw new DOMException('XMLHttpRequest is not in the OPENED state.', 'InvalidStateError');
+                const key = String(name);
+                this._requestHeaders[key] = this._requestHeaders[key]
+                  ? this._requestHeaders[key] + ', ' + String(value)
+                  : String(value);
+              }
+              send(body = null) {
+                if (this.readyState !== 1 || this._sent) throw new DOMException('XMLHttpRequest is not in the OPENED state.', 'InvalidStateError');
+                this._sent = true;
+                this._controller = new AbortController();
+                const headers = { ...this._requestHeaders };
+                const options = {
+                  method: this._method,
+                  headers,
+                  signal: this._controller.signal,
+                  credentials: this.withCredentials ? 'include' : 'same-origin'
+                };
+                if (!['GET', 'HEAD'].includes(this._method) && body !== null) options.body = body;
+                if (this.timeout > 0) {
+                  this._timeoutId = setTimeout(() => {
+                    if (this._controller) this._controller.abort();
+                    this._emit('timeout');
+                    this._emit('loadend');
+                  }, this.timeout);
+                }
+                virtualFetch(this._url, options).then(async response => {
+                  if (this._controller && this._controller.signal.aborted) return;
+                  this.status = response.status;
+                  this.statusText = response.statusText;
+                  this.responseURL = response.url;
+                  this._responseHeaders = response.headers;
+                  this.readyState = 2;
+                  this._emit('readystatechange');
+                  this._responseBuffer = await response.arrayBuffer();
+                  this.readyState = 3;
+                  this._emit('readystatechange');
+                  const length = this._responseBuffer.byteLength;
+                  this._emit('progress', new ProgressEvent('progress', { lengthComputable: true, loaded: length, total: length }));
+                  this.readyState = 4;
+                  this._emit('readystatechange');
+                  this._emit('load');
+                  this._emit('loadend');
+                }).catch(error => {
+                  if (this._controller && this._controller.signal.aborted) {
+                    this._emit('abort');
+                  } else {
+                    this._emit('error');
+                  }
+                  this._emit('loadend');
+                }).finally(() => {
+                  if (this._timeoutId) clearTimeout(this._timeoutId);
+                  this._timeoutId = null;
+                });
+              }
+              abort() {
+                if (this._controller) this._controller.abort();
+                this.readyState = 0;
+                this._sent = false;
+                this._emit('readystatechange');
+                this._emit('abort');
+                this._emit('loadend');
+              }
+              getResponseHeader(name) {
+                return this.readyState < 2 ? null : this._responseHeaders.get(name);
+              }
+              getAllResponseHeaders() {
+                if (this.readyState < 2) return '';
+                return Array.from(this._responseHeaders.entries()).map(entry => entry[0] + ': ' + entry[1] + '\r\n').join('');
+              }
+              get responseText() {
+                if (this.responseType && this.responseType !== 'text') throw new DOMException('responseText is unavailable for this responseType.', 'InvalidStateError');
+                return new TextDecoder().decode(this._responseBuffer);
+              }
+              get response() {
+                if (this.readyState !== 4) return null;
+                switch (this.responseType) {
+                  case 'arraybuffer': return this._responseBuffer.slice(0);
+                  case 'blob': return new Blob([this._responseBuffer]);
+                  case 'json':
+                    try { return JSON.parse(new TextDecoder().decode(this._responseBuffer)); } catch (_) { return null; }
+                  case 'document': return null;
+                  case '':
+                  case 'text': return new TextDecoder().decode(this._responseBuffer);
+                  default: return null;
+                }
+              }
+            }
+            Object.assign(VirtualXMLHttpRequest, {
+              UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4
+            });
+            Object.assign(VirtualXMLHttpRequest.prototype, {
+              UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4
+            });
+
+            const NativeWebSocket = self.WebSocket;
+            let nextSocketId = 1;
+            class VirtualWebSocket extends EventTarget {
+              constructor(url, protocols) {
+                super();
+                this.url = new URL(String(url), workerBaseURL).href;
+                this.readyState = VirtualWebSocket.CONNECTING;
+                this.protocol = '';
+                this.extensions = '';
+                this.binaryType = 'blob';
+                this.bufferedAmount = 0;
+                this._socketId = nextSocketId++;
+                this._native = null;
+                workerSockets.set(this._socketId, this);
+                rpc('ws-open', {
+                  socketId: this._socketId,
+                  url: this.url,
+                  protocols
+                }).then(result => {
+                  if (result && result.fallback) {
+                    this._native = protocols === undefined
+                      ? new NativeWebSocket(this.url)
+                      : new NativeWebSocket(this.url, protocols);
+                    this._native.binaryType = this.binaryType;
+                    for (const type of ['open', 'message', 'error', 'close']) {
+                      this._native.addEventListener(type, event => this._receive(type, event.data, event));
+                    }
+                  }
+                }).catch(() => this._receive('error'));
+              }
+              _emit(type, event) {
+                const dispatched = event || new Event(type);
+                this.dispatchEvent(dispatched);
+                const handler = this['on' + type];
+                if (typeof handler === 'function') handler.call(this, dispatched);
+              }
+              _receive(type, data, sourceEvent) {
+                if (type === 'open') {
+                  this.readyState = VirtualWebSocket.OPEN;
+                  if (sourceEvent) {
+                    this.protocol = sourceEvent.target && sourceEvent.target.protocol || '';
+                    this.extensions = sourceEvent.target && sourceEvent.target.extensions || '';
+                  }
+                  this._emit('open');
+                } else if (type === 'message') {
+                  const event = new MessageEvent('message', { data });
+                  this._emit('message', event);
+                } else if (type === 'close') {
+                  this.readyState = VirtualWebSocket.CLOSED;
+                  const event = new CloseEvent('close', {
+                    code: sourceEvent && sourceEvent.code || 1000,
+                    reason: sourceEvent && sourceEvent.reason || '',
+                    wasClean: sourceEvent ? !!sourceEvent.wasClean : true
+                  });
+                  this._emit('close', event);
+                  workerSockets.delete(this._socketId);
+                } else if (type === 'error') {
+                  this._emit('error');
+                }
+              }
+              send(data) {
+                if (this.readyState !== VirtualWebSocket.OPEN) throw new DOMException('WebSocket is not open.', 'InvalidStateError');
+                if (this._native) this._native.send(data);
+                else bridgePort.postMessage({ kind: 'ws-send', socketId: this._socketId, data });
+              }
+              close(code, reason) {
+                if (this.readyState === VirtualWebSocket.CLOSED || this.readyState === VirtualWebSocket.CLOSING) return;
+                this.readyState = VirtualWebSocket.CLOSING;
+                if (this._native) this._native.close(code, reason);
+                else bridgePort.postMessage({ kind: 'ws-close', socketId: this._socketId, code, reason });
+              }
+            }
+            Object.assign(VirtualWebSocket, {
+              CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3
+            });
+            Object.assign(VirtualWebSocket.prototype, {
+              CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3
+            });
+
+            function installNetworkPatches(baseURL) {
+              workerBaseURL = baseURL;
+              Object.defineProperty(self, '__wkWorkerURL', {
+                configurable: false,
+                enumerable: false,
+                writable: false,
+                value: baseURL
+              });
+              self.fetch = virtualFetch;
+              self.XMLHttpRequest = VirtualXMLHttpRequest;
+              if (NativeWebSocket) self.WebSocket = VirtualWebSocket;
+            }
+
+            async function startWorkerSource(payload) {
+              workerBaseURL = payload.url;
+              installNetworkPatches(payload.url);
+
+              const scriptEntries = new Map(payload.scripts.map(item => [item.url, item]));
+              if (payload.type === 'module') {
+                const moduleBlobUrls = new Map();
+                const creating = new Set();
+                function createModuleUrl(url) {
+                  if (moduleBlobUrls.has(url)) return moduleBlobUrls.get(url);
+                  if (creating.has(url)) throw new Error('Cyclic module-worker imports cannot currently be virtualized: ' + url);
+                  const entry = scriptEntries.get(url);
+                  if (!entry) throw new Error('Missing preloaded worker module: ' + url);
+                  creating.add(url);
+                  let source = entry.source;
+                  const dependencies = (entry.dependencies || []).slice().sort((a, b) => b.start - a.start);
+                  for (const dependency of dependencies) {
+                    const importedUrl = createModuleUrl(dependency.url);
+                    source = source.slice(0, dependency.start) + JSON.stringify(importedUrl) + source.slice(dependency.end);
+                  }
+                  const blobUrl = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+                  moduleBlobUrls.set(url, blobUrl);
+                  creating.delete(url);
+                  return blobUrl;
+                }
+                const rootUrl = createModuleUrl(payload.url);
+                await import(rootUrl);
+              } else {
+                if (!nativeImportScripts) throw new Error('Classic worker importScripts() is unavailable.');
+                const scriptUrls = new Map();
+                const blobUrls = [];
+                for (const entry of payload.scripts) {
+                  if (entry.url === payload.url) continue;
+                  const blobUrl = URL.createObjectURL(new Blob([entry.source], { type: 'text/javascript' }));
+                  blobUrls.push(blobUrl);
+                  scriptUrls.set(entry.url, blobUrl);
+                }
+                let currentScriptUrl = payload.url;
+                self.importScripts = function(...urls) {
+                  for (const specifier of urls) {
+                    const resolved = new URL(String(specifier), currentScriptUrl).href;
+                    const blobUrl = scriptUrls.get(resolved);
+                    if (!blobUrl) {
+                      throw new TypeError('Worker importScripts() resource was not preloaded through the virtual network: ' + resolved);
+                    }
+                    const previous = currentScriptUrl;
+                    currentScriptUrl = resolved;
+                    try { nativeImportScripts(blobUrl); }
+                    finally { currentScriptUrl = previous; }
+                  }
+                };
+                const rootBlobUrl = URL.createObjectURL(new Blob([scriptEntries.get(payload.url).source], { type: 'text/javascript' }));
+                blobUrls.push(rootBlobUrl);
+                try { nativeImportScripts(rootBlobUrl); }
+                finally { currentScriptUrl = payload.url; }
+              }
+
+              initialized = true;
+              self.removeEventListener('message', receiveInitialMessage);
+              for (const message of queuedMessages.splice(0)) {
+                self.dispatchEvent(new MessageEvent('message', {
+                  data: message.data,
+                  origin: message.origin,
+                  lastEventId: message.lastEventId,
+                  ports: message.ports
+                }));
+              }
+            }
+
+            self.addEventListener('message', receiveInitialMessage);
+          }
+
+          const bootstrapSource = '(' + workerBootstrap.toString() + ')();';
+
+          function getStaticWorkerDependencies(source, type) {
+            const ast = acorn.parse(source, {
+              ecmaVersion: 'latest',
+              sourceType: type === 'module' ? 'module' : 'script',
+              allowAwaitOutsideFunction: true
+            });
+            const dependencies = [];
+            const add = node => {
+              if (node && node.type === 'Literal' && typeof node.value === 'string') {
+                dependencies.push({
+                  specifier: node.value,
+                  start: node.start,
+                  end: node.end
+                });
+              }
+            };
+            if (type === 'module') {
+              acorn.walk.simple(ast, {
+                ImportDeclaration(node) { add(node.source); },
+                ExportNamedDeclaration(node) { if (node.source) add(node.source); },
+                ExportAllDeclaration(node) { add(node.source); },
+                ImportExpression(node) { add(node.source); }
+              });
+            } else {
+              acorn.walk.simple(ast, {
+                CallExpression(node) {
+                  if (node.callee && node.callee.type === 'Identifier' && node.callee.name === 'importScripts') {
+                    node.arguments.forEach(add);
+                  }
+                }
+              });
+            }
+            return dependencies;
+          }
+
+          async function fetchWorkerGraph(rootUrl, type, signal) {
+            const scripts = new Map();
+            async function visit(url) {
+              if (scripts.has(url)) return;
+              const response = await pageEmulator.network.request(url, BASE_ORIGIN, { signal }, 'worker');
+              if (!response || !response.ok) {
+                throw new Error('Failed to load worker script through the virtual network: ' + url +
+                  (response ? ' (HTTP ' + response.status + ')' : ''));
+              }
+              const source = await response.text();
+              const entry = { url, source, dependencies: [] };
+              scripts.set(url, entry);
+              const dependencies = getStaticWorkerDependencies(source, type);
+              for (const dependency of dependencies) {
+                let dependencyUrl;
+                try { dependencyUrl = new URL(dependency.specifier, url).href; }
+                catch (_) {
+                  throw new Error('Cannot resolve worker dependency "' + dependency.specifier + '" from ' + url);
+                }
+                if (type === 'module' && !/^(?:[a-z][a-z\d+.-]*:|\/|\.{1,2}\/)/i.test(dependency.specifier)) {
+                  throw new Error('Bare module specifier "' + dependency.specifier + '" cannot be resolved in a virtual module worker.');
+                }
+                entry.dependencies.push({
+                  specifier: dependency.specifier,
+                  start: dependency.start,
+                  end: dependency.end,
+                  url: dependencyUrl
+                });
+                await visit(dependencyUrl);
+              }
+            }
+            await visit(rootUrl);
+            return Array.from(scripts.values());
+          }
+
+          function dispatchWorkerStartupError(worker, url, error) {
+            const message = error && error.message || String(error);
+            const event = typeof ErrorEvent === 'function'
+              ? new ErrorEvent('error', { message, filename: url, error })
+              : new Event('error');
+            try { worker.dispatchEvent(event); } catch (_) {}
+          }
+
+          const VirtualWorker = class extends NativeWorker {
+            constructor(scriptURL, options = {}) {
+              const sourceUrl = new URL(String(scriptURL), CURRENT_PAGE_URL).href;
+              const bootstrapBlob = new Blob([bootstrapSource], { type: 'text/javascript' });
+              const bootstrapUrl = URL.createObjectURL(bootstrapBlob);
+              super(bootstrapUrl, options || {});
+
+              const channel = new MessageChannel();
+              const port = channel.port1;
+              const abortController = new AbortController();
+              const sockets = new Map();
+              let nextSocketId = 1;
+              let bootstrapRevoked = false;
+              const revokeBootstrap = () => {
+                if (bootstrapRevoked) return;
+                bootstrapRevoked = true;
+                URL.revokeObjectURL(bootstrapUrl);
+              };
+              const fail = error => {
+                if (abortController.signal.aborted) return;
+                abortController.abort();
+                dispatchWorkerStartupError(this, sourceUrl, error);
+              };
+
+              this.__wkWorkerPort = port;
+              this.__wkWorkerAbortController = abortController;
+              this.__wkWorkerSockets = sockets;
+              port.onmessage = async event => {
+                const message = event.data || {};
+                if (message.kind === 'bridge-ready') {
+                  revokeBootstrap();
+                  try {
+                    const type = options && options.type === 'module' ? 'module' : 'classic';
+                    const scripts = await fetchWorkerGraph(sourceUrl, type, abortController.signal);
+                    port.postMessage({
+                      kind: 'start',
+                      url: sourceUrl,
+                      type,
+                      scripts
+                    });
+                  } catch (error) {
+                    fail(error);
+                  }
+                  return;
+                }
+
+                if (message.kind === 'bootstrap-error') {
+                  fail(new Error(message.message || 'Worker bootstrap failed.'));
+                  return;
+                }
+
+                if (message.kind === 'cancel') {
+                  const controller = this.__wkWorkerRequests && this.__wkWorkerRequests.get(message.id);
+                  if (controller) controller.abort();
+                  return;
+                }
+
+                if (message.kind === 'ws-send') {
+                  const socket = sockets.get(message.socketId);
+                  if (socket && socket.readyState === 1) {
+                    try { socket.send(message.data); } catch (_) {}
+                  }
+                  return;
+                }
+
+                if (message.kind === 'ws-close') {
+                  const socket = sockets.get(message.socketId);
+                  if (socket) {
+                    try { socket.close(message.code, message.reason); } catch (_) {}
+                    sockets.delete(message.socketId);
+                  }
+                  return;
+                }
+
+                if (message.kind !== 'rpc') return;
+                if (message.operation === 'ws-open') {
+                  try {
+                    const socket = await pageEmulator.network.socket(
+                      message.payload.url,
+                      BASE_ORIGIN,
+                      message.payload.protocols
+                    );
+                    if (!socket || typeof socket.send !== 'function' || typeof socket.close !== 'function') {
+                      port.postMessage({ kind: 'rpc-result', id: message.id, response: { fallback: true } });
+                      return;
+                    }
+                    sockets.set(message.payload.socketId, socket);
+                    const forward = type => event => {
+                      const outgoing = { kind: 'ws-event', socketId: message.payload.socketId, event: type };
+                      if (type === 'message') outgoing.data = event.data;
+                      if (type === 'close') {
+                        outgoing.code = event.code;
+                        outgoing.reason = event.reason;
+                        outgoing.wasClean = event.wasClean;
+                      }
+                      try { port.postMessage(outgoing); } catch (_) {}
+                      if (type === 'close') sockets.delete(message.payload.socketId);
+                    };
+                    if (typeof socket.addEventListener === 'function') {
+                      for (const type of ['open', 'message', 'error', 'close']) socket.addEventListener(type, forward(type));
+                    } else {
+                      for (const type of ['open', 'message', 'error', 'close']) socket['on' + type] = forward(type);
+                    }
+                    port.postMessage({ kind: 'rpc-result', id: message.id, response: { fallback: false } });
+                  } catch (_) {
+                    port.postMessage({ kind: 'rpc-result', id: message.id, response: { fallback: true } });
+                  }
+                  return;
+                }
+
+                if (message.operation === 'fetch') {
+                  const controller = new AbortController();
+                  this.__wkWorkerRequests = this.__wkWorkerRequests || new Map();
+                  this.__wkWorkerRequests.set(message.id, controller);
+                  try {
+                    const payload = message.payload || {};
+                    const options = { ...(payload.options || {}), signal: controller.signal };
+                    if (payload.body && payload.body.byteLength) options.body = payload.body;
+                    const response = await pageEmulator.network.request(payload.url, BASE_ORIGIN, options, 'worker-fetch');
+                    const finalResponse = response || await originalFetch(new Request(payload.url, options));
+                    const body = await finalResponse.arrayBuffer();
+                    const status = finalResponse.status || 200;
+                    const responseData = {
+                      status,
+                      statusText: finalResponse.statusText || '',
+                      headers: Array.from(finalResponse.headers.entries()),
+                      url: finalResponse.url || payload.url,
+                      redirected: !!finalResponse.redirected,
+                      body
+                    };
+                    port.postMessage({
+                      kind: 'rpc-result',
+                      id: message.id,
+                      response: responseData
+                    }, body.byteLength ? [body] : []);
+                  } catch (error) {
+                    port.postMessage({ kind: 'rpc-result', id: message.id, error: error && error.message || String(error) });
+                  } finally {
+                    if (this.__wkWorkerRequests) this.__wkWorkerRequests.delete(message.id);
+                  }
+                }
+              };
+              if (port.start) port.start();
+
+              this.postMessage({ __wkEmulatorInit: true }, [channel.port2]);
+              const originalTerminate = this.terminate.bind(this);
+              this.terminate = () => {
+                abortController.abort();
+                for (const socket of sockets.values()) {
+                  try { socket.close(); } catch (_) {}
+                }
+                sockets.clear();
+                try { port.close(); } catch (_) {}
+                revokeBootstrap();
+                return originalTerminate();
+              };
+              this.addEventListener('error', () => {
+                abortController.abort();
+                revokeBootstrap();
+              }, { once: true });
+            }
+          };
+
+          Object.defineProperty(VirtualWorker, '__wkVirtualized', { value: true });
+          window.Worker = VirtualWorker;
+        })();
+
         (function() {
           const OriginalWebSocket = window.WebSocket;
           
