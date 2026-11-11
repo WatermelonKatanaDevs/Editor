@@ -1,0 +1,362 @@
+(function(global) {
+  'use strict';
+
+  const DATA_ID = 'wk-standalone-data';
+
+  function reportProgress(options, message) {
+    if (typeof options?.onProgress === 'function') options.onProgress(message);
+  }
+
+  async function fetchText(url, label) {
+    const response = await fetch(url, {cache:'no-store'});
+    if (!response.ok) throw new Error('Unable to fetch ' + label + ' (' + response.status + '): ' + url);
+    return await response.text();
+  }
+
+  function parseStringArray(source) {
+    const values = [];
+    let index = 0;
+
+    function skipTrivia() {
+      while (index < source.length) {
+        if (/\s/.test(source[index]) || source[index] === ',') {
+          index++;
+          continue;
+        }
+        if (source.slice(index, index + 2) === '//') {
+          index += 2;
+          while (index < source.length && source[index] !== '\n') index++;
+          continue;
+        }
+        if (source.slice(index, index + 2) === '/*') {
+          const end = source.indexOf('*/', index + 2);
+          if (end < 0) throw new Error('Unterminated comment in deployment asset list.');
+          index = end + 2;
+          continue;
+        }
+        break;
+      }
+    }
+
+    while (index < source.length) {
+      skipTrivia();
+      if (index >= source.length) break;
+      const quote = source[index];
+      if (quote !== '"' && quote !== "'") {
+        throw new Error('The deployment asset list must contain only string literals.');
+      }
+      index++;
+      let value = '';
+      let closed = false;
+      while (index < source.length) {
+        const char = source[index++];
+        if (char === quote) {
+          closed = true;
+          break;
+        }
+        if (char === '\\') {
+          if (index >= source.length) throw new Error('Invalid escape in deployment asset list.');
+          const escaped = source[index++];
+          const escapes = {n:'\n',r:'\r',t:'\t',b:'\b',f:'\f'};
+          if (escaped === 'u') {
+            const hex = source.slice(index, index + 4);
+            if (!/^[0-9a-f]{4}$/i.test(hex)) throw new Error('Invalid Unicode escape in deployment asset list.');
+            value += String.fromCharCode(parseInt(hex, 16));
+            index += 4;
+          } else {
+            value += Object.prototype.hasOwnProperty.call(escapes, escaped) ? escapes[escaped] : escaped;
+          }
+        } else {
+          value += char;
+        }
+      }
+      if (!closed) throw new Error('Unterminated string in deployment asset list.');
+      values.push(value);
+      skipTrivia();
+      if (index < source.length && source[index] !== ',') {
+        throw new Error('Unexpected expression in deployment asset list.');
+      }
+    }
+
+    if (!values.length) throw new Error('No deployment script dependencies were declared.');
+    if (new Set(values).size !== values.length) throw new Error('The deployment asset list contains duplicate entries.');
+    return values;
+  }
+
+  function extractDeploymentSources(html) {
+    const loaderStart = html.indexOf('window.__deploymentAssetsReady');
+    if (loaderStart < 0) throw new Error('deployment.html does not declare its deployment asset loader.');
+    const match = html.slice(loaderStart).match(/\bconst\s+sources\s*=\s*\[([\s\S]*?)\]\s*;/);
+    if (!match) throw new Error('Unable to locate the deployment page source list.');
+    return parseStringArray(match[1]);
+  }
+
+  function extractWorkersPath(html) {
+    const match = html.match(/\bconst\s+workers\s*=\s*await\s+fetch\(\s*(['"])([^'"]+)\1/);
+    if (!match) throw new Error('Unable to locate the deployment page workers.json dependency.');
+    return match[2];
+  }
+
+  function bytesToBase64(bytes) {
+    const chunks = [];
+    const chunkSize = 0x6000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      chunks.push(String.fromCharCode.apply(null, bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length))));
+    }
+    return btoa(chunks.join(''));
+  }
+
+  function textToBase64(value) {
+    return bytesToBase64(new TextEncoder().encode(String(value)));
+  }
+
+  function escapeJsonForHtml(value) {
+    return JSON.stringify(value)
+      .replace(/</g, '\\u003c')
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029');
+  }
+
+  function replaceOnce(source, search, replacement, label) {
+    const first = source.indexOf(search);
+    if (first < 0) throw new Error('The deployment template changed: unable to find ' + label + '.');
+    if (source.indexOf(search, first + search.length) >= 0) {
+      throw new Error('The deployment template changed: found multiple ' + label + ' anchors.');
+    }
+    return source.slice(0, first) + replacement + source.slice(first + search.length);
+  }
+
+  function createAssetLoader() {
+    return [
+      'window.__deploymentAssetsReady = (async function() {',
+      '  const dataNode = document.getElementById("wk-standalone-data");',
+      '  if (!dataNode) throw new Error("Standalone deployment data is missing.");',
+      '  const bundle = JSON.parse(dataNode.textContent || "{}");',
+      '  window.__WKStandaloneData = bundle;',
+      '  window.__peerLayer = String(bundle.runConfig && bundle.runConfig.peerLayer || "peer").trim() || "peer";',
+      '  const dataUrl = asset => "data:text/javascript;charset=utf-8;base64," + asset.base64;',
+      '  for (const asset of bundle.assets) {',
+      '    const script = document.createElement("script");',
+      '    script.async = false;',
+      '    script.setAttribute("data-raw-src", asset.url);',
+      '    if (/\\/peer\\.js$/.test(asset.path)) script.setAttribute("data-layer", window.__peerLayer);',
+      '    script.src = dataUrl(asset);',
+      '    await new Promise((resolve, reject) => {',
+      '      script.addEventListener("load", resolve, {once:true});',
+      '      script.addEventListener("error", () => reject(new Error("Failed to initialize embedded deployment dependency: " + asset.path)), {once:true});',
+      '      document.head.appendChild(script);',
+      '    });',
+      '  }',
+      '  if (window.NodeEmulator && window.NodeEmulator.prototype && typeof window.NodeEmulator.prototype._config === "function") {',
+      '    const originalConfig = window.NodeEmulator.prototype._config;',
+      '    const parserUrl = path => {',
+      '      const asset = bundle.assets.find(item => item.path === path);',
+      '      if (!asset) throw new Error("Embedded Node parser dependency is missing: " + path);',
+      '      return dataUrl(asset);',
+      '    };',
+      '    window.NodeEmulator.prototype._config = function(snapshot) {',
+      '      const config = originalConfig.call(this, snapshot);',
+      '      config.moduleParserUrls = {',
+      '        acorn: parserUrl("browser/external/acorn.js"),',
+      '        astring: parserUrl("browser/external/astring.js")',
+      '      };',
+      '      if (location.protocol === "file:") {',
+      '        config.hostOrigin = "http://127.0.0.1";',
+      '        config.hostURL = "http://127.0.0.1/";',
+      '        config.currentPageUrl = "http://127.0.0.1/";',
+      '        config.baseOrigin = "http://127.0.0.1/";',
+      '      }',
+      '      return config;',
+      '    };',
+      '  }',
+      '  return true;',
+      '})();'
+    ].join('\n');
+  }
+
+  function patchDeploymentPage(html, bundle) {
+    html = replaceOnce(
+      html,
+      'async function getRepositoryInfo(owner, repo) {',
+      'async function getRepositoryInfo(owner, repo) {\n    if (window.__WKStandaloneData) return {defaultBranch:"main"};',
+      'repository lookup function'
+    );
+
+    const archiveBranch = [
+      'async function loadArchive(owner, repo, ref) {',
+      '    if (window.__WKStandaloneData) {',
+      '      const binary = atob(window.__WKStandaloneData.archive);',
+      '      const bytes = new Uint8Array(binary.length);',
+      '      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);',
+      '      return new Blob([bytes], {type:"application/zip"});',
+      '    }'
+    ].join('\n');
+    html = replaceOnce(html, 'async function loadArchive(owner, repo, ref) {', archiveBranch, 'project archive loader');
+
+    html = replaceOnce(
+      html,
+      'const workers = await fetch(\'workers.json\'',
+      'const workers = window.__WKStandaloneData ? window.__WKStandaloneData.workers : await fetch(\'workers.json\'',
+      'workers.json loader'
+    );
+
+    const paramsBranch = [
+      'const params = new URLSearchParams(location.search);',
+      '  if (window.__WKStandaloneData) {',
+      '    const data = window.__WKStandaloneData;',
+      '    params.set("github", "https://github.com/standalone/embedded-project");',
+      '    params.set("branch", "main");',
+      '    params.set("commit", "0000000000000000000000000000000000000000");',
+      '    if (!params.has("path")) params.set("path", String(data.path || "/"));',
+      '    params.set("usePeerServer", data.runConfig && data.runConfig.usePeerServer ? "1" : "0");',
+      '  }'
+    ].join('\n');
+    html = replaceOnce(html, 'const params = new URLSearchParams(location.search);', paramsBranch, 'deployment query parameters');
+
+    html = replaceOnce(
+      html,
+      'const runConfigFromProject = readJSON(fs, \'/\.editor/config.json\');',
+      'const runConfigFromProject = {...readJSON(fs, \'/\.editor/config.json\'), ...(window.__WKStandaloneData?.runConfig || {})};',
+      'project run configuration'
+    );
+
+    const loaderMarker = 'window.__deploymentAssetsReady = (async function() {';
+    const loaderStart = html.indexOf(loaderMarker);
+    const scriptStart = html.lastIndexOf('<script', loaderStart);
+    const scriptEnd = html.indexOf('</script>', loaderStart);
+    if (loaderStart < 0 || scriptStart < 0 || scriptEnd < 0) {
+      throw new Error('Unable to replace the deployment page asset loader.');
+    }
+
+    const payloadTag = '<script type="application/json" id="' + DATA_ID + '">' +
+      escapeJsonForHtml(bundle) + '</script>\n';
+    const loaderTag = '<script>\n' + createAssetLoader() + '\n</script>';
+    html = html.slice(0, scriptStart) + payloadTag + loaderTag + html.slice(scriptEnd + 9);
+
+    const safeTitle = String(bundle.projectName || 'Workspace')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>' + safeTitle + '</title>');
+    return html;
+  }
+
+  async function compile(snapshot, options = {}) {
+    if (!snapshot || !snapshot.archive || typeof snapshot.archive.arrayBuffer !== 'function') {
+      throw new TypeError('The Editor did not provide a project archive.');
+    }
+
+    const editorUrl = new URL('.', options.editorUrl || global.location.href);
+    const deploymentUrl = new URL('deployment.html', editorUrl);
+    reportProgress(options, 'Reading deployment page…');
+    const deploymentHtml = await fetchText(deploymentUrl.href, 'deployment.html');
+    const sources = extractDeploymentSources(deploymentHtml);
+    const workersPath = extractWorkersPath(deploymentHtml);
+
+    reportProgress(options, 'Embedding deployment dependencies…');
+    const assets = await Promise.all(sources.map(async (path, index) => {
+      const url = new URL(path, deploymentUrl);
+      const content = await fetchText(url.href, path);
+      reportProgress(options, 'Embedded dependency ' + (index + 1) + ' of ' + sources.length + '…');
+      return {path, url:url.href, base64:textToBase64(content)};
+    }));
+
+    const workersUrl = new URL(workersPath, deploymentUrl);
+    const workersText = await fetchText(workersUrl.href, workersPath);
+    let workers;
+    try {
+      workers = JSON.parse(workersText);
+    } catch (error) {
+      throw new Error('The deployment workers configuration is invalid JSON: ' + error.message);
+    }
+    if (!workers || typeof workers !== 'object' || Array.isArray(workers)) {
+      throw new Error('The deployment workers configuration must be a JSON object.');
+    }
+
+    reportProgress(options, 'Embedding project archive…');
+    const archiveBytes = new Uint8Array(await snapshot.archive.arrayBuffer());
+    if (!archiveBytes.length) throw new Error('The current project archive is empty.');
+
+    const runConfig = snapshot.runConfig && typeof snapshot.runConfig === 'object'
+      ? snapshot.runConfig
+      : {};
+    const bundle = {
+      version: 1,
+      projectName: String(snapshot.projectName || 'Workspace'),
+      archive: bytesToBase64(archiveBytes),
+      assets,
+      workers,
+      runConfig,
+      path: String(runConfig.path || '/')
+    };
+
+    reportProgress(options, 'Building standalone HTML…');
+    return patchDeploymentPage(deploymentHtml, bundle);
+  }
+
+  function safeFilename(value) {
+    const name = String(value || 'Workspace')
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+      .replace(/\s+/g, ' ')
+      .replace(/[. ]+$/g, '')
+      .trim();
+    return (name || 'Workspace') + '.html';
+  }
+
+  function download(html, filename) {
+    const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = safeFilename(filename).replace(/\.html$/i, '') + '.html';
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }
+
+  function installButton() {
+    const button = document.getElementById('compilePageBtn');
+    if (!button || button.dataset.standaloneExportInstalled === '1') return;
+    button.dataset.standaloneExportInstalled = '1';
+
+    button.addEventListener('click', async () => {
+      if (button.dataset.busy === '1' || button.disabled) return;
+      button.dataset.busy = '1';
+      button.disabled = true;
+      const originalText = button.textContent;
+      try {
+        const editor = global.EditorApp;
+        if (!editor || typeof editor.getSinglePageSnapshot !== 'function') {
+          throw new Error('The Editor standalone export API is unavailable.');
+        }
+        const snapshot = await editor.getSinglePageSnapshot();
+        const html = await compile(snapshot, {
+          editorUrl: global.location.href,
+          onProgress: message => { button.textContent = message; }
+        });
+        download(html, snapshot.projectName);
+        button.textContent = 'Page Downloaded';
+      } catch (error) {
+        button.textContent = 'Compile Failed';
+        if (typeof global.EditorApp?.logError === 'function') global.EditorApp.logError(error);
+        else console.error(error);
+      } finally {
+        delete button.dataset.busy;
+        setTimeout(() => {
+          button.textContent = originalText;
+          button.disabled = false;
+        }, 1800);
+      }
+    });
+  }
+
+  global.StandalonePageExporter = Object.freeze({compile});
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', installButton, {once:true});
+  } else {
+    installButton();
+  }
+})(window);
