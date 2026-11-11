@@ -59,7 +59,7 @@
     // provide lexical CommonJS/AMD bindings that are not visible on window.
     const evaluate = new Function(
       'globalThis', 'exports', 'module', 'define', 'self',
-      source + '\\n;return globalThis.acorn;'
+      source + '\n;return globalThis.acorn;'
     );
     const acorn = evaluate(global, undefined, undefined, undefined, global);
     if (!isAcornParser(acorn)) {
