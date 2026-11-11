@@ -3321,6 +3321,19 @@
                 });
                 await visit(dependencyUrl);
               }
+
+              // Monaco's workerMain dynamically calls importScripts() with
+              // the AMD loader URL. That URL is built at runtime from
+              // MonacoEnvironment.baseUrl, so it cannot be found by scanning
+              // literal imports. Its worker entry sets baseUrl to the Monaco
+              // distribution root; the loader is therefore /vs/loader.js.
+              try {
+                const workerPath = new URL(url).pathname;
+                if (type === 'classic' && /\/vs\/base\/worker\/workerMain\.js$/.test(workerPath)) {
+                  const amdLoaderUrl = new URL('../../loader.js', url).href;
+                  await visit(amdLoaderUrl);
+                }
+              } catch (_) {}
             }
             await visit(rootUrl);
             return Array.from(scripts.values());
