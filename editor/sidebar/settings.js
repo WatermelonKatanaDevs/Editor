@@ -39,6 +39,15 @@
             <h3>Export</h3>
             <label class="setting-check"><input id="setting-compile-minify" type="checkbox"><span>Minify HTML, CSS, and JavaScript when compiling</span></label>
             <p class="editor-settings-note">Reduces the compiled project size. Original workspace files are left unchanged; files the parser cannot safely process are kept as-is.</p>
+            <label class="setting-check"><input id="setting-compile-base122" type="checkbox"><span>Use Base122 encoding for the embedded ZIP</span></label>
+            <p class="editor-settings-note">Produces a smaller HTML file than Base64, with a little extra decoding work when the standalone page opens.</p>
+            <label>Archive compression
+              <select id="setting-compile-compression">
+                <option value="6">Standard (DEFLATE level 6)</option>
+                <option value="9">Maximum (DEFLATE level 9)</option>
+              </select>
+            </label>
+            <p class="editor-settings-note">Controls ZIP compression during Compile Page. Maximum compression may take longer on large projects.</p>
           </div>
           <div class="editor-settings-section">
             <h3>Image Editing</h3>
@@ -79,6 +88,8 @@
       const ignoreNodeModules = $('setting-ignore-node-modules');
       const piskelAutoSave = $('setting-piskel-auto-save');
       const compileMinify = $('setting-compile-minify');
+      const compileBase122 = $('setting-compile-base122');
+      const compileCompression = $('setting-compile-compression');
       try {
         const stored = localStorage.getItem('node-editor.compile.minify');
         compileMinify.checked = stored === null ? true : stored === 'true';
@@ -87,6 +98,24 @@
       }
       compileMinify.onchange = () => {
         try { localStorage.setItem('node-editor.compile.minify', compileMinify.checked ? 'true' : 'false'); } catch (_) {}
+      };
+      try {
+        const stored = localStorage.getItem('node-editor.compile.base122');
+        compileBase122.checked = stored === 'true';
+      } catch (_) {
+        compileBase122.checked = false;
+      }
+      compileBase122.onchange = () => {
+        try { localStorage.setItem('node-editor.compile.base122', compileBase122.checked ? 'true' : 'false'); } catch (_) {}
+      };
+      try {
+        const stored = localStorage.getItem('node-editor.compile.compression');
+        compileCompression.value = stored === '6' ? '6' : '9';
+      } catch (_) {
+        compileCompression.value = '9';
+      }
+      compileCompression.onchange = () => {
+        try { localStorage.setItem('node-editor.compile.compression', compileCompression.value === '6' ? '6' : '9'); } catch (_) {}
       };
       const b = $('setting-hide-browser-bar');
       const defaultTab = $('setting-browser-default-tab');
