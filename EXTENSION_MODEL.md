@@ -122,4 +122,6 @@ The bridge is a general object-reference RPC layer rather than an API-method all
 
 There are two JavaScript boundaries that cannot be erased by `postMessage`: primitive remote property reads and DOM operations are asynchronous, and DOM methods cannot synchronously return live nodes to another origin. Code that needs the Editor's DOM or synchronous Editor APIs should therefore execute in the Editor document itself and call the embedding page through the bridge. The WatermelonKatana integration follows that model: it runs in the Editor origin, while authentication, same-origin WK API requests, and host navigation are provided by the embedding page.
 
+The accepted parent-origin list is stored in `editor/remote-bridge-config.json` in the Editor repository. Add a normalized origin there when deploying a new trusted embedding host. The receiver checks both `event.source` and `event.origin`, checks the optional `config.origin`, and only loads an integration script from that same approved origin.
+
 Always pass an exact `targetOrigin`; never use `*` for the connection. The receiver also verifies that the initial connection message came from its own parent window. Treat every exposed host method as a capability and expose only the operations that the embedded application needs.
