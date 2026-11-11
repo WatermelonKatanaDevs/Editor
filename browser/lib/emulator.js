@@ -3225,7 +3225,8 @@
             const scripts = new Map();
             async function visit(url) {
               if (scripts.has(url)) return;
-              const response = await pageEmulator.network.request(url, BASE_ORIGIN, { signal }, 'worker');
+              let response = await pageEmulator.network.request(url, BASE_ORIGIN, { signal }, 'worker');
+              if (!response) response = await originalFetch(new Request(url, { signal }));
               if (!response || !response.ok) {
                 throw new Error('Failed to load worker script through the virtual network: ' + url +
                   (response ? ' (HTTP ' + response.status + ')' : ''));
@@ -3264,13 +3265,51 @@
             try { worker.dispatchEvent(event); } catch (_) {}
           }
 
+          const nativeRevokeObjectURL = window.URL.revokeObjectURL.bind(window.URL);
+          const retainedWorkerBlobUrls = new Map();
+          if (!window.URL.revokeObjectURL.__wkWorkerAware) {
+            const revokeObjectURL = function(url) {
+              const key = String(url);
+              const retained = retainedWorkerBlobUrls.get(key);
+              if (retained && retained.pending > 0) {
+                retained.revokeRequested = true;
+                return;
+              }
+              return nativeRevokeObjectURL(key);
+            };
+            Object.defineProperty(revokeObjectURL, '__wkWorkerAware', { value: true });
+            window.URL.revokeObjectURL = revokeObjectURL;
+          }
+
+          function retainWorkerBlobUrl(url) {
+            if (!String(url).startsWith('blob:')) return () => {};
+            const key = String(url);
+            const retained = retainedWorkerBlobUrls.get(key) || { pending: 0, revokeRequested: false };
+            retained.pending++;
+            retainedWorkerBlobUrls.set(key, retained);
+            let released = false;
+            return () => {
+              if (released) return;
+              released = true;
+              retained.pending = Math.max(0, retained.pending - 1);
+              if (!retained.pending) {
+                retainedWorkerBlobUrls.delete(key);
+                if (retained.revokeRequested) nativeRevokeObjectURL(key);
+              }
+            };
+          }
+
           const VirtualWorker = class extends NativeWorker {
             constructor(scriptURL, options = {}) {
               const sourceUrl = new URL(String(scriptURL), CURRENT_PAGE_URL).href;
+              const releaseSourceUrl = retainWorkerBlobUrl(sourceUrl);
               const bootstrapBlob = new Blob([bootstrapSource], { type: 'text/javascript' });
               const bootstrapUrl = URL.createObjectURL(bootstrapBlob);
               super(bootstrapUrl, options || {});
 
+              this.__wkPendingInitMessages = [];
+              this.__wkStartSent = false;
+              this.__wkReleaseSourceUrl = releaseSourceUrl;
               const channel = new MessageChannel();
               const port = channel.port1;
               const abortController = new AbortController();
@@ -3285,7 +3324,9 @@
               const fail = error => {
                 if (abortController.signal.aborted) return;
                 abortController.abort();
+                releaseSourceUrl();
                 dispatchWorkerStartupError(this, sourceUrl, error);
+                try { this.terminate(); } catch (_) {}
               };
 
               this.__wkWorkerPort = port;
@@ -3297,14 +3338,41 @@
                   revokeBootstrap();
                   try {
                     const type = options && options.type === 'module' ? 'module' : 'classic';
-                    const scripts = await fetchWorkerGraph(sourceUrl, type, abortController.signal);
+                    const scriptsByUrl = new Map();
+                    const rootScripts = await fetchWorkerGraph(sourceUrl, type, abortController.signal);
+                    for (const entry of rootScripts) scriptsByUrl.set(entry.url, entry);
+
+                    // The Node worker receives its parser URLs in a later init
+                    // message and calls importScripts(String(url)) dynamically.
+                    // Fetch those dependencies before allowing that init message
+                    // to reach the worker's synchronous importScripts call.
+                    const parserUrls = new Set();
+                    for (const pending of this.__wkPendingInitMessages) {
+                      const urls = pending && pending.config && pending.config.moduleParserUrls || {};
+                      for (const value of Object.values(urls)) {
+                        if (typeof value === 'string' && value) parserUrls.add(new URL(value, sourceUrl).href);
+                      }
+                    }
+                    for (const parserUrl of parserUrls) {
+                      const parserScripts = await fetchWorkerGraph(parserUrl, 'classic', abortController.signal);
+                      for (const entry of parserScripts) scriptsByUrl.set(entry.url, entry);
+                    }
+
+                    const scripts = Array.from(scriptsByUrl.values());
+                    this.__wkStartSent = true;
                     port.postMessage({
                       kind: 'start',
                       url: sourceUrl,
                       type,
                       scripts
                     });
+                    releaseSourceUrl();
+                    const pendingMessages = this.__wkPendingInitMessages.splice(0);
+                    for (const pending of pendingMessages) {
+                      NativeWorker.prototype.postMessage.call(this, pending);
+                    }
                   } catch (error) {
+                    releaseSourceUrl();
                     fail(error);
                   }
                   return;
@@ -3411,6 +3479,7 @@
               this.postMessage({ __wkEmulatorInit: true }, [channel.port2]);
               const originalTerminate = this.terminate.bind(this);
               this.terminate = () => {
+                releaseSourceUrl();
                 abortController.abort();
                 for (const socket of sockets.values()) {
                   try { socket.close(); } catch (_) {}
@@ -3424,6 +3493,26 @@
                 abortController.abort();
                 revokeBootstrap();
               }, { once: true });
+            }
+
+            postMessage(message, transferOrOptions) {
+              const parserUrls = message && message.type === 'init'
+                ? message.config && message.config.moduleParserUrls
+                : null;
+              if (parserUrls && !this.__wkStartSent) {
+                const transferList = Array.isArray(transferOrOptions)
+                  ? transferOrOptions
+                  : transferOrOptions && Array.isArray(transferOrOptions.transfer)
+                    ? transferOrOptions.transfer
+                    : [];
+                // Preserve postMessage's synchronous clone/transfer behavior
+                // while holding this one init message until its runtime scripts
+                // have been fetched and registered in the worker bootstrap.
+                const cloned = structuredClone(message, transferList.length ? { transfer: transferList } : undefined);
+                this.__wkPendingInitMessages.push(cloned);
+                return;
+              }
+              return NativeWorker.prototype.postMessage.call(this, message, transferOrOptions);
             }
           };
 
