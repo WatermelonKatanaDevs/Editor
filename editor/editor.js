@@ -1772,7 +1772,8 @@ window.__editorInitPromise = (async function () {
 
     const required = {
       ...(rootManifest.dependencies || {}),
-      ...(rootManifest.devDependencies || {})
+      ...(rootManifest.devDependencies || {}),
+      ...(rootManifest.optionalDependencies || {})
     };
     for (const [name, meta] of Object.entries(rootManifest.peerDependenciesMeta || {})) {
       if (!meta?.optional && rootManifest.peerDependencies?.[name]) required[name] = rootManifest.peerDependencies[name];
