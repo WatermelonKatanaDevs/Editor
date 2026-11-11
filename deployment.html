@@ -198,7 +198,7 @@ window.__deploymentNetworkReady = (async function() {
     console.error('[Deployment startup]', error);
     hideProgress();
     status.textContent = error?.stack
-      ? (error.message || String(error)) + '\\n\\n' + error.stack
+      ? (error.message || String(error)) + '\n\n' + error.stack
       : (error?.message || String(error));
     status.className = 'error';
     if (!status.isConnected) document.body.appendChild(status);
