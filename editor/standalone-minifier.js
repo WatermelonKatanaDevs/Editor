@@ -45,24 +45,25 @@
     if (existing) return existing;
 
     const url = new URL(ACORN_PATH, editorUrl || global.location.href).href;
-    await new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = url;
-      script.async = true;
-      script.onload = resolve;
-      script.onerror = () => reject(new Error('Unable to load the local Acorn parser required for JavaScript minification: ' + url));
-      document.head.appendChild(script);
-    });
+    const response = await fetch(url, {cache:'force-cache'});
+    if (!response.ok) {
+      throw new Error('Unable to load the local Acorn parser (' + response.status + '): ' + url);
+    }
+    const source = await response.text();
+    if (!/exports\.tokenizer\s*=\s*tokenizer/.test(source) ||
+        !/exports\.parse\s*=\s*parse/.test(source)) {
+      throw new Error('The local Acorn resource does not appear to contain the expected parser build: ' + url);
+    }
 
-    const acorn = findAcornParser();
-    if (!acorn) {
-      const details = {
-        acorn: !!global.acorn,
-        Acorn: !!global.Acorn,
-        commonJSExports: !!(global.module && global.module.exports),
-        exports: !!global.exports
-      };
-      throw new Error('The local Acorn script loaded, but no usable parser API (parse + tokenizer) was exposed. Checked browser and CommonJS exports. ' + JSON.stringify(details));
+    // Force the UMD build down its browser-global branch. The Editor can
+    // provide lexical CommonJS/AMD bindings that are not visible on window.
+    const evaluate = new Function(
+      'globalThis', 'exports', 'module', 'define', 'self',
+      source + '\\n;return globalThis.acorn;'
+    );
+    const acorn = evaluate(global, undefined, undefined, undefined, global);
+    if (!isAcornParser(acorn)) {
+      throw new Error('The local Acorn build executed but did not expose parse() and tokenizer().');
     }
     return acorn;
   }
