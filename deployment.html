@@ -63,6 +63,9 @@ window.__deploymentAssetsReady = (async function() {
 </div>
 <script>
 window.__deploymentNetworkReady = (async function() {
+  if (!window.__deploymentAssetsReady || typeof window.__deploymentAssetsReady.then !== 'function') {
+    throw new Error('The deployment asset loader did not initialize.');
+  }
   await window.__deploymentAssetsReady;
   const embeddedWorkers = window.__WKStandaloneData?.workers;
   const validWorkers = value => !!value && typeof value === 'object' && !Array.isArray(value);
