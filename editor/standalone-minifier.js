@@ -22,9 +22,27 @@
     }
   }
 
+  function isAcornParser(candidate) {
+    return !!candidate && typeof candidate.parse === 'function' &&
+      typeof candidate.tokenizer === 'function';
+  }
+
+  function findAcornParser() {
+    // The UMD build normally publishes window.acorn. Some editor/runtime
+    // environments expose CommonJS globals, however, causing Acorn's UMD
+    // wrapper to populate exports/module.exports instead.
+    const candidates = [
+      global.acorn,
+      global.Acorn,
+      global.module && global.module.exports,
+      global.exports
+    ];
+    return candidates.find(isAcornParser) || null;
+  }
+
   async function loadAcorn(editorUrl) {
-    if (global.acorn?.tokenizer && global.acorn?.parse) return global.acorn;
-    if (global.Acorn?.tokenizer && global.Acorn?.parse) return global.Acorn;
+    const existing = findAcornParser();
+    if (existing) return existing;
 
     const url = new URL(ACORN_PATH, editorUrl || global.location.href).href;
     await new Promise((resolve, reject) => {
@@ -32,13 +50,19 @@
       script.src = url;
       script.async = true;
       script.onload = resolve;
-      script.onerror = () => reject(new Error('Unable to load the local Acorn parser required for JavaScript minification.'));
+      script.onerror = () => reject(new Error('Unable to load the local Acorn parser required for JavaScript minification: ' + url));
       document.head.appendChild(script);
     });
 
-    const acorn = global.acorn || global.Acorn;
-    if (!acorn?.tokenizer || !acorn?.parse) {
-      throw new Error('The local Acorn parser loaded without exposing its tokenizer.');
+    const acorn = findAcornParser();
+    if (!acorn) {
+      const details = {
+        acorn: !!global.acorn,
+        Acorn: !!global.Acorn,
+        commonJSExports: !!(global.module && global.module.exports),
+        exports: !!global.exports
+      };
+      throw new Error('The local Acorn script loaded, but no usable parser API (parse + tokenizer) was exposed. Checked browser and CommonJS exports. ' + JSON.stringify(details));
     }
     return acorn;
   }
