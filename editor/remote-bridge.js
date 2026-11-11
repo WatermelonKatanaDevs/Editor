@@ -337,22 +337,26 @@
     });
   }
 
-  const bridgeConfigUrl = new URL('remote-bridge-config.json', global.document.currentScript?.src || global.location.href);
-  const bridgeConfigReady = fetch(bridgeConfigUrl, {cache:'no-store'})
-    .then(async response => {
-      if (!response.ok) throw new Error('Remote bridge config request failed (' + response.status + ').');
-      const config = await response.json();
-      if (!config || !Array.isArray(config.allowedParentOrigins)) {
-        throw new Error('Remote bridge config must define allowedParentOrigins.');
-      }
-      return config;
-    })
-    .catch(error => {
-      console.error('[EditorRemoteBridge] Unable to load origin allowlist:', error);
-      return {allowedParentOrigins:[]};
-    });
-
   function acceptParent() {
+    // The same library is also loaded by the embedding page to create the
+    // outgoing connection. Only an actual iframe needs the receiver side.
+    if (global.parent === global) return;
+
+    const bridgeConfigUrl = new URL('remote-bridge-config.json', global.document.currentScript?.src || global.location.href);
+    const bridgeConfigReady = fetch(bridgeConfigUrl, {cache:'no-store'})
+      .then(async response => {
+        if (!response.ok) throw new Error('Remote bridge config request failed (' + response.status + ').');
+        const config = await response.json();
+        if (!config || !Array.isArray(config.allowedParentOrigins)) {
+          throw new Error('Remote bridge config must define allowedParentOrigins.');
+        }
+        return config;
+      })
+      .catch(error => {
+        console.error('[EditorRemoteBridge] Unable to load origin allowlist:', error);
+        return {allowedParentOrigins:[]};
+      });
+
     global.addEventListener('message', async event => {
       if (event.source !== global.parent || !event.ports?.[0]) return;
       if (event.data?.protocol !== PROTOCOL || event.data?.type !== 'connect') return;
