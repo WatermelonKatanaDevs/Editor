@@ -103,12 +103,70 @@
   }
 
   function bytesToBase64(bytes) {
-    const chunks = [];
+    let binary = '';
     const chunkSize = 0x6000;
     for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-      chunks.push(String.fromCharCode.apply(null, bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length))));
+      binary += String.fromCharCode.apply(null, bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
     }
-    return btoa(chunks.join(''));
+    return btoa(binary);
+  }
+
+  async function blobToBase64Chunks(blob, options = {}) {
+    if (!blob || typeof blob.size !== 'number') {
+      throw new TypeError('The project archive is not a Blob.');
+    }
+
+    // Each encoded part is independently decodable. Keeping the raw binary
+    // string below a few megabytes avoids JavaScript's maximum string length.
+    const chunkSize = 3 * 1024 * 1024;
+    const chunks = [];
+    let processed = 0;
+
+    async function encodePart(bytes) {
+      if (!bytes.length) return;
+      chunks.push(bytesToBase64(bytes));
+      processed += bytes.length;
+      reportProgress(options, 'Embedding project archive… ' +
+        Math.min(100, Math.round(processed / Math.max(1, blob.size) * 100)) + '%');
+    }
+
+    if (typeof blob.stream === 'function') {
+      const reader = blob.stream().getReader();
+      let buffer = new Uint8Array(chunkSize);
+      let used = 0;
+      try {
+        while (true) {
+          const result = await reader.read();
+          if (result.done) break;
+          const incoming = result.value instanceof Uint8Array ? result.value : new Uint8Array(result.value);
+          let offset = 0;
+          while (offset < incoming.length) {
+            const count = Math.min(chunkSize - used, incoming.length - offset);
+            buffer.set(incoming.subarray(offset, offset + count), used);
+            used += count;
+            offset += count;
+            if (used === chunkSize) {
+              await encodePart(buffer);
+              buffer = new Uint8Array(chunkSize);
+              used = 0;
+            }
+          }
+        }
+      } finally {
+        try { reader.releaseLock(); } catch (_) {}
+      }
+      if (used) await encodePart(buffer.subarray(0, used));
+    } else if (typeof blob.slice === 'function') {
+      for (let offset = 0; offset < blob.size; offset += chunkSize) {
+        const bytes = new Uint8Array(await blob.slice(offset, Math.min(offset + chunkSize, blob.size)).arrayBuffer());
+        await encodePart(bytes);
+      }
+    } else {
+      throw new TypeError('The browser cannot stream the project archive.');
+    }
+
+    if (!chunks.length) throw new Error('The current project archive is empty.');
+    return chunks;
   }
 
   function textToBase64(value) {
@@ -190,10 +248,16 @@
     const archiveBranch = [
       'async function loadArchive(owner, repo, ref) {',
       '    if (window.__WKStandaloneData) {',
-      '      const binary = atob(window.__WKStandaloneData.archive);',
-      '      const bytes = new Uint8Array(binary.length);',
-      '      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);',
-      '      return new Blob([bytes], {type:"application/zip"});',
+      '      const archiveParts = [];',
+      '      const archiveChunks = document.querySelectorAll("script.wk-standalone-archive-chunk");',
+      '      if (!archiveChunks.length) throw new Error("The standalone project archive is missing.");',
+      '      for (const node of archiveChunks) {',
+      '        const binary = atob(node.textContent.trim());',
+      '        const bytes = new Uint8Array(binary.length);',
+      '        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);',
+      '        archiveParts.push(bytes);',
+      '      }',
+      '      return new Blob(archiveParts, {type:"application/zip"});',
       '    }'
     ].join('\n');
     html = replaceOnce(html, 'async function loadArchive(owner, repo, ref) {', archiveBranch, 'project archive loader');
@@ -233,10 +297,16 @@
       throw new Error('Unable to replace the deployment page asset loader.');
     }
 
-    const payloadTag = '<script type="application/json" id="' + DATA_ID + '">' +
-      escapeJsonForHtml(bundle) + '</script>\n';
+    const {archiveChunks, ...metadata} = bundle;
+    const metadataJson = escapeJsonForHtml(metadata);
+    const payloadParts = [
+      '<script type="application/json" id="' + DATA_ID + '">' + metadataJson + '</script>\n'
+    ];
+    for (const chunk of archiveChunks) {
+      payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\n');
+    }
     const loaderTag = '<script>\n' + createAssetLoader() + '\n</script>';
-    html = html.slice(0, scriptStart) + payloadTag + loaderTag + html.slice(scriptEnd + 9);
+    return new Blob([html.slice(0, scriptStart), ...payloadParts, loaderTag, html.slice(scriptEnd + 9)], {type:'text/html;charset=utf-8'});
 
     const safeTitle = String(bundle.projectName || 'Workspace')
       .replace(/&/g, '&amp;')
@@ -280,8 +350,7 @@
     }
 
     reportProgress(options, 'Embedding project archive…');
-    const archiveBytes = new Uint8Array(await snapshot.archive.arrayBuffer());
-    if (!archiveBytes.length) throw new Error('The current project archive is empty.');
+    const archiveChunks = await blobToBase64Chunks(snapshot.archive, options);
 
     const runConfig = snapshot.runConfig && typeof snapshot.runConfig === 'object'
       ? snapshot.runConfig
@@ -289,7 +358,7 @@
     const bundle = {
       version: 1,
       projectName: String(snapshot.projectName || 'Workspace'),
-      archive: bytesToBase64(archiveBytes),
+      archiveChunks,
       assets,
       workers,
       runConfig,
@@ -346,8 +415,8 @@
         button.textContent = 'Page Downloaded';
       } catch (error) {
         button.textContent = 'Compile Failed';
-        if (typeof global.EditorApp?.logError === 'function') global.EditorApp.logError(error);
-        else console.error(error);
+        button.title = error?.message || String(error);
+        console.error('[Compile Page]', error);
       } finally {
         delete button.dataset.busy;
         setTimeout(() => {
