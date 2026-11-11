@@ -52,15 +52,15 @@
           throw new Error('Unable to load the local Acorn parser (' + response.status + '): ' + url);
         }
         const source = await response.text();
-        if (!/exports\\.tokenizer\\s*=\\s*tokenizer/.test(source) ||
-            !/exports\\.parse\\s*=\\s*parse/.test(source)) {
+        if (!/exports\.tokenizer\s*=\s*tokenizer/.test(source) ||
+            !/exports\.parse\s*=\s*parse/.test(source)) {
           throw new Error('The local Acorn resource does not appear to contain the expected parser build: ' + url);
         }
         // Force the UMD build down its browser-global branch. The Editor can
         // provide lexical CommonJS/AMD bindings that are not visible on window.
         const evaluate = new Function(
           'globalThis', 'exports', 'module', 'define', 'self',
-          source + '\\n;return globalThis.acorn;'
+          source + '\n;return globalThis.acorn;'
         );
         const acorn = evaluate(global, undefined, undefined, undefined, global);
         if (!isAcornParser(acorn)) {
@@ -151,6 +151,9 @@
       output += entry.raw;
       previous = entry;
     }
+    // Never emit a token-concatenated result unless the parser accepts it.
+    // This catches ASI/separator edge cases and lets callers retain the original.
+    acorn.parse(output, {...parseOptions, sourceType});
     return output;
   }
 
