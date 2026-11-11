@@ -3960,7 +3960,8 @@ window.__editorInitPromise = (async function () {
       return {
         archive: await state.fs.exportZip(),
         projectName: state.projectName || 'Workspace',
-        runConfig: state.runConfig?.config ? {...state.runConfig.config} : {}
+        runConfig: state.runConfig?.config ? {...state.runConfig.config} : {},
+        deploymentSettings: state.deploymentSettings ? {...state.deploymentSettings} : {}
       };
     },
     getDeploymentPreview: () => {
