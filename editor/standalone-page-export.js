@@ -256,6 +256,7 @@
       '        const bytes = new Uint8Array(binary.length);',
       '        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);',
       '        archiveParts.push(bytes);',
+      '        node.remove();',
       '      }',
       '      return new Blob(archiveParts, {type:"application/zip"});',
       '    }'
