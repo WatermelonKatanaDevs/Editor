@@ -137,9 +137,9 @@
 
     async function encodePart(bytes) {
       if (!bytes.length) return;
-      chunks.push(encoding === 'raw1252' ? encodeRaw1252Chunk(bytes) : bytesToBase64(bytes));
+      chunks.push(encoding === 'iso8859-2' ? encodeISO88592Chunk(bytes) : bytesToBase64(bytes));
       processed += bytes.length;
-      reportProgress(options, (encoding === 'raw1252' ? 'Embedding raw project bytes… ' : 'Embedding project archive… ') +
+      reportProgress(options, (encoding === 'iso8859-2' ? 'Encoding ZIP archive… ' : 'Embedding project archive… ') +
         Math.min(100, Math.round(processed / Math.max(1, blob.size) * 100)) + '%');
     }
 
@@ -182,30 +182,48 @@
     return chunks;
   }
 
-  const WINDOWS_1252_SPECIAL = [
-    0x20AC,0x0081,0x201A,0x0192,0x201E,0x2026,0x2020,0x2021,
-    0x02C6,0x2030,0x0160,0x2039,0x0152,0x008D,0x017D,0x008F,
-    0x0090,0x2018,0x2019,0x201C,0x201D,0x2022,0x2013,0x2014,
-    0x02DC,0x2122,0x0161,0x203A,0x0153,0x009D,0x017E,0x0178
+  // ISO-8859-2 maps every byte to one Unicode code point. The document
+  // itself is emitted in this charset so archive bytes remain one byte each.
+  const ISO_8859_2_HIGH = [
+    0x00A0,0x0104,0x02D8,0x0141,0x00A4,0x013D,0x015A,0x00A7,
+    0x00A8,0x0160,0x015E,0x0164,0x0179,0x00AD,0x017D,0x017B,
+    0x00B0,0x0105,0x02DB,0x0142,0x00B4,0x013E,0x015B,0x02C7,
+    0x00B8,0x0161,0x015F,0x0165,0x017A,0x02DD,0x017E,0x017C,
+    0x0154,0x00C1,0x00C2,0x0102,0x00C4,0x0139,0x0106,0x00C7,
+    0x010C,0x00C9,0x0118,0x00CB,0x011A,0x00CD,0x00CE,0x010E,
+    0x0110,0x0143,0x0147,0x00D3,0x00D4,0x0150,0x00D6,0x00D7,
+    0x0158,0x016E,0x00DA,0x0170,0x00DC,0x00DD,0x0162,0x00DF,
+    0x0155,0x00E1,0x00E2,0x0103,0x00E4,0x013A,0x0107,0x00E7,
+    0x010D,0x00E9,0x0119,0x00EB,0x011B,0x00ED,0x00EE,0x010F,
+    0x0111,0x0144,0x0148,0x00F3,0x00F4,0x0151,0x00F6,0x00F7,
+    0x0159,0x016F,0x00FA,0x0171,0x00FC,0x00FD,0x0163,0x02D9
   ];
-  const WINDOWS_1252_REVERSE = new Map(WINDOWS_1252_SPECIAL.map((codePoint,index) => [codePoint, index + 0x80]));
+  const ISO_8859_2_BYTE_TO_CODEPOINT = Array.from(
+    {length:256},
+    (_, byte) => byte < 0xA0 ? byte : ISO_8859_2_HIGH[byte - 0xA0]
+  );
+  const ISO_8859_2_BYTE_TO_CHAR = ISO_8859_2_BYTE_TO_CODEPOINT.map(code => String.fromCharCode(code));
+  const ISO_8859_2_REVERSE = new Map(
+    ISO_8859_2_BYTE_TO_CODEPOINT.map((code, byte) => [code, byte])
+  );
 
-  function windows1252Byte(codePoint) {
-    if (codePoint <= 0x7F || (codePoint >= 0x80 && codePoint <= 0x9F) ||
-        (codePoint >= 0xA0 && codePoint <= 0xFF)) return codePoint;
-    return WINDOWS_1252_REVERSE.get(codePoint);
-  }
+  const ISO_8859_2_MARKER_CANDIDATES = [
+    0x23,0x24,0x25,0x26,0x27,0x28,0x29,0x2A,0x2B,0x2C,
+    0x2E,0x3A,0x3B,0x3D,0x3E,0x3F,0x40,0x5B,0x5D,0x5E,
+    0x5F,0x60,0x7B,0x7C,0x7D,0x7E
+  ];
 
-  function encodeWindows1252(value) {
-    const bytes = new Uint8Array(value.length);
-    for (let index = 0; index < value.length; index++) {
-      const codePoint = value.charCodeAt(index);
-      const byte = windows1252Byte(codePoint);
+  function encodeISO88592(value) {
+    const bytes = new Uint8Array([...String(value)].length);
+    let offset = 0;
+    for (const character of String(value)) {
+      const codePoint = character.codePointAt(0);
+      const byte = ISO_8859_2_REVERSE.get(codePoint);
       if (byte == null) {
-        throw new Error('The standalone HTML contains a character that cannot be represented in Windows-1252 (U+' +
+        throw new Error('The standalone HTML contains a character that cannot be represented in ISO-8859-2 (U+' +
           codePoint.toString(16).toUpperCase().padStart(4, '0') + ').');
       }
-      bytes[index] = byte;
+      bytes[offset++] = byte;
     }
     return bytes;
   }
@@ -214,71 +232,149 @@
     let output = '';
     for (const character of String(value)) {
       const codePoint = character.codePointAt(0);
-      output += (windows1252Byte(codePoint) == null || (codePoint >= 0x80 && codePoint <= 0x9F))
-        ? '&#x' + codePoint.toString(16) + ';'
-        : character;
+      output += (ISO_8859_2_REVERSE.has(codePoint) && !(codePoint >= 0x80 && codePoint <= 0x9F))
+        ? character
+        : '&#x' + codePoint.toString(16) + ';';
     }
     return output;
   }
 
-  function encodeRaw1252Chunk(bytes) {
+  function escapeDocumentCharacters(value, context) {
     let output = '';
+    for (const character of String(value)) {
+      const codePoint = character.codePointAt(0);
+      if (ISO_8859_2_REVERSE.has(codePoint) && !(codePoint >= 0x80 && codePoint <= 0x9F)) {
+        output += character;
+      } else if (context === 'script') {
+        for (let index = 0; index < character.length; index++) {
+          output += '\\u' + character.charCodeAt(index).toString(16).padStart(4, '0');
+        }
+      } else if (context === 'style') {
+        output += '\\' + codePoint.toString(16) + ' ';
+      } else {
+        output += '&#x' + codePoint.toString(16) + ';';
+      }
+    }
+    return output;
+  }
+
+  function prepareHtmlForISO88592(value) {
+    const source = String(value);
+    const rawTextPattern = /(<(script|style)\b[^>]*>)([\s\S]*?)(<\/\2\s*>)/gi;
+    let output = '';
+    let lastIndex = 0;
+    let match;
+    while ((match = rawTextPattern.exec(source))) {
+      output += escapeDocumentCharacters(source.slice(lastIndex, match.index), 'html');
+      output += match[1];
+
+      // The ZIP chunks already contain an ISO-8859-2-safe reversible
+      // representation. Never rewrite their characters during document
+      // charset preparation, including C1 controls and escape markers.
+      const isArchiveChunk = match[2].toLowerCase() === 'script' &&
+        /\bclass\s*=\s*["'][^"']*\bwk-standalone-archive-chunk\b[^"']*["']/i.test(match[1]);
+      output += isArchiveChunk
+        ? match[3]
+        : escapeDocumentCharacters(match[3], match[2].toLowerCase());
+
+      output += match[4];
+      lastIndex = rawTextPattern.lastIndex;
+    }
+    output += escapeDocumentCharacters(source.slice(lastIndex), 'html');
+    return output;
+  }
+
+  function chooseISO88592Marker(bytes) {
+    const counts = new Uint32Array(256);
+    for (const byte of bytes) counts[byte]++;
+    let marker = ISO_8859_2_MARKER_CANDIDATES[0];
+    for (const candidate of ISO_8859_2_MARKER_CANDIDATES) {
+      if (counts[candidate] < counts[marker]) marker = candidate;
+    }
+    return marker;
+  }
+
+  function isScriptEndTag(bytes, index) {
+    if (bytes[index] !== 0x3C || bytes[index + 1] !== 0x2F || index + 7 >= bytes.length) {
+      return false;
+    }
+    const target = 'script';
+    for (let offset = 0; offset < target.length; offset++) {
+      let byte = bytes[index + 2 + offset];
+      if (byte >= 0x41 && byte <= 0x5A) byte += 0x20;
+      if (byte !== target.charCodeAt(offset)) return false;
+    }
+    return true;
+  }
+
+  function encodeISO88592Chunk(bytes) {
+    const markerByte = chooseISO88592Marker(bytes);
+    const marker = ISO_8859_2_BYTE_TO_CHAR[markerByte];
+    let output = '';
+
     for (let index = 0; index < bytes.length; index++) {
       const byte = bytes[index];
-      if (byte === 0x00) {
-        output += '\\0';
-        continue;
+
+      if (byte === markerByte) {
+        output += marker + marker;
+      } else if (byte === 0x00) {
+        output += marker + '0';
+      } else if (byte === 0x0D) {
+        output += marker + 'r';
+      } else if (isScriptEndTag(bytes, index)) {
+        output += '<' + marker;
+        index++;
+      } else if (
+        byte === 0x3C &&
+        bytes[index + 1] === 0x21 &&
+        bytes[index + 2] === 0x2D &&
+        bytes[index + 3] === 0x2D
+      ) {
+        output += '<' + marker;
+        index++;
+      } else {
+        output += ISO_8859_2_BYTE_TO_CHAR[byte];
       }
-      if (byte === 0x0D) {
-        output += '\\r';
-        continue;
-      }
-      if (byte === 0x5C) {
-        output += '\\\\';
-        continue;
-      }
-      if (byte === 0x3C && index + 3 < bytes.length &&
-          bytes[index + 1] === 0x21 && bytes[index + 2] === 0x2D && bytes[index + 3] === 0x2D) {
-        output += '\\x3C';
-        continue;
-      }
-      if (byte === 0x3C && index + 7 < bytes.length &&
-          bytes[index + 1] === 0x2F &&
-          String.fromCharCode(...bytes.subarray(index + 2, index + 8)).toLowerCase() === 'script') {
-        output += '<\\/' + String.fromCharCode(...bytes.subarray(index + 2, index + 8));
-        index += 7;
-        continue;
-      }
-      output += String.fromCharCode(byte);
     }
-    return output;
+
+    return {text:output, markerByte};
   }
 
-  function createRaw1252Decoder() {
-    const reverse = Object.fromEntries(WINDOWS_1252_REVERSE);
+  function createISO88592ArchiveDecoder() {
+    const reverse = Object.fromEntries(ISO_8859_2_REVERSE);
     return [
-      'function(encoded) {',
+      'function(encoded, markerByte) {',
+      '  if (!Number.isInteger(markerByte) || markerByte < 0 || markerByte > 255) throw new Error("Invalid ISO-8859-2 archive marker.");',
+      '  const marker = markerByte;',
       '  const bytes = new Uint8Array(encoded.length);',
       '  let offset = 0;',
       '  for (let index = 0; index < encoded.length; index++) {',
       '    let code = encoded.charCodeAt(index);',
-      '    if (code === 92) {',
-      '      const escaped = encoded[++index];',
-      '      if (escaped === "0") code = 0;',
-      '      else if (escaped === "r") code = 13;',
-      '      else if (escaped === "\\\\") code = 92;',
-      '      else if (escaped === "/") code = 47;',
-      '      else if (escaped === "x") {',
-      '        const hex = encoded.slice(index + 1, index + 3);',
-      '        if (!/^[0-9a-f]{2}$/i.test(hex)) throw new Error("Invalid raw archive hex escape at character " + (index - 1) + ".");',
-      '        code = parseInt(hex, 16);',
-      '        index += 2;',
+      '    if (code === 0x3C && encoded.charCodeAt(index + 1) === marker) {',
+      '      if (encoded.slice(index + 2, index + 8).toLowerCase() === "script") {',
+      '        bytes[offset++] = 0x3C;',
+      '        bytes[offset++] = 0x2F;',
+      '        index++;',
+      '        continue;',
       '      }',
-      '      else throw new Error("Invalid raw archive escape at character " + (index - 1) + ".");',
+      '      if (encoded.slice(index + 2, index + 4) === "--") {',
+      '        bytes[offset++] = 0x3C;',
+      '        bytes[offset++] = 0x21;',
+      '        index++;',
+      '        continue;',
+      '      }',
       '    }',
-      '    const mapped = ' + JSON.stringify(reverse) + '[code];',
-      '    if (mapped != null) code = mapped;',
-      '    if (code > 255) throw new Error("Invalid raw archive character at " + index + ".");',
+      '    if (code === marker) {',
+      '      const escaped = encoded.charCodeAt(++index);',
+      '      if (escaped === marker) code = marker;',
+      '      else if (escaped === 0x30) code = 0;',
+      '      else if (escaped === 0x72) code = 0x0D;',
+      '      else throw new Error("Invalid ISO-8859-2 archive escape at character " + (index - 1) + ".");',
+      '    } else {',
+      '      const mapped = ' + JSON.stringify(reverse) + '[code];',
+      '      if (mapped == null) throw new Error("Invalid ISO-8859-2 archive character at " + index + ".");',
+      '      code = mapped;',
+      '    }',
       '    bytes[offset++] = code;',
       '  }',
       '  return bytes.subarray(0, offset);',
@@ -309,7 +405,7 @@
   function createAssetLoader() {
     return [
       'window.__deploymentAssetsReady = (async function() {',
-      '  window.__decodeStandaloneRaw1252 = ' + createRaw1252Decoder() + ';',
+      '  window.__decodeStandaloneISO88592 = ' + createISO88592ArchiveDecoder() + ';',
       '  const dataNode = document.getElementById("wk-standalone-data");',
       '  if (!dataNode) throw new Error("Standalone deployment data is missing.");',
       '  const encodedMetadata = (dataNode.textContent || "").trim();',
@@ -383,10 +479,11 @@
       '      const archiveChunks = document.querySelectorAll("script.wk-standalone-archive-chunk");',
       '      if (!archiveChunks.length) throw new Error("The standalone project archive is missing.");',
       '      const archiveEncoding = window.__WKStandaloneData.archiveEncoding || "base64";',
-      '      if (archiveEncoding !== "base64" && archiveEncoding !== "raw1252") throw new Error("Unknown standalone archive encoding: " + archiveEncoding);',
+      '      if (archiveEncoding !== "base64" && archiveEncoding !== "iso8859-2") throw new Error("Unknown standalone archive encoding: " + archiveEncoding);',
       '      for (const node of archiveChunks) {',
-      '        if (archiveEncoding === "raw1252") {',
-      '          archiveParts.push(window.__decodeStandaloneRaw1252(node.textContent));',
+      '        if (archiveEncoding === "iso8859-2") {',
+      '          const markerByte = Number(node.getAttribute("data-escape-marker"));',
+      '          archiveParts.push(window.__decodeStandaloneISO88592(node.textContent, markerByte));',
       '        } else {',
       '          const binary = atob(node.textContent.trim());',
       '          const bytes = new Uint8Array(binary.length);',
@@ -439,7 +536,12 @@
       payloadParts.push('<script type="application/octet-stream" class="wk-standalone-asset" data-path="' + escapeAttribute(asset.path) + '" data-url="' + escapeAttribute(asset.url) + '">' + asset.base64 + '</script>\n');
     }
     for (const chunk of archiveChunks) {
-      payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\n');
+      if (bundle.archiveEncoding === 'iso8859-2') {
+        payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk" data-escape-marker="' +
+          chunk.markerByte + '">' + chunk.text + '</script>\n');
+      } else {
+        payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\n');
+      }
     }
     const loaderTag = '<script>\n' + createAssetLoader() + '\n</script>';
 
@@ -454,8 +556,9 @@
     if (!charsetPattern.test(html)) {
       throw new Error('The deployment template must declare a character encoding before raw archive bytes can be embedded.');
     }
-    html = html.replace(charsetPattern, '<meta charset="windows-1252">');
-    return new Blob([encodeWindows1252(html)], {type:'text/html;charset=windows-1252'});
+    html = html.replace(charsetPattern, '<meta charset="iso-8859-2">');
+    html = prepareHtmlForISO88592(html);
+    return new Blob([encodeISO88592(html)], {type:'text/html;charset=iso-8859-2'});
   }
 
   async function compile(snapshot, options = {}) {
@@ -506,8 +609,8 @@
       }
     }
 
-    const archiveEncoding = options.archiveEncoding === 'raw1252' ? 'raw1252' : 'base64';
-    reportProgress(options, archiveEncoding === 'raw1252' ? 'Embedding raw project bytes…' : 'Embedding project archive…');
+    const archiveEncoding = options.archiveEncoding === 'iso8859-2' || options.archiveEncoding === 'raw1252' ? 'iso8859-2' : 'base64';
+    reportProgress(options, archiveEncoding === 'iso8859-2' ? 'Encoding ZIP archive…' : 'Embedding project archive…');
     const archiveChunks = await blobToEncodedChunks(projectArchive, archiveEncoding, options);
 
     const runConfig = snapshot.runConfig && typeof snapshot.runConfig === 'object'
@@ -573,7 +676,7 @@
         const html = await compile(snapshot, {
           editorUrl: global.location.href,
           compressionLevel: compileSettings.compressionLevel,
-          archiveEncoding: compileSettings.rawBinary ? 'raw1252' : 'base64',
+          archiveEncoding: compileSettings.rawBinary ? 'iso8859-2' : 'base64',
           onProgress: message => { button.textContent = message; }
         });
         download(html, snapshot.projectName);
