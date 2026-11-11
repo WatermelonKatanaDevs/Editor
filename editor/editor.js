@@ -754,6 +754,11 @@ window.__editorInitPromise = (async function () {
       exportZip.disabled = !canExport;
       exportZip.title = canExport ? 'Export project as a ZIP (Ctrl+E)' : '';
     }
+    const compilePage = $('compilePageBtn');
+    if (compilePage) {
+      compilePage.disabled = !state.fs;
+      compilePage.title = state.fs ? 'Compile the current project as a standalone HTML page' : 'Open a project to compile a standalone HTML page';
+    }
     const save = $('saveProjectBtn');
     if (save) {
       const hasHandle = !!state.fs?.canSave?.();
@@ -3950,6 +3955,15 @@ window.__editorInitPromise = (async function () {
       projectOwner: state.projectOwner !== false,
       hasGitHubRepository: !!(state.gitRemote?.provider === 'github' && state.gitRemote.owner && state.gitRemote.repo)
     }),
+    getSinglePageSnapshot: async () => {
+      if (!state.fs) throw new Error('No workspace is open.');
+      return {
+        archive: await state.fs.exportZip(),
+        projectName: state.projectName || 'Workspace',
+        runConfig: state.runConfig?.config ? {...state.runConfig.config} : {},
+        deploymentSettings: state.deploymentSettings ? {...state.deploymentSettings} : {}
+      };
+    },
     getDeploymentPreview: () => {
       if (typeof state.getDeploymentPreview !== 'function') {
         throw new Error('Deployment Preview is not available.');
