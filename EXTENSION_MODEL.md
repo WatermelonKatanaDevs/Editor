@@ -93,3 +93,33 @@ Hook payloads are ordinary JavaScript objects. `ai.beforeRun` can return a repla
 The editor also exposes built-in GitHub AI tools. They use the existing GitHub sign-in from the Editor Profile and are separately permissioned as `githubRead` and `githubWrite`. GitHub write actions remain disabled until the user grants permission.
 
 An extension can also register tools directly with `EditorExtensionAPI.registerAITool(extensionId, tool)` and remove one with `unregisterAITool(name)`.
+
+## Cross-origin embedding bridge
+
+The Editor can be embedded by a different origin without exposing its window or DOM to the embedding page. Load `editor/remote-bridge.js` in the Editor document and connect from the embedding page with a dedicated `MessageChannel`:
+
+```js
+const bridge = await EditorRemoteBridge.connect(frame.contentWindow, {
+  targetOrigin: new URL(frame.src).origin,
+  localObjects: { host: hostServices },
+  config: { integrationUrl: 'https://host.example/editor-integration.js' }
+});
+
+// The entire Editor window is available as a remote object graph.
+await bridge.remote.Editor.EditorApp.openBuiltin('example');
+
+// Primitive values are read asynchronously because a JavaScript Proxy
+// cannot synchronously fetch a property from another browsing context.
+const info = await bridge.remote.Editor.EditorApp.getWorkspaceInfo();
+const theme = await bridge.remote.Editor.EditorTheme.$get('monaco');
+
+// Confirmed property writes and introspection are explicit asynchronous calls.
+await bridge.remote.Editor.EditorTheme.$set('id', 'example-theme');
+const keys = await bridge.remote.Editor.EditorTheme.$keys();
+```
+
+The bridge is a general object-reference RPC layer rather than an API-method allowlist. It supports nested property paths, method calls with the correct receiver, constructors, callbacks passed as arguments, returned callbacks and object references, promises, property assignment/deletion, key enumeration, structured-clone values (including files, blobs, and buffers), and serialized errors. Remote object references are released when proxy handles are collected where `FinalizationRegistry` is available; closing the bridge rejects pending operations and closes its port.
+
+There are two JavaScript boundaries that cannot be erased by `postMessage`: primitive remote property reads and DOM operations are asynchronous, and DOM methods cannot synchronously return live nodes to another origin. Code that needs the Editor's DOM or synchronous Editor APIs should therefore execute in the Editor document itself and call the embedding page through the bridge. The WatermelonKatana integration follows that model: it runs in the Editor origin, while authentication, same-origin WK API requests, and host navigation are provided by the embedding page.
+
+Always pass an exact `targetOrigin`; never use `*` for the connection. The receiver also verifies that the initial connection message came from its own parent window. Treat every exposed host method as a capability and expose only the operations that the embedded application needs.
