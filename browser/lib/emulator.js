@@ -620,7 +620,7 @@
             computed: false
           };
 
-          node.arguments.unshift({ type: "Identifier", name: "globalThis" });
+          node.arguments.unshift({ type: "Identifier", name: "__windowProxy" });
         }
 
         // Simple identifier call: foo()
@@ -632,7 +632,7 @@
             computed: false
           };
 
-          node.arguments.unshift({ type: "Identifier", name: "globalThis" });
+          node.arguments.unshift({ type: "Identifier", name: "__windowProxy" });
         }
 
         // Comma operator — (0, fn)()
@@ -649,7 +649,7 @@
               computed: false
             };
 
-            node.arguments.unshift({ type: "Identifier", name: "globalThis" });
+            node.arguments.unshift({ type: "Identifier", name: "__windowProxy" });
           }
         }
       }
