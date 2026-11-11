@@ -217,6 +217,7 @@
 
         const absoluteUrl = resolveUrl(originalUrl);
         el.setAttribute(rawAttr, originalUrl);
+        el.removeAttribute(attr);
 
         const response = await page.network.request(absoluteUrl, dynamicBaseOrigin, {}, selector);
         if (!response || !response.ok) return;
@@ -1241,6 +1242,7 @@
 
       if (rawUrl.startsWith('data:')) return;
 
+      urlMap.set(rawUrl, 'data:,');
       try {
         const resolvedUrl = new URL(rawUrl, baseUrl).href;
         const response = await networkRequest(resolvedUrl, baseOrigin, {}, 'css-url');
@@ -1840,13 +1842,30 @@
         async function interceptElementAttribute(el, attr, rawAttr = 'data-raw-src', filter = f => f) {
           if (el.tagName === "SCRIPT" && !isExecutableScriptElement(el)) return;
           const val = el.getAttribute(attr);
-          if (!val || val.startsWith('data:') || val.startsWith('blob:')) return;
+          if (!val || val.startsWith('data:') || val.startsWith('blob:') || val.startsWith('javascript:')) return;
 
           if (!el.hasAttribute(rawAttr)) {
-            const resolvedUrl = new URL(val, CURRENT_PAGE_URL).href;
+            let resolvedUrl;
+            try {
+              resolvedUrl = new URL(val, CURRENT_PAGE_URL).href;
+            } catch (_) {
+              el.removeAttribute(attr);
+              return;
+            }
             el.setAttribute(rawAttr, resolvedUrl);
+            el.removeAttribute(attr);
 
-            const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, el.tagName);
+            let response;
+            try {
+              response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, el.tagName);
+            } catch (error) {
+              el.setAttribute('data-wk-resource-error', String(error?.message || error).slice(0, 300));
+              return;
+            }
+            if (!response || !response.ok) {
+              el.setAttribute('data-wk-resource-error', response ? 'HTTP ' + response.status : 'unhandled');
+              return;
+            }
             if (response && response.ok) {
               const integrity = el.getAttribute("integrity");
               if (integrity) {
@@ -1912,16 +1931,19 @@
 
         Node.prototype.appendChild = function(node) {
           prepareInsertedScripts(node);
+          primeAssignedResources([node]);
           return applyNodeMethod(nativeAppendChild, this, [node]);
         };
 
         Node.prototype.insertBefore = function(node, referenceNode) {
           prepareInsertedScripts(node);
+          primeAssignedResources([node]);
           return applyNodeMethod(nativeInsertBefore, this, [node, referenceNode]);
         };
 
         Node.prototype.replaceChild = function(newNode, oldNode) {
           prepareInsertedScripts(newNode);
+          primeAssignedResources([newNode]);
           return applyNodeMethod(nativeReplaceChild, this, [newNode, oldNode]);
         };
 
@@ -2280,7 +2302,7 @@
 
               if (!value) {
                 oldSetAttribute.call(this, propObj[lowerProp], '');
-                return oldSetAttribute.call(this, prop, value);
+                return oldRemoveAttribute.call(this, prop);
               }
 
               oldSetAttribute.call(this, propObj[lowerProp], value);
@@ -2289,6 +2311,7 @@
                 return oldSetAttribute.call(this, prop, value);
               }
 
+              oldRemoveAttribute.call(this, prop);
               this.__processing_attr = true;
 
               // Async resolution
@@ -2327,12 +2350,15 @@
 
                     const dataUri = await createDataUri(response);
                     if (dataUri) {
+                      oldRemoveAttribute.call(this, 'data-wk-resource-error');
                       return oldSetAttribute.call(this, prop, dataUri);
                     }
                   }
-                  oldSetAttribute.call(this, prop, value);
+                  oldRemoveAttribute.call(this, prop);
+                  oldSetAttribute.call(this, 'data-wk-resource-error', response ? 'HTTP ' + response.status : 'unhandled');
                 } catch (err) {
-                  oldSetAttribute.call(this, prop, value);
+                  oldRemoveAttribute.call(this, prop);
+                  oldSetAttribute.call(this, 'data-wk-resource-error', String(err?.message || err).slice(0, 300));
                 } finally {
                   this.__processing_attr = false;
                 }
@@ -2432,9 +2458,10 @@
                 try {
                   originalInsertRule.call(sheet, processedRule, index);
                 } catch(e) {
-                  originalInsertRule.call(sheet, rule, index);
+                  console.warn('[Browser Emulator] CSS rule was blocked after virtual resource rewriting failed:', e);
                 }
-              });
+              })
+              .catch(error => console.warn('[Browser Emulator] CSS rule rewrite failed:', error));
             return index || 0;
           }
           return originalInsertRule.apply(this, arguments);
@@ -5281,17 +5308,16 @@
         const processNode = window.__checkNodeAndChildren;
         if (typeof processNode !== 'function') return;
 
+        const selector = 'link[href], script[src], img[src], audio[src], video[src], source[src], object[data]';
         for (const node of nodes || []) {
-          if (!node || node.nodeType !== Node.ELEMENT_NODE) continue;
+          if (!node) continue;
 
           const resources = [];
-          if (node.matches?.('link[href], script[src], img[src], audio[src], video[src], source[src], object[data]')) {
+          if (node.nodeType === Node.ELEMENT_NODE && node.matches?.(selector)) {
             resources.push(node);
           }
           if (node.querySelectorAll) {
-            resources.push(...node.querySelectorAll(
-              'link[href], script[src], img[src], audio[src], video[src], source[src], object[data]'
-            ));
+            resources.push(...node.querySelectorAll(selector));
           }
 
           for (const resource of resources) {

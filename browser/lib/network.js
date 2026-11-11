@@ -45,6 +45,26 @@ class EventHandler {
   }
 }
 
+function isLoopbackHostname(hostname) {
+  const host = String(hostname || '').toLowerCase().replace("[", "").replace("]", "");
+  const parts = host.split(".");
+  return host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "::1" ||
+    (parts.length === 4 && Number(parts[0]) === 127 && parts.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255));
+}
+
+function isEmulatedLoopbackRequest(request, baseOrigin) {
+  if (!baseOrigin) return false;
+  try {
+    const base = new URL(baseOrigin);
+    const target = new URL(request.url);
+    return base.origin === target.origin && isLoopbackHostname(base.hostname);
+  } catch (_) {
+    return false;
+  }
+}
+
 class Network extends EventHandler {
   constructor() {
     super();
@@ -57,19 +77,28 @@ class Network extends EventHandler {
   async _requestURL(url,baseOrigin,data,type,filter) {
     const absoluteUrl = resolveNetworkURL(url, baseOrigin);
     const request = new Request(absoluteUrl, data);
-    return await this._requestObject(request,type,filter);
+    return await this._requestObject(request,type,filter,baseOrigin);
   }
-  async _requestObject(request,type,filter) {
+  async _requestObject(request,type,filter,baseOrigin) {
     request.__original_url = request.url;
     request.request_type = type;
     this.dispatchEvent('requeststart',request,type);
+    // localhost is the emulated page origin, not a real server that the
+    // browser should contact. Only in-process virtual endpoints may handle it.
+    const endpointList = isEmulatedLoopbackRequest(request, baseOrigin)
+      ? this.endpoints.filter(endpoint =>
+          endpoint &&
+          !endpoint.__browserDefaultFallback &&
+          !endpoint.__browserProxyEndpoint
+        )
+      : this.endpoints;
     const response = await this.searchEndpoints(async function(endp) {
       endp.dispatchEvent('handlerequest',request,type);
       var response = await endp.handleRequest(request.clone(), type);
       if (!response) return null;
       endp.dispatchEvent('returnresponse',response,request,type);
       return response;
-    }, filter || (r => r.ok));
+    }, filter || (r => r.ok), endpointList);
     if (response) {
       response.source_url = request.url;
       response.requested_url = request.__original_url || request.url;
@@ -186,6 +215,7 @@ class ProxyNetworkEndpoint extends NetworkEndpoint {
     super(enabled);
     this.proxy = proxy;
     this.obscureURL = obscureURL;
+    this.__browserProxyEndpoint = true;
   }
   async handleRequest(request,type) {
     let targetProxyUrl = request.url;
