@@ -1399,6 +1399,10 @@
                 if (parentPage && typeof parentPage.addChild === 'function') parentPage.addChild(registeredPage);
               }
             }
+            if (registeredPage && parentPage && registeredPage.parent !== parentPage &&
+                typeof parentPage.addChild === 'function') {
+              parentPage.addChild(registeredPage);
+            }
             if (registeredPage?.setLocation) registeredPage.setLocation(CURRENT_PAGE_URL, BASE_ORIGIN);
           } catch (error) {
             console.error('[Browser Emulator] Could not recover the iframe PageEmulator:', error);
