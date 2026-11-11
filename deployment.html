@@ -839,6 +839,10 @@ window.__deploymentNetworkReady = (async function() {
 
       frame.setAttribute('data-embed-frame', '1');
       frame.setAttribute('frameborder', '0');
+      // This overlay is managed by its own PageEmulator. Prevent the owning
+      // document's dynamic-iframe observer from treating it as a fresh blank
+      // iframe and replacing the embedded document with an empty srcdoc.
+      frame.__sandboxed = true;
       frame.style.position = 'fixed';
       frame.style.border = '0';
       frame.style.margin = '0';
