@@ -597,11 +597,17 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;'));
-    html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>' + safeTitle + '</title>');
+    html = html.replace(/<title>[\s\S]*?<\/title>/i, () => '<title>' + safeTitle + '</title>');
     if (!html.includes(loaderPlaceholder)) {
       throw new Error('The deployment asset-loader placeholder was lost during HTML minification.');
     }
-    html = html.replace(loaderPlaceholder, payloadParts.join('') + loaderTag);
+    // Use a callback: dependency source legitimately contains "    html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>' + safeTitle + '</title>');
+    if (!html.includes(loaderPlaceholder)) {
+      throw new Error('The deployment asset-loader placeholder was lost during HTML minification.');
+    }
+    html = html.replace(loaderPlaceholder, payloadParts.join('') + loaderTag);", which
+    // String.replace would otherwise expand to the matched placeholder text.
+    html = html.replace(loaderPlaceholder, () => payloadParts.join('') + loaderTag);
     const charsetPattern = /<meta\s+charset=["']?[^"'>\s]+["']?\s*>/i;
     if (!charsetPattern.test(html)) {
       throw new Error('The deployment template must declare a character encoding before raw archive bytes can be embedded.');
