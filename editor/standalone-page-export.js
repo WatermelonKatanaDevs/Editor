@@ -19,7 +19,7 @@
 
     function skipTrivia() {
       while (index < source.length) {
-        if (/\s/.test(source[index]) || source[index] === ',') {
+        if (/\s/.test(source[index])) {
           index++;
           continue;
         }
@@ -41,6 +41,10 @@
     while (index < source.length) {
       skipTrivia();
       if (index >= source.length) break;
+      if (source[index] === ',') {
+        index++;
+        continue;
+      }
       const quote = source[index];
       if (quote !== '"' && quote !== "'") {
         throw new Error('The deployment asset list must contain only string literals.');
@@ -73,8 +77,9 @@
       if (!closed) throw new Error('Unterminated string in deployment asset list.');
       values.push(value);
       skipTrivia();
-      if (index < source.length && source[index] !== ',') {
-        throw new Error('Unexpected expression in deployment asset list.');
+      if (index < source.length) {
+        if (source[index] !== ',') throw new Error('Unexpected expression in deployment asset list.');
+        index++;
       }
     }
 
