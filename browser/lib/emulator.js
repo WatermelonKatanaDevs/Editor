@@ -77,6 +77,52 @@
     return page?.location?.url || "http://localhost:3000/";
   }
 
+  const javascriptMimeTypes = new Set([
+    "application/ecmascript", "application/javascript",
+    "application/x-ecmascript", "application/x-javascript",
+    "text/ecmascript", "text/javascript",
+    "text/javascript1.0", "text/javascript1.1", "text/javascript1.2",
+    "text/javascript1.3", "text/javascript1.4", "text/javascript1.5",
+    "text/jscript", "text/livescript", "text/x-ecmascript", "text/x-javascript"
+  ]);
+
+  function isExecutableScriptElement(script) {
+    const rawType = script?.getAttribute?.("type");
+    if (rawType == null || !String(rawType).trim()) return true;
+    const type = String(rawType).trim().toLowerCase();
+    if (type === "module") return true;
+    return javascriptMimeTypes.has(type.split(";", 1)[0].trim());
+  }
+
+  async function verifySubresourceIntegrity(response, metadata) {
+    const tokens = String(metadata || "").trim().split(/\s+/).map(token => token.split("?", 1)[0]);
+    const supported = tokens.map(token => {
+      const match = /^(sha256|sha384|sha512)-([A-Za-z0-9+/]+={0,2})$/i.exec(token);
+      return match ? { algorithm: match[1].toLowerCase(), digest: match[2].replace(/=+$/, "") } : null;
+    }).filter(Boolean);
+
+    if (!supported.length || !globalThis.crypto?.subtle) return false;
+
+    const strength = { sha256: 1, sha384: 2, sha512: 3 };
+    const strongest = Math.max(...supported.map(item => strength[item.algorithm]));
+    const candidates = supported.filter(item => strength[item.algorithm] === strongest);
+    let bytes;
+    try {
+      bytes = await response.clone().arrayBuffer();
+    } catch (_) {
+      return false;
+    }
+
+    for (const candidate of candidates) {
+      try {
+        const digest = await globalThis.crypto.subtle.digest(({ sha256: "SHA-256", sha384: "SHA-384", sha512: "SHA-512" })[candidate.algorithm], bytes);
+        const actual = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/=+$/, "");
+        if (actual === candidate.digest) return true;
+      } catch (_) {}
+    }
+    return false;
+  }
+
   function ensureSandBoxSameOrigin(iframe) {
     if (!iframe.hasAttribute('sandbox')) return;
 
@@ -164,6 +210,8 @@
       const elements = Array.from(doc.querySelectorAll(selector));
 
       return elements.map(async (el) => {
+        if (el.tagName === "SCRIPT" && !isExecutableScriptElement(el)) return;
+
         const originalUrl = el.getAttribute(attr);
         if (!originalUrl || originalUrl.startsWith('data:') || originalUrl.startsWith('blob:')) return;
 
@@ -171,8 +219,23 @@
         el.setAttribute(rawAttr, originalUrl);
 
         const response = await page.network.request(absoluteUrl, dynamicBaseOrigin, {}, selector);
-
         if (!response || !response.ok) return;
+
+        const integrity = el.getAttribute("integrity");
+        if (integrity) {
+          const verified = await verifySubresourceIntegrity(response, integrity);
+          el.setAttribute("data-raw-integrity", integrity);
+          el.removeAttribute("integrity");
+
+          if (!verified) {
+            // Do not leave the original URL attached: that would let the native
+            // document loader bypass the emulator after a failed verification.
+            el.removeAttribute(attr);
+            el.setAttribute("data-wk-integrity-error", "verification-failed");
+            console.error("[Browser Emulator] Blocked resource with invalid subresource integrity:", absoluteUrl);
+            return;
+          }
+        }
 
         const processedRes = await filter(response, absoluteUrl, originalUrl, el);
 
@@ -291,6 +354,7 @@
     });
 
     doc.querySelectorAll('script:not([src]):not([data-wk-device-emulation])').forEach(script => {
+      if (!isExecutableScriptElement(script)) return;
       if (script.textContent && !script.textContent.includes('__executeCode')) {
         const rawScript = script.textContent;
         script.setAttribute('data-raw-script', rawScript);
@@ -619,8 +683,10 @@
             if (node.kind === "let" || node.kind === "const") {
               newBody.push(createGlobalLexicalDeclaration(node.kind,decl.id.name));
               newBody.push(createGlobalLexicalInitialization(decl.id.name,decl.init));
-            } else {
+            } else if (decl.init) {
               newBody.push(createGlobalAssignment(decl.id.name, decl.init));
+            } else {
+              newBody.push(createGlobalVarDeclaration(decl.id.name));
             }
           } else {
             newBody.push(createGlobalDestructuringAssignment(node.kind,decl));
@@ -647,6 +713,31 @@
 
     // Prepend the assignments to the top of the script body
     ast.body = [...hoistedAssignments,...newBody];
+  }
+
+  // A global var declaration without an initializer must not overwrite an
+  // existing global binding/property (for example repeated "var Namespace;"
+  // declarations in AMD loaders).
+  function createGlobalVarDeclaration(name) {
+    return {
+      type: "IfStatement",
+      test: {
+        type: "UnaryExpression",
+        operator: "!",
+        prefix: true,
+        argument: {
+          type: "BinaryExpression",
+          operator: "in",
+          left: { type: "Literal", value: name, raw: JSON.stringify(name) },
+          right: { type: "Identifier", name: "window" }
+        }
+      },
+      consequent: {
+        type: "BlockStatement",
+        body: [createGlobalAssignment(name, { type: "Identifier", name: "undefined" })]
+      },
+      alternate: null
+    };
   }
 
   // Helper to generate AST nodes for: window[name] = value;
@@ -1506,6 +1597,52 @@
         }
 
 
+        const javascriptMimeTypes = new Set([
+          "application/ecmascript", "application/javascript",
+          "application/x-ecmascript", "application/x-javascript",
+          "text/ecmascript", "text/javascript",
+          "text/javascript1.0", "text/javascript1.1", "text/javascript1.2",
+          "text/javascript1.3", "text/javascript1.4", "text/javascript1.5",
+          "text/jscript", "text/livescript", "text/x-ecmascript", "text/x-javascript"
+        ]);
+
+        function isExecutableScriptElement(script) {
+          const rawType = script?.getAttribute?.("type");
+          if (rawType == null || !String(rawType).trim()) return true;
+          const type = String(rawType).trim().toLowerCase();
+          if (type === "module") return true;
+          return javascriptMimeTypes.has(type.split(";", 1)[0].trim());
+        }
+
+        async function verifySubresourceIntegrity(response, metadata) {
+          const tokens = String(metadata || "").trim().split(/\s+/).map(token => token.split("?", 1)[0]);
+          const supported = tokens.map(token => {
+            const match = /^(sha256|sha384|sha512)-([A-Za-z0-9+/]+={0,2})$/i.exec(token);
+            return match ? { algorithm: match[1].toLowerCase(), digest: match[2].replace(/=+$/, "") } : null;
+          }).filter(Boolean);
+
+          if (!supported.length || !window.crypto?.subtle) return false;
+
+          const strength = { sha256: 1, sha384: 2, sha512: 3 };
+          const strongest = Math.max(...supported.map(item => strength[item.algorithm]));
+          const candidates = supported.filter(item => strength[item.algorithm] === strongest);
+          let bytes;
+          try {
+            bytes = await response.clone().arrayBuffer();
+          } catch (_) {
+            return false;
+          }
+
+          for (const candidate of candidates) {
+            try {
+              const digest = await window.crypto.subtle.digest(({ sha256: "SHA-256", sha384: "SHA-384", sha512: "SHA-512" })[candidate.algorithm], bytes);
+              const actual = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/=+$/, "");
+              if (actual === candidate.digest) return true;
+            } catch (_) {}
+          }
+          return false;
+        }
+
         // --- Dynamic Inline On* Handler Rewriter ---
         function patchInlineEvents(node) {
           if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -1638,6 +1775,7 @@
         ];
 
         async function interceptElementAttribute(el, attr, rawAttr = 'data-raw-src', filter = f => f) {
+          if (el.tagName === "SCRIPT" && !isExecutableScriptElement(el)) return;
           const val = el.getAttribute(attr);
           if (!val || val.startsWith('data:') || val.startsWith('blob:')) return;
 
@@ -1647,9 +1785,29 @@
 
             const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, el.tagName);
             if (response && response.ok) {
+              const integrity = el.getAttribute("integrity");
+              if (integrity) {
+                const verified = await verifySubresourceIntegrity(response, integrity);
+                el.setAttribute("data-raw-integrity", integrity);
+                Element.prototype.removeAttribute.call(el, "integrity");
+
+                if (!verified) {
+                  el.removeAttribute(attr);
+                  el.setAttribute("data-wk-integrity-error", "verification-failed");
+                  console.error("[Browser Emulator] Blocked dynamically inserted resource with invalid subresource integrity:", resolvedUrl);
+                  return;
+                }
+              }
+
               const processedRes = await filter(response, resolvedUrl, BASE_ORIGIN, el);
               if (processedRes) {
-                el.setAttribute(attr, await createDataUri(processedRes));
+                const dataUri = await createDataUri(processedRes);
+                if (dataUri) {
+                  el.setAttribute(attr, dataUri);
+                  // The wrapped setAttribute stores its input in data-raw-src;
+                  // restore the original URL after assigning the internal data URL.
+                  el.setAttribute(rawAttr, resolvedUrl);
+                }
               }
             }
           }
@@ -1660,6 +1818,7 @@
         // insertBefore / replaceChild, before MutationObserver callbacks run.
         function prepareInlineScript(node) {
           if (!node || node.nodeType !== Node.ELEMENT_NODE || node.tagName !== 'SCRIPT') return;
+          if (!isExecutableScriptElement(node)) return;
           if (node.getAttribute('src') || !node.textContent || node.hasAttribute('data-raw-script')) return;
           if (node.textContent.includes('__executeCode')) return;
 
@@ -1879,6 +2038,36 @@
           return [];
         });
 
+        const nativeElementGetAttribute = Element.prototype.getAttribute;
+        const nativeScriptSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, "src");
+
+        function getOriginalScriptSrc(script) {
+          const rawSrc = nativeElementGetAttribute.call(script, "data-raw-src");
+          if (rawSrc !== null && rawSrc !== "") {
+            try {
+              return new URL(rawSrc, CURRENT_PAGE_URL).href;
+            } catch (_) {
+              return rawSrc;
+            }
+          }
+          return nativeScriptSrcDescriptor.get.call(script);
+        }
+
+        try {
+          Object.defineProperty(HTMLScriptElement.prototype, "src", {
+            configurable: nativeScriptSrcDescriptor.configurable,
+            enumerable: nativeScriptSrcDescriptor.enumerable,
+            get() {
+              return getOriginalScriptSrc(this);
+            },
+            set(value) {
+              return nativeScriptSrcDescriptor.set.call(this, value);
+            }
+          });
+        } catch (error) {
+          console.warn("[Browser Emulator] Could not virtualize HTMLScriptElement.src:", error);
+        }
+
         var getOldContextWindow = (f=>f.call.bind(f))(Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get);
         function wrapElement(elem) {
           if (!(elem instanceof HTMLElement)) return elem;
@@ -1890,10 +2079,12 @@
           const tagName = elem.tagName.toLowerCase();
           const propMap = {
             "script": {
-              "src":"data-raw-src"
+              "src":"data-raw-src",
+              "integrity":"data-raw-integrity"
             },
             "link": {
-              "href":"data-raw-href"
+              "href":"data-raw-href",
+              "integrity":"data-raw-integrity"
             },
             "img": {
               "src":"data-raw-src",
@@ -1928,7 +2119,11 @@
 
           for (var linkprop in propObj) (function(linkprop){
             Object.defineProperty(elem, linkprop, {
-              get: function() { return this.getAttribute(linkprop) },
+              get: function() {
+                if (tagName === "script" && linkprop === "src") return getOriginalScriptSrc(this);
+                const value = this.getAttribute(linkprop);
+                return linkprop === "integrity" && value == null ? "" : value;
+              },
               set: function(val) { return this.setAttribute(linkprop, val) },
               configurable: true,
               enumerable: true
@@ -1997,8 +2192,16 @@
 
           var oldSetAttribute = elem.setAttribute;
           var oldGetAttribute = elem.getAttribute;
+          var oldRemoveAttribute = elem.removeAttribute;
           elem.setAttribute = function(prop, value) {
             const lowerProp = prop.toLowerCase();
+
+            // Integrity is metadata, not a URL-bearing attribute. Keep its
+            // page-visible value separately while the browser-facing attribute
+            // is removed after verification.
+            if ((tagName === "script" || tagName === "link") && lowerProp === "integrity" && !this.__editingAttribute) {
+              return oldSetAttribute.call(this, "data-raw-integrity", String(value));
+            }
 
             // Guard against internal recursions during dynamic fetches
             if (this.__processing_attr) {
@@ -2006,6 +2209,12 @@
             }
 
             if (lowerProp in propObj && !this.__editingAttribute) {
+              // Non-JavaScript script data blocks (JSON, import maps,
+              // speculation rules, etc.) must retain native resource behavior.
+              if (tagName === "script" && lowerProp === "src" && !isExecutableScriptElement(this)) {
+                return oldSetAttribute.call(this, prop, value);
+              }
+
               if (!value) {
                 oldSetAttribute.call(this, propObj[lowerProp], '');
                 return oldSetAttribute.call(this, prop, value);
@@ -2038,6 +2247,21 @@
                   const resolvedUrl = new URL(value, CURRENT_PAGE_URL).href;
                   const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, tagName);
                   if (response && response.ok) {
+                    const integrity = oldGetAttribute.call(this, "integrity") ||
+                      oldGetAttribute.call(this, "data-raw-integrity");
+                    if (integrity) {
+                      const verified = await verifySubresourceIntegrity(response, integrity);
+                      oldSetAttribute.call(this, "data-raw-integrity", integrity);
+                      oldRemoveAttribute.call(this, "integrity");
+
+                      if (!verified) {
+                        oldRemoveAttribute.call(this, prop);
+                        oldSetAttribute.call(this, "data-wk-integrity-error", "verification-failed");
+                        console.error("[Browser Emulator] Blocked dynamically assigned resource with invalid subresource integrity:", resolvedUrl);
+                        return;
+                      }
+                    }
+
                     const dataUri = await createDataUri(response);
                     if (dataUri) {
                       return oldSetAttribute.call(this, prop, dataUri);
@@ -2060,10 +2284,18 @@
             const lowerProp = prop.toLowerCase();
 
             if (lowerProp in propObj && !this.__editingAttribute) {
-              return oldGetAttribute.call(this, propObj[lowerProp]);
+              const rawValue = oldGetAttribute.call(this, propObj[lowerProp]);
+              return rawValue === null ? oldGetAttribute.call(this, prop) : rawValue;
             }
 
             return oldGetAttribute.call(this, prop);
+          };
+          elem.removeAttribute = function(prop) {
+            const lowerProp = prop.toLowerCase();
+            if ((tagName === "script" || tagName === "link") && lowerProp === "integrity") {
+              oldRemoveAttribute.call(this, "data-raw-integrity");
+            }
+            return oldRemoveAttribute.call(this, prop);
           };
 
           return elem;
