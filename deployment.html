@@ -705,7 +705,7 @@ window.__deploymentNetworkReady = (async function() {
       return true;
     }
 
-        function getDownloadName(url, filename, response) {
+    function getDownloadName(url, filename, response) {
       if (typeof filename === 'string' && filename.trim()) return filename.trim();
 
       const disposition = response?.headers?.get?.('content-disposition') || '';
@@ -901,7 +901,7 @@ window.__deploymentNetworkReady = (async function() {
       return frame;
     }
 
-        function installEmulatedPageEvents(currentPage) {
+    function installEmulatedPageEvents(currentPage) {
       if (!currentPage || currentPage.__deploymentEventsInstalled) return;
       currentPage.__deploymentEventsInstalled = true;
 
@@ -1092,7 +1092,7 @@ window.__deploymentNetworkReady = (async function() {
           return;
         }
 
-                const contentType = String(
+        const contentType = String(
           response.headers?.get?.('content-type') || ''
         ).toLowerCase();
         const isHtml =
