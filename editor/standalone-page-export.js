@@ -182,6 +182,93 @@
     return chunks;
   }
 
+  const WINDOWS_1252_SPECIAL = [
+    0x20AC,0x0081,0x201A,0x0192,0x201E,0x2026,0x2020,0x2021,
+    0x02C6,0x2030,0x0160,0x2039,0x0152,0x008D,0x017D,0x008F,
+    0x0090,0x2018,0x2019,0x201C,0x201D,0x2022,0x2013,0x2014,
+    0x02DC,0x2122,0x0161,0x203A,0x0153,0x009D,0x017E,0x0178
+  ];
+  const WINDOWS_1252_REVERSE = new Map(WINDOWS_1252_SPECIAL.map((codePoint,index) => [codePoint, index + 0x80]));
+
+  function windows1252Byte(codePoint) {
+    if (codePoint <= 0x7F || (codePoint >= 0xA0 && codePoint <= 0xFF)) return codePoint;
+    return WINDOWS_1252_REVERSE.get(codePoint);
+  }
+
+  function encodeWindows1252(value) {
+    const bytes = new Uint8Array(value.length);
+    for (let index = 0; index < value.length; index++) {
+      const codePoint = value.charCodeAt(index);
+      const byte = windows1252Byte(codePoint);
+      if (byte == null) {
+        throw new Error('The standalone HTML contains a character that cannot be represented in Windows-1252 (U+' +
+          codePoint.toString(16).toUpperCase().padStart(4, '0') + ').');
+      }
+      bytes[index] = byte;
+    }
+    return bytes;
+  }
+
+  function escapeUnrepresentableHtmlCharacters(value) {
+    let output = '';
+    for (const character of String(value)) {
+      const codePoint = character.codePointAt(0);
+      output += windows1252Byte(codePoint) == null
+        ? '&#x' + codePoint.toString(16) + ';'
+        : character;
+    }
+    return output;
+  }
+
+  function encodeRaw1252Chunk(bytes) {
+    let output = '';
+    const hex = value => value.toString(16).padStart(2, '0').toUpperCase();
+    for (let index = 0; index < bytes.length; index++) {
+      const byte = bytes[index];
+      if (byte === 0x00 || byte === 0x0D || byte === 0x5C) {
+        output += '\\x' + hex(byte);
+        continue;
+      }
+      if (byte === 0x3C && index + 7 < bytes.length &&
+          bytes[index + 1] === 0x2F &&
+          String.fromCharCode(...bytes.subarray(index + 2, index + 8)).toLowerCase() === 'script') {
+        output += '<\\x2Fscript';
+        index += 7;
+        continue;
+      }
+      output += String.fromCharCode(byte);
+    }
+    return output;
+  }
+
+  function createRaw1252Decoder() {
+    const reverse = Object.fromEntries(WINDOWS_1252_REVERSE);
+    return [
+      'function(encoded) {',
+      '  const bytes = new Uint8Array(encoded.length);',
+      '  let offset = 0;',
+      '  for (let index = 0; index < encoded.length; index++) {',
+      '    let code = encoded.charCodeAt(index);',
+      '    if (code === 92) {',
+      '      if (encoded[index + 1] === "x") {',
+      '        const hex = encoded.slice(index + 2, index + 4);',
+      '        if (!/^[0-9a-f]{2}$/i.test(hex)) throw new Error("Invalid raw archive escape at character " + index + ".");',
+      '        bytes[offset++] = parseInt(hex, 16);',
+      '        index += 3;',
+      '        continue;',
+      '      }',
+      '      throw new Error("Invalid raw archive escape at character " + index + ".");',
+      '    }',
+      '    const mapped = ' + JSON.stringify(reverse) + '[code];',
+      '    if (mapped != null) code = mapped;',
+      '    if (code > 255) throw new Error("Invalid raw archive character at " + index + ".");',
+      '    bytes[offset++] = code;',
+      '  }',
+      '  return bytes.subarray(0, offset);',
+      '}'
+    ].join('\n');
+  }
+
   function textToBase64(value) {
     return bytesToBase64(new TextEncoder().encode(String(value)));
   }
@@ -206,7 +293,7 @@
     return [
       'window.__deploymentAssetsReady = (async function() {',
       '  window.__decodeStandaloneRaw1252 = ' + createRaw1252Decoder() + ';',
-      '  const dataNode = document.getElementById("wk-standalone-data");'
+      '  const dataNode = document.getElementById("wk-standalone-data");',
       '  if (!dataNode) throw new Error("Standalone deployment data is missing.");',
       '  const encodedMetadata = (dataNode.textContent || "").trim();',
       '  if (!encodedMetadata) throw new Error("Standalone deployment metadata is empty.");',
