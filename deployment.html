@@ -561,8 +561,20 @@ window.__deploymentNetworkReady = (async function() {
       return href;
     }
 
+    function getDeploymentPageBaseUrl(targetPage) {
+      const currentUrl = String(targetPage?.location?.url || '');
+      if (currentUrl === 'about:srcdoc') {
+        let parent = targetPage.parent;
+        while (parent && parent.location?.url === 'about:srcdoc') {
+          parent = parent.parent;
+        }
+        return parent?.location?.url || domain + '/';
+      }
+      return currentUrl || domain + '/';
+    }
+
     function updatePageHistory(target, replace = false, targetPage = page) {
-      const resolved = new URL(target, targetPage.location?.url || domain + '/').href;
+      const resolved = new URL(target, getDeploymentPageBaseUrl(targetPage)).href;
       targetPage.setLocation(resolved, new URL(resolved).origin);
       targetPage.history = Array.isArray(targetPage.history) ? targetPage.history : [];
 
@@ -635,7 +647,7 @@ window.__deploymentNetworkReady = (async function() {
 
     async function loadEmulatedPage(target, options = {}) {
       const targetPage = options.page || page;
-      const resolved = new URL(target, targetPage.location?.url || domain + '/');
+      const resolved = new URL(target, getDeploymentPageBaseUrl(targetPage));
       const supportedProtocol = ['http:', 'https:', 'data:', 'blob:'].includes(resolved.protocol);
 
       if (!supportedProtocol) {
@@ -906,7 +918,7 @@ window.__deploymentNetworkReady = (async function() {
       });
 
       currentPage.interceptEvent('open', (url, activateTab = true) => {
-        const resolved = new URL(url, currentPage.location?.url || domain + '/');
+        const resolved = new URL(url, getDeploymentPageBaseUrl(currentPage));
 
         if (resolved.origin === domain) {
           const popup = window.open(
@@ -973,7 +985,7 @@ window.__deploymentNetworkReady = (async function() {
         try {
           targetUrl = new URL(
             obj.src,
-            currentPage.location?.url || domain + '/'
+            getDeploymentPageBaseUrl(currentPage)
           );
         } catch (_) {
           return;
@@ -1052,7 +1064,7 @@ window.__deploymentNetworkReady = (async function() {
         try {
           targetUrl = new URL(
             obj.src,
-            currentPage.location?.url || domain + '/'
+            getDeploymentPageBaseUrl(currentPage)
           );
         } catch (_) {
           return;
@@ -1131,7 +1143,7 @@ window.__deploymentNetworkReady = (async function() {
       });
 
       currentPage.interceptEvent('navigate', async function(url, ...args) {
-        const resolved = new URL(url, currentPage.location?.url || domain + '/');
+        const resolved = new URL(url, getDeploymentPageBaseUrl(currentPage));
 
         const isHistoryStateChange =
           args.length >= 2 &&
