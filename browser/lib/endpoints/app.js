@@ -4815,19 +4815,40 @@
       }
     }
   
-    function loadModuleParserRuntime(config) {
+    async function loadModuleParserRuntime(config, network) {
       if (globalThis.acorn?.parse && globalThis.astring?.generate) return;
-      if (typeof importScripts !== 'function') {
-        throw new Error('ES module parser runtime cannot be loaded in this Worker.');
+      if (!network || typeof network.request !== 'function') {
+        throw new Error('The Node Worker virtual network is unavailable for loading the ES module parser runtime.');
       }
+      if (typeof importScripts !== 'function' || typeof URL.createObjectURL !== 'function') {
+        throw new Error('ES module parser runtime cannot be installed in this Worker.');
+      }
+
       const urls = config.moduleParserUrls || {};
       const scripts = [urls.acorn, urls.astring].filter(Boolean);
       if (!scripts.length) {
         throw new Error('ES module parser URLs were not supplied to the Node Worker.');
       }
+
       for (const url of scripts) {
-        importScripts(String(url));
+        const absoluteUrl = String(url);
+        const response = await network.request(absoluteUrl, config.baseOrigin || config.hostOrigin || '', {}, 'import');
+        if (!response || !response.ok) {
+          throw new Error(`Failed to load ES module parser script "${absoluteUrl}" through the virtual network${response ? ` (HTTP ${response.status})` : ''}.`);
+        }
+
+        const source = await response.text();
+        const blobUrl = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+        try {
+          // importScripts only understands native Worker URLs. Fetch through the
+          // virtual network first, then install the trusted parser source from a
+          // same-origin Blob URL so local filesystem endpoints work as well.
+          importScripts(blobUrl);
+        } finally {
+          URL.revokeObjectURL(blobUrl);
+        }
       }
+
       if (!globalThis.acorn?.parse || !globalThis.astring?.generate) {
         throw new Error('Failed to initialize the ES module parser runtime in the Node Worker.');
       }
@@ -4910,7 +4931,7 @@
       };
   
       try {
-        if (config.enableESModules !== false) loadModuleParserRuntime(config);
+        if (config.enableESModules !== false) await loadModuleParserRuntime(config, network);
         const fn = new Function(`return (${config.nodeExecution});`)();
         fn({
           
