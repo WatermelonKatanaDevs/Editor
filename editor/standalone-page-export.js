@@ -293,7 +293,7 @@
       assets,
       workers,
       runConfig,
-      path: String(runConfig.path || '/')
+      path: String(snapshot.deploymentSettings?.path || runConfig.path || '/')
     };
 
     reportProgress(options, 'Building standalone HTML…');
