@@ -36,6 +36,7 @@
     const objects = new Map();
     const objectIds = new WeakMap();
     const pending = new Map();
+    const remoteRefCounts = new Map();
     let nextObjectId = 1;
     let nextRequestId = 1;
     let closed = false;
@@ -50,7 +51,7 @@
         throw new TypeError('Only objects and functions can be exported by reference.');
       }
       let id = objectIds.get(value);
-      if (id !== undefined) return id;
+      if (id !== undefined && objects.has(id)) return id;
       id = nextObjectId++;
       objectIds.set(value, id);
       objects.set(id, value);
@@ -116,6 +117,18 @@
       });
     }
 
+    const referenceFinalizer = typeof FinalizationRegistry === 'function'
+      ? new FinalizationRegistry(id => {
+          const count = (remoteRefCounts.get(id) || 1) - 1;
+          if (count <= 0) {
+            remoteRefCounts.delete(id);
+            request({op:'release', id}).catch(onError);
+          } else {
+            remoteRefCounts.set(id, count);
+          }
+        })
+      : null;
+
     async function resolvePath(id, path) {
       let value = objects.get(id);
       if (value === undefined) throw new ReferenceError('Unknown remote object reference: ' + id);
@@ -130,6 +143,10 @@
       const op = operation?.op;
       const id = operation?.id;
       const path = Array.isArray(operation?.path) ? operation.path : [];
+      if (op === 'release') {
+        if (id !== 0) objects.delete(id);
+        return true;
+      }
       if (op === 'callRef') {
         const fn = objects.get(id);
         if (typeof fn !== 'function') throw new TypeError('Remote reference is not callable.');
@@ -224,6 +241,10 @@
         }
       });
       proxyMetadata.set(proxy, meta);
+      if (id !== 0 && referenceFinalizer) {
+        remoteRefCounts.set(id, (remoteRefCounts.get(id) || 0) + 1);
+        referenceFinalizer.register(proxy, id);
+      }
       return proxy;
     }
 
@@ -260,6 +281,8 @@
         closed = true;
         for (const item of pending.values()) item.reject(new Error('The remote bridge was closed.'));
         pending.clear();
+        objects.clear();
+        remoteRefCounts.clear();
         try { port.close(); } catch (_) {}
       }
     };
