@@ -1,13 +1,19 @@
 
 (function() {
-  async function generateCompressedZip(cache, directories, compressionLevel) {
+  async function generateCompressedZip(cache, directories, compressionLevel, sourceZip = null, sourcePath = path => path) {
     const level = Math.max(1, Math.min(9, Number(compressionLevel) || 9));
     const zip = new JSZip();
     for (const directory of directories || []) {
       if (directory) zip.folder(directory);
     }
     for (const [path, data] of cache || []) {
-      zip.file(path, data, {binary:true});
+      const original = sourceZip?.files?.[sourcePath(path)];
+      const options = {binary:true};
+      if (original?.date) options.date = original.date;
+      if (original?.comment) options.comment = original.comment;
+      if (original?.unixPermissions != null) options.unixPermissions = original.unixPermissions;
+      if (original?.dosPermissions != null) options.dosPermissions = original.dosPermissions;
+      zip.file(path, data, options);
     }
     return await zip.generateAsync({
       type:'blob',
@@ -531,7 +537,7 @@
     }
     async exportZip(options = {}) {
       if (options.compressionLevel != null) {
-        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel);
+        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel, this.zip);
       }
       const zip = new JSZip();
       for (const [path, data] of this.cache) zip.file(path, data);
@@ -592,7 +598,7 @@
     }
     async exportZip(options = {}) {
       if (options.compressionLevel != null) {
-        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel);
+        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel, this.zip, path => this.physicalPath(path));
       }
       for (const dir of this.directories) if (dir) this.zip.folder(dir);
       this.cache.forEach((data, path) => this.zip.file(path, data));
