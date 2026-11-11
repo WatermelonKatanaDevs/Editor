@@ -337,21 +337,63 @@
     });
   }
 
+  const bridgeConfigUrl = new URL('remote-bridge-config.json', global.document.currentScript?.src || global.location.href);
+  const bridgeConfigReady = fetch(bridgeConfigUrl, {cache:'no-store'})
+    .then(async response => {
+      if (!response.ok) throw new Error('Remote bridge config request failed (' + response.status + ').');
+      const config = await response.json();
+      if (!config || !Array.isArray(config.allowedParentOrigins)) {
+        throw new Error('Remote bridge config must define allowedParentOrigins.');
+      }
+      return config;
+    })
+    .catch(error => {
+      console.error('[EditorRemoteBridge] Unable to load origin allowlist:', error);
+      return {allowedParentOrigins:[]};
+    });
+
   function acceptParent() {
-    global.addEventListener('message', event => {
+    global.addEventListener('message', async event => {
       if (event.source !== global.parent || !event.ports?.[0]) return;
       if (event.data?.protocol !== PROTOCOL || event.data?.type !== 'connect') return;
+
+      const config = await bridgeConfigReady;
+      const allowedOrigins = new Set(config.allowedParentOrigins.map(value => {
+        try { return new URL(value).origin; } catch (_) { return ''; }
+      }).filter(Boolean));
+      if (!allowedOrigins.has(event.origin)) {
+        console.warn('[EditorRemoteBridge] Rejected an untrusted parent origin:', event.origin);
+        event.ports[0].close();
+        return;
+      }
+
+      const hostConfig = event.data.config || {};
+      if (hostConfig.origin && hostConfig.origin !== event.origin) {
+        console.warn('[EditorRemoteBridge] Rejected a mismatched host origin.');
+        event.ports[0].close();
+        return;
+      }
+
+      const integrationUrl = String(hostConfig.integrationUrl || '');
+      if (integrationUrl) {
+        let parsedIntegrationUrl;
+        try { parsedIntegrationUrl = new URL(integrationUrl); } catch (_) {}
+        if (!parsedIntegrationUrl || parsedIntegrationUrl.origin !== event.origin || !/^https?:$/.test(parsedIntegrationUrl.protocol)) {
+          console.warn('[EditorRemoteBridge] Rejected an integration script outside the trusted parent origin.');
+          event.ports[0].close();
+          return;
+        }
+      }
 
       const port = event.ports[0];
       const bridge = createBridge(port, {Editor:global});
       global.EditorRemoteBridgeSession?.close?.();
       global.EditorRemoteBridgeSession = bridge;
       global.WKHost = bridge.remote.WKHost;
-      global.WKHostConfig = event.data.config || {};
+      global.WKHostConfig = hostConfig;
       port.postMessage({protocol:PROTOCOL,type:'ready'});
       global.dispatchEvent(new CustomEvent('editorhostready', {detail:{bridge,config:global.WKHostConfig}}));
 
-      const integrationUrl = String(global.WKHostConfig.integrationUrl || '');
       if (integrationUrl) {
         const script = global.document.createElement('script');
         script.src = integrationUrl;
