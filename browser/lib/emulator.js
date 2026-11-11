@@ -140,10 +140,29 @@
 
     const parser = new DOMParser();
     const doc = parser.parseFromString(rawHtml, 'text/html');
+    const codeOrgGameLab = /studio\.code\.org\/projects\/gamelab\//i.test(rawHtml) && /gamelab-api\.js/i.test(rawHtml);
+    let codeOrgChannel = null;
+    if (codeOrgGameLab) {
+      page.__codeOrgGameLab = true;
+      const configScript = Array.from(doc.querySelectorAll('script:not([src])'))
+        .find(script => /_FCONFIG_/.test(script.textContent || '') && /channel\s*:/.test(script.textContent || ''));
+      codeOrgChannel = configScript?.textContent.match(/channel\s*:\s*["']([^"']+)["']/)?.[1] || null;
+      if (configScript) {
+        configScript.textContent = configScript.textContent.replace(
+          '_FCONFIG_=Object.assign(_FCONFIG_,config)',
+          'for(const key of ["assetPathPrefix","soundPathPrefix"]){const value=config&&config[key];if(typeof value==="string"&&value.startsWith("/"))config[key]="https://studio.code.org"+value;}_FCONFIG_=Object.assign(_FCONFIG_,config)'
+        );
+      }
+    }
 
     const resolveUrl = (relUrl) => {
-      try { return new URL(relUrl, pageUrl).href; } 
-      catch (e) { return relUrl; }
+      try {
+        const resolved = new URL(relUrl, pageUrl);
+        if (codeOrgGameLab && resolved.origin === dynamicBaseOrigin && resolved.pathname.startsWith('/blockly/')) {
+          return new URL(resolved.pathname + resolved.search + resolved.hash, 'https://studio.code.org').href;
+        }
+        return resolved.href;
+      } catch (e) { return relUrl; }
     };
 
     const processSrcSet = async (el) => {
@@ -214,6 +233,16 @@
 
         const originalUrl = el.getAttribute(attr);
         if (!originalUrl || originalUrl.startsWith('data:') || originalUrl.startsWith('blob:')) return;
+
+        // Code.org's Game Lab export_config endpoint is designed to run as a
+        // classic cross-origin script (which does not require CORS). Keep it
+        // as a native script instead of fetching it through the emulator.
+        // Its URL template is resolved from the page's _FCONFIG_ channel.
+        if (codeOrgGameLab && el.tagName === "SCRIPT" &&
+            /https?:\/\/studio\.code\.org\/projects\/gamelab\/\$\{id\}\/export_config(?:[?#]|$)/i.test(originalUrl)) {
+          if (codeOrgChannel) el.setAttribute(attr, originalUrl.replace(/\$\{id\}/g, encodeURIComponent(codeOrgChannel)));
+          return;
+        }
 
         const absoluteUrl = resolveUrl(originalUrl);
         el.setAttribute(rawAttr, originalUrl);
@@ -1171,8 +1200,10 @@
 
   async function rewriteCSSURLs(cssText, baseUrl, baseOrigin, networkRequest, createDataUri) {
     // Support both the new page-based API and the old explicit API.
+    let pageContext = null;
     if (typeof baseUrl === 'object' && baseUrl.network) {
       const page = baseUrl;
+      pageContext = page;
       // Linked stylesheets resolve url(...) against their own URL, not the
       // document URL. The optional third argument carries that original URL.
       const sourceUrl = typeof baseOrigin === 'string' && baseOrigin
@@ -1244,7 +1275,14 @@
 
       urlMap.set(rawUrl, 'data:,');
       try {
-        const resolvedUrl = new URL(rawUrl, baseUrl).href;
+        let resolved = new URL(rawUrl, baseUrl);
+        if (pageContext?.__codeOrgGameLab) {
+          const pageOrigin = (() => { try { return new URL(baseUrl).origin; } catch (_) { return baseOrigin; } })();
+          if (resolved.origin === pageOrigin && resolved.pathname.startsWith('/blockly/')) {
+            resolved = new URL(resolved.pathname + resolved.search + resolved.hash, 'https://studio.code.org');
+          }
+        }
+        const resolvedUrl = resolved.href;
         const response = await networkRequest(resolvedUrl, baseOrigin, {}, 'css-url');
         if (!response || !response.ok) return;
 
