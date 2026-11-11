@@ -2895,6 +2895,9 @@
           if (typeof NativeWorker !== 'function' || NativeWorker.__wkVirtualized) return;
 
           function workerBootstrap() {
+            // Capture the worker's native WebSocket before any worker-scope
+            // patches replace it with the Network-backed implementation.
+            const NativeWebSocket = self.WebSocket;
             const nativeImportScripts = typeof self.importScripts === 'function'
               ? self.importScripts.bind(self)
               : null;
