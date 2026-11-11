@@ -3957,10 +3957,20 @@ window.__editorInitPromise = (async function () {
     }),
     getSinglePageSnapshot: async () => {
       if (!state.fs) throw new Error('No workspace is open.');
+      state.runConfig?.detect?.();
+      const runConfig = state.runConfig?.config ? {...state.runConfig.config} : {};
+      if (runConfig.serverType === 'node') {
+        if (typeof state.ensureNodeRuntime !== 'function') {
+          throw new Error('The Node runtime is unavailable, so dependencies cannot be prepared for offline export.');
+        }
+        // The normal Editor setup checks the complete dependency tree and installs
+        // missing packages into the workspace filesystem before it is archived.
+        await state.ensureNodeRuntime();
+      }
       return {
         archive: await state.fs.exportZip(),
         projectName: state.projectName || 'Workspace',
-        runConfig: state.runConfig?.config ? {...state.runConfig.config} : {},
+        runConfig,
         deploymentSettings: state.deploymentSettings ? {...state.deploymentSettings} : {}
       };
     },
