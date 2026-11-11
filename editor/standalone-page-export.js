@@ -602,7 +602,18 @@
         payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\n');
       }
     }
-    const loaderTag = '<script>\n' + createAssetLoader(assets) + '\n</script>';
+    let loaderSource = createAssetLoader(assets);
+    if (global.StandaloneMinifier?.isEnabled?.() &&
+        typeof global.StandaloneMinifier.minifyJavaScriptSource === 'function') {
+      try {
+        loaderSource = await global.StandaloneMinifier.minifyJavaScriptSource(loaderSource, {
+          editorUrl: options.editorUrl || global.location.href
+        });
+      } catch (error) {
+        console.warn('[Compile Page] Kept standalone loader source after minification failed:', error);
+      }
+    }
+    const loaderTag = '<script>' + loaderSource + '</script>';
 
     const safeTitle = escapeUnrepresentableHtmlCharacters(String(bundle.projectName || 'Workspace')
       .replace(/&/g, '&amp;')
