@@ -3098,8 +3098,8 @@
                 if (type === 'open') {
                   this.readyState = VirtualWebSocket.OPEN;
                   if (sourceEvent) {
-                    this.protocol = sourceEvent.target && sourceEvent.target.protocol || '';
-                    this.extensions = sourceEvent.target && sourceEvent.target.extensions || '';
+                    this.protocol = sourceEvent.protocol || sourceEvent.target && sourceEvent.target.protocol || '';
+                    this.extensions = sourceEvent.extensions || sourceEvent.target && sourceEvent.target.extensions || '';
                   }
                   this._emit('open');
                 } else if (type === 'message') {
@@ -3425,6 +3425,10 @@
                     const forward = type => event => {
                       const outgoing = { kind: 'ws-event', socketId: message.payload.socketId, event: type };
                       if (type === 'message') outgoing.data = event.data;
+                      if (type === 'open') {
+                        outgoing.protocol = socket.protocol || '';
+                        outgoing.extensions = socket.extensions || '';
+                      }
                       if (type === 'close') {
                         outgoing.code = event.code;
                         outgoing.reason = event.reason;
