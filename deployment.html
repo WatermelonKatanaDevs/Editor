@@ -519,7 +519,135 @@ window.__deploymentNetworkReady = (async function() {
       location: {url: pageURL, origin: domain},
       history: []
     });
+
     const deploymentRootPage = page;
+
+    // Mirror the active emulated document's identity in the outer deployment
+    // tab. The project still runs inside its PageEmulator; only its metadata
+    // is reflected onto the wrapper document.
+    const deploymentFavicon = document.createElement('link');
+    deploymentFavicon.rel = 'icon';
+    deploymentFavicon.id = 'deployment-page-favicon';
+    document.head.appendChild(deploymentFavicon);
+
+    let deploymentMetadataObserver = null;
+    let deploymentMetadataDocument = null;
+    let deploymentMetadataRequestId = 0;
+    let deploymentMetadataIconSource = null;
+
+    function getDeploymentFallbackTitle() {
+      try {
+        const current = new URL(page.location?.url || pageURL);
+        const filename = current.pathname.split('/').filter(Boolean).pop();
+        if (filename) {
+          try { return decodeURIComponent(filename); } catch (_) { return filename; }
+        }
+        return current.hostname || 'Deployment';
+      } catch (_) {
+        return 'Deployment';
+      }
+    }
+
+    function getDeploymentIconLink(targetDocument) {
+      const links = Array.from(targetDocument.querySelectorAll('link[rel][href], link[rel][data-raw-href]'));
+      return links.find(link => link.relList?.contains('icon')) ||
+        links.find(link => link.relList?.contains('apple-touch-icon')) ||
+        links.find(link => link.relList?.contains('mask-icon')) ||
+        null;
+    }
+
+    async function updateDeploymentFavicon(targetDocument) {
+      const requestId = ++deploymentMetadataRequestId;
+      const iconLink = getDeploymentIconLink(targetDocument);
+      const href = iconLink
+        ? (iconLink.getAttribute('href') || iconLink.getAttribute('data-raw-href') || '').trim()
+        : '';
+
+      let source = href;
+      if (!source) {
+        try { source = new URL('/favicon.ico', page.location?.url || pageURL).href; }
+        catch (_) { source = ''; }
+      }
+
+      if (!source) {
+        deploymentMetadataIconSource = null;
+        deploymentFavicon.removeAttribute('href');
+        return;
+      }
+
+      let resolved;
+      try { resolved = new URL(source, page.location?.url || pageURL); }
+      catch (_) {
+        deploymentMetadataIconSource = null;
+        deploymentFavicon.removeAttribute('href');
+        return;
+      }
+
+      const sourceKey = resolved.href;
+      if (sourceKey === deploymentMetadataIconSource) return;
+      deploymentMetadataIconSource = sourceKey;
+
+      if (resolved.protocol === 'data:' || resolved.protocol === 'blob:') {
+        if (requestId === deploymentMetadataRequestId) deploymentFavicon.href = resolved.href;
+        return;
+      }
+
+      if (!['http:', 'https:'].includes(resolved.protocol)) {
+        if (requestId === deploymentMetadataRequestId) deploymentFavicon.removeAttribute('href');
+        return;
+      }
+
+      try {
+        const response = await page.network.request(
+          resolved.href,
+          resolved.origin,
+          {},
+          'favicon'
+        );
+        if (!response?.ok) throw new Error('Favicon request failed.');
+        const dataUri = await createDataUri(response);
+        if (requestId === deploymentMetadataRequestId) {
+          if (dataUri) deploymentFavicon.href = dataUri;
+          else deploymentFavicon.removeAttribute('href');
+        }
+      } catch (error) {
+        if (requestId === deploymentMetadataRequestId) deploymentFavicon.removeAttribute('href');
+        console.warn('Could not load the emulated page favicon:', resolved.href, error);
+      }
+    }
+
+    function syncDeploymentMetadata() {
+      let targetDocument;
+      try { targetDocument = iframe.contentDocument; } catch (_) { return; }
+      if (!targetDocument?.documentElement) return;
+
+      const title = String(targetDocument.title || '').trim();
+      document.title = title || getDeploymentFallbackTitle();
+      updateDeploymentFavicon(targetDocument);
+    }
+
+    function observeDeploymentMetadata() {
+      let targetDocument;
+      try { targetDocument = iframe.contentDocument; } catch (_) { return; }
+      if (!targetDocument?.documentElement) return;
+
+      if (deploymentMetadataDocument !== targetDocument) {
+        deploymentMetadataObserver?.disconnect();
+        deploymentMetadataDocument = targetDocument;
+        deploymentMetadataObserver = new MutationObserver(syncDeploymentMetadata);
+        deploymentMetadataObserver.observe(targetDocument.documentElement, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributes: true,
+          attributeFilter: ['href', 'rel']
+        });
+      }
+
+      syncDeploymentMetadata();
+    }
+
+    iframe.addEventListener('load', observeDeploymentMetadata);
 
     function deploymentPageUrl(target) {
       const resolved = new URL(target, page.location.url);
