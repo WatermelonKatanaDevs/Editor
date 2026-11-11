@@ -39,8 +39,8 @@
             <h3>Export</h3>
             <label class="setting-check"><input id="setting-compile-minify" type="checkbox"><span>Minify HTML, CSS, and JavaScript when compiling</span></label>
             <p class="editor-settings-note">Reduces the compiled project size. Original workspace files are left unchanged; files the parser cannot safely process are kept as-is.</p>
-            <label class="setting-check"><input id="setting-compile-base122" type="checkbox"><span>Use Base122 encoding for the embedded ZIP</span></label>
-            <p class="editor-settings-note">Produces a smaller HTML file than Base64, with a little extra decoding work when the standalone page opens.</p>
+            <label class="setting-check"><input id="setting-compile-raw-binary" type="checkbox"><span>Embed the ZIP as raw binary data</span></label>
+            <p class="editor-settings-note">Uses Windows-1252 byte storage instead of Base64, keeping the compiled HTML close to the ZIP's actual size.</p>
             <label>Archive compression
               <select id="setting-compile-compression">
                 <option value="6">Standard (DEFLATE level 6)</option>
@@ -88,7 +88,7 @@
       const ignoreNodeModules = $('setting-ignore-node-modules');
       const piskelAutoSave = $('setting-piskel-auto-save');
       const compileMinify = $('setting-compile-minify');
-      const compileBase122 = $('setting-compile-base122');
+      const compileRawBinary = $('setting-compile-raw-binary');
       const compileCompression = $('setting-compile-compression');
       try {
         const stored = localStorage.getItem('node-editor.compile.minify');
@@ -100,13 +100,13 @@
         try { localStorage.setItem('node-editor.compile.minify', compileMinify.checked ? 'true' : 'false'); } catch (_) {}
       };
       try {
-        const stored = localStorage.getItem('node-editor.compile.base122');
-        compileBase122.checked = stored === 'true';
+        const stored = localStorage.getItem('node-editor.compile.raw-binary');
+        compileRawBinary.checked = stored === null ? true : stored === 'true';
       } catch (_) {
-        compileBase122.checked = false;
+        compileRawBinary.checked = true;
       }
-      compileBase122.onchange = () => {
-        try { localStorage.setItem('node-editor.compile.base122', compileBase122.checked ? 'true' : 'false'); } catch (_) {}
+      compileRawBinary.onchange = () => {
+        try { localStorage.setItem('node-editor.compile.raw-binary', compileRawBinary.checked ? 'true' : 'false'); } catch (_) {}
       };
       try {
         const stored = localStorage.getItem('node-editor.compile.compression');
