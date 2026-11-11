@@ -650,41 +650,24 @@ window.__deploymentNetworkReady = (async function() {
       const resolved = new URL(target, getDeploymentPageBaseUrl(targetPage));
       const supportedProtocol = ['http:', 'https:', 'data:', 'blob:'].includes(resolved.protocol);
 
+      // Project documents are always emulated. Do not assign arbitrary
+      // schemes to a native child frame, where javascript: or a same-origin
+      // blob: could escape the PageEmulator.
       if (!supportedProtocol) {
-        if (targetPage === deploymentRootPage) {
+        if (targetPage === deploymentRootPage && ['mailto:', 'tel:'].includes(resolved.protocol)) {
           location.assign(resolved.href);
-        } else if (targetPage.iframe) {
-          targetPage.iframe.removeAttribute('srcdoc');
-          targetPage.iframe.src = resolved.href;
         }
         return true;
       }
 
-      let response;
-      try {
-        response = await targetPage.network.request(
-          resolved.href,
-          resolved.origin,
-          {},
-          options.requestType || 'navigation'
-        );
-      } catch (error) {
-        if (targetPage !== deploymentRootPage && resolved.origin !== domain && targetPage.iframe && /^https?:$/.test(resolved.protocol)) {
-          targetPage.setLocation(resolved.href, resolved.origin);
-          targetPage.iframe.removeAttribute('srcdoc');
-          targetPage.iframe.src = resolved.href;
-          return true;
-        }
-        throw error;
-      }
+      const response = await targetPage.network.request(
+        resolved.href,
+        resolved.origin,
+        {},
+        options.requestType || 'navigation'
+      );
 
       if (!response?.ok) {
-        if (targetPage !== deploymentRootPage && resolved.origin !== domain && targetPage.iframe && /^https?:$/.test(resolved.protocol)) {
-          targetPage.setLocation(resolved.href, resolved.origin);
-          targetPage.iframe.removeAttribute('srcdoc');
-          targetPage.iframe.src = resolved.href;
-          return true;
-        }
         throw new Error(`Emulated page navigation failed (${response?.status || 'no response'}): ${resolved.href}`);
       }
 
@@ -730,7 +713,8 @@ window.__deploymentNetworkReady = (async function() {
     }
 
     async function triggerDownload(url, filename, sourcePage = page) {
-      const resolved = new URL(url, sourcePage.location?.url || page.location.url);
+      const resolved = new URL(url, getDeploymentPageBaseUrl(sourcePage));
+      if (!['http:', 'https:', 'data:', 'blob:'].includes(resolved.protocol)) return false;
 
       let response = null;
       try {
@@ -919,6 +903,10 @@ window.__deploymentNetworkReady = (async function() {
 
       currentPage.interceptEvent('open', (url, activateTab = true) => {
         const resolved = new URL(url, getDeploymentPageBaseUrl(currentPage));
+        if (!['http:', 'https:', 'mailto:', 'tel:'].includes(resolved.protocol)) {
+          console.warn('Blocked unsupported popup URL scheme:', resolved.protocol);
+          return true;
+        }
 
         if (resolved.origin === domain) {
           const popup = window.open(
@@ -998,9 +986,7 @@ window.__deploymentNetworkReady = (async function() {
 
         const supportedProtocol = ['http:', 'https:', 'data:', 'blob:'].includes(targetUrl.protocol);
         if (!supportedProtocol) {
-          child.setLocation(targetUrl.href, targetUrl.origin);
-          frame.removeAttribute('srcdoc');
-          frame.src = targetUrl.href;
+          console.warn('Blocked unsupported iframe URL scheme:', targetUrl.protocol);
           return;
         }
 
@@ -1014,29 +1000,17 @@ window.__deploymentNetworkReady = (async function() {
           );
         } catch (error) {
           if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
-          if (targetUrl.origin !== domain && /^https?:$/.test(targetUrl.protocol)) {
-            child.setLocation(targetUrl.href, targetUrl.origin);
-            frame.removeAttribute('srcdoc');
-            frame.src = targetUrl.href;
-          } else {
-            console.warn('Could not load emulated iframe:', targetUrl.href, error);
-          }
+          console.warn('Could not load emulated iframe:', targetUrl.href, error);
           return;
         }
 
         if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
         if (!response?.ok) {
-          if (targetUrl.origin !== domain && /^https?:$/.test(targetUrl.protocol)) {
-            child.setLocation(targetUrl.href, targetUrl.origin);
-            frame.removeAttribute('srcdoc');
-            frame.src = targetUrl.href;
-          } else {
-            console.warn('Emulated iframe request failed:', targetUrl.href, response?.status || 'no response');
-          }
+          console.warn('Emulated iframe request failed:', targetUrl.href, response?.status || 'no response');
           return;
         }
 
-        const rawHtml = await getDeploymentDocumentContent(response, targetUrl.href);
+                const rawHtml = await getDeploymentDocumentContent(response, targetUrl.href);
         if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
 
         child.setLocation(targetUrl.href, targetUrl.origin);
@@ -1074,7 +1048,7 @@ window.__deploymentNetworkReady = (async function() {
 
         const supportedProtocol = ['http:', 'https:', 'data:', 'blob:'].includes(targetUrl.protocol);
         if (!supportedProtocol) {
-          embed.setAttribute('src', targetUrl.href);
+          console.warn('Blocked unsupported embed URL scheme:', targetUrl.protocol);
           return;
         }
 
@@ -1088,25 +1062,17 @@ window.__deploymentNetworkReady = (async function() {
           );
         } catch (error) {
           if (navigationId !== undefined && embed.__embedNavigationId !== navigationId) return;
-          if (targetUrl.origin !== domain && /^https?:$/.test(targetUrl.protocol)) {
-            embed.setAttribute('src', targetUrl.href);
-          } else {
-            console.warn('Could not load emulated embed:', targetUrl.href, error);
-          }
+          console.warn('Could not load emulated embed:', targetUrl.href, error);
           return;
         }
 
         if (navigationId !== undefined && embed.__embedNavigationId !== navigationId) return;
         if (!response?.ok) {
-          if (targetUrl.origin !== domain && /^https?:$/.test(targetUrl.protocol)) {
-            embed.setAttribute('src', targetUrl.href);
-          } else {
-            console.warn('Emulated embed request failed:', targetUrl.href, response?.status || 'no response');
-          }
+          console.warn('Emulated embed request failed:', targetUrl.href, response?.status || 'no response');
           return;
         }
 
-        const contentType = String(
+                const contentType = String(
           response.headers?.get?.('content-type') || ''
         ).toLowerCase();
         const isHtml =
@@ -1170,7 +1136,13 @@ window.__deploymentNetworkReady = (async function() {
         }
 
         if (isRootPage && resolved.origin !== domain) {
-          // Leaving the emulated project is a real top-level navigation.
+          // Only ordinary web URLs (and standard external-protocol links)
+          // may leave the deployment. Never hand javascript:, data: or blob:
+          // URLs to the real deployment window.
+          if (!['http:', 'https:', 'mailto:', 'tel:'].includes(resolved.protocol)) {
+            console.warn('Blocked unsupported top-level navigation scheme:', resolved.protocol);
+            return true;
+          }
           location.assign(resolved.href);
           return true;
         }
