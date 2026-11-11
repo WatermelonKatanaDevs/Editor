@@ -2764,7 +2764,6 @@
 
         if (pageEmulator.runtimeInterceptor) eval(pageEmulator.runtimeInterceptor);
 
-        const originalFetch = window.fetch;
         window.fetch = async function(input, data = {}, type = 'fetch') {
           let fetchUrl = input;
           let requestOptions = { ...data };
@@ -2795,8 +2794,7 @@
           // Pass the enriched requestOptions into your network handler
           const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, requestOptions, type);
           if (response) return response;
-          
-          return await originalFetch.apply(this, arguments);
+          throw new TypeError('The emulator network did not handle fetch request: ' + resolvedUrl);
         };
 
 
@@ -3283,6 +3281,7 @@
                   ports: message.ports
                 }));
               }
+              try { bridgePort.postMessage({ kind: 'worker-ready' }); } catch (_) {}
             }
 
             self.addEventListener('message', receiveInitialMessage);
@@ -3294,9 +3293,11 @@
             const scripts = new Map();
             async function visit(url) {
               if (scripts.has(url)) return;
-              let response = await pageEmulator.network.request(url, BASE_ORIGIN, { signal }, 'worker');
-              if (!response) response = await originalFetch(new Request(url, { signal }));
-              if (!response || !response.ok) {
+              const response = await pageEmulator.network.request(url, BASE_ORIGIN, { signal }, 'worker');
+              if (!response) {
+                throw new Error('The emulator network did not handle worker script: ' + url);
+              }
+              if (!response.ok) {
                 throw new Error('Failed to load worker script through the virtual network: ' + url +
                   (response ? ' (HTTP ' + response.status + ')' : ''));
               }
@@ -3397,6 +3398,32 @@
               const abortController = new AbortController();
               const sockets = new Map();
               let nextSocketId = 1;
+              const workerRecord = {
+                id: pageEmulator.nextWorkerId = (pageEmulator.nextWorkerId || 0) + 1,
+                url: sourceUrl,
+                name: (() => { try { return new URL(sourceUrl).pathname.split('/').filter(Boolean).pop() || sourceUrl; } catch (_) { return sourceUrl; } })(),
+                type: options && options.type === 'module' ? 'module' : 'classic',
+                status: 'starting',
+                createdAt: Date.now(),
+                startedAt: null,
+                endedAt: null,
+                sources: [],
+                error: null,
+                instance: this
+              };
+              pageEmulator.workers ||= new Map();
+              pageEmulator.workers.set(workerRecord.id, workerRecord);
+              const notifyWorker = action => {
+                if (pageEmulator.eventInterceptors?.worker?.length) {
+                  pageEmulator.sendEvent('worker', { action, worker: workerRecord });
+                }
+              };
+              const updateWorkerRecord = (patch, action = 'updated') => {
+                Object.assign(workerRecord, patch);
+                notifyWorker(action);
+              };
+              this.__wkWorkerRecord = workerRecord;
+              notifyWorker('created');
               let bootstrapRevoked = false;
               const revokeBootstrap = () => {
                 if (bootstrapRevoked) return;
@@ -3406,6 +3433,14 @@
               const fail = error => {
                 if (abortController.signal.aborted) return;
                 abortController.abort();
+                updateWorkerRecord({
+                  status: 'failed',
+                  endedAt: Date.now(),
+                  error: {
+                    message: error && error.message || String(error),
+                    stack: error && error.stack || ''
+                  }
+                });
                 releaseSourceUrl();
                 dispatchWorkerStartupError(this, sourceUrl, error);
                 try { this.terminate(); } catch (_) {}
@@ -3441,6 +3476,14 @@
                     }
 
                     const scripts = Array.from(scriptsByUrl.values());
+                    updateWorkerRecord({
+                      status: 'loading',
+                      sources: scripts.map(entry => ({
+                        url: entry.url,
+                        source: entry.source,
+                        module: type === 'module'
+                      }))
+                    });
                     this.__wkStartSent = true;
                     port.postMessage({
                       kind: 'start',
@@ -3460,6 +3503,11 @@
                     releaseSourceUrl();
                     fail(error);
                   }
+                  return;
+                }
+
+                if (message.kind === 'worker-ready') {
+                  updateWorkerRecord({ status: 'running', startedAt: Date.now() });
                   return;
                 }
 
@@ -3547,15 +3595,17 @@
                     const options = { ...(payload.options || {}), signal: controller.signal };
                     if (payload.body && payload.body.byteLength) options.body = payload.body;
                     const response = await pageEmulator.network.request(payload.url, BASE_ORIGIN, options, 'worker-fetch');
-                    const finalResponse = response || await originalFetch(new Request(payload.url, options));
-                    const body = await finalResponse.arrayBuffer();
-                    const status = finalResponse.status || 200;
+                    if (!response) {
+                      throw new TypeError('The emulator network did not handle worker fetch: ' + payload.url);
+                    }
+                    const body = await response.arrayBuffer();
+                    const status = response.status || 200;
                     const responseData = {
                       status,
-                      statusText: finalResponse.statusText || '',
-                      headers: Array.from(finalResponse.headers.entries()),
-                      url: finalResponse.url || payload.url,
-                      redirected: !!finalResponse.redirected,
+                      statusText: response.statusText || '',
+                      headers: Array.from(response.headers.entries()),
+                      url: response.url || payload.url,
+                      redirected: !!response.redirected,
                       body
                     };
                     port.postMessage({
@@ -3575,6 +3625,10 @@
               this.postMessage({ __wkEmulatorInit: true }, [channel.port2]);
               const originalTerminate = this.terminate.bind(this);
               this.terminate = () => {
+                if (workerRecord.status !== 'failed') {
+                  updateWorkerRecord({ status: 'terminated', endedAt: Date.now() });
+                }
+                workerRecord.instance = null;
                 releaseSourceUrl();
                 abortController.abort();
                 for (const socket of sockets.values()) {
@@ -3585,7 +3639,17 @@
                 revokeBootstrap();
                 return originalTerminate();
               };
-              this.addEventListener('error', () => {
+              this.addEventListener('error', event => {
+                if (workerRecord.status !== 'failed') {
+                  updateWorkerRecord({
+                    status: 'failed',
+                    endedAt: Date.now(),
+                    error: {
+                      message: event && event.message || 'Worker runtime error',
+                      stack: event && event.error && event.error.stack || ''
+                    }
+                  });
+                }
                 releaseSourceUrl();
                 abortController.abort();
                 revokeBootstrap();
@@ -5307,6 +5371,8 @@
       this.history = history || [];
       this.historyIndex = -1;
       this.network = createPageNetwork(network);
+      this.workers = new Map();
+      this.nextWorkerId = 0;
 
       this.parent = false;
       this.children = [];
@@ -5317,6 +5383,11 @@
 
     remove() {
       if (!this.id && !this.iframe) return;
+
+      for (const workerRecord of this.workers?.values?.() || []) {
+        try { workerRecord?.instance?.terminate?.(); } catch (_) {}
+      }
+      this.workers?.clear?.();
 
       const children = Array.isArray(this.children) ? this.children.slice() : [];
       children.forEach(child => child?.remove?.());

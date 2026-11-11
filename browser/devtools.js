@@ -3421,7 +3421,7 @@ var DevToolsInternal = {
       });
 
       DevToolsInternal.network.getLog(tab).forEach(req => {
-        if (!req.responseText) return;
+        if (!req.responseText || req.type === 'worker') return;
         if (!DevToolsInternal.network.isTextualContent(req.contentType || '') && !/\.(?:js|mjs|css|html?|json|txt)(?:[?#]|$)/i.test(req.url)) return;
         const id = makeId('network-' + req.id,0);
         if (seen.has(id) || entries.some(item => item.url === req.url)) return;
@@ -3452,7 +3452,7 @@ var DevToolsInternal = {
       const capturedBucket = sourceBuckets.get(tab);
       if (capturedBucket) {
         capturedBucket.forEach((captured,url) => {
-          if (!captured?.text) return;
+          if (!captured?.text || captured.requestType === 'worker') return;
           if (entries.some(item => resolveUrl(item.url || '',tab.url) === url)) return;
           push({
             id:makeId('module-',url),
@@ -3674,6 +3674,52 @@ var DevToolsInternal = {
       return buildFrameContexts(rootTab,doc,rootTab.page,[],1);
     }
 
+    function getWorkerContexts(tab) {
+      const registry = tab?.page?.workers;
+      if (!registry || typeof registry.values !== 'function') return [];
+      return Array.from(registry.values()).map(worker => {
+        const entries = [];
+        (Array.isArray(worker?.sources) ? worker.sources : []).forEach((source,index) => {
+          if (!source || typeof source.source !== 'string') return;
+          const url = String(source.url || worker.url || '');
+          entries.push({
+            id: 'worker-' + tab.id + '-' + worker.id + '-' + index,
+            name: sourceEntryNameFromUrl(url,index,'worker-script.js'),
+            type: 'js',
+            url,
+            deliveryUrl: url,
+            sourcePath: sourcePathFromUrl(url),
+            activeUrl: url,
+            original: source.source,
+            active: source.source,
+            kind: 'worker',
+            module: !!source.module,
+            workerId: worker.id
+          });
+        });
+        if (!entries.length && worker?.error) {
+          const message = String(worker.error.message || 'Worker failed to start');
+          const stack = String(worker.error.stack || '');
+          const url = String(worker.url || tab.url || '');
+          const text = message + (stack ? '\\n\\n' + stack : '');
+          entries.push({
+            id: 'worker-' + tab.id + '-' + worker.id + '-error',
+            name: 'Worker startup error.txt',
+            type: 'file',
+            url,
+            deliveryUrl: url,
+            sourcePath: sourcePathFromUrl(url),
+            activeUrl: url,
+            original: text,
+            active: text,
+            kind: 'worker-error',
+            workerId: worker.id
+          });
+        }
+        return { worker, entries };
+      });
+    }
+
     // Sources hierarchy intentionally uses sourceGroupName/sourceDomainLabel only.
     function buildDomainTree(entries) {
       const root = {type:'domains',name:'',children:new Map()};
@@ -3889,7 +3935,42 @@ var DevToolsInternal = {
       return wrap;
     }
 
-    function renderSourceTree(tab,topEntries,frameContexts) {
+    function renderWorkerBranch(context,depth=1) {
+      const worker = context?.worker || {};
+      const status = String(worker.status || 'starting');
+      const workerName = String(worker.name || sourceEntryNameFromUrl(worker.url || '',0,'worker'));
+      const parts = createTreeRow(
+        'Worker ' + worker.id + ' — ' + workerName + ' (' + status + ')',
+        'fa-solid fa-microchip text-cyan-400',
+        depth,
+        true,
+        ()=>{},
+        'source-worker-row'
+      );
+      parts.row.title = String(worker.url || '') + (worker.error?.message ? '\\n' + worker.error.message : '');
+      const body = document.createElement('div');
+      body.style.display = 'block';
+      if (context.entries?.length) {
+        body.appendChild(renderContextDomains({entries:context.entries},depth + 1));
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'px-2 py-1 text-[10px] text-gray-500';
+        empty.style.paddingLeft = ((depth + 1) * 12 + 4) + 'px';
+        empty.textContent = worker.error?.message || 'No worker scripts captured.';
+        body.appendChild(empty);
+      }
+      parts.row.onclick = e => {
+        e.stopPropagation();
+        const collapsed = body.style.display === 'none';
+        body.style.display = collapsed ? 'block' : 'none';
+        parts.caret.textContent = collapsed ? '▼' : '▶';
+      };
+      const wrap = document.createElement('div');
+      wrap.append(parts.row,body);
+      return wrap;
+    }
+
+    function renderSourceTree(tab,topEntries,frameContexts,workerContexts=[]) {
       const root = document.createElement('div');
 
       const topParts = createTreeRow('Top',groupIconClass('top'),0,true,()=>{},'source-top-row');
@@ -3897,6 +3978,7 @@ var DevToolsInternal = {
       topBody.style.display = 'block';
       topBody.appendChild(renderContextDomains({tab,entries:topEntries},1));
       frameContexts.forEach(context => topBody.appendChild(renderFrameBranch(context,1)));
+      workerContexts.forEach(context => topBody.appendChild(renderWorkerBranch(context,1)));
       topParts.row.onclick = e => {
         e.stopPropagation();
         const collapsed = topBody.style.display === 'none';
@@ -3944,6 +4026,12 @@ var DevToolsInternal = {
       }
     }
 
+    function handleWorkerEvent(tab) {
+      if (tab && tab.id === getActiveTabId() && DevToolsInternal.activeTab === 'sources') {
+        try { refresh(); } catch (_) {}
+      }
+    }
+
     function refresh() {
       const tree = getUIElement('sources-file-tree');
       if (!tree) return;
@@ -3956,6 +4044,7 @@ var DevToolsInternal = {
 
       const topEntries = buildEntries(tab,doc);
       const frameContexts = getFrameContexts(tab);
+      const workerContexts = getWorkerContexts(tab);
       const allEntries = topEntries.slice();
       frameContexts.forEach(context => {
         if (!context.doc) { context.entries = []; return; }
@@ -3963,8 +4052,9 @@ var DevToolsInternal = {
         getTabState(context.tab).sourceEntries = context.entries;
         allEntries.push(...context.entries);
       });
+      workerContexts.forEach(context => allEntries.push(...context.entries));
       getTabState(tab).sourceEntries = allEntries;
-      tree.appendChild(renderSourceTree(tab,topEntries,frameContexts));
+      tree.appendChild(renderSourceTree(tab,topEntries,frameContexts,workerContexts));
 
       const current = entry ? allEntries.find(e => e.id === entry.id) : null;
       if (current) openEntry(current);
@@ -4119,7 +4209,7 @@ var DevToolsInternal = {
       DevToolsInternal.ui.refreshActiveViews();
     }
 
-    return { get mode(){return mode;}, refresh, setMode, filter:filterSources, findInSource, copyText, copyCurrent, captureProcessed, openEntry, buildEntries, decodeDataUriText, handleRequestStart, handleRequestEnd, clearTab };
+    return { get mode(){return mode;}, refresh, setMode, filter:filterSources, findInSource, copyText, copyCurrent, captureProcessed, openEntry, buildEntries, decodeDataUriText, handleRequestStart, handleRequestEnd, handleWorkerEvent, clearTab };
   })(),
 
   performance: {
@@ -4449,6 +4539,12 @@ var DevToolsInternal = {
         try { Promise.resolve(owner.internal.network.handleRequestEnd(response,request,type,rec.tab)).catch(function(){}); } catch(e) {}
         try { Promise.resolve(owner.internal.sources.handleRequestEnd(response,request,type,rec.tab)).catch(function(){}); } catch(e) {}
       },
+      worker:function(detail){
+        var rec=pageRecords.get(page); if(!rec) return;
+        var owner=getOwner(); if(!owner) return;
+        try { owner.internal.sources.handleWorkerEvent(rec.tab,detail); } catch(e) {}
+        rootData.events.dispatchEvent('worker',rec.tab,detail);
+      },
       socketstart:function(url,protocols){
         var rec=pageRecords.get(page); if(!rec) return;
         var owner=getOwner(); if(!owner) return;
@@ -4512,6 +4608,7 @@ var DevToolsInternal = {
     page.interceptEvent('console',handlers.console);
     page.interceptEvent('error',handlers.error);
     page.interceptEvent('iframe',handlers.iframe);
+    page.interceptEvent('worker',handlers.worker);
     if(page.iframe?.addEventListener) page.iframe.addEventListener('load',handlers.load);
   }
 
@@ -4535,6 +4632,7 @@ var DevToolsInternal = {
       page.removeEventListener('console',h.console);
       page.removeEventListener('error',h.error);
       page.removeEventListener('iframe',h.iframe);
+      page.removeEventListener('worker',h.worker);
     }
     if(page.iframe?.removeEventListener) page.iframe.removeEventListener('load',h.load);
     rootData.collectors.delete(page);
