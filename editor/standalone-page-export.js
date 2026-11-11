@@ -423,7 +423,7 @@
       payloadParts.push('<script type="application/octet-stream" class="wk-standalone-asset" data-path="' + escapeAttribute(asset.path) + '" data-url="' + escapeAttribute(asset.url) + '">' + asset.base64 + '</script>\n');
     }
     for (const chunk of archiveChunks) {
-      payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\\n');
+      payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\n');
     }
     const loaderTag = '<script>\n' + createAssetLoader() + '\n</script>';
 
