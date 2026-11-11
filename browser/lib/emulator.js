@@ -3145,6 +3145,16 @@
                 writable: false,
                 value: baseURL
               });
+              const NativeRequest = self.Request;
+              class VirtualRequest extends NativeRequest {
+                constructor(input, init) {
+                  const normalizedInput = typeof input === 'string' || input instanceof URL
+                    ? new URL(String(input), workerBaseURL).href
+                    : input;
+                  super(normalizedInput, init);
+                }
+              }
+              self.Request = VirtualRequest;
               self.fetch = virtualFetch;
               self.XMLHttpRequest = VirtualXMLHttpRequest;
               if (NativeWebSocket) self.WebSocket = VirtualWebSocket;
