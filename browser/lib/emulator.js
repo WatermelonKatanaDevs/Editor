@@ -267,7 +267,7 @@
 
       processElements('link[rel="stylesheet"][href]', 'href', 'data-raw-href', async function(response, absoluteUrl) {
         let cssText = await response.text();
-        cssText = await rewriteCSSURLs(cssText, page);
+        cssText = await rewriteCSSURLs(cssText, page, absoluteUrl);
         return new Response(cssText, { headers: { 'Content-Type': 'text/css' } });
       }),
 
@@ -348,7 +348,7 @@
       Array.from(node.attributes || []).forEach(attr => {
         if (attr.name.startsWith('on') && attr.value && !attr.value.includes('__executeCode')) {
           node.setAttribute('data-raw-' + attr.name, attr.value);
-          node.setAttribute(attr.name, `return window.__executeCode(${JSON.stringify(attr.value)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? {event: event} : {})`);
+          node.setAttribute(attr.name, `return window.__executeCode(${JSON.stringify(attr.value)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? event : undefined)`);
         }
       });
     });
@@ -620,7 +620,7 @@
             computed: false
           };
 
-          node.arguments.unshift({ type: "Identifier", name: "__windowProxy" });
+          node.arguments.unshift({ type: "Identifier", name: "globalThis" });
         }
 
         // Simple identifier call: foo()
@@ -632,7 +632,7 @@
             computed: false
           };
 
-          node.arguments.unshift({ type: "Identifier", name: "__windowProxy" });
+          node.arguments.unshift({ type: "Identifier", name: "globalThis" });
         }
 
         // Comma operator — (0, fn)()
@@ -649,7 +649,7 @@
               computed: false
             };
 
-            node.arguments.unshift({ type: "Identifier", name: "__windowProxy" });
+            node.arguments.unshift({ type: "Identifier", name: "globalThis" });
           }
         }
       }
@@ -1115,8 +1115,13 @@
     // Support both the new page-based API and the old explicit API.
     if (typeof baseUrl === 'object' && baseUrl.network) {
       const page = baseUrl;
+      // Linked stylesheets resolve url(...) against their own URL, not the
+      // document URL. The optional third argument carries that original URL.
+      const sourceUrl = typeof baseOrigin === 'string' && baseOrigin
+        ? baseOrigin
+        : getPageBaseUrl(page);
       baseOrigin = page.location.origin;
-      baseUrl = getPageBaseUrl(page);
+      baseUrl = sourceUrl;
       networkRequest = page.network.request.bind(page.network);
       createDataUri = createDataUri || window.createDataUri || window.__createDataUri || globalsCreateDataUri;
     }
@@ -1654,7 +1659,7 @@
               // Override attribute value to dispatch through sandboxed executor
               node.setAttribute(
                 attr.name, 
-                `return window.__executeCode(${JSON.stringify(rawCode)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? {event: event} : {})`
+                `return window.__executeCode(${JSON.stringify(rawCode)}, '<anonymous onevent>', this, typeof event !== 'undefined' ? event : undefined)`
               );
             }
           });
@@ -1763,7 +1768,7 @@
           { selector: 'link[rel="stylesheet"][href]', attr: 'href', rawAttr: 'data-raw-href', 
             filter: async function(response, absoluteUrl) {
               let cssText = await response.text();
-              cssText = await rewriteCSSURLs(cssText, pageEmulator);
+              cssText = await rewriteCSSURLs(cssText, pageEmulator, absoluteUrl);
               return new Response(cssText, { headers: { 'Content-Type': 'text/css' } });
             }
           },
