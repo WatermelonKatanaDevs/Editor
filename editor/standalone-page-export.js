@@ -378,8 +378,8 @@
     return (name || 'Workspace') + '.html';
   }
 
-  function download(html, filename) {
-    const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+  function download(blob, filename) {
+    if (!(blob instanceof Blob)) blob = new Blob([blob], {type:'text/html;charset=utf-8'});
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
