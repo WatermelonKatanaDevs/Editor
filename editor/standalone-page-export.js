@@ -417,7 +417,21 @@
     return source.slice(0, first) + replacement + source.slice(first + search.length);
   }
 
-  function createAssetLoader() {
+  function encodeTemplateLiteral(value) {
+    return String(value)
+      .replace(/\\/g, '\\\\')
+      .replace(/`/g, '\\`')
+      .replace(/\$\{/g, '\\${')
+      .replace(/\0/g, '\\x00')
+      .replace(/\r/g, '\\r')
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029')
+      // Avoid HTML script end tags and comment-openers inside the outer script.
+      .replace(/<!--/g, '\\x3C!--')
+      .replace(/<\/script/gi, match => '<\\/' + match.slice(2));
+  }
+
+  function createAssetLoader(assets) {
     return [
       'window.__deploymentAssetsReady = (async function() {',
       '  window.__decodeStandaloneISO88592 = ' + createISO88592ArchiveDecoder() + ';',
@@ -429,35 +443,41 @@
       '  const metadataBytes = new Uint8Array(metadataBinary.length);',
       '  for (let i = 0; i < metadataBinary.length; i++) metadataBytes[i] = metadataBinary.charCodeAt(i);',
       '  const bundle = JSON.parse(new TextDecoder().decode(metadataBytes));',
-      '  const assetNodes = Array.from(document.querySelectorAll("script.wk-standalone-asset"));',
-      '  const embeddedAssets = assetNodes.map(node => ({',
-      '    path: node.getAttribute("data-path") || "",',
-      '    url: node.getAttribute("data-url") || "",',
-      '    base64: node.textContent.trim()',
-      '  }));',
-      '  if (!Array.isArray(bundle.assets) || !bundle.assets.length) bundle.assets = embeddedAssets;',
-      '  if (!Array.isArray(bundle.assets) || !bundle.assets.length) throw new Error("Standalone HTML is missing its embedded deployment dependencies.");',
+      '  const embeddedAssets = [',
+      ...assets.map(asset =>
+        '    {path:' + escapeJsonForHtml(asset.path) + ', url:' + escapeJsonForHtml(asset.url) + ', source:`' +
+        encodeTemplateLiteral(asset.source) + '`}'
+      ),
+      '  ];',
+      '  bundle.assets = embeddedAssets;',
       '  window.__WKStandaloneData = bundle;',
       '  window.__peerLayer = String(bundle.runConfig && bundle.runConfig.peerLayer || "peer").trim() || "peer";',
-      '  const dataUrl = asset => "data:text/javascript;charset=utf-8;base64," + asset.base64;',
+      '  const base64Url = asset => {',
+      '    if (!asset.parserDataUrl) {',
+      '      const bytes = new TextEncoder().encode(asset.source);',
+      '      let binary = "";',
+      '      const chunkSize = 0x6000;',
+      '      for (let offset = 0; offset < bytes.length; offset += chunkSize) {',
+      '        binary += String.fromCharCode.apply(null, bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));',
+      '      }',
+      '      asset.parserDataUrl = "data:text/javascript;charset=utf-8;base64," + btoa(binary);',
+      '    }',
+      '    return asset.parserDataUrl;',
+      '  };',
       '  for (const asset of bundle.assets) {',
       '    const script = document.createElement("script");',
       '    script.async = false;',
       '    script.setAttribute("data-raw-src", asset.url);',
       '    if (/\\/peer\\.js$/.test(asset.path)) script.setAttribute("data-layer", window.__peerLayer);',
-      '    script.src = dataUrl(asset);',
-      '    await new Promise((resolve, reject) => {',
-      '      script.addEventListener("load", resolve, {once:true});',
-      '      script.addEventListener("error", () => reject(new Error("Failed to initialize embedded deployment dependency: " + asset.path)), {once:true});',
-      '      document.head.appendChild(script);',
-      '    });',
+      '    script.textContent = asset.source;',
+      '    document.head.appendChild(script);',
       '  }',
       '  if (window.NodeEmulator && window.NodeEmulator.prototype && typeof window.NodeEmulator.prototype._config === "function") {',
       '    const originalConfig = window.NodeEmulator.prototype._config;',
       '    const parserUrl = path => {',
       '      const asset = bundle.assets.find(item => item.path === path);',
       '      if (!asset) throw new Error("Embedded Node parser dependency is missing: " + path);',
-      '      return dataUrl(asset);',
+      '      return base64Url(asset);',
       '    };',
       '    window.NodeEmulator.prototype._config = function(snapshot) {',
       '      const config = originalConfig.call(this, snapshot);',
@@ -541,17 +561,9 @@
 
     const {archiveChunks, assets, ...metadata} = bundle;
     const metadataJson = escapeJsonForHtml(metadata);
-    const escapeAttribute = value => escapeUnrepresentableHtmlCharacters(String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/"/g, '&quot;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;'));
     const payloadParts = [
       '<script type="application/octet-stream" id="' + DATA_ID + '">' + textToBase64(metadataJson) + '</script>\n'
     ];
-    for (const asset of assets) {
-      payloadParts.push('<script type="application/octet-stream" class="wk-standalone-asset" data-path="' + escapeAttribute(asset.path) + '" data-url="' + escapeAttribute(asset.url) + '">' + asset.base64 + '</script>\n');
-    }
     for (const chunk of archiveChunks) {
       if (bundle.archiveEncoding === 'iso8859-2') {
         payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk" data-escape-marker="' +
@@ -560,7 +572,7 @@
         payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\n');
       }
     }
-    const loaderTag = '<script>\n' + createAssetLoader() + '\n</script>';
+    const loaderTag = '<script>\n' + createAssetLoader(assets) + '\n</script>';
 
     const safeTitle = escapeUnrepresentableHtmlCharacters(String(bundle.projectName || 'Workspace')
       .replace(/&/g, '&amp;')
@@ -591,11 +603,24 @@
     const workersPath = extractWorkersPath(deploymentHtml);
 
     reportProgress(options, 'Embedding deployment dependencies…');
+    const shouldMinifyDependencies = global.StandaloneMinifier?.isEnabled?.() &&
+      typeof global.StandaloneMinifier.minifyJavaScriptSource === 'function';
     const assets = await Promise.all(sources.map(async (path, index) => {
       const url = new URL(path, deploymentUrl);
-      const content = await fetchText(url.href, path);
-      reportProgress(options, 'Embedded dependency ' + (index + 1) + ' of ' + sources.length + '…');
-      return {path, url:url.href, base64:textToBase64(content)};
+      const original = await fetchText(url.href, path);
+      let source = original;
+      if (shouldMinifyDependencies) {
+        try {
+          const optimized = await global.StandaloneMinifier.minifyJavaScriptSource(original, {
+            editorUrl: editorUrl.href
+          });
+          if (optimized.length < original.length) source = optimized;
+        } catch (error) {
+          console.warn('[Compile Page] Kept original deployment dependency after minification failed:', path, error);
+        }
+      }
+      reportProgress(options, 'Prepared dependency ' + (index + 1) + ' of ' + sources.length + '…');
+      return {path, url:url.href, source};
     }));
 
     const workersUrl = new URL(workersPath, deploymentUrl);

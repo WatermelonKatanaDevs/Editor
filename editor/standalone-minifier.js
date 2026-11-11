@@ -2,6 +2,7 @@
   'use strict';
 
   const ACORN_PATH = 'browser/external/acorn.js';
+  let acornPromise = null;
   const MERGING_PUNCTUATORS = new Set([
     '++', '--', '**', '=>', '==', '!=', '<=', '>=', '<<', '>>',
     '&&', '||', '??', '?.', '+=', '-=', '*=', '/=', '%=', '&=',
@@ -43,29 +44,37 @@
   async function loadAcorn(editorUrl) {
     const existing = findAcornParser();
     if (existing) return existing;
-
-    const url = new URL(ACORN_PATH, editorUrl || global.location.href).href;
-    const response = await fetch(url, {cache:'force-cache'});
-    if (!response.ok) {
-      throw new Error('Unable to load the local Acorn parser (' + response.status + '): ' + url);
+    if (!acornPromise) {
+      acornPromise = (async () => {
+        const url = new URL(ACORN_PATH, editorUrl || global.location.href).href;
+        const response = await fetch(url, {cache:'force-cache'});
+        if (!response.ok) {
+          throw new Error('Unable to load the local Acorn parser (' + response.status + '): ' + url);
+        }
+        const source = await response.text();
+        if (!/exports\\.tokenizer\\s*=\\s*tokenizer/.test(source) ||
+            !/exports\\.parse\\s*=\\s*parse/.test(source)) {
+          throw new Error('The local Acorn resource does not appear to contain the expected parser build: ' + url);
+        }
+        // Force the UMD build down its browser-global branch. The Editor can
+        // provide lexical CommonJS/AMD bindings that are not visible on window.
+        const evaluate = new Function(
+          'globalThis', 'exports', 'module', 'define', 'self',
+          source + '\\n;return globalThis.acorn;'
+        );
+        const acorn = evaluate(global, undefined, undefined, undefined, global);
+        if (!isAcornParser(acorn)) {
+          throw new Error('The local Acorn build executed but did not expose parse() and tokenizer().');
+        }
+        return acorn;
+      })();
     }
-    const source = await response.text();
-    if (!/exports\.tokenizer\s*=\s*tokenizer/.test(source) ||
-        !/exports\.parse\s*=\s*parse/.test(source)) {
-      throw new Error('The local Acorn resource does not appear to contain the expected parser build: ' + url);
+    try {
+      return await acornPromise;
+    } catch (error) {
+      acornPromise = null;
+      throw error;
     }
-
-    // Force the UMD build down its browser-global branch. The Editor can
-    // provide lexical CommonJS/AMD bindings that are not visible on window.
-    const evaluate = new Function(
-      'globalThis', 'exports', 'module', 'define', 'self',
-      source + '\n;return globalThis.acorn;'
-    );
-    const acorn = evaluate(global, undefined, undefined, undefined, global);
-    if (!isAcornParser(acorn)) {
-      throw new Error('The local Acorn build executed but did not expose parse() and tokenizer().');
-    }
-    return acorn;
   }
 
   function isWordCharacter(character) {
@@ -143,6 +152,11 @@
       previous = entry;
     }
     return output;
+  }
+
+  async function minifyJavaScriptSource(source, options = {}) {
+    const acorn = await loadAcorn(options.editorUrl);
+    return minifyJavaScript(String(source), acorn);
   }
 
   function minifyCSS(source) {
@@ -423,6 +437,7 @@
 
   global.StandaloneMinifier = Object.freeze({
     isEnabled:minificationEnabled,
+    minifyJavaScriptSource,
     minifyArchive
   });
 })(window);
