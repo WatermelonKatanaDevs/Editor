@@ -1104,5 +1104,32 @@ window.__deploymentNetworkReady = (async function() {
   main().catch(showError);
 })();
 </script>
+<script>
+(function() {
+  const hostOriginValue = new URLSearchParams(location.search).get('wkHostOrigin');
+  let hostOrigin = '';
+  try { hostOrigin = new URL(hostOriginValue).origin; } catch (_) {}
+  if (!hostOrigin || hostOrigin === location.origin) return;
+
+  function publishMetadata() {
+    const icon = document.querySelector('link[rel~="icon"],link[rel="shortcut icon"],link[rel="apple-touch-icon"]');
+    let iconUrl = '';
+    try { if (icon?.href) iconUrl = new URL(icon.href, document.baseURI).href; } catch (_) {}
+    window.parent.postMessage({
+      type:'wk-deployment-metadata',
+      title:document.title || '',
+      icon:iconUrl
+    }, hostOrigin);
+  }
+
+  publishMetadata();
+  const observer = new MutationObserver(publishMetadata);
+  observer.observe(document.head || document.documentElement, {
+    subtree:true,childList:true,characterData:true,attributes:true,
+    attributeFilter:['href','rel']
+  });
+  window.addEventListener('pagehide', () => observer.disconnect(), {once:true});
+})();
+</script>
 </body>
 </html>
