@@ -561,37 +561,123 @@ window.__deploymentNetworkReady = (async function() {
       return href;
     }
 
-    function updatePageHistory(target, replace = false) {
-      const resolved = new URL(target, page.location.url).href;
-      page.setLocation(resolved, new URL(resolved).origin);
-      page.history = Array.isArray(page.history) ? page.history : [];
+    function getDeploymentPageBaseUrl(targetPage) {
+      const currentUrl = String(targetPage?.location?.url || '');
+      if (currentUrl === 'about:srcdoc') {
+        let parent = targetPage.parent;
+        while (parent && parent.location?.url === 'about:srcdoc') {
+          parent = parent.parent;
+        }
+        return parent?.location?.url || domain + '/';
+      }
+      return currentUrl || domain + '/';
+    }
 
-      if (replace && page.history.length) {
-        if (page.historyIndex < 0) page.historyIndex = page.history.length - 1;
-        page.history[page.historyIndex] = resolved;
+    function updatePageHistory(target, replace = false, targetPage = page) {
+      const resolved = new URL(target, getDeploymentPageBaseUrl(targetPage)).href;
+      targetPage.setLocation(resolved, new URL(resolved).origin);
+      targetPage.history = Array.isArray(targetPage.history) ? targetPage.history : [];
+
+      if (replace && targetPage.history.length) {
+        if (targetPage.historyIndex < 0) targetPage.historyIndex = targetPage.history.length - 1;
+        targetPage.history[targetPage.historyIndex] = resolved;
       } else {
-        page.history = page.history.slice(0, page.historyIndex + 1);
-        page.history.push(resolved);
-        page.historyIndex = page.history.length - 1;
+        targetPage.history = targetPage.history.slice(0, targetPage.historyIndex + 1);
+        targetPage.history.push(resolved);
+        targetPage.historyIndex = targetPage.history.length - 1;
       }
       return resolved;
     }
 
-    async function loadEmulatedPage(target, options = {}) {
-      const resolved = new URL(target, page.location.url);
+    function escapeDeploymentHTML(value) {
+      return String(value ?? '').replace(/[&<>"']/g, character => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[character]);
+    }
 
-      if (resolved.origin !== domain) {
-        if (options.hostFrame) {
-          options.hostFrame.removeAttribute('srcdoc');
-          options.hostFrame.src = resolved.href;
-          return true;
+    async function getDeploymentDocumentContent(response, url) {
+      const contentType = String(response?.headers?.get?.('content-type') || 'text/html').toLowerCase();
+      const parsedUrl = (() => {
+        try { return new URL(url); } catch (_) { return null; }
+      })();
+      const filename = (() => {
+        const part = parsedUrl?.pathname?.split('/').filter(Boolean).pop() || 'Document';
+        try { return decodeURIComponent(part); } catch (_) { return part; }
+      })();
+      const title = escapeDeploymentHTML(filename);
+
+      if (
+        contentType.includes('text/html') ||
+        contentType.includes('application/xhtml+xml') ||
+        contentType.includes('application/xml') ||
+        contentType.includes('text/xml')
+      ) {
+        return await response.clone().text();
+      }
+
+      if (
+        contentType.includes('image/') ||
+        contentType.includes('audio/') ||
+        contentType.includes('video/') ||
+        contentType.includes('application/pdf')
+      ) {
+        let dataUri = null;
+        try { dataUri = await createDataUri(response.clone()); } catch (_) {}
+        if (dataUri) {
+          if (contentType.includes('image/')) {
+            return `<!doctype html><html><head><title>${title}</title></head><body style="margin:0;background:#1e1e1e;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="${dataUri}" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>`;
+          }
+          if (contentType.includes('audio/')) {
+            return `<!doctype html><html><head><title>${title}</title></head><body style="margin:0;background:#1e1e1e;color:white;display:flex;align-items:center;justify-content:center;min-height:100vh"><audio controls autoplay src="${dataUri}"></audio></body></html>`;
+          }
+          if (contentType.includes('video/')) {
+            return `<!doctype html><html><head><title>${title}</title></head><body style="margin:0;background:#1e1e1e;display:flex;align-items:center;justify-content:center;min-height:100vh"><video controls autoplay style="max-width:100%;max-height:100vh"><source src="${dataUri}" type="${escapeDeploymentHTML(contentType)}"></video></body></html>`;
+          }
+          return `<!doctype html><html><head><title>${title}</title></head><body style="margin:0;background:#1e1e1e"><embed title="${title}" type="application/pdf" src="${dataUri}" style="display:block;width:100%;height:100vh"></body></html>`;
         }
-        if (options.externalReplace) location.replace(resolved.href);
-        else location.assign(resolved.href);
+      }
+
+      const text = await response.clone().text();
+      return `<!doctype html><html><head><title>${title}</title></head><body style="margin:0;background:#1e1e1e;color:#eee"><pre style="white-space:pre-wrap;overflow-wrap:anywhere;padding:12px">${escapeDeploymentHTML(text)}</pre></body></html>`;
+    }
+
+    async function loadEmulatedPage(target, options = {}) {
+      const targetPage = options.page || page;
+      const resolved = new URL(target, getDeploymentPageBaseUrl(targetPage));
+
+      if (targetPage !== deploymentRootPage && resolved.href === 'about:blank') {
+        const inheritedOrigin = targetPage.parent?.location?.origin || targetPage.location?.origin || domain;
+        targetPage.setLocation('about:blank', inheritedOrigin);
+        await targetPage.setDocument('<!doctype html><html><head></head><body></body></html>', true);
+        targetPage.history = Array.isArray(targetPage.history) ? targetPage.history : [];
+        if (options.replaceHistory && targetPage.history.length) {
+          if (targetPage.historyIndex < 0) targetPage.historyIndex = targetPage.history.length - 1;
+          targetPage.history[targetPage.historyIndex] = 'about:blank';
+        } else if (options.recordHistory !== false) {
+          targetPage.history = targetPage.history.slice(0, targetPage.historyIndex + 1);
+          targetPage.history.push('about:blank');
+          targetPage.historyIndex = targetPage.history.length - 1;
+        }
         return true;
       }
 
-      const response = await network.request(
+      const supportedProtocol = ['http:', 'https:', 'data:', 'blob:'].includes(resolved.protocol);
+
+      // Project documents are always emulated. Do not assign arbitrary
+      // schemes to a native child frame, where javascript: or a same-origin
+      // blob: could escape the PageEmulator.
+      if (!supportedProtocol) {
+        if (targetPage === deploymentRootPage && ['mailto:', 'tel:'].includes(resolved.protocol)) {
+          location.assign(resolved.href);
+        }
+        return true;
+      }
+
+      const response = await targetPage.network.request(
         resolved.href,
         resolved.origin,
         {},
@@ -599,25 +685,12 @@ window.__deploymentNetworkReady = (async function() {
       );
 
       if (!response?.ok) {
-        if (options.hostFrame) {
-          options.hostFrame.removeAttribute('srcdoc');
-          options.hostFrame.src = resolved.href;
-          return true;
-        }
-        location.assign(resolved.href);
-        return true;
+        throw new Error(`Emulated page navigation failed (${response?.status || 'no response'}): ${resolved.href}`);
       }
 
-      const rawHtml = await getDocumentContent(
-        response,
-        resolved.href,
-        resolved.origin,
-        options.page || page
-      );
-
-      const targetPage = options.page || page;
-      await targetPage.setDocument(rawHtml, true, resolved.href);
+      const rawHtml = await getDeploymentDocumentContent(response, resolved.href);
       targetPage.setLocation(resolved.href, resolved.origin);
+      await targetPage.setDocument(rawHtml, true, resolved.href);
       targetPage.history = Array.isArray(targetPage.history) ? targetPage.history : [];
 
       if (options.replaceHistory && targetPage.history.length) {
@@ -657,7 +730,8 @@ window.__deploymentNetworkReady = (async function() {
     }
 
     async function triggerDownload(url, filename, sourcePage = page) {
-      const resolved = new URL(url, sourcePage.location?.url || page.location.url);
+      const resolved = new URL(url, getDeploymentPageBaseUrl(sourcePage));
+      if (!['http:', 'https:', 'data:', 'blob:'].includes(resolved.protocol)) return false;
 
       let response = null;
       try {
@@ -694,6 +768,40 @@ window.__deploymentNetworkReady = (async function() {
       return true;
     }
 
+    function getOrCreateDeploymentChildPage(frame, parentPage, initialLocation = null) {
+      if (!frame) return null;
+
+      const pageId = frame.getAttribute?.('data-page-id');
+      let child = frame.pageEmulator || (pageId ? window.__pageRegistry?.[pageId] : null);
+
+      if (!child) {
+        child = new PageEmulator(frame, {
+          network,
+          location: initialLocation || {
+            url: 'about:blank',
+            origin: parentPage.location?.origin || domain
+          },
+          history: []
+        });
+      } else {
+        if (child.iframe && child.iframe !== frame) {
+          try { delete child.iframe.pageEmulator; } catch (_) {}
+        }
+        child.iframe = frame;
+        frame.pageEmulator = child;
+        if (child.id) frame.setAttribute('data-page-id', child.id);
+      }
+
+      frame.pageEmulator = child;
+      frame.usefulHelpers = window.__pageRegistry?.__usefulHelpers;
+      parentPage.addChild?.(child);
+
+      if (!child.__deploymentEventsInstalled) {
+        installEmulatedPageEvents(child);
+      }
+      return child;
+    }
+
     function clearHostedEmbed(embed) {
       const frame = embed?.__embedFrame;
       try { embed?.__embedCleanup?.(); } catch (_) {}
@@ -705,6 +813,7 @@ window.__deploymentNetworkReady = (async function() {
       try { frame.remove(); } catch (_) {}
       try { frame.pageEmulator?.remove?.(); } catch (_) {}
       try { delete frame.pageEmulator; } catch (_) {}
+      try { delete frame.__hostedEmbedElement; } catch (_) {}
       try { delete embed.__embedFrame; } catch (_) {}
       try { embed.style.opacity = ''; } catch (_) {}
       try { embed.style.pointerEvents = ''; } catch (_) {}
@@ -730,8 +839,12 @@ window.__deploymentNetworkReady = (async function() {
       frame.style.pointerEvents = visible ? 'auto' : 'none';
     }
 
-    function createHostedDeploymentFrame(embed) {
-      if (embed.__embedFrame?.pageEmulator) return embed.__embedFrame;
+    function createHostedDeploymentFrame(embed, parentPage) {
+      if (embed.__embedFrame?.pageEmulator) {
+        const existing = embed.__embedFrame;
+        getOrCreateDeploymentChildPage(existing, parentPage);
+        return existing;
+      }
 
       const ownerDocument = embed.ownerDocument || document;
       const ownerWindow = ownerDocument.defaultView || window;
@@ -739,6 +852,10 @@ window.__deploymentNetworkReady = (async function() {
 
       frame.setAttribute('data-embed-frame', '1');
       frame.setAttribute('frameborder', '0');
+      // This overlay is managed by its own PageEmulator. Prevent the owning
+      // document's dynamic-iframe observer from treating it as a fresh blank
+      // iframe and replacing the embedded document with an empty srcdoc.
+      frame.__sandboxed = true;
       frame.style.position = 'fixed';
       frame.style.border = '0';
       frame.style.margin = '0';
@@ -748,18 +865,13 @@ window.__deploymentNetworkReady = (async function() {
       frame.style.display = 'block';
 
       ownerDocument.body?.appendChild(frame);
+      frame.__hostedEmbedElement = embed;
 
-      const child = new PageEmulator(frame, {
-        network,
-        location: {
-          url: 'about:blank',
-          origin: domain
-        },
-        history: []
+      getOrCreateDeploymentChildPage(frame, parentPage, {
+        url: 'about:blank',
+        origin: parentPage.location?.origin || domain
       });
 
-      frame.pageEmulator = child;
-      frame.usefulHelpers = window.__pageRegistry?.__usefulHelpers;
       embed.__embedFrame = frame;
       embed.style.opacity = '0';
       embed.style.pointerEvents = 'none';
@@ -789,16 +901,16 @@ window.__deploymentNetworkReady = (async function() {
       return frame;
     }
 
-    function installEmulatedPageEvents(currentPage, options = {}) {
-      const hostFrame = options.hostFrame || null;
+    function installEmulatedPageEvents(currentPage) {
+      if (!currentPage || currentPage.__deploymentEventsInstalled) return;
+      currentPage.__deploymentEventsInstalled = true;
+
       const isRootPage = currentPage === deploymentRootPage;
 
       currentPage.interceptEvent('console', (method, args) => forwardConsole(method, args));
       currentPage.interceptEvent('error', (error, location) => forwardError(error, location));
 
       currentPage.interceptEvent('download', async (url, filenameOrUnused, filename) => {
-        // emulator.js sends (url, filename); accept the historical three-argument
-        // form as well so downloads always receive the requested file name.
         return await triggerDownload(
           url,
           filename ?? filenameOrUnused,
@@ -807,7 +919,11 @@ window.__deploymentNetworkReady = (async function() {
       });
 
       currentPage.interceptEvent('open', (url, activateTab = true) => {
-        const resolved = new URL(url, currentPage.location?.url || domain + '/');
+        const resolved = new URL(url, getDeploymentPageBaseUrl(currentPage));
+        if (!['http:', 'https:', 'mailto:', 'tel:'].includes(resolved.protocol)) {
+          console.warn('Blocked unsupported popup URL scheme:', resolved.protocol);
+          return true;
+        }
 
         if (resolved.origin === domain) {
           const popup = window.open(
@@ -830,23 +946,20 @@ window.__deploymentNetworkReady = (async function() {
 
       currentPage.interceptEvent('iframe-create', function(obj) {
         if (!obj?.iframe) return null;
+        return getOrCreateDeploymentChildPage(obj.iframe, currentPage);
+      });
 
-        const frame = obj.iframe;
-        if (frame.pageEmulator) return frame.pageEmulator;
+      currentPage.interceptEvent('iframe-remove', function(obj) {
+        const frame = obj?.iframe;
+        const child = obj?.page || frame?.pageEmulator;
+        const hostedEmbed = frame?.__hostedEmbedElement;
 
-        const child = new PageEmulator(frame, {
-          network,
-          location: {
-            url: 'about:blank',
-            origin: currentPage.location?.origin || domain
-          },
-          history: []
-        });
-
-        frame.pageEmulator = child;
-        frame.usefulHelpers = window.__pageRegistry?.__usefulHelpers;
-        currentPage.addChild?.(child);
-        return child;
+        if (hostedEmbed) {
+          clearHostedEmbed(hostedEmbed);
+        } else if (child) {
+          child.remove?.();
+        }
+        return true;
       });
 
       currentPage.interceptEvent('iframe-navigate', async function(obj) {
@@ -859,23 +972,13 @@ window.__deploymentNetworkReady = (async function() {
           frame.__iframeNavigationId !== navigationId
         ) return;
 
-        if (obj.is_doc) {
-          let child = frame.pageEmulator;
-          if (!child) {
-            child = new PageEmulator(frame, {
-              network,
-              location: {
-                url: 'about:srcdoc',
-                origin: currentPage.location?.origin || domain
-              },
-              history: []
-            });
-            frame.pageEmulator = child;
-            frame.usefulHelpers = window.__pageRegistry?.__usefulHelpers;
-            currentPage.addChild?.(child);
-          }
+        const child = getOrCreateDeploymentChildPage(frame, currentPage);
+        if (!child) return;
 
+        if (obj.is_doc) {
           child.setLocation('about:srcdoc', currentPage.location?.origin || domain);
+          child.history = ['about:srcdoc'];
+          child.historyIndex = 0;
           child.rawDocument = String(obj.srcdoc || '');
           await child.setDocument(obj.srcdoc || '');
           return;
@@ -887,32 +990,56 @@ window.__deploymentNetworkReady = (async function() {
         try {
           targetUrl = new URL(
             obj.src,
-            currentPage.location?.url || domain + '/'
+            getDeploymentPageBaseUrl(currentPage)
           );
         } catch (_) {
           return;
         }
 
-        const isInternal = targetUrl.origin === domain;
+        if (targetUrl.href === 'about:blank') {
+          child.setLocation('about:blank', currentPage.location?.origin || domain);
+          child.history = ['about:blank'];
+          child.historyIndex = 0;
+          await child.setDocument('<!doctype html><html><head></head><body></body></html>', true);
+          return;
+        }
 
-        // Internal iframe pages are represented by another deployment page
-        // carrying their own ?url= parameter. External frames remain native.
-        const child = frame.pageEmulator;
-        if (child) child.setLocation(targetUrl.href, targetUrl.origin);
+        const supportedProtocol = ['http:', 'https:', 'data:', 'blob:'].includes(targetUrl.protocol);
+        if (!supportedProtocol) {
+          console.warn('Blocked unsupported iframe URL scheme:', targetUrl.protocol);
+          return;
+        }
 
-        const frameUrl = isInternal
-          ? deploymentPageUrl(targetUrl.href)
-          : targetUrl.href;
+        let response;
+        try {
+          response = await child.network.request(
+            targetUrl.href,
+            targetUrl.origin,
+            {},
+            'iframe'
+          );
+        } catch (error) {
+          if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
+          console.warn('Could not load emulated iframe:', targetUrl.href, error);
+          return;
+        }
 
-        frame.removeAttribute('srcdoc');
-        frame.src = frameUrl;
+        if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
+        if (!response?.ok) {
+          console.warn('Emulated iframe request failed:', targetUrl.href, response?.status || 'no response');
+          return;
+        }
+
+                const rawHtml = await getDeploymentDocumentContent(response, targetUrl.href);
+        if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
+
+        child.setLocation(targetUrl.href, targetUrl.origin);
+        child.history = [targetUrl.href];
+        child.historyIndex = 0;
+        await child.setDocument(rawHtml, true, targetUrl.href);
       });
 
       currentPage.interceptEvent('embed-create', function() {
-        // setupEmbed() removes the original src before embed-navigate. No
-        // PageEmulator is necessary for a normal embed; embed-navigate decides
-        // whether it stays native, becomes a deployment iframe, or becomes a
-        // data: URL.
         return null;
       });
 
@@ -925,14 +1052,13 @@ window.__deploymentNetworkReady = (async function() {
           navigationId !== undefined &&
           embed.__embedNavigationId !== navigationId
         ) return;
-
         if (!obj.src) return;
 
         let targetUrl;
         try {
           targetUrl = new URL(
             obj.src,
-            currentPage.location?.url || domain + '/'
+            getDeploymentPageBaseUrl(currentPage)
           );
         } catch (_) {
           return;
@@ -940,33 +1066,35 @@ window.__deploymentNetworkReady = (async function() {
 
         clearHostedEmbed(embed);
 
-        if (targetUrl.origin !== domain) {
-          embed.setAttribute('src', targetUrl.href);
+        const supportedProtocol = ['http:', 'https:', 'data:', 'blob:'].includes(targetUrl.protocol);
+        if (!supportedProtocol) {
+          console.warn('Blocked unsupported embed URL scheme:', targetUrl.protocol);
           return;
         }
 
         let response;
         try {
-          response = await network.request(
+          response = await currentPage.network.request(
             targetUrl.href,
             targetUrl.origin,
             {},
             'embed'
           );
-        } catch (_) {
-          embed.setAttribute('src', targetUrl.href);
+        } catch (error) {
+          if (navigationId !== undefined && embed.__embedNavigationId !== navigationId) return;
+          console.warn('Could not load emulated embed:', targetUrl.href, error);
           return;
         }
 
+        if (navigationId !== undefined && embed.__embedNavigationId !== navigationId) return;
         if (!response?.ok) {
-          embed.setAttribute('src', targetUrl.href);
+          console.warn('Emulated embed request failed:', targetUrl.href, response?.status || 'no response');
           return;
         }
 
         const contentType = String(
           response.headers?.get?.('content-type') || ''
         ).toLowerCase();
-
         const isHtml =
           contentType.includes('text/html') ||
           contentType.includes('application/xhtml+xml') ||
@@ -974,11 +1102,17 @@ window.__deploymentNetworkReady = (async function() {
           contentType.includes('text/xml');
 
         if (isHtml) {
-          const frame = createHostedDeploymentFrame(embed);
-          const frameUrl = deploymentPageUrl(targetUrl.href);
+          const frame = createHostedDeploymentFrame(embed, currentPage);
+          const child = frame.pageEmulator;
+          if (!child) return;
 
-          frame.pageEmulator?.setLocation(frameUrl, new URL(frameUrl).origin);
-          frame.src = frameUrl;
+          const rawHtml = await getDeploymentDocumentContent(response, targetUrl.href);
+          if (navigationId !== undefined && embed.__embedNavigationId !== navigationId) return;
+
+          child.setLocation(targetUrl.href, targetUrl.origin);
+          child.history = [targetUrl.href];
+          child.historyIndex = 0;
+          await child.setDocument(rawHtml, true, targetUrl.href);
           embed.__syncEmbedBounds?.();
           return;
         }
@@ -991,11 +1125,11 @@ window.__deploymentNetworkReady = (async function() {
           }
         } catch (_) {}
 
-        embed.setAttribute('src', targetUrl.href);
+        console.warn('Could not convert emulated embed response to a data URI:', targetUrl.href);
       });
 
       currentPage.interceptEvent('navigate', async function(url, ...args) {
-        const resolved = new URL(url, currentPage.location?.url || domain + '/');
+        const resolved = new URL(url, getDeploymentPageBaseUrl(currentPage));
 
         const isHistoryStateChange =
           args.length >= 2 &&
@@ -1006,40 +1140,30 @@ window.__deploymentNetworkReady = (async function() {
           isHistoryStateChange && args[1] === true;
 
         if (isHistoryStateChange) {
-          updatePageHistory(resolved.href, replaceHistory);
+          if (resolved.origin !== currentPage.location?.origin) {
+            throw new DOMException(
+              'History state URLs must remain within the emulated page origin.',
+              'SecurityError'
+            );
+          }
+
+          updatePageHistory(resolved.href, replaceHistory, currentPage);
 
           if (isRootPage) {
-            // pushState()/replaceState() only changes the deployment URL.
-            // It never recreates the emulated document, even for an external
-            // URL.
             updateDeploymentBrowserUrl(resolved.href, replaceHistory);
           }
           return true;
         }
 
-        if (resolved.origin !== domain) {
-          if (hostFrame) {
-            hostFrame.removeAttribute('srcdoc');
-            hostFrame.src = resolved.href;
-          } else {
-            location.assign(resolved.href);
+        if (isRootPage && resolved.origin !== domain) {
+          // Only ordinary web URLs (and standard external-protocol links)
+          // may leave the deployment. Never hand javascript:, data: or blob:
+          // URLs to the real deployment window.
+          if (!['http:', 'https:', 'mailto:', 'tel:'].includes(resolved.protocol)) {
+            console.warn('Blocked unsupported top-level navigation scheme:', resolved.protocol);
+            return true;
           }
-          return true;
-        }
-
-        if (isRootPage) {
-          await loadEmulatedPage(resolved.href, {
-            page: currentPage,
-            requestType: 'navigation',
-            recordHistory: true
-          });
-          updateDeploymentBrowserUrl(resolved.href, false);
-          return true;
-        }
-
-        if (hostFrame) {
-          hostFrame.removeAttribute('srcdoc');
-          hostFrame.src = deploymentPageUrl(resolved.href);
+          location.assign(resolved.href);
           return true;
         }
 
@@ -1048,6 +1172,12 @@ window.__deploymentNetworkReady = (async function() {
           requestType: 'navigation',
           recordHistory: true
         });
+
+        if (isRootPage) {
+          // Keep the deployment wrapper in place and store the emulated
+          // document URL in its query string.
+          updateDeploymentBrowserUrl(resolved.href, false);
+        }
         return true;
       });
     }
@@ -1060,6 +1190,43 @@ window.__deploymentNetworkReady = (async function() {
     page.history = [pageURL];
     page.historyIndex = 0;
     updateDeploymentBrowserUrl(pageURL, true);
+
+    // The outer deployment URL stores the emulated page path. Browser
+    // back/forward therefore reloads that path into the existing PageEmulator
+    // instead of navigating to another deployment bootstrap.
+    window.addEventListener('popstate', async () => {
+      const path = new URL(location.href).searchParams.get('path');
+      if (!path) return;
+
+      let targetUrl;
+      try { targetUrl = new URL(path, domain + '/'); }
+      catch (error) {
+        console.error('Could not restore deployment history entry:', error);
+        return;
+      }
+
+      if (targetUrl.origin !== domain) {
+        location.assign(targetUrl.href);
+        return;
+      }
+
+      try {
+        await loadEmulatedPage(targetUrl.href, {
+          page,
+          requestType: 'navigation',
+          recordHistory: false
+        });
+
+        const historyIndex = page.history.lastIndexOf(targetUrl.href);
+        if (historyIndex >= 0) {
+          page.historyIndex = historyIndex;
+        } else {
+          updatePageHistory(targetUrl.href, false, page);
+        }
+      } catch (error) {
+        console.error('Could not restore deployment history entry:', error);
+      }
+    });
 
     setProgress('Starting project…', null, 'Launching deployment runtime…');
     status.textContent = 'Starting project…';
