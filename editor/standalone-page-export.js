@@ -362,8 +362,23 @@
       throw new Error('The deployment workers configuration must be a JSON object.');
     }
 
+    let projectArchive = snapshot.archive;
+    if (global.StandaloneMinifier?.isEnabled?.()) {
+      reportProgress(options, 'Minifying project HTML, CSS, and JavaScript…');
+      const result = await global.StandaloneMinifier.minifyArchive(snapshot.archive, {
+        editorUrl: editorUrl.href,
+        onProgress: message => reportProgress(options, message),
+        onFileError: (path, error) => console.warn('[Compile Page] Kept original file after minification failed:', path, error)
+      });
+      projectArchive = result.archive;
+      if (result.filesMinified) {
+        const savedKB = Math.round(result.bytesSaved / 1024);
+        reportProgress(options, 'Minified ' + result.filesMinified + ' files' + (savedKB ? ' · saved ' + savedKB + ' KB' : '') + '…');
+      }
+    }
+
     reportProgress(options, 'Embedding project archive…');
-    const archiveChunks = await blobToBase64Chunks(snapshot.archive, options);
+    const archiveChunks = await blobToBase64Chunks(projectArchive, options);
 
     const runConfig = snapshot.runConfig && typeof snapshot.runConfig === 'object'
       ? snapshot.runConfig

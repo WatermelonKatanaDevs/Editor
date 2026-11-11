@@ -36,6 +36,11 @@
             <label class="setting-check"><input id="setting-ignore-node-modules" type="checkbox"><span>Exclude node_modules from Source Control</span></label>
           </div>
           <div class="editor-settings-section">
+            <h3>Export</h3>
+            <label class="setting-check"><input id="setting-compile-minify" type="checkbox"><span>Minify HTML, CSS, and JavaScript when compiling</span></label>
+            <p class="editor-settings-note">Reduces the compiled project size. Original workspace files are left unchanged; files the parser cannot safely process are kept as-is.</p>
+          </div>
+          <div class="editor-settings-section">
             <h3>Image Editing</h3>
             <label class="setting-check"><input id="setting-piskel-auto-save" type="checkbox"><span>Auto-save Piskel edits</span></label>
             <p class="editor-settings-note">Automatically saves Piskel changes to the image and its <code>.piskel</code> sidecar.</p>
@@ -73,6 +78,16 @@
       const hideNodeModules = $('setting-hide-node-modules');
       const ignoreNodeModules = $('setting-ignore-node-modules');
       const piskelAutoSave = $('setting-piskel-auto-save');
+      const compileMinify = $('setting-compile-minify');
+      try {
+        const stored = localStorage.getItem('node-editor.compile.minify');
+        compileMinify.checked = stored === null ? true : stored === 'true';
+      } catch (_) {
+        compileMinify.checked = true;
+      }
+      compileMinify.onchange = () => {
+        try { localStorage.setItem('node-editor.compile.minify', compileMinify.checked ? 'true' : 'false'); } catch (_) {}
+      };
       const b = $('setting-hide-browser-bar');
       const defaultTab = $('setting-browser-default-tab');
       const primaryProxy = $('setting-browser-primary-proxy');
