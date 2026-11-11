@@ -426,9 +426,9 @@
       .replace(/\r/g, '\\r')
       .replace(/\u2028/g, '\\u2028')
       .replace(/\u2029/g, '\\u2029')
-      // Avoid HTML script end tags and comment-openers inside the outer script.
-      .replace(/<!--/g, '\\x3C!--')
-      .replace(/<\/script/gi, match => '<\\/' + match.slice(2));
+      // Keep embedded source invisible to the HTML raw-text parser and the
+      // ISO-8859-2 document scanner. Template evaluation restores each "<".
+      .replace(/</g, '\\x3C');
   }
 
   function createAssetLoader(assets) {
