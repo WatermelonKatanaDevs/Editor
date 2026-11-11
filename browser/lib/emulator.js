@@ -5225,7 +5225,7 @@
               }
             }
             const value = Reflect.get(window, prop, window);
-            if (isNativeFunction(value) && !value.prototype) {
+            if (typeof value.bind == "function" && isNativeFunction(value) && !value.prototype) {
               return value.bind(window);
             }
             return value;
