@@ -65,6 +65,75 @@ function isEmulatedLoopbackRequest(request) {
   }
 }
 
+function createSocketAbortError(signal) {
+  const reason = signal && signal.reason;
+  if (reason instanceof Error) return reason;
+  const error = new Error(reason ? String(reason) : 'WebSocket connection was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function closeSocketQuietly(socket) {
+  if (!socket || typeof socket.close !== 'function') return;
+  try {
+    if (socket.readyState === 0 || socket.readyState === 1) socket.close();
+  } catch (_) {
+    try { socket.close(); } catch (_) {}
+  }
+}
+
+function waitForSocketOpen(socket, timeout, signal, url, endpointName) {
+  if (signal && signal.aborted) return Promise.reject(createSocketAbortError(signal));
+  // The editor also has an internal mock WebSocket backend. It does not use
+  // the browser WebSocket readyState/open handshake, so preserve that API.
+  if (socket && typeof socket.onClientMessage === 'function') return Promise.resolve(socket);
+  if (socket && socket.readyState === 1) return Promise.resolve(socket);
+  if (!socket || typeof socket.addEventListener !== 'function') {
+    return Promise.reject(new Error('WebSocket endpoint ' + endpointName + ' did not return an event-capable socket for ' + url));
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = null;
+    const cleanup = () => {
+      if (timer !== null) clearTimeout(timer);
+      socket.removeEventListener('open', onOpen);
+      socket.removeEventListener('error', onError);
+      socket.removeEventListener('close', onClose);
+      if (signal) signal.removeEventListener('abort', onAbort);
+    };
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve(socket);
+    };
+    const onOpen = () => finish(null);
+    const onError = () => finish(new Error('WebSocket handshake failed through ' + endpointName + ' for ' + url));
+    const onClose = event => finish(new Error(
+      'WebSocket closed before opening through ' + endpointName + ' for ' + url +
+      (event && event.code ? ' (code ' + event.code + (event.reason ? ': ' + event.reason : '') + ')' : '')
+    ));
+    const onAbort = () => finish(createSocketAbortError(signal));
+
+    socket.addEventListener('open', onOpen);
+    socket.addEventListener('error', onError);
+    socket.addEventListener('close', onClose);
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    if (timeout > 0) {
+      timer = setTimeout(() => finish(new Error(
+        'WebSocket handshake timed out after ' + timeout + 'ms through ' + endpointName + ' for ' + url
+      )), timeout);
+    }
+
+    // Check after installing listeners so an unusually fast endpoint cannot
+    // open between the initial state check and listener registration.
+    if (socket.readyState === 1) onOpen();
+    else if (socket.readyState === 3) onClose({ code: 1006, reason: 'Socket closed before opening' });
+  });
+}
+
 class Network extends EventHandler {
   constructor() {
     super();
@@ -112,19 +181,56 @@ class Network extends EventHandler {
     this.dispatchEvent('requestend',response,request,type);
     return response;
   }
-  async socket(url,baseOrigin,protocols,filter) {
+  async socket(url,baseOrigin,protocols,filter,options = {}) {
     const absoluteUrl = resolveNetworkURL(url,baseOrigin);
+    const signal = options && options.signal;
+    const timeout = Number.isFinite(options && options.timeout)
+      ? Math.max(0, options.timeout)
+      : (this.socketTimeout || 10000);
+    const acceptSocket = typeof filter === 'function' ? filter : (() => true);
     this.dispatchEvent('socketstart',absoluteUrl,protocols);
-    const endpoints = this.endpoints.filter(endp => !endp?.__browserDefaultFallback).concat(this.endpoints.filter(endp => endp?.__browserDefaultFallback));
-    const response = await this.searchEndpoints(async function(endp) {
-      endp.dispatchEvent('handlesocket',absoluteUrl,protocols);
-      var response = await endp.handleSocket(absoluteUrl,protocols);
-      if (!response) return null;
-      endp.dispatchEvent('returnsocket',response,absoluteUrl,protocols);
-      return response;
-    }, filter || (r => true), endpoints);
-    this.dispatchEvent('socketend',response,absoluteUrl,protocols);
-    return response;
+
+    // Preserve the configured Network order. The browser installs the direct
+    // endpoint first, followed by the primary and optional fallback proxies.
+    const endpoints = this.endpoints.slice();
+    let lastError = null;
+
+    for (const endp of endpoints) {
+      if (!endp || endp.enabled === false) continue;
+      if (signal && signal.aborted) break;
+
+      let response = null;
+      const endpointName = endp.constructor && endp.constructor.name || 'Network endpoint';
+      try {
+        endp.dispatchEvent('handlesocket',absoluteUrl,protocols);
+        response = await endp.handleSocket(absoluteUrl,protocols);
+        if (!response) continue;
+
+        if (options && options.binaryType && 'binaryType' in response) {
+          try { response.binaryType = options.binaryType; } catch (_) {}
+        }
+
+        await waitForSocketOpen(response,timeout,signal,absoluteUrl,endpointName);
+        if (!acceptSocket(response)) {
+          closeSocketQuietly(response);
+          continue;
+        }
+
+        endp.dispatchEvent('returnsocket',response,absoluteUrl,protocols);
+        this.dispatchEvent('socketend',response,absoluteUrl,protocols);
+        return response;
+      } catch (error) {
+        closeSocketQuietly(response);
+        if (signal && signal.aborted) break;
+        console.log('[networkSocket] Endpoint error:', endpointName, error && error.message || error);
+        lastError = error;
+      }
+    }
+
+    this.dispatchEvent('socketend',null,absoluteUrl,protocols);
+    if (signal && signal.aborted) throw createSocketAbortError(signal);
+    if (lastError) throw lastError;
+    return null;
   }
   setEndpoints(endpoints) {
     this.endpoints = endpoints;
