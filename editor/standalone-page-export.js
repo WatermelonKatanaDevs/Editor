@@ -8,13 +8,14 @@
   }
 
   function readCompileSettings() {
-    let base122 = false;
+    let rawBinary = true;
     let compressionLevel = 9;
     try {
-      base122 = global.localStorage.getItem('node-editor.compile.base122') === 'true';
+      const storedRawBinary = global.localStorage.getItem('node-editor.compile.raw-binary');
+      rawBinary = storedRawBinary === null ? true : storedRawBinary === 'true';
       compressionLevel = global.localStorage.getItem('node-editor.compile.compression') === '6' ? 6 : 9;
     } catch (_) {}
-    return {base122, compressionLevel};
+    return {rawBinary, compressionLevel};
   }
 
   async function fetchText(url, label) {
@@ -129,21 +130,16 @@
     if (!blob || typeof blob.size !== 'number') {
       throw new TypeError('The project archive is not a Blob.');
     }
-    if (encoding === 'base122' && (!global.Base122 || typeof global.Base122.encode !== 'function')) {
-      throw new Error('The Base122 encoder is unavailable.');
-    }
 
-    // Each chunk is independently encoded and decoded so its final padding
-    // bits cannot shift the next chunk's byte alignment.
     const chunkSize = 3 * 1024 * 1024;
     const chunks = [];
     let processed = 0;
 
     async function encodePart(bytes) {
       if (!bytes.length) return;
-      chunks.push(encoding === 'base122' ? global.Base122.encode(bytes) : bytesToBase64(bytes));
+      chunks.push(encoding === 'raw1252' ? encodeRaw1252Chunk(bytes) : bytesToBase64(bytes));
       processed += bytes.length;
-      reportProgress(options, (encoding === 'base122' ? 'Encoding project archive… ' : 'Embedding project archive… ') +
+      reportProgress(options, (encoding === 'raw1252' ? 'Embedding raw project bytes… ' : 'Embedding project archive… ') +
         Math.min(100, Math.round(processed / Math.max(1, blob.size) * 100)) + '%');
     }
 
@@ -209,9 +205,8 @@
   function createAssetLoader() {
     return [
       'window.__deploymentAssetsReady = (async function() {',
-      '  const decodeBase122 = ' + global.Base122.decode.toString() + ';',
-      '  window.__decodeStandaloneBase122 = decodeBase122;',
-      '  const dataNode = document.getElementById("wk-standalone-data");',
+      '  window.__decodeStandaloneRaw1252 = ' + createRaw1252Decoder() + ';',
+      '  const dataNode = document.getElementById("wk-standalone-data");'
       '  if (!dataNode) throw new Error("Standalone deployment data is missing.");',
       '  const encodedMetadata = (dataNode.textContent || "").trim();',
       '  if (!encodedMetadata) throw new Error("Standalone deployment metadata is empty.");',
@@ -284,12 +279,10 @@
       '      const archiveChunks = document.querySelectorAll("script.wk-standalone-archive-chunk");',
       '      if (!archiveChunks.length) throw new Error("The standalone project archive is missing.");',
       '      const archiveEncoding = window.__WKStandaloneData.archiveEncoding || "base64";',
-      '      if (archiveEncoding !== "base64" && archiveEncoding !== "base122") throw new Error("Unknown standalone archive encoding: " + archiveEncoding);',
+      '      if (archiveEncoding !== "base64" && archiveEncoding !== "raw1252") throw new Error("Unknown standalone archive encoding: " + archiveEncoding);',
       '      for (const node of archiveChunks) {',
-      '        if (archiveEncoding === "base122") {',
-      '          const encoded = node.getAttribute("data-b122");',
-      '          if (encoded == null) throw new Error("A Base122 archive chunk is missing its encoded data.");',
-      '          archiveParts.push(window.__decodeStandaloneBase122(encoded));',
+      '        if (archiveEncoding === "raw1252") {',
+      '          archiveParts.push(window.__decodeStandaloneRaw1252(node.textContent));',
       '        } else {',
       '          const binary = atob(node.textContent.trim());',
       '          const bytes = new Uint8Array(binary.length);',
@@ -330,11 +323,11 @@
 
     const {archiveChunks, assets, ...metadata} = bundle;
     const metadataJson = escapeJsonForHtml(metadata);
-    const escapeAttribute = value => String(value ?? '')
+    const escapeAttribute = value => escapeUnrepresentableHtmlCharacters(String(value ?? '')
       .replace(/&/g, '&amp;')
       .replace(/"/g, '&quot;')
       .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+      .replace(/>/g, '&gt;'));
     const payloadParts = [
       '<script type="application/octet-stream" id="' + DATA_ID + '">' + textToBase64(metadataJson) + '</script>\n'
     ];
@@ -342,27 +335,19 @@
       payloadParts.push('<script type="application/octet-stream" class="wk-standalone-asset" data-path="' + escapeAttribute(asset.path) + '" data-url="' + escapeAttribute(asset.url) + '">' + asset.base64 + '</script>\n');
     }
     for (const chunk of archiveChunks) {
-      if (bundle.archiveEncoding === 'base122') {
-        // Kevin Albertson's Base122 alphabet excludes characters that would
-        // terminate or corrupt this quoted HTML attribute.
-        if (/[&"\\\r\n\u0000]/.test(chunk)) {
-          throw new Error('Base122 produced a character that is unsafe in an HTML attribute.');
-        }
-        payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk" data-b122="' + chunk + '"></script>\n');
-      } else {
-        payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\n');
-      }
+      payloadParts.push('<script type="application/octet-stream" class="wk-standalone-archive-chunk">' + chunk + '</script>\\n');
     }
     const loaderTag = '<script>\n' + createAssetLoader() + '\n</script>';
 
-    const safeTitle = String(bundle.projectName || 'Workspace')
+    const safeTitle = escapeUnrepresentableHtmlCharacters(String(bundle.projectName || 'Workspace')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/"/g, '&quot;'));
     html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>' + safeTitle + '</title>');
     html = html.replace(loaderPattern, payloadParts.join('') + loaderTag);
-    return new Blob([html], {type:'text/html;charset=utf-8'});
+    html = html.replace(/<meta\s+charset=["']?[^"'>\s]+["']?\s*>/i, '<meta charset="windows-1252">');
+    return new Blob([encodeWindows1252(html)], {type:'text/html;charset=windows-1252'});
   }
 
   async function compile(snapshot, options = {}) {
@@ -413,8 +398,8 @@
       }
     }
 
-    const archiveEncoding = options.archiveEncoding === 'base122' ? 'base122' : 'base64';
-    reportProgress(options, archiveEncoding === 'base122' ? 'Encoding project archive…' : 'Embedding project archive…');
+    const archiveEncoding = options.archiveEncoding === 'raw1252' ? 'raw1252' : 'base64';
+    reportProgress(options, archiveEncoding === 'raw1252' ? 'Embedding raw project bytes…' : 'Embedding project archive…');
     const archiveChunks = await blobToEncodedChunks(projectArchive, archiveEncoding, options);
 
     const runConfig = snapshot.runConfig && typeof snapshot.runConfig === 'object'
@@ -480,7 +465,7 @@
         const html = await compile(snapshot, {
           editorUrl: global.location.href,
           compressionLevel: compileSettings.compressionLevel,
-          archiveEncoding: compileSettings.base122 ? 'base122' : 'base64',
+          archiveEncoding: compileSettings.rawBinary ? 'raw1252' : 'base64',
           onProgress: message => { button.textContent = message; }
         });
         download(html, snapshot.projectName);
