@@ -3009,15 +3009,32 @@
               });
             }
 
-            function isMonacoModuleMessage(message) {
+            function getMonacoModuleId(message) {
               const baseUrl = self.MonacoEnvironment && self.MonacoEnvironment.baseUrl;
-              const moduleId = message && message.data;
-              return workerType === 'classic' &&
-                typeof baseUrl === 'string' &&
-                typeof moduleId === 'string' &&
-                /^vs\/[A-Za-z0-9_./-]+$/.test(moduleId) &&
-                !moduleId.split('/').includes('..') &&
-                !bundledAmdModuleIds.has(moduleId);
+              if (workerType !== 'classic' || typeof baseUrl !== 'string') return null;
+
+              const data = message && message.data;
+              // Monaco's SimpleWorkerClient does not send its worker module ID
+              // as the message itself. It sends an initialize protocol request
+              // whose third argument (args[2]) is the AMD module ID, e.g.
+              // "vs/language/typescript/tsWorker".
+              const moduleId = typeof data === 'string'
+                ? data
+                : data && Array.isArray(data.args)
+                  ? data.args[2]
+                  : null;
+
+              if (typeof moduleId !== 'string' ||
+                  !/^vs\/[A-Za-z0-9_./-]+$/.test(moduleId) ||
+                  moduleId.split('/').includes('..') ||
+                  bundledAmdModuleIds.has(moduleId)) {
+                return null;
+              }
+              return moduleId;
+            }
+
+            function isMonacoModuleMessage(message) {
+              return !!getMonacoModuleId(message);
             }
 
             async function preloadMonacoModule(moduleId) {
@@ -3057,7 +3074,8 @@
             }
 
             async function dispatchQueuedWorkerMessage(message) {
-              if (isMonacoModuleMessage(message)) await preloadMonacoModule(message.data);
+              const moduleId = getMonacoModuleId(message);
+              if (moduleId) await preloadMonacoModule(moduleId);
               dispatchWorkerMessage(message);
             }
 
