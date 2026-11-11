@@ -3966,7 +3966,8 @@ window.__editorInitPromise = (async function () {
         }
         // The normal Editor setup checks the complete dependency tree and installs
         // missing packages into the workspace filesystem before it is archived.
-        await state.ensureNodeRuntime();
+        const runtime = await state.ensureNodeRuntime();
+        await installNodeDependencies(runtime, runConfig);
       }
       return {
         archive: await state.fs.exportZip(),
