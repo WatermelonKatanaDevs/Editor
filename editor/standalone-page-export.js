@@ -198,7 +198,12 @@
       'window.__deploymentAssetsReady = (async function() {',
       '  const dataNode = document.getElementById("wk-standalone-data");',
       '  if (!dataNode) throw new Error("Standalone deployment data is missing.");',
-      '  const bundle = JSON.parse(dataNode.textContent || "{}");',
+      '  const encodedMetadata = (dataNode.textContent || "").trim();',
+      '  if (!encodedMetadata) throw new Error("Standalone deployment metadata is empty.");',
+      '  const metadataBinary = atob(encodedMetadata);',
+      '  const metadataBytes = new Uint8Array(metadataBinary.length);',
+      '  for (let i = 0; i < metadataBinary.length; i++) metadataBytes[i] = metadataBinary.charCodeAt(i);',
+      '  const bundle = JSON.parse(new TextDecoder().decode(metadataBytes));',
       '  const assetNodes = Array.from(document.querySelectorAll("script.wk-standalone-asset"));',
       '  const embeddedAssets = assetNodes.map(node => ({',
       '    path: node.getAttribute("data-path") || "",',
@@ -311,7 +316,7 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
     const payloadParts = [
-      '<script type="application/json" id="' + DATA_ID + '">' + metadataJson + '</script>\n'
+      '<script type="application/octet-stream" id="' + DATA_ID + '">' + textToBase64(metadataJson) + '</script>\n'
     ];
     for (const asset of assets) {
       payloadParts.push('<script type="application/octet-stream" class="wk-standalone-asset" data-path="' + escapeAttribute(asset.path) + '" data-url="' + escapeAttribute(asset.url) + '">' + asset.base64 + '</script>\n');
