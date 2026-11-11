@@ -4528,6 +4528,16 @@
   function workerBootstrap() {
   
     'use strict';
+
+    // This bootstrap is serialized into a real Web Worker. Page scripts are
+    // transformed to pass the private page proxy as the default this-value;
+    // in this isolated Worker, that name must refer to the Worker global.
+    Object.defineProperty(globalThis, '__windowProxy', {
+      value: globalThis,
+      configurable: false,
+      enumerable: false,
+      writable: false
+    });
   
     // Safari's JavaScriptCore does not implement V8's structured CallSite API.
     // Node packages such as depd rely on Error.captureStackTrace returning
