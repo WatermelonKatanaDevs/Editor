@@ -214,16 +214,16 @@
   ];
 
   function encodeISO88592(value) {
-    const bytes = new Uint8Array([...String(value)].length);
-    let offset = 0;
-    for (const character of String(value)) {
-      const codePoint = character.codePointAt(0);
+    const source = String(value);
+    const bytes = new Uint8Array(source.length);
+    for (let index = 0; index < source.length; index++) {
+      const codePoint = source.charCodeAt(index);
       const byte = ISO_8859_2_REVERSE.get(codePoint);
       if (byte == null) {
         throw new Error('The standalone HTML contains a character that cannot be represented in ISO-8859-2 (U+' +
           codePoint.toString(16).toUpperCase().padStart(4, '0') + ').');
       }
-      bytes[offset++] = byte;
+      bytes[index] = byte;
     }
     return bytes;
   }
