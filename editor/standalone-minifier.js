@@ -261,7 +261,8 @@
       if (source[index] !== '<') {
         const nextTag = source.indexOf('<', index);
         const end = nextTag < 0 ? source.length : nextTag;
-        output += source.slice(index, end).replace(/\s+/g, ' ');
+        // Text-node whitespace can be significant under CSS white-space rules; preserve it exactly.
+        output += source.slice(index, end);
         index = end;
         continue;
       }
