@@ -499,7 +499,7 @@
     ].join('\n');
   }
 
-  function patchDeploymentPage(html, bundle) {
+  async function patchDeploymentPage(html, bundle, options = {}) {
     html = replaceOnce(
       html,
       'async function getRepositoryInfo(owner, repo) {',
@@ -581,6 +581,17 @@
       .replace(/"/g, '&quot;'));
     html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>' + safeTitle + '</title>');
     html = html.replace(loaderPattern, payloadParts.join('') + loaderTag);
+    if (global.StandaloneMinifier?.isEnabled?.() &&
+        typeof global.StandaloneMinifier.minifyInlineScripts === 'function') {
+      reportProgress(options, 'Minifying standalone inline scripts…');
+      try {
+        html = await global.StandaloneMinifier.minifyInlineScripts(html, {
+          editorUrl: options.editorUrl || global.location.href
+        });
+      } catch (error) {
+        console.warn('[Compile Page] Kept standalone inline scripts after minification failed:', error);
+      }
+    }
     const charsetPattern = /<meta\s+charset=["']?[^"'>\s]+["']?\s*>/i;
     if (!charsetPattern.test(html)) {
       throw new Error('The deployment template must declare a character encoding before raw archive bytes can be embedded.');
@@ -670,7 +681,10 @@
     };
 
     reportProgress(options, 'Building standalone HTML…');
-    return patchDeploymentPage(deploymentHtml, bundle);
+    return await patchDeploymentPage(deploymentHtml, bundle, {
+      editorUrl:editorUrl.href,
+      onProgress:options.onProgress
+    });
   }
 
   function safeFilename(value) {
