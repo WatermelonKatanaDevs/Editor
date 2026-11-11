@@ -62,7 +62,9 @@
       if (value === null || (typeof value !== 'object' && typeof value !== 'function')) return value;
 
       const remote = proxyMetadata.get(value);
-      if (remote) return { __editorRemoteRef: remote.id, path: remote.path, kind: remote.kind };
+      // Returning a proxy to the side that originally exported it should
+      // restore the original object, not create a proxy back toward itself.
+      if (remote) return { __editorReturnRef: remote.id, path: remote.path, kind: remote.kind };
 
       if (typeof value === 'function') {
         return { __editorRemoteRef: objectId(value), kind: 'function', path: [] };
@@ -91,6 +93,15 @@
 
     function unpack(value) {
       if (!value || typeof value !== 'object') return value;
+      if (Object.prototype.hasOwnProperty.call(value, '__editorReturnRef')) {
+        let local = objects.get(value.__editorReturnRef);
+        if (local === undefined) throw new ReferenceError('Unknown returned object reference: ' + value.__editorReturnRef);
+        for (const key of value.path || []) {
+          if (local == null) throw new TypeError('Cannot read ' + String(key) + ' from ' + local);
+          local = local[key];
+        }
+        return local;
+      }
       if (Object.prototype.hasOwnProperty.call(value, '__editorRemoteRef')) {
         return makeProxy(value.__editorRemoteRef, value.path || [], value.kind || 'object');
       }
