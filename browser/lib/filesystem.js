@@ -1,5 +1,21 @@
 
 (function() {
+  async function generateCompressedZip(cache, directories, compressionLevel) {
+    const level = Math.max(1, Math.min(9, Number(compressionLevel) || 9));
+    const zip = new JSZip();
+    for (const directory of directories || []) {
+      if (directory) zip.folder(directory);
+    }
+    for (const [path, data] of cache || []) {
+      zip.file(path, data, {binary:true});
+    }
+    return await zip.generateAsync({
+      type:'blob',
+      compression:'DEFLATE',
+      compressionOptions:{level}
+    });
+  }
+
   class FileSystem {
     constructor(provider, sourceMode, syncEnabled) {
       this.provider = provider;
@@ -361,8 +377,8 @@
       return true;
     }
 
-    async exportZip() {
-      return await this.provider.exportZip();
+    async exportZip(options = {}) {
+      return await this.provider.exportZip(options);
     }
   }
 
@@ -513,7 +529,10 @@
       await this.flush();
       return null;
     }
-    async exportZip() {
+    async exportZip(options = {}) {
+      if (options.compressionLevel != null) {
+        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel);
+      }
       const zip = new JSZip();
       for (const [path, data] of this.cache) zip.file(path, data);
       return await zip.generateAsync({ type: 'blob' });
@@ -571,7 +590,10 @@
       await writable.close();
       return null;
     }
-    async exportZip() {
+    async exportZip(options = {}) {
+      if (options.compressionLevel != null) {
+        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel);
+      }
       for (const dir of this.directories) if (dir) this.zip.folder(dir);
       this.cache.forEach((data, path) => this.zip.file(path, data));
       return await this.zip.generateAsync({ type: 'blob' });
@@ -613,7 +635,10 @@
     async save() {
       return await this.exportZip();
     }
-    async exportZip() {
+    async exportZip(options = {}) {
+      if (options.compressionLevel != null) {
+        return await generateCompressedZip(this.cache, this.directories, options.compressionLevel);
+      }
       const zip = this.rootPrefix ? new JSZip() : this.zip;
       for (const dir of this.directories) if (dir) zip.folder(dir);
       this.cache.forEach((data, path) => zip.file(path, data));
