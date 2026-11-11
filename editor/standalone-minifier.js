@@ -409,10 +409,14 @@
     }
 
     if (!filesMinified) return {archive, filesMinified:0, filesSkipped, bytesSaved:0};
+    const requestedLevel = Number(options.compressionLevel);
+    const compressionLevel = Number.isFinite(requestedLevel)
+      ? Math.max(1, Math.min(9, requestedLevel))
+      : 9;
     const optimizedArchive = await zip.generateAsync({
       type:'blob',
       compression:'DEFLATE',
-      compressionOptions:{level:9}
+      compressionOptions:{level:compressionLevel}
     });
     return {archive:optimizedArchive, filesMinified, filesSkipped, bytesSaved};
   }
