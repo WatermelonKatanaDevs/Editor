@@ -1198,7 +1198,8 @@
     return node;
   }
 
-  async function rewriteCSSURLs(cssText, baseUrl, baseOrigin, networkRequest, createDataUri) {
+  async function rewriteCSSURLs(cssText, baseUrl, baseOrigin, networkRequest, createDataUri, rewriteContext) {
+    rewriteContext = rewriteContext || { seenStylesheets: new Set(), depth: 0 };
     // Support both the new page-based API and the old explicit API.
     let pageContext = null;
     if (typeof baseUrl === 'object' && baseUrl.network) {
@@ -1244,7 +1245,15 @@
     }
 
     async function processCSS(css, cssUrl) {
-      const rewritten = await rewriteCSSURLs(css, cssUrl, baseOrigin, networkRequest, createDataUri);
+      if (rewriteContext.depth >= 12 || rewriteContext.seenStylesheets.has(cssUrl)) return null;
+      rewriteContext.seenStylesheets.add(cssUrl);
+      rewriteContext.depth++;
+      let rewritten;
+      try {
+        rewritten = await rewriteCSSURLs(css, cssUrl, baseOrigin, networkRequest, createDataUri, rewriteContext);
+      } finally {
+        rewriteContext.depth--;
+      }
       const response = new Response(rewritten, { status: 200, headers: { 'Content-Type': 'text/css' } });
       response.source_url = cssUrl;
       return await createDataUri(response);
@@ -1287,13 +1296,25 @@
         if (!response || !response.ok) return;
 
         const contentType = response.headers.get('content-type') || '';
-        const isCSS = contentType.toLowerCase().includes('text/css') || /\.css(?:[?#]|$)/i.test(resolvedUrl);
+        const cssMimeType = contentType.toLowerCase().includes('text/css');
+        const cssFileURL = /\.css(?:[?#]|$)/i.test(resolvedUrl);
 
         let finalResponse = response;
-
-        if (isCSS) {
-          const importedCSS = await response.text();
-          const rewrittenCSS = await rewriteCSSURLs(importedCSS, resolvedUrl, baseOrigin, networkRequest, createDataUri);
+        if (cssMimeType || cssFileURL) {
+          const importedCSS = await response.clone().text();
+          // Some upstreams/proxies return an HTML error document with status 200
+          // for a missing or blocked stylesheet. Do not recursively parse it as CSS.
+          const looksLikeHTML = /^\s*(?:<!doctype\s+html|<html\b|<head\b|<body\b)/i.test(importedCSS);
+          const looksLikeCSS = /(?:^|[;}\s])(?:@(?:charset|import|media|supports|font-face|keyframes)\b|[-\w.#:[\\]]+\s*\{)/i.test(importedCSS);
+          if (looksLikeHTML || (!cssMimeType && !looksLikeCSS)) {
+            console.warn('[Browser Emulator] Skipping invalid CSS response:', resolvedUrl, response.status, contentType);
+            return;
+          }
+          const rewrittenCSS = await processCSS(importedCSS, resolvedUrl);
+          if (rewrittenCSS == null) {
+            console.warn('[Browser Emulator] Skipping cyclic or excessively nested CSS:', resolvedUrl);
+            return;
+          }
           finalResponse = new Response(rewrittenCSS, {
             status: response.status,
             statusText: response.statusText,
