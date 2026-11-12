@@ -1727,7 +1727,7 @@ window.__editorInitPromise = (async function () {
     for (const [kind, label] of welcomeBuiltins) {
       if (['photocraft', 'soundcraft', 'filmcraft'].includes(kind) || !window.EditorBuiltinFactories?.[kind]) continue;
       const b = document.createElement('button');
-      b.textContent = String(label).replace(/^\\(?WatermelonKatana Extension\\)?$/, '(WatermelonKatana Extension)');
+      b.textContent = label === 'WatermelonKatana Extension' ? '(WatermelonKatana Extension)' : label;
       b.onclick = () => openBuiltin(kind, g);
       actions.appendChild(b);
     }
