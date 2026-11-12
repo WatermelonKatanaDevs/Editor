@@ -1717,13 +1717,31 @@ window.__editorInitPromise = (async function () {
     groupCreate.append(groupInput, groupButton);
     card.appendChild(groupCreate);
     const actions = document.createElement('div');
-    actions.className = 'workbench-empty-actions';
-    for (const [kind, label] of [['browser', 'Browser'], ['terminal', 'Terminal'], ['run', 'Run Configuration'], ['environment', 'Environment Variables'], ['peer', 'Peer Server'], ['compilation', 'HTML Compilation'], ['ai', 'AI Chat'], ['ai-asset-studio', 'AI Asset Studio'], ['blockbench', 'Blockbench'], ['photocraft', 'PhotoCraft Image Editor'], ['soundcraft', 'SoundCraft DAW'], ['filmcraft', 'FilmCraft Video Editor'], ['github-repository', 'Git Repository'], ['watermelonkatana', '(WatermelonKatana Extension)']]) {
-      const b = document.createElement('button');
-      b.textContent = label;
-      b.onclick = () => openBuiltin(kind, g);
-      actions.appendChild(b);
-    }
+    actions.className = 'workbench-empty-actions welcome-actions';
+    const welcomeGroups = [
+      [['browser', 'Browser'], ['terminal', 'Terminal']],
+      [['run', 'Run Configuration'], ['environment', 'Environment Variables'], ['peer', 'Peer Server'], ['compilation', 'HTML Compilation']],
+      [['ai', 'AI Chat'], ['ai-asset-studio', 'AI Asset Studio']],
+      [['blockbench', 'Blockbench'], ['photocraft', 'PhotoCraft Image Editor'], ['soundcraft', 'SoundCraft DAW'], ['filmcraft', 'FilmCraft Video Editor']],
+      [['github-repository', 'Git Repository'], ['watermelonkatana', '(WatermelonKatana Extension)']]
+    ];
+    welcomeGroups.forEach((items, index) => {
+      const group = document.createElement('div');
+      group.className = 'welcome-action-group';
+      items.forEach(([kind, label]) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.onclick = () => openBuiltin(kind, g);
+        group.appendChild(b);
+      });
+      actions.appendChild(group);
+      if (index < welcomeGroups.length - 1) {
+        const divider = document.createElement('div');
+        divider.className = 'welcome-action-divider';
+        divider.setAttribute('aria-hidden', 'true');
+        actions.appendChild(divider);
+      }
+    });
     for (const [kind, label] of welcomeBuiltins) {
       if (['photocraft', 'soundcraft', 'filmcraft', 'watermelonkatanaEditor'].includes(kind) || !window.EditorBuiltinFactories?.[kind]) continue;
       const b = document.createElement('button');
