@@ -216,6 +216,7 @@
         validateValue(args, tool.parameters || DEFAULT_SCHEMA, 'arguments');
         const before = await this.runHook('ai.beforeTool', {tool, args}) || {args};
         args = before?.args && typeof before.args === 'object' ? before.args : args;
+        validateValue(args, tool.parameters || DEFAULT_SCHEMA, 'arguments');
         this.emit('tool_call', {name:tool.name, args});
         await this.checkPermission(tool, args, call.preview || args);
         let result = await tool.execute(args);
