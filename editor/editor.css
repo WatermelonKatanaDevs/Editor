@@ -1001,7 +1001,7 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .editor-image-metadata-group-name{font-weight:600}
 .editor-image-metadata-group-count{margin-left:auto;color:var(--editor-muted,#888);font:10px ui-monospace,monospace}
 .editor-image-metadata-rows{display:flex;flex-direction:column}
-.editor-image-metadata-row{display:grid;grid-template-columns:minmax(125px, minmax(125px, 28%)) minmax(0,1fr) 62px;gap:9px;align-items:start;padding:7px 9px;border-top:1px solid var(--editor-border,#303030)}
+.editor-image-metadata-row{display:grid;grid-template-columns:minmax(125px,28%) minmax(0,1fr) 62px;gap:9px;align-items:start;padding:7px 9px;border-top:1px solid var(--editor-border,#303030)}
 .editor-image-metadata-row:first-child{border-top:0}
 .editor-image-metadata-row.is-removed{opacity:.48}
 .editor-image-metadata-row.is-removed .editor-image-metadata-value{text-decoration:line-through}
