@@ -1038,6 +1038,6 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .documentation-link:focus-visible{outline:1px solid var(--editor-accent);outline-offset:-1px}
 .documentation-link:disabled{opacity:.55;cursor:wait}
 .documentation-favicon,.documentation-favicon-fallback{display:flex;align-items:center;justify-content:center;flex:0 0 19px;width:19px;height:19px;box-sizing:border-box;object-fit:contain;border-radius:3px}
-.documentation-favicon{background:#fff;padding:2px}
+.documentation-favicon{background:var(--editor-surface,#202020);padding:2px;border:1px solid var(--editor-border,#383838)}
 .documentation-favicon-fallback{background:var(--editor-hover);color:var(--editor-text);font-size:10px;font-weight:700}
 .documentation-link-label{min-width:0;overflow-wrap:anywhere}
