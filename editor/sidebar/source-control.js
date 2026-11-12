@@ -330,6 +330,15 @@
       }
     }
     function esc(value) { return String(value ?? '').replace(/[&<>\"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\\':'&#39;'}[ch])); }
+    function validateGitHubRepositoryName(value) {
+      const name = String(value || '').trim();
+      if (!name) throw new Error('Enter a repository name.');
+      if (name.length > 100) throw new Error('Repository names must be 100 characters or fewer.');
+      if (!/^[A-Za-z0-9._-]+$/.test(name) || name === '.' || name === '..') {
+        throw new Error('Use only letters, numbers, periods, underscores, and hyphens.');
+      }
+      return name;
+    }
     function loadConfig() {
       try { const value = JSON.parse(localStorage.getItem(configKey()) || 'null'); if (value?.owner && value?.repo) return {...value}; } catch (_) {}
       return {owner:'', repo:'', branch:'main'};
@@ -408,17 +417,28 @@
         const actionLabel = area === 'staged' ? 'Unstage' : 'Stage';
         return '<div class="source-control-change source-control-local-change"><span class="source-control-change-type source-' + type + '">' + label + '</span><button type="button" class="source-control-change-open" data-local-diff="' + esc(change.path) + '" title="View changes in ' + esc(change.path) + '"><span>' + esc(change.path) + '</span><span class="source-control-diff-indicator">Diff</span></button><button type="button" class="source-control-local-action" data-local-action="' + action + '" data-local-path="' + esc(change.path) + '">' + actionLabel + '</button></div>';
       };
+      const defaultRepositoryName = String(state.projectName || 'workspace').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
+      const publishPanel = github?.isSignedIn?.()
+        ? '<form class="source-control-create-panel source-control-repository-create-form" data-local-publish-form hidden>' +
+            '<div class="source-control-create-heading"><strong>New GitHub repository</strong><span>Publish the current workspace and its local Git history to GitHub.</span></div>' +
+            '<label>Repository name<input data-local-publish-name type="text" value="' + esc(defaultRepositoryName) + '" placeholder="my-game" maxlength="100" required spellcheck="false" autocomplete="off"></label>' +
+            '<label>Description<textarea data-local-publish-description rows="3" maxlength="350" placeholder="What is this repository for?"></textarea></label>' +
+            '<label>Visibility<select data-local-publish-visibility><option value="public">Public — anyone can view</option><option value="private">Private — only you and collaborators</option></select></label>' +
+            '<div class="source-control-create-actions"><button type="button" data-local-publish-cancel>Cancel</button><button type="submit" data-local-publish-confirm class="primary">Publish Workspace</button></div>' +
+            '<div class="source-control-create-error" data-local-publish-error role="alert" hidden></div>' +
+          '</form>'
+        : '';
       tree.innerHTML = '<div class="source-control-sidebar">' +
         '<div class="source-control-head"><div class="activity-sidebar-title">Source Control</div><button data-refresh title="Refresh">↻</button></div>' +
         '<section class="source-control-section"><div class="source-control-section-title">Local Repository</div>' +
         (hasRepository
           ? '<div class="source-control-local-repo"><strong>' + esc(state.projectName || 'Workspace') + '</strong><span>Branch: ' + esc(localGitRepository.branch || 'HEAD') + '</span>' + (connectedRemote ? '<span>GitHub: ' + esc(connectedRemote.owner + '/' + connectedRemote.repo) + '</span><span>' + (hasPendingPush ? 'Local commit ready to push' : 'Tracking ' + esc(connectedRemote.branch || 'main')) + '</span><span class="source-control-local-remote-status">' + esc(remoteFetchStatus) + '</span>' : '<span>' + (persistent ? 'Stored in the selected folder' : 'Stored in project ZIP; export the project to keep its Git history') + '</span>') + '</div><button type="button" class="source-control-local-identity' + (hasLocalIdentity ? ' assigned' : ' missing') + '" data-local-identity>' + (hasLocalIdentity ? 'Committing as ' + esc(localIdentity.name) + ' &lt;' + esc(localIdentity.email) + '&gt; · Edit in Profile' : 'Please assign local identity · Open Profile') + '</button><div class="source-control-local-branch"><select data-local-branch aria-label="Switch branch"></select><button type="button" data-local-branch-create' + (localGitRepository.head ? '' : ' disabled') + '>New Branch</button><button type="button" data-local-branch-delete' + (!localGitRepository.head ? ' disabled' : '') + '>Delete</button></div>'
           : localGitAvailable
-            ? '<div class="source-control-local-hint">' + (persistent ? 'This folder is not being tracked by Git yet. Choose how to start source control.' : 'This project can keep Git history inside its virtual filesystem. Export the project as a ZIP to carry that history with it.') + '</div><div class="source-control-local-setup"><button type="button" class="source-control-create-repo" data-local-init>Initialize Local Git</button>' + (github?.isSignedIn?.() ? '<button type="button" class="source-control-create-repo" data-local-publish>Create GitHub Repository</button>' : '<button type="button" class="source-control-create-repo" data-local-github-signin>Sign in to create GitHub repository</button>') + '</div>'
+            ? '<div class="source-control-local-hint">' + (persistent ? 'This folder is not being tracked by Git yet. Choose how to start source control.' : 'This project can keep Git history inside its virtual filesystem. Export the project as a ZIP to carry that history with it.') + '</div><div class="source-control-local-setup"><button type="button" class="source-control-create-repo" data-local-init>Initialize Local Git</button>' + (github?.isSignedIn?.() ? '<button type="button" class="source-control-create-repo" data-local-publish>Create GitHub Repository</button>' + publishPanel : '<button type="button" class="source-control-create-repo" data-local-github-signin>Sign in to create GitHub repository</button>') + '</div>'
             : '<div class="source-control-local-hint">Local Git is unavailable for this read-only project source.</div>') +
         '</section>' +
         (hasRepository && connectedRemote ? '<section class="source-control-section"><div class="source-control-local-remote-actions"><button type="button" class="source-control-local-fetch" data-local-fetch title="Download remote commits and objects without changing workspace files">Fetch</button><button type="button" class="source-control-local-pull" data-local-pull' + (localGitStatus?.clean ? '' : ' disabled') + ' title="Fetch and fast-forward the current branch; refuses divergent histories and local changes">Pull (FF only)</button><button type="button" class="source-control-local-pull" data-local-merge' + (localGitStatus?.clean && localGitRepository?.head ? '' : ' disabled') + ' title="Merge the fetched origin branch; conflicts abort without changing workspace files">Merge</button></div></section>' : '') +
-        (!connectedRemote && hasRepository && github?.isSignedIn?.() ? '<section class="source-control-section"><button type="button" class="source-control-create-repo" data-local-publish>Publish to GitHub</button></section>' : '') +
+        (!connectedRemote && hasRepository && github?.isSignedIn?.() ? '<section class="source-control-section"><button type="button" class="source-control-create-repo" data-local-publish>Publish to GitHub</button>' + publishPanel + '</section>' : '') +
         (hasRepository
           ? '<section class="source-control-section"><div class="source-control-section-title">Changes</div>' +
             '<div class="source-control-local-bulk"><button type="button" data-local-stage-all ' + (unstaged.length ? '' : 'disabled') + '>Stage All</button><button type="button" data-local-unstage-all ' + (staged.length ? '' : 'disabled') + '>Unstage All</button></div>' +
@@ -492,7 +512,31 @@
       tree.querySelectorAll('[data-local-diff]').forEach(button => button.addEventListener('click', () => void openLocalFileDiff(button.dataset.localDiff)));
       tree.querySelector('[data-local-identity]')?.addEventListener('click', () => state.sidebarController?.show?.('Profile'));
       tree.querySelector('[data-local-commit]')?.addEventListener('click', () => void commitLocal());
-      tree.querySelector('[data-local-publish]')?.addEventListener('click', () => void publishLocalRepository());
+      tree.querySelectorAll('[data-local-publish]').forEach(button => button.addEventListener('click', () => {
+        const form = tree.querySelector('[data-local-publish-form]');
+        if (!form) return;
+        form.hidden = !form.hidden;
+        if (!form.hidden) form.querySelector('[data-local-publish-name]')?.focus();
+      }));
+      const localPublishForm = tree.querySelector('[data-local-publish-form]');
+      localPublishForm?.querySelector('[data-local-publish-cancel]')?.addEventListener('click', () => {
+        localPublishForm.hidden = true;
+        const error = localPublishForm.querySelector('[data-local-publish-error]');
+        if (error) { error.hidden = true; error.textContent = ''; }
+      });
+      localPublishForm?.addEventListener('submit', event => {
+        event.preventDefault();
+        const name = localPublishForm.querySelector('[data-local-publish-name]')?.value || '';
+        const description = localPublishForm.querySelector('[data-local-publish-description]')?.value || '';
+        const visibility = localPublishForm.querySelector('[data-local-publish-visibility]')?.value || 'public';
+        void publishLocalRepository({
+          name,
+          description,
+          privateRepo:visibility === 'private',
+          form:localPublishForm,
+          button:localPublishForm.querySelector('[data-local-publish-confirm]')
+        });
+      });
       tree.querySelector('[data-local-github-signin]')?.addEventListener('click', async () => { try { await github?.startLogin?.(); } catch (error) { showStatus(error.message || String(error), true); } });
       bindCommitHistory(tree.querySelector('[data-local-history]'));
     }
@@ -794,13 +838,24 @@
       }
     }
 
-    async function publishLocalRepository() {
+    async function publishLocalRepository({name, description = '', privateRepo = false, form = null, button = null} = {}) {
       if (!github?.isSignedIn?.() || !state.fs || commitBusy) return;
-      const name = window.prompt('New GitHub repository name', String(state.projectName || 'workspace').toLowerCase().replace(/[^a-z0-9._-]+/g, '-'));
-      if (name == null || !name.trim()) return;
-      const privateRepo = window.confirm('Create this repository as private?');
+      const errorNode = form?.querySelector('[data-local-publish-error]');
+      const setFormError = message => {
+        if (!errorNode) return;
+        errorNode.textContent = message || '';
+        errorNode.hidden = !message;
+      };
+      try {
+        name = validateGitHubRepositoryName(name);
+      } catch (error) {
+        setFormError(error.message || String(error));
+        form?.querySelector('[data-local-publish-name]')?.focus();
+        return;
+      }
+      description = String(description || '').trim();
+      setFormError('');
       commitBusy = true;
-      const button = tree.querySelector('[data-local-publish]');
       if (button) { button.disabled = true; button.textContent = 'Publishing…'; }
       try {
         const service = getLocalGit();
@@ -823,7 +878,7 @@
         await service.runSerialized(['add', '-A'], {cwd:'/'});
         const status = await service.status('/');
         if (status.changes.some(change => change.staged)) await service.runSerialized(['commit', '-m', 'Published workspace baseline'], {cwd:'/'});
-        const created = await github.createRepository({name:name.trim(), description:'', privateRepo, autoInit:false});
+        const created = await github.createRepository({name, description, privateRepo, autoInit:false});
         const owner = created?.owner?.login || github.getUser?.()?.login;
         const repoName = created?.name || name.trim();
         const branch = created?.default_branch || 'main';
@@ -849,8 +904,9 @@
         await loadLocalHistory();
         showStatus('Published to https://github.com/' + owner + '/' + repoName + '.');
       } catch (error) {
+        setFormError(error?.message || String(error));
         showStatus(error.message || String(error), true);
-        if (button?.isConnected) { button.disabled = false; button.textContent = 'Publish to GitHub'; }
+        if (button?.isConnected) { button.disabled = false; button.textContent = 'Publish Workspace'; }
       } finally {
         commitBusy = false;
         await refreshLocalStatus();
@@ -936,7 +992,7 @@
       const localProject = isLocalProject();
       tree.innerHTML = `<div class="source-control-sidebar">
         <div class="source-control-head"><div class="activity-sidebar-title">Source Control</div><button data-refresh title="Refresh">↻</button></div>
-        ${!selected.repo ? `<section class="source-control-section"><div class="source-control-section-title">GitHub repository</div><div class="source-control-local-hint">No repository is selected. Connect this workspace to a new GitHub repository to start tracking and pushing changes.</div><button data-create-local-repo class="source-control-create-repo">Create GitHub Repository</button><div class="source-control-create-panel" data-create-panel hidden><label>Repository name<input data-create-name type="text" placeholder="my-game" spellcheck="false"></label><label>Description<input data-create-description type="text" placeholder="Optional"></label><label class="source-control-private"><input data-create-private type="checkbox"> Private repository</label><div class="source-control-create-actions"><button data-create-cancel>Cancel</button><button data-create-confirm class="primary">Create Repository</button></div></div></section>` : ''}
+        ${!selected.repo ? `<section class="source-control-section"><div class="source-control-section-title">GitHub repository</div><div class="source-control-local-hint">No repository is selected. Connect this workspace to a new GitHub repository to start tracking and pushing changes.</div><button data-create-local-repo class="source-control-create-repo">Create GitHub Repository</button><form class="source-control-create-panel source-control-repository-create-form" data-create-panel hidden><div class="source-control-create-heading"><strong>New GitHub repository</strong><span>Create a repository on GitHub and connect this workspace to it.</span></div><label>Repository name<input data-create-name type="text" placeholder="my-game" maxlength="100" required spellcheck="false" autocomplete="off"></label><label>Description<textarea data-create-description rows="3" maxlength="350" placeholder="What is this repository for?"></textarea></label><label>Visibility<select data-create-visibility><option value="public">Public — anyone can view</option><option value="private">Private — only you and collaborators</option></select></label><div class="source-control-create-actions"><button type="button" data-create-cancel>Cancel</button><button type="submit" data-create-confirm class="primary">Create Repository</button></div><div class="source-control-create-error" data-create-error role="alert" hidden></div></form></section>` : ''}
         <section class="source-control-section">
           <div class="source-control-label">Repository</div>
           <div class="source-control-select-row"><select data-repo ${repos.length ? '' : 'disabled'}><option value="">${repos.length ? 'Select repository…' : 'Loading repositories…'}</option>${repos.map(r => `<option value="${esc(r.fullName)}" ${r.fullName === `${selected.owner}/${selected.repo}` ? 'selected' : ''}>${esc(r.fullName)}${r.private ? ' · private' : ''}</option>`).join('')}</select><button data-repo-refresh title="Refresh repositories">↻</button></div>
@@ -950,13 +1006,32 @@
       const createLocalButton = tree.querySelector('[data-create-local-repo]');
       const createPanel = tree.querySelector('[data-create-panel]');
       createLocalButton?.addEventListener('click', () => { createPanel.hidden = !createPanel.hidden; if (!createPanel.hidden) createPanel.querySelector('[data-create-name]')?.focus(); });
-      createPanel?.querySelector('[data-create-cancel]')?.addEventListener('click', () => { createPanel.hidden = true; });
-      createPanel?.querySelector('[data-create-confirm]')?.addEventListener('click', async () => {
-        const name = createPanel.querySelector('[data-create-name]')?.value.trim();
-        const description = createPanel.querySelector('[data-create-description]')?.value.trim();
-        const privateRepo = !!createPanel.querySelector('[data-create-private]')?.checked;
+      createPanel?.querySelector('[data-create-cancel]')?.addEventListener('click', () => {
+        createPanel.hidden = true;
+        const error = createPanel.querySelector('[data-create-error]');
+        if (error) { error.hidden = true; error.textContent = ''; }
+      });
+      createPanel?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const nameInput = createPanel.querySelector('[data-create-name]');
         const button = createPanel.querySelector('[data-create-confirm]');
-        if (!name) { createPanel.querySelector('[data-create-name]')?.focus(); return; }
+        const errorNode = createPanel.querySelector('[data-create-error]');
+        const setCreateError = message => {
+          if (!errorNode) return;
+          errorNode.textContent = message || '';
+          errorNode.hidden = !message;
+        };
+        let name;
+        try {
+          name = validateGitHubRepositoryName(nameInput?.value);
+        } catch (error) {
+          setCreateError(error.message || String(error));
+          nameInput?.focus();
+          return;
+        }
+        const description = createPanel.querySelector('[data-create-description]')?.value.trim() || '';
+        const privateRepo = createPanel.querySelector('[data-create-visibility]')?.value === 'private';
+        setCreateError('');
         button.disabled = true; button.textContent = 'Creating…';
         try {
           const created = await github.createRepository({name, description, privateRepo, autoInit:false});
@@ -1014,6 +1089,7 @@
           await loadHistory();
         } catch (e) {
           button.disabled = false; button.textContent = 'Create Repository';
+          setCreateError(e?.message || String(e));
           showStatus(e.message || String(e), true);
         }
       });
