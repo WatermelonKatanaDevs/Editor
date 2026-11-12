@@ -150,7 +150,10 @@
         // can change how the browser parses the result without causing a syntax
         // error. Collapse whitespace, but retain a line terminator where the
         // original source had one so automatic semicolon insertion is stable.
-        if (/\r|\n/.test(gap)) output += '\n';
+        const templateBoundary = previous.label === 'backQuote' ||
+          previous.label === 'template' || entry.label === 'template';
+        if (templateBoundary) output += gap;
+        else if (/\r|\n/.test(gap)) output += '\n';
         else output += ' ';
       }
       output += entry.raw;
