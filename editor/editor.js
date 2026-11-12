@@ -1646,6 +1646,93 @@ window.__editorInitPromise = (async function () {
   
   
   
+  async function openDocumentationURL(rawURL) {
+    let url;
+    try {
+      url = new URL(String(rawURL || '').trim());
+    } catch (_) {
+      throw new Error('The documentation URL is invalid.');
+    }
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      throw new Error('Documentation links must use HTTP or HTTPS.');
+    }
+
+    const candidates = [];
+    for (const workbench of Workbench.getInstances?.() || []) {
+      for (const group of workbench.groups?.values?.() || []) {
+        for (const tab of group.tabs || []) {
+          if (tab.kind !== 'builtin' || tab.builtin !== 'browser') continue;
+          const info = state.browserTabs.get(tab.id);
+          if (!info?.frame) continue;
+
+          let visible = false;
+          const frame = info.frame;
+          if (frame.isConnected) {
+            const rect = frame.getBoundingClientRect();
+            visible = rect.width > 0 && rect.height > 0;
+            for (let element = frame; visible && element?.nodeType === 1; element = element.parentElement) {
+              const style = window.getComputedStyle(element);
+              if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+                visible = false;
+              }
+            }
+          }
+          candidates.push({workbench, group, tab, info, visible});
+        }
+      }
+    }
+
+    // Prefer a Browser panel that is already on-screen. If none are visible,
+    // reuse an existing one and reveal its containing tab/group.
+    candidates.sort((a, b) => Number(b.visible) - Number(a.visible));
+    let candidate = candidates[0] || null;
+
+    if (!candidate) {
+      const group = Workbench.getActiveGroup?.()
+        || state.workbench?.getActiveGroup?.()
+        || state.workbench?.getFirstLeaf?.();
+      if (!group) throw new Error('There is no editor workbench group available for the Browser.');
+      const tab = openBuiltin('browser', group);
+      candidate = {
+        workbench: group.ownerWorkbench || state.workbench,
+        group: tab.group || group,
+        tab,
+        info: state.browserTabs.get(tab.id),
+        visible: true
+      };
+    }
+
+    if (!candidate.info) throw new Error('The Browser panel could not be initialized.');
+
+    if (!candidate.visible) {
+      let currentWorkbench = candidate.workbench;
+      currentWorkbench?.activateTab(candidate.group, candidate.tab.id);
+
+      // Reveal any parent Group tabs if this Browser lives inside a nested
+      // workbench, so its iframe is attached to the visible editor surface.
+      while (currentWorkbench?.hostTab) {
+        const hostTab = currentWorkbench.hostTab;
+        const hostGroup = hostTab.group;
+        const hostWorkbench = hostGroup?.ownerWorkbench;
+        if (!hostWorkbench || !hostGroup) break;
+        hostWorkbench.activateTab(hostGroup, hostTab.id);
+        currentWorkbench = hostWorkbench;
+      }
+    }
+
+    const info = candidate.info;
+    if (info.ready) await info.ready;
+    const frame = info.frame;
+    const browserWindow = frame?.contentWindow;
+    if (!browserWindow || typeof browserWindow.createNewTab !== 'function') {
+      throw new Error('The Browser tab is not ready to open documentation.');
+    }
+
+    state.browserFrame = frame;
+    state.browserNetwork = info.network || browserWindow.browserNetwork || state.browserNetwork;
+    return browserWindow.createNewTab(url.href, true);
+  }
+
   // Source Control uses the shared editor state, so expose the diff-tab opener there.
   state.openDiffTab = options => {
     const g = Workbench.getActiveGroup?.() || state.workbench?.getActiveGroup?.() || state.workbench?.getFirstLeaf?.();
@@ -3812,6 +3899,7 @@ window.__editorInitPromise = (async function () {
       scheduleWorkspaceLayoutSave,
       updateStatus,
       extensionAPI,
+      openDocumentationURL,
       openDiffTab: options => {
         const group = Workbench.getActiveGroup?.() || state.workbench?.getActiveGroup?.() || state.workbench?.getFirstLeaf?.();
         return group ? openBuiltin('source-control-diff', group, options || {}) : null;

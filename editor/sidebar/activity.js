@@ -5,7 +5,7 @@
     const explorer = root.Explorer(options);
     const runDebug = root.RunDebug(options);
     const settings = root.Settings(options);
-    const placeholders = root.Placeholders(options);
+    const documentation = root.Documentation(options);
     const extensions = root.Extensions(options);
     const search = root.Search(options);
     const sourceControl = root.SourceControl(options);
@@ -33,7 +33,7 @@
       activitySearch: {kind: 'Search', show: () => search.show()},
       activitySource: {kind: 'Source Control', show: () => sourceControl.show()},
       activityRun: {kind: 'Run and Debug', show: () => runDebug.show()},
-      activityDocumentation: {kind: 'Documentation', show: () => placeholders.show('Documentation', 'Documentation Coming Soon')},
+      activityDocumentation: {kind: 'Documentation', show: () => documentation.show()},
       activityExtensions: {kind: 'Extensions', show: () => extensions.show()},
       activitySettings: {kind: 'settings', show: () => settings.show()},
       activityExplorer: {kind: 'explorer', show: () => explorer.show()},
@@ -132,7 +132,7 @@
     setWidth(MIN_WIDTH);
     state.sidebar = 'explorer';
     return {
-      explorer, runDebug, settings, extensions, search, sourceControl, profile, show, dispose() { extensions.dispose?.(); githubUnsubscribe?.(); },
+      explorer, runDebug, settings, extensions, search, sourceControl, profile, documentation, show, dispose() { extensions.dispose?.(); githubUnsubscribe?.(); },
       setActiveActivity(id) { document.querySelectorAll('.activity-button').forEach(x => x.classList.toggle('active', x.id === id)); },
       restoreCollapsed: paths => explorer.restoreCollapsed(paths),
       setWidth, collapse, expand, getWidth: () => width
