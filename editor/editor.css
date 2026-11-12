@@ -959,7 +959,7 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .compilation-check strong{font-size:12px;font-weight:500;color:var(--editor-text-secondary)}
 .compilation-check small,.compilation-note{font-size:11px;line-height:1.5;color:var(--editor-muted)}
 .compilation-field{display:grid;grid-template-columns:minmax(110px,145px) minmax(0,1fr);gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--editor-border);font-size:12px;color:var(--editor-muted)}
-.compilation-field input,.compilation-field select{width:100%;min-width:0;box-sizing:border-box;background:var(--editor-bg);color:var(--editor-text-secondary);border:1px solid var(--editor-border-strong);border-radius:3px;padding:8px 9px;font:12px inherit;outline:none}
+.compilation-field input,.compilation-field select{width:100%;min-width:0;box-sizing:border-box;background:var(--editor-bg);color:var(--editor-text-secondary);border:1px solid var(--editor-border-strong);border-radius:3px;padding:8px 9px;font:inherit;font-size:12px;outline:none}
 .compilation-field input:focus,.compilation-field select:focus{border-color:var(--editor-accent)}
 .compilation-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--editor-border);padding-top:15px;margin-top:5px}
 .compilation-actions button{border:1px solid var(--editor-border-strong);border-radius:4px;padding:8px 14px;background:var(--editor-hover);color:var(--editor-text);cursor:pointer;font:inherit}
