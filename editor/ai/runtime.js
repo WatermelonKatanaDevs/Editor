@@ -375,7 +375,6 @@
       this.emit('user_message', userMessage);
       this._activeUnsubscribe = this.agent.on('*', event => {
         this.emit(event.type, event);
-        if (event.type === 'final') this.emit('assistant_message', {role:'assistant', content:event.text || '', result:event});
       });
       try {
         const prompt = options.systemPrompt !== undefined ? String(options.systemPrompt || '') : this.systemPrompt;
