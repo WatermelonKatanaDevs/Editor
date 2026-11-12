@@ -1,0 +1,89 @@
+name: One-time vendor layout migration
+on:
+  push:
+    branches:
+      - with-submodules
+permissions:
+  contents: write
+jobs:
+  migrate:
+    if: contains(github.event.head_commit.message, '[migrate-vendor-layout]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out all source submodules
+        uses: actions/checkout@v4
+        with:
+          ref: with-submodules
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Vendor AudioMass and move source/build tooling off main
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          AUDIO_PATH="editor/previews/vendor/audiomass"
+          AUDIO_SRC_PATH="editor/previews/vendor/audiomass-src"
+          AUDIO_COPY="$RUNNER_TEMP/audiomass-vendored"
+          AUDIO_COMMIT="21f5ee1362a47be6f0dbe6e4969a15e43d21b044"
+
+          # Verify the checked-out submodule matches the pinned source and copy
+          # every tracked file, including binary assets, without its .git pointer.
+          test -f "$AUDIO_PATH/src/index.html"
+          rm -rf "$AUDIO_COPY"
+          mkdir -p "$AUDIO_COPY"
+          rsync -a --exclude='.git' "$AUDIO_PATH/" "$AUDIO_COPY/"
+
+          # Replace the original AudioMass gitlink with an ordinary folder.
+          git submodule deinit -f -- "$AUDIO_PATH"
+          git rm -f -- "$AUDIO_PATH"
+          mkdir -p "$AUDIO_PATH"
+          rsync -a "$AUDIO_COPY/" "$AUDIO_PATH/"
+          git add -A -- "$AUDIO_PATH"
+
+          # Keep the exact pinned revision as a separately named source submodule.
+          git submodule add --force --name audiomass-src --branch production \
+            https://github.com/pkalogiros/AudioMass.git "$AUDIO_SRC_PATH"
+          git -C "$AUDIO_SRC_PATH" checkout "$AUDIO_COMMIT"
+          git add .gitmodules "$AUDIO_SRC_PATH"
+
+          git diff --cached --check
+          git commit -m "chore: vendor AudioMass and retain audiomass-src submodule"
+          git push origin HEAD:with-submodules
+
+          # Save the vendored copy before switching to main.
+          rm -rf "$AUDIO_COPY"
+          mkdir -p "$AUDIO_COPY"
+          rsync -a --exclude='.git' "$AUDIO_PATH/" "$AUDIO_COPY/"
+
+          # Remove this one-time workflow from the long-lived source branch.
+          git rm -f -- .github/workflows/migrate-vendor-layout.yml
+          git commit -m "chore: remove one-time vendor migration workflow"
+          git push origin HEAD:with-submodules
+
+          # Rebuild main from its current remote head, with no source submodules.
+          git fetch origin main
+          git submodule deinit --all --force || true
+          git checkout -B main origin/main
+
+          git rm -f -- \
+            editor/previews/vendor/audiomass \
+            editor/previews/vendor/blockbench-src \
+            editor/previews/vendor/filmcraft-src \
+            editor/previews/vendor/opendaw-src \
+            editor/previews/vendor/photocraft-src \
+            editor/previews/vendor/piskel-src \
+            editor/previews/vendor/soundcraft-src
+
+          git rm -f -- .gitmodules
+          git rm -rf -- scripts .github/workflows/build-standalone-apps.yml
+
+          mkdir -p "$AUDIO_PATH"
+          rsync -a "$AUDIO_COPY/" "$AUDIO_PATH/"
+          git add -A -- "$AUDIO_PATH"
+
+          git diff --cached --check
+          git diff --cached --stat
+          git commit -m "chore: remove source submodules and build tooling from main"
+          git push origin HEAD:main
