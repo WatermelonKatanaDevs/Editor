@@ -1608,14 +1608,14 @@ window.__editorInitPromise = (async function () {
   function openBuiltin(kind, g, options = {}) {
     const wb = g?.ownerWorkbench || state.workbench;
     g = g || wb.getFirstLeaf();
+    if (options.replace) {
+      const t = makeBuiltinTab(kind, kind === 'group' ? {groupName: options.groupName ?? options.name} : options);
+      return wb.replaceTab(g, t);
+    }
     if (kind === 'group') {
       const t = makeBuiltinTab('group', {groupName: options.groupName ?? options.name});
       wb.addTab(t, g);
       return t;
-    }
-    if (options.replace) {
-      const t = makeBuiltinTab(kind);
-      return wb.replaceTab(g, t);
     }
     if (kind === 'welcome') {
       const t = makeBuiltinTab(kind);
@@ -1821,7 +1821,7 @@ window.__editorInitPromise = (async function () {
     const createGroup = () => {
       const name = groupInput.value.trim();
       if (!name) return;
-      openBuiltin('group', g, {groupName:name});
+      openBuiltin('group', g, {groupName:name, replace:true});
     };
     groupButton.onclick = createGroup;
     groupInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); createGroup(); } });
@@ -1846,7 +1846,7 @@ window.__editorInitPromise = (async function () {
       items.forEach(([kind, label]) => {
         const b = document.createElement('button');
         b.textContent = label;
-        b.onclick = () => openBuiltin(kind, g);
+        b.onclick = () => openBuiltin(kind, g, {replace:true});
         group.appendChild(b);
       });
       actions.appendChild(group);
