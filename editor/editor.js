@@ -1326,11 +1326,17 @@ window.__editorInitPromise = (async function () {
     }
     return false;
   }
-  function openSidePanel() {
+  function openSidePanel(direction = 'right') {
     const target = getActiveWorkbenchGroup();
     const wb = target?.ownerWorkbench || state.workbench;
     if (!target || !wb?.splitGroup) return null;
-    const group = wb.splitGroup(target, 'horizontal', false);
+    const layout = {
+      right: ['horizontal', false],
+      left: ['horizontal', true],
+      bottom: ['vertical', false],
+      top: ['vertical', true]
+    }[direction] || ['horizontal', false];
+    const group = wb.splitGroup(target, layout[0], layout[1]);
     openBuiltin('welcome', group);
     return group;
   }
@@ -4009,7 +4015,7 @@ window.__editorInitPromise = (async function () {
         // windows before page handlers can reliably intercept them. Use the
         // physical Control key for the editor's tab-management shortcuts on Mac.
         const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent);
-        const tabMod = isMac ? e.ctrlKey : mod;
+        const tabMod = isMac ? (e.metaKey || e.ctrlKey) : e.ctrlKey;
         if (!mod && e.key !== 'F5') return;
         const focusedElement = document.activeElement;
         const browserHasFocus = [...(state.browserTabs?.values?.() || [])]
@@ -4032,9 +4038,14 @@ window.__editorInitPromise = (async function () {
           if (tab) (group.ownerWorkbench || state.workbench)?.onClose?.(tab, group);
           return;
         }
-        if (tabMod && e.key.toLowerCase() === 'n' && !e.shiftKey && !e.altKey) {
+        if (tabMod && e.key.toLowerCase() === 'n' && !e.altKey) {
           e.preventDefault();
-          openSidePanel();
+          openSidePanel(e.shiftKey ? 'left' : 'right');
+          return;
+        }
+        if (tabMod && e.key.toLowerCase() === 'b' && !e.altKey) {
+          e.preventDefault();
+          openSidePanel(e.shiftKey ? 'top' : 'bottom');
           return;
         }
         if (e.key === 'F5') {
