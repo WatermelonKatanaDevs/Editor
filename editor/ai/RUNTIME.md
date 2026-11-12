@@ -75,7 +75,7 @@ const client = {
 const ai = LocalAI.createRuntime({ client, maxSteps: 20 });
 ~~~
 
-The Editor supplies its existing multi-provider AIClient as this adapter, so its Groq, Gemini, Anthropic, Cohere, Responses API and local-model behavior remains in the provider layer.
+The provider layer is reusable separately as documented in [PROVIDER_CLIENT.md](./PROVIDER_CLIENT.md). The Editor supplies its existing multi-provider registry, shared network, auth resolver, preferences, analytics and local Transformers.js manager through a thin host adapter, so its existing saved model settings and provider behavior remain host-owned.
 
 ## Registering tools
 
