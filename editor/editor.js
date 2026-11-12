@@ -1245,7 +1245,7 @@ window.__editorInitPromise = (async function () {
     card.innerHTML = '<h2>Welcome</h2><p>Choose what you want to add to this pane.</p>';
     const actions = document.createElement('div');
     actions.className = 'workbench-empty-actions';
-    for (const [k, label] of [['browser', 'Browser'], ['blockbench', 'Blockbench'], ['opendaw', 'openDAW Studio'], ['peer', 'Peer Server'], ['terminal', 'Terminal'], ['run', 'Run Configuration'], ['environment', 'Environment Variables'], ['compilation', 'Compilation'], ['ai', 'AI'], ['welcome', 'Welcome']]) {
+    for (const [k, label] of [['browser', 'Browser'], ['blockbench', 'Blockbench'], ['opendaw', 'openDAW Studio'], ['peer', 'Peer Server'], ['terminal', 'Terminal'], ['run', 'Run Configuration'], ['environment', 'Environment Variables'], ['compilation', 'HTML Compilation'], ['ai', 'AI'], ['welcome', 'Welcome']]) {
       const b = document.createElement('button');
       b.textContent = label;
       b.onclick = () => openBuiltin(k, g);
@@ -1718,7 +1718,7 @@ window.__editorInitPromise = (async function () {
     card.appendChild(groupCreate);
     const actions = document.createElement('div');
     actions.className = 'workbench-empty-actions';
-    for (const [kind, label] of [['browser', 'Browser'], ['blockbench', 'Blockbench'], ['peer', 'Peer Server'], ['terminal', 'Terminal'], ['run', 'Run Configuration'], ['environment', 'Environment Variables'], ['compilation', 'Compilation'], ['ai', 'AI Chat'], ['github-repository', 'GitHub Repository']]) {
+    for (const [kind, label] of [['browser', 'Browser'], ['blockbench', 'Blockbench'], ['peer', 'Peer Server'], ['terminal', 'Terminal'], ['run', 'Run Configuration'], ['environment', 'Environment Variables'], ['compilation', 'HTML Compilation'], ['ai', 'AI Chat'], ['github-repository', 'GitHub Repository']]) {
       const b = document.createElement('button');
       b.textContent = label;
       b.onclick = () => openBuiltin(kind, g);
