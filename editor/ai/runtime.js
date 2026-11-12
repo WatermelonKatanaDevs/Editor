@@ -356,10 +356,7 @@
       this.systemPrompt = String(options.systemPrompt || '');
       this.messages = Array.isArray(options.messages) ? options.messages.map(cloneMessage) : [];
       this.busy = false;
-      this._unsubscribe = agent.on('*', event => {
-        this.emit(event.type, event);
-        if (event.type === 'final') this.emit('assistant_message', {role:'assistant', content:event.text || '', result:event});
-      });
+      this._activeUnsubscribe = null;
     }
     getMessages() { return this.messages.map(cloneMessage); }
     setMessages(messages) {
@@ -376,6 +373,10 @@
       const userMessage = {role:'user', content};
       this.messages.push(userMessage);
       this.emit('user_message', userMessage);
+      this._activeUnsubscribe = this.agent.on('*', event => {
+        this.emit(event.type, event);
+        if (event.type === 'final') this.emit('assistant_message', {role:'assistant', content:event.text || '', result:event});
+      });
       try {
         const prompt = options.systemPrompt !== undefined ? String(options.systemPrompt || '') : this.systemPrompt;
         const history = [...(prompt ? [{role:'system', content:prompt}] : []), ...this.messages].map(cloneMessage);
@@ -388,11 +389,13 @@
         this.emit('error', {error, message:error?.message || String(error)});
         throw error;
       } finally {
+        this._activeUnsubscribe?.();
+        this._activeUnsubscribe = null;
         this.busy = false;
       }
     }
     cancel() { this.agent.cancel(); }
-    dispose() { this._unsubscribe?.(); this.removeAllListeners(); }
+    dispose() { this._activeUnsubscribe?.(); this._activeUnsubscribe = null; this.removeAllListeners(); }
   }
 
   class Runtime extends EventEmitter {
