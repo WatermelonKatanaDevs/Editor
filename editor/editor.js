@@ -612,6 +612,11 @@ window.__editorInitPromise = (async function () {
       path: normalizeDeploymentPath((legacyDeployment.path ?? legacyDeployment.url ?? state.runConfig?.config?.path) || '/'),
       usePeerServer: legacyDeployment.usePeerServer === true || state.runConfig?.config?.usePeerServer === true
     };
+    // Keep the run configuration consumed by the standalone runtime aligned
+    // with the deployment setting restored from project metadata.
+    if (state.runConfig?.config) {
+      state.runConfig.config.usePeerServer = state.deploymentSettings.usePeerServer;
+    }
     if (!state.projectId) state.projectId = makeProjectId();
     hydrateGitRemoteFromSavedSelection();
     return meta;
