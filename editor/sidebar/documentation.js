@@ -40,7 +40,7 @@
       category: 'Game Development & Physics',
       entries: [
         {name: 'Phaser Documentation', url: 'https://www.phaser.io/oss/docs/'},
-        {name: 'Matter.js Documentation', url: 'https://brm.io/matter-js/docs/'},
+        {name: 'Matter.js Documentation', url: 'https://brm.io/matter-js/docs/', icon: 'https://brm.io/matter-js/docs/assets/favicon.png'},
         {name: 'Game Programming Patterns', url: 'https://gameprogrammingpatterns.com/contents.html'}
       ]
     }
@@ -66,7 +66,7 @@
       icon.alt = '';
       icon.loading = 'lazy';
       icon.referrerPolicy = 'no-referrer';
-      icon.src = faviconURL(entry.url);
+      icon.src = entry.icon || faviconURL(entry.url);
       icon.addEventListener('error', () => {
         const fallback = document.createElement('span');
         fallback.className = 'documentation-favicon-fallback';
