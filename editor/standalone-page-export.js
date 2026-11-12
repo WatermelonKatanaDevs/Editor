@@ -749,52 +749,6 @@
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
 
-  function installButton() {
-    const button = document.getElementById('compilePageBtn');
-    if (!button || button.dataset.standaloneExportInstalled === '1') return;
-    button.dataset.standaloneExportInstalled = '1';
 
-    button.addEventListener('click', async () => {
-      if (button.dataset.busy === '1' || button.disabled) return;
-      button.dataset.busy = '1';
-      button.disabled = true;
-      const originalText = button.textContent;
-      button.textContent = 'Compiling Page…';
-      try {
-        const editor = global.EditorApp;
-        if (!editor || typeof editor.getSinglePageSnapshot !== 'function') {
-          throw new Error('The Editor standalone export API is unavailable.');
-        }
-        const compileSettings = readCompileSettings();
-        const snapshot = await editor.getSinglePageSnapshot({
-          compressionLevel: compileSettings.compressionLevel
-        });
-        const html = await compile(snapshot, {
-          editorUrl: global.location.href,
-          compressionLevel: compileSettings.compressionLevel,
-          archiveEncoding: compileSettings.rawBinary ? 'iso8859-2' : 'base64',
-          onProgress: message => { button.textContent = message; }
-        });
-        download(html, snapshot.projectName);
-        button.textContent = 'Page Downloaded';
-      } catch (error) {
-        button.textContent = 'Compile Failed';
-        button.title = error?.message || String(error);
-        console.error('[Compile Page]', error);
-      } finally {
-        delete button.dataset.busy;
-        setTimeout(() => {
-          button.textContent = originalText;
-          button.disabled = false;
-        }, 1800);
-      }
-    });
-  }
-
-  global.StandalonePageExporter = Object.freeze({compile});
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', installButton, {once:true});
-  } else {
-    installButton();
-  }
+  global.StandalonePageExporter = Object.freeze({compile, download});
 })(window);
