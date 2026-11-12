@@ -139,7 +139,7 @@
 
   function parseToolProtocol(text) {
     const calls = [];
-    const re = /<tool_call>\\s*([\\s\\S]*?)\\s*<\\/tool_call>/g;
+    const re = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
     let match;
     while ((match = re.exec(String(text || '')))) {
       try {
@@ -151,14 +151,14 @@
   }
 
   function stripToolProtocol(text) {
-    return String(text || '').replace(/<tool_call>[\\s\\S]*?<\\/tool_call>/g, '').trim();
+    return String(text || '').replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '').trim();
   }
 
   function stringifyResult(value, maxChars = 120000) {
     let result;
     try { result = JSON.stringify(value); } catch (_) { result = String(value); }
     result = String(result == null ? '' : result);
-    return result.length <= maxChars ? result : result.slice(0, maxChars) + '\\n… [truncated ' + (result.length - maxChars) + ' characters]';
+    return result.length <= maxChars ? result : result.slice(0, maxChars) + '\n… [truncated ' + (result.length - maxChars) + ' characters]';
   }
 
   class Agent extends EventEmitter {
@@ -243,8 +243,8 @@
         const canNative = !!model.supportsTools;
         const working = (messages || []).map(cloneMessage);
         if (!canNative) {
-          const instructions = '\\n\\nYou have access to tools. When a tool is needed, output one or more tags in this format:\\n<tool_call>{"name":"tool_name","arguments":{"example":"value"}}</tool_call>\\nDo not put tool calls inside Markdown code fences. Use valid JSON arguments matching the schemas below. After receiving tool results, continue the task.\\n\\nTool schemas:\\n' +
-            this.tools.list().map(tool => JSON.stringify({name:tool.name, description:tool.description, parameters:tool.parameters || DEFAULT_SCHEMA})).join('\\n');
+          const instructions = '\n\nYou have access to tools. When a tool is needed, output one or more tags in this format:\n<tool_call>{"name":"tool_name","arguments":{"example":"value"}}</tool_call>\nDo not put tool calls inside Markdown code fences. Use valid JSON arguments matching the schemas below. After receiving tool results, continue the task.\n\nTool schemas:\n' +
+            this.tools.list().map(tool => JSON.stringify({name:tool.name, description:tool.description, parameters:tool.parameters || DEFAULT_SCHEMA})).join('\n');
           if (working[0]?.role === 'system') working[0] = {...working[0], content:String(working[0].content || '') + instructions};
           else working.unshift({role:'system', content:(options.systemPrompt || '') + instructions});
         }
@@ -322,7 +322,7 @@
                 this.emit('final', {text:finalText, reasoning, exitedEarly:true});
                 return {text:finalText, reasoning, exitedEarly:true};
               }
-              working.push({role:'user', content:'Tool result for ' + call.name + ':\\n' + stringifyResult(result)});
+              working.push({role:'user', content:'Tool result for ' + call.name + ':\n' + stringifyResult(result)});
             }
           }
         }
@@ -330,7 +330,7 @@
         const finalMessage = await this.client.complete(working, {
           ...options, model,
           tools:undefined,
-          systemPrompt:(options.systemPrompt || '') + '\\n\\nYou have reached the tool-step limit. Do not call tools. Give the user the best final answer using the tool results already collected.',
+          systemPrompt:(options.systemPrompt || '') + '\n\nYou have reached the tool-step limit. Do not call tools. Give the user the best final answer using the tool results already collected.',
           onResponse:info => this.emit('request_response', info)
         });
         const finalThink = finalMessage.reasoning_content || finalMessage.reasoning || '';
