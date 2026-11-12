@@ -1312,7 +1312,16 @@ window.__editorInitPromise = (async function () {
       if (!group) continue;
       const wb = group.ownerWorkbench || state.workbench;
       if (!wb) continue;
-      wb.addTab(tab, group, entry.index);
+      // Closing the final tab in the root workbench automatically creates a
+      // Welcome tab. Replace that placeholder when restoring the closed tab.
+      const welcomePlaceholder = group.tabs.length === 1
+        && group.tabs[0]?.kind === 'builtin'
+        && group.tabs[0]?.builtin === 'welcome';
+      if (welcomePlaceholder) {
+        group.tabs.splice(0, 1);
+        group.active = null;
+      }
+      wb.addTab(tab, group, welcomePlaceholder ? 0 : entry.index);
       return true;
     }
     return false;
