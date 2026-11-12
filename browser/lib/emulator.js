@@ -140,13 +140,25 @@
 
     const parser = new DOMParser();
     const doc = parser.parseFromString(rawHtml, 'text/html');
-    const codeOrgGameLab = /studio\.code\.org\/projects\/gamelab\//i.test(rawHtml) && /gamelab-api\.js/i.test(rawHtml);
+    // Game Lab exports may be hosted under an arbitrary local/project URL,
+    // so requiring both the studio project URL and API filename misses normal
+    // exported HTML. The API filename and its dedicated Blockly media path are
+    // reliable indicators on their own.
+    const codeOrgGameLab =
+      /gamelab-api(?:\.min)?\.js/i.test(rawHtml) ||
+      /studio\.code\.org\/projects\/gamelab\//i.test(rawHtml) ||
+      /\/blockly\/media\/gamelab\//i.test(rawHtml);
     page.__codeOrgGameLab = codeOrgGameLab;
     let codeOrgChannel = null;
     if (codeOrgGameLab) {
-      const configScript = Array.from(doc.querySelectorAll('script:not([src])'))
+      const inlineScripts = Array.from(doc.querySelectorAll('script:not([src])'));
+      const configScript = inlineScripts
         .find(script => /_FCONFIG_/.test(script.textContent || '') && /channel\s*:/.test(script.textContent || ''));
-      codeOrgChannel = configScript?.textContent.match(/channel\s*:\s*["']([^"']+)["']/)?.[1] || null;
+      const channelMatch = inlineScripts
+        .map(script => (script.textContent || '').match(/(?:["']?channel["']?\s*:\s*|(?:_FCONFIG_\.)?channel\s*=\s*)["']([^"']+)["']/i))
+        .find(match => match && match[1]);
+      codeOrgChannel = channelMatch?.[1] || null;
+      page.__codeOrgChannel = codeOrgChannel;
       if (configScript) {
         configScript.textContent = configScript.textContent.replace(
           '_FCONFIG_=Object.assign(_FCONFIG_,config)',
@@ -158,7 +170,12 @@
     const resolveUrl = (relUrl) => {
       try {
         const resolved = new URL(relUrl, pageUrl);
-        if (codeOrgGameLab && resolved.origin === dynamicBaseOrigin && resolved.pathname.startsWith('/blockly/')) {
+        const isGameLabMedia = resolved.pathname.startsWith('/blockly/media/gamelab/');
+        if (
+          resolved.origin === dynamicBaseOrigin &&
+          resolved.pathname.startsWith('/blockly/') &&
+          (codeOrgGameLab || isGameLabMedia)
+        ) {
           return new URL(resolved.pathname + resolved.search + resolved.hash, 'https://studio.code.org').href;
         }
         return resolved.href;
@@ -238,9 +255,22 @@
         // classic cross-origin script (which does not require CORS). Keep it
         // as a native script instead of fetching it through the emulator.
         // Its URL template is resolved from the page's _FCONFIG_ channel.
-        if (codeOrgGameLab && el.tagName === "SCRIPT" &&
-            /https?:\/\/studio\.code\.org\/projects\/gamelab\/\$\{id\}\/export_config(?:[?#]|$)/i.test(originalUrl)) {
-          if (codeOrgChannel) el.setAttribute(attr, originalUrl.replace(/\$\{id\}/g, encodeURIComponent(codeOrgChannel)));
+        const decodedOriginalUrl = (() => {
+          try { return decodeURIComponent(originalUrl); }
+          catch (_) { return originalUrl; }
+        })();
+        const exportConfigMatch = decodedOriginalUrl.match(
+          /^(https?:\/\/studio\.code\.org\/projects\/gamelab\/)\$\{id\}(\/export_config(?:[?#]|$))/i
+        );
+        if (codeOrgGameLab && el.tagName === "SCRIPT" && exportConfigMatch) {
+          // The exported API sometimes URL-encodes the braces in the
+          // placeholder ($%7Bid%7D), which used to bypass the native-script
+          // exception and send this request through fetch/XHR, triggering CORS.
+          const exportConfigUrl = codeOrgChannel
+            ? originalUrl.replace(/(?:\$\{id\}|\$%7Bid%7D|%24%7Bid%7D)/i, encodeURIComponent(codeOrgChannel))
+            : originalUrl;
+          el.removeAttribute('crossorigin');
+          el.setAttribute(attr, exportConfigUrl);
           return;
         }
 
@@ -1198,9 +1228,10 @@
     return node;
   }
 
-  async function rewriteCSSURLs(cssText, baseUrl, baseOrigin, networkRequest, createDataUri) {
+  async function rewriteCSSURLs(cssText, baseUrl, baseOrigin, networkRequest, createDataUri, pageContextOverride = null) {
     // Support both the new page-based API and the old explicit API.
-    let pageContext = null;
+    // Keep the page context when recursively processing imported stylesheets.
+    let pageContext = pageContextOverride;
     if (typeof baseUrl === 'object' && baseUrl.network) {
       const page = baseUrl;
       pageContext = page;
@@ -1244,7 +1275,7 @@
     }
 
     async function processCSS(css, cssUrl) {
-      const rewritten = await rewriteCSSURLs(css, cssUrl, baseOrigin, networkRequest, createDataUri);
+      const rewritten = await rewriteCSSURLs(css, cssUrl, baseOrigin, networkRequest, createDataUri, pageContext);
       const response = new Response(rewritten, { status: 200, headers: { 'Content-Type': 'text/css' } });
       response.source_url = cssUrl;
       return await createDataUri(response);
@@ -1276,9 +1307,14 @@
       urlMap.set(rawUrl, 'data:,');
       try {
         let resolved = new URL(rawUrl, baseUrl);
-        if (pageContext?.__codeOrgGameLab) {
+        {
           const pageOrigin = (() => { try { return new URL(baseUrl).origin; } catch (_) { return baseOrigin; } })();
-          if (resolved.origin === pageOrigin && resolved.pathname.startsWith('/blockly/')) {
+          const isGameLabMedia = resolved.pathname.startsWith('/blockly/media/gamelab/');
+          if (
+            resolved.origin === pageOrigin &&
+            resolved.pathname.startsWith('/blockly/') &&
+            (pageContext?.__codeOrgGameLab || isGameLabMedia)
+          ) {
             resolved = new URL(resolved.pathname + resolved.search + resolved.hash, 'https://studio.code.org');
           }
         }
@@ -1293,7 +1329,7 @@
 
         if (isCSS) {
           const importedCSS = await response.text();
-          const rewrittenCSS = await rewriteCSSURLs(importedCSS, resolvedUrl, baseOrigin, networkRequest, createDataUri);
+          const rewrittenCSS = await rewriteCSSURLs(importedCSS, resolvedUrl, baseOrigin, networkRequest, createDataUri, pageContext);
           finalResponse = new Response(rewrittenCSS, {
             status: response.status,
             statusText: response.statusText,
