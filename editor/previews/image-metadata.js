@@ -303,7 +303,7 @@
           const patchMetadataForPiskel = async pngBytes => {
             const tags = ctx.tab._piskelMetadataTags || {};
             if (!Object.keys(tags).length) return pngBytes;
-            const baseName = fileName(ctx).replace(/\\.[^.]+$/, '');
+            const baseName = fileName(ctx).replace(/\.[^.]+$/, '');
             const patched = await engine.writeMetadata({
               name: baseName + '.png',
               data: asBytes(pngBytes)
