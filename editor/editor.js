@@ -1723,7 +1723,7 @@ window.__editorInitPromise = (async function () {
       [['run', 'Run Configuration'], ['environment', 'Environment Variables'], ['peer', 'Peer Server'], ['compilation', 'HTML Compilation']],
       [['ai', 'AI Chat'], ['ai-asset-studio', 'AI Asset Studio']],
       [['blockbench', 'Blockbench'], ['photocraft', 'PhotoCraft Image Editor'], ['soundcraft', 'SoundCraft DAW'], ['filmcraft', 'FilmCraft Video Editor']],
-      [['github-repository', 'Git Repository'], ['watermelonkatana', '(WatermelonKatana Extension)']]
+      [['github-repository', 'Git Repository']]
     ];
     welcomeGroups.forEach((items, index) => {
       const group = document.createElement('div');
