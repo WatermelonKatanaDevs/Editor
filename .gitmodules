@@ -1,7 +1,3 @@
-[submodule "audiomass"]
-	path = editor/previews/vendor/audiomass
-	url = https://github.com/pkalogiros/AudioMass.git
-	branch = production
 [submodule "opendaw"]
 	path = editor/previews/vendor/opendaw-src
 	url = https://github.com/andremichelle/openDAW.git
@@ -31,3 +27,7 @@
 	path = editor/previews/vendor/filmcraft-src
 	url = https://github.com/storytold/filmcraft.git
 	branch = main
+[submodule "audiomass-src"]
+	path = editor/previews/vendor/audiomass-src
+	url = https://github.com/pkalogiros/AudioMass.git
+	branch = production
