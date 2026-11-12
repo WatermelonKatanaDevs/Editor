@@ -1027,6 +1027,12 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 
 /* Documentation source picker in the activity sidebar. */
 .documentation-page{height:100%;box-sizing:border-box;overflow:auto;padding:18px 10px 22px;color:var(--editor-text-secondary);font-family:sans-serif;scrollbar-width:thin}
+.documentation-page{scrollbar-color:var(--editor-hover) var(--editor-surface-2)}
+.documentation-page::-webkit-scrollbar{width:8px;height:8px}
+.documentation-page::-webkit-scrollbar-track{background:var(--editor-surface-2)}
+.documentation-page::-webkit-scrollbar-thumb{background:var(--editor-hover);border:2px solid var(--editor-surface-2);border-radius:6px}
+.documentation-page::-webkit-scrollbar-thumb:hover{background:var(--editor-border-strong)}
+.documentation-page::-webkit-scrollbar-corner{background:var(--editor-surface-2)}
 .documentation-header{padding:0 5px 14px}
 .documentation-header h2{margin:0 0 5px;color:var(--editor-text);font-size:17px;font-weight:500}
 .documentation-header p{margin:0;color:var(--editor-muted);font-size:10px;line-height:1.45}
