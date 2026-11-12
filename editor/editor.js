@@ -1718,14 +1718,14 @@ window.__editorInitPromise = (async function () {
     card.appendChild(groupCreate);
     const actions = document.createElement('div');
     actions.className = 'workbench-empty-actions';
-    for (const [kind, label] of [['browser', 'Browser'], ['terminal', 'Terminal'], ['run', 'Run Configuration'], ['environment', 'Environment Variables'], ['peer', 'Peer Server'], ['compilation', 'HTML Compilation'], ['ai', 'AI Chat'], ['ai-asset-studio', 'AI Asset Studio'], ['blockbench', 'Blockbench'], ['photocraft', 'PhotoCraft Image Editor'], ['soundcraft', 'SoundCraft DAW'], ['filmcraft', 'FilmCraft Video Editor'], ['github-repository', 'Git Repository']]) {
+    for (const [kind, label] of [['browser', 'Browser'], ['terminal', 'Terminal'], ['run', 'Run Configuration'], ['environment', 'Environment Variables'], ['peer', 'Peer Server'], ['compilation', 'HTML Compilation'], ['ai', 'AI Chat'], ['ai-asset-studio', 'AI Asset Studio'], ['blockbench', 'Blockbench'], ['photocraft', 'PhotoCraft Image Editor'], ['soundcraft', 'SoundCraft DAW'], ['filmcraft', 'FilmCraft Video Editor'], ['github-repository', 'Git Repository'], ['watermelonkatana', '(WatermelonKatana Extension)']]) {
       const b = document.createElement('button');
       b.textContent = label;
       b.onclick = () => openBuiltin(kind, g);
       actions.appendChild(b);
     }
     for (const [kind, label] of welcomeBuiltins) {
-      if (['photocraft', 'soundcraft', 'filmcraft'].includes(kind) || !window.EditorBuiltinFactories?.[kind]) continue;
+      if (['photocraft', 'soundcraft', 'filmcraft', 'watermelonkatanaEditor'].includes(kind) || !window.EditorBuiltinFactories?.[kind]) continue;
       const b = document.createElement('button');
       b.textContent = label === 'WatermelonKatana Extension' ? '(WatermelonKatana Extension)' : label;
       b.onclick = () => openBuiltin(kind, g);
