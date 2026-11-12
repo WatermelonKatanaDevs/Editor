@@ -7,17 +7,6 @@
     if (typeof options?.onProgress === 'function') options.onProgress(message);
   }
 
-  function readCompileSettings() {
-    let rawBinary = true;
-    let compressionLevel = 9;
-    try {
-      const storedRawBinary = global.localStorage.getItem('node-editor.compile.raw-binary');
-      rawBinary = storedRawBinary === null ? true : storedRawBinary === 'true';
-      compressionLevel = global.localStorage.getItem('node-editor.compile.compression') === '6' ? 6 : 9;
-    } catch (_) {}
-    return {rawBinary, compressionLevel};
-  }
-
   async function fetchText(url, label) {
     const response = await fetch(url, {cache:'no-store'});
     if (!response.ok) throw new Error('Unable to fetch ' + label + ' (' + response.status + '): ' + url);
