@@ -628,6 +628,10 @@ window.__deploymentNetworkReady = (async function() {
         : '';
 
       let source = href;
+      if (!source) {
+        try { source = new URL('/favicon.ico', page.location?.url || pageURL).href; }
+        catch (_) { source = ''; }
+      }
 
       if (!source) {
         deploymentMetadataIconSource = null;
