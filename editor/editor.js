@@ -1725,6 +1725,12 @@ window.__editorInitPromise = (async function () {
       [['blockbench', 'Blockbench'], ['photocraft', 'PhotoCraft Image Editor'], ['soundcraft', 'SoundCraft DAW'], ['filmcraft', 'FilmCraft Video Editor']],
       [['github-repository', 'Git Repository']]
     ];
+    // The WatermelonKatana site registers this entry only when its extension is installed.
+    // Place it beside Git Repository rather than rendering it as a separate builtin group.
+    const watermelonKatanaLabel = welcomeBuiltins.get('watermelonkatanaEditor');
+    if (watermelonKatanaLabel && window.EditorBuiltinFactories?.watermelonkatanaEditor) {
+      welcomeGroups[welcomeGroups.length - 1].push(['watermelonkatanaEditor', watermelonKatanaLabel]);
+    }
     welcomeGroups.forEach((items, index) => {
       const group = document.createElement('div');
       group.className = 'welcome-action-group';
