@@ -8,11 +8,11 @@
   }
 
   function readCompileSettings() {
-    let rawBinary = true;
+    let rawBinary = false;
     let compressionLevel = 9;
     try {
       const storedRawBinary = global.localStorage.getItem('node-editor.compile.raw-binary');
-      rawBinary = storedRawBinary === null ? true : storedRawBinary === 'true';
+      rawBinary = storedRawBinary === null ? false : storedRawBinary === 'true';
       compressionLevel = global.localStorage.getItem('node-editor.compile.compression') === '6' ? 6 : 9;
     } catch (_) {}
     return {rawBinary, compressionLevel};
@@ -636,9 +636,19 @@
     if (!charsetPattern.test(html)) {
       throw new Error('The deployment template must declare a character encoding before raw archive bytes can be embedded.');
     }
-    html = html.replace(charsetPattern, '<meta charset="iso-8859-2">');
-    html = prepareHtmlForISO88592(html);
-    return new Blob([encodeISO88592(html)], {type:'text/html;charset=iso-8859-2'});
+    if (bundle.archiveEncoding === 'iso8859-2') {
+      // Raw ZIP bytes are represented as ISO-8859-2 characters. Preserve that
+      // byte mapping only in this opt-in size-optimized mode.
+      html = html.replace(charsetPattern, '<meta charset="iso-8859-2">');
+      html = prepareHtmlForISO88592(html);
+      return new Blob([encodeISO88592(html)], {type:'text/html;charset=iso-8859-2'});
+    }
+
+    // The portable Base64 variant is ordinary UTF-8 HTML. Do not run the
+    // single-byte charset transformation over it: many upload/hosting
+    // services serve HTML as UTF-8 and cannot preserve a legacy charset.
+    html = html.replace(charsetPattern, '<meta charset="utf-8">');
+    return new Blob([html], {type:'text/html;charset=utf-8'});
   }
 
   async function compile(snapshot, options = {}) {
