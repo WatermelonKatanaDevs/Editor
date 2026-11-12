@@ -1,4 +1,4 @@
-# WatermelonAI runtime
+# LocalAI runtime
 
 The standalone runtime is the UI-independent agent core. It has no dependency on the editor, the DOM, browser storage, or the Editor global namespace. It can be loaded as a browser script or required as a CommonJS module.
 
@@ -10,12 +10,12 @@ Browser:
 <script src="runtime.js"></script>
 ~~~
 
-The API is exposed as window.WatermelonAI.
+The API is exposed as window.LocalAI.
 
 CommonJS:
 
 ~~~js
-const WatermelonAI = require('./runtime.js');
+const LocalAI = require('./runtime.js');
 ~~~
 
 ## Creating a runtime
@@ -72,7 +72,7 @@ const client = {
   }
 };
 
-const ai = WatermelonAI.createRuntime({ client, maxSteps: 20 });
+const ai = LocalAI.createRuntime({ client, maxSteps: 20 });
 ~~~
 
 The Editor supplies its existing multi-provider AIClient as this adapter, so its Groq, Gemini, Anthropic, Cohere, Responses API and local-model behavior remains in the provider layer.
@@ -138,7 +138,7 @@ The runtime emits events including step, request:start, tool:start, tool:complet
 Tools are unrestricted by default when they do not declare a permission field. Set permission to a capability name to require a permission manager and request callback:
 
 ~~~js
-const ai = WatermelonAI.createRuntime({
+const ai = LocalAI.createRuntime({
   client,
   permissions: {
     get: capability => 'ask', // 'always', 'ask' or 'never'
