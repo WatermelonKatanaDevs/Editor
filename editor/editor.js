@@ -1271,8 +1271,63 @@ window.__editorInitPromise = (async function () {
     empty.textContent = 'drag tab here';
     g.viewBody.appendChild(empty);
   }
+  function getActiveWorkbenchGroup() {
+    return Workbench.getActiveGroup?.() || state.workbench?.getActiveGroup?.() || state.workbench?.getFirstLeaf?.() || null;
+  }
+  function rememberClosedWorkbenchTab(t, g) {
+    if (!t || !g) return;
+    let data = null;
+    if (t.kind === 'file') {
+      data = {kind:'file', path:t.path, view:t.view};
+    } else if (t.kind === 'builtin') {
+      data = {kind:'builtin', builtin:t.builtin};
+      if (t.builtin === 'group') {
+        data.groupName = t.groupName || 'Group';
+        data.groupLayout = t._groupWorkbench?.serialize?.() || t.groupLayout || null;
+      } else if (t.builtin === 'source-control-diff') {
+        data.diffData = t.diffData || null;
+      }
+    }
+    if (!data) return;
+    const history = state.closedTabHistory || (state.closedTabHistory = []);
+    history.push({
+      data,
+      workbench:g.ownerWorkbench || state.workbench,
+      groupId:g.id,
+      index:g.tabs.indexOf(t)
+    });
+    if (history.length > 50) history.splice(0, history.length - 50);
+  }
+  function restoreClosedWorkbenchTab() {
+    const history = state.closedTabHistory || [];
+    while (history.length) {
+      const entry = history.pop();
+      const tab = makeLayoutTab(entry.data, state.runConfig?.config?.serverType);
+      if (!tab) continue;
+      const instances = Workbench.getInstances?.() || [];
+      let group = instances.includes(entry.workbench)
+        ? entry.workbench.groups.get(entry.groupId) || null
+        : null;
+      if (!group) group = getActiveWorkbenchGroup();
+      if (!group) continue;
+      const wb = group.ownerWorkbench || state.workbench;
+      if (!wb) continue;
+      wb.addTab(tab, group, entry.index);
+      return true;
+    }
+    return false;
+  }
+  function openSidePanel() {
+    const target = getActiveWorkbenchGroup();
+    const wb = target?.ownerWorkbench || state.workbench;
+    if (!target || !wb?.splitGroup) return null;
+    const group = wb.splitGroup(target, 'horizontal', false);
+    openBuiltin('welcome', group);
+    return group;
+  }
   function closeWorkbenchTab(t, g) {
     if (!t || !g) return;
+    rememberClosedWorkbenchTab(t, g);
     if (t?.builtin === 'peer') void getBuiltin('peer')?.stop(t);
     if (t?.builtin === 'group') t._groupWorkbench?.dispose?.();
     if (t?.kind === 'builtin') {
@@ -2201,7 +2256,7 @@ window.__editorInitPromise = (async function () {
     }
     if (data.kind === 'builtin') {
       const builtin = String(data.builtin || '');
-      if (builtin === 'source-control-diff') return null;
+      if (builtin === 'source-control-diff') return makeBuiltinTab(builtin, data);
       if (!builtin || (builtin !== 'group' && builtin !== 'welcome' && !window.EditorBuiltinFactories?.[builtin])) return null;
       return makeBuiltinTab(builtin, data);
     }
@@ -2424,6 +2479,7 @@ window.__editorInitPromise = (async function () {
     state.cacheTimer = null;
     resetRunContext();
     disposeAllWorkbenchTabs();
+    state.closedTabHistory = [];
     state.loading = true;
     state.fs = fs;
     state.saveProjectPermission = 'denied';
@@ -3941,13 +3997,30 @@ window.__editorInitPromise = (async function () {
       document.addEventListener('keydown', e => {
         const mod = e.ctrlKey || e.metaKey;
         if (!mod && e.key !== 'F5') return;
-        if (mod && e.key.toLowerCase() === 't' && !e.shiftKey && !e.altKey) {
-          const focusedElement = document.activeElement;
-          const browserHasFocus = [...(state.browserTabs?.values?.() || [])]
-            .some(info => info?.frame && info.frame === focusedElement);
-          if (browserHasFocus) return;
+        const focusedElement = document.activeElement;
+        const browserHasFocus = [...(state.browserTabs?.values?.() || [])]
+          .some(info => info?.frame && info.frame === focusedElement);
+        if (browserHasFocus) return;
+        if (mod && e.key.toLowerCase() === 't' && e.shiftKey && !e.altKey) {
           e.preventDefault();
-          openBuiltin('welcome', state.workbench?.getActiveGroup?.());
+          restoreClosedWorkbenchTab();
+          return;
+        }
+        if (mod && e.key.toLowerCase() === 't' && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          openBuiltin('welcome', getActiveWorkbenchGroup());
+          return;
+        }
+        if (mod && e.key.toLowerCase() === 'w' && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          const group = getActiveWorkbenchGroup();
+          const tab = group?.tabs.find(item => item.id === group.active);
+          if (tab) (group.ownerWorkbench || state.workbench)?.onClose?.(tab, group);
+          return;
+        }
+        if (mod && e.key.toLowerCase() === 'n' && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          openSidePanel();
           return;
         }
         if (e.key === 'F5') {
