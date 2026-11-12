@@ -5629,11 +5629,11 @@
         var { __importModule, __exportModule, __currentModuleExports } = __createModuleControls(__moduleBaseUrl, __ancestry);
         var __requireModule = __importModule;
 
-        __codeString = \`
+        __codeString = `
           (async function(){
-            \${window.__usefulHelpers.editCodeModule(__codeString)}
+            ${window.__usefulHelpers.editCodeModule(__codeString)}
           })();
-        \`;
+        `;
 
         __codeString = window.__usefulHelpers.editCode(__codeString);
 
@@ -5641,10 +5641,10 @@
         const __execution = __rawReflectApply(async function(window, self, globalThis, parent, top, location, document) {
           let __execResult;
           with (__globalLexicalScope) {
-            await eval(\`
-            \${__event ? 'let event = __event;' : ''}
-            \${__codeString.code}
-            \n//# sourceURL=\`+__sourceURL);
+            await eval(`
+            ${__event ? 'let event = __event;' : ''}
+            ${__codeString.code}
+            \n//# sourceURL=`+__sourceURL);
           }
           return __currentModuleExports;
         }, executionThis, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
