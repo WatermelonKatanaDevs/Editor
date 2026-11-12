@@ -37,7 +37,7 @@
   }
   function makeTools(options) {
     const {state, openFile, onRefresh, runConfigured, ensureNodeRuntime} = options;
-    const tools = new window.WatermelonAI.ToolRegistry();
+    const tools = new window.LocalAI.ToolRegistry();
     function add(def) { tools.register(def, {replace:true}); }
     add({name:'exit_early', permission:'none', description:'Finish the task immediately and return the supplied message directly as the final answer. Use when all necessary tool work is complete and no further tool or model turn is needed. Put the complete answer or summary in message; do not leave the message empty.', parameters:{type:'object',properties:{message:{type:'string',description:'Optional final message to show the user.'}},additionalProperties:false}, execute:async args => ({exitEarly:true,message:String(args?.message||'')})});
     add({name:'list_files', permission:'readFiles', description:'List project files and optionally directories.', parameters:{type:'object',properties:{directories:{type:'boolean'}},additionalProperties:false}, execute:async args => ({files:state.fs?.listFilesSync?.() || [], directories:args.directories ? state.fs?.listDirectoriesSync?.() || [] : undefined})});
