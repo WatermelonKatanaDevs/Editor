@@ -15,7 +15,7 @@
       root.className = 'compilation-page';
       root.innerHTML = `
         <header class="compilation-header">
-          <h2>Compilation</h2>
+          <h2>HTML Compilation</h2>
           <p>Configure and build a portable standalone HTML version of this project.</p>
         </header>
         <div class="compilation-content">
@@ -278,7 +278,7 @@
     }
 
     return {
-      title: 'Compilation',
+      title: 'HTML Compilation',
       icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M5 3.5h9l5 5v12H5z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M14 3.5v5h5M8 13h8M8 16.5h8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
       render: renderCompilation
     };
