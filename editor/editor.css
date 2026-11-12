@@ -1047,3 +1047,21 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .documentation-favicon{background:#343434;padding:2px;border:1px solid #343434}
 .documentation-favicon-fallback{background:#343434;border:1px solid #343434;color:var(--editor-text);font-size:11px;font-weight:700}
 .documentation-link-label{min-width:0;overflow-wrap:anywhere}
+
+
+/* Repository creation forms are shared by the local-publish and external-GitHub
+   Source Control paths so both workflows use the same compact, accessible UI. */
+.source-control-create-panel{display:flex;flex-direction:column;gap:9px;margin-top:9px;padding:11px;background:var(--editor-surface,#1d1d1d);border:1px solid var(--editor-border,#3b3b3b);border-radius:3px}
+.source-control-create-heading{display:flex;flex-direction:column;gap:3px;margin-bottom:2px}
+.source-control-create-heading strong{color:var(--editor-text,#eee);font-size:11px;font-weight:600}
+.source-control-create-heading span,.source-control-create-help{color:var(--editor-muted,#999);font-size:10px;line-height:1.4}
+.source-control-create-panel label{display:flex;flex-direction:column;gap:4px;margin:0;color:var(--editor-muted-2,#bbb);font-size:10px}
+.source-control-create-panel input[type=text],.source-control-create-panel textarea,.source-control-create-panel select{display:block;width:100%;min-width:0;box-sizing:border-box;margin:0;padding:7px 8px;background:var(--editor-bg,#181818);color:var(--editor-text,#eee);border:1px solid var(--editor-border,#414141);border-radius:2px;font:11px/1.4 sans-serif;outline:none}
+.source-control-create-panel textarea{min-height:58px;resize:vertical}
+.source-control-create-panel input:focus,.source-control-create-panel textarea:focus,.source-control-create-panel select:focus{border-color:var(--editor-accent-strong,#4a8ec8);box-shadow:0 0 0 1px color-mix(in srgb,var(--editor-accent,#3985c6) 25%,transparent)}
+.source-control-create-panel .source-control-create-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:2px}
+.source-control-create-panel .source-control-create-actions button{min-height:27px;padding:5px 9px;border-radius:2px;font:10px sans-serif}
+.source-control-create-panel .source-control-create-actions button.primary{background:var(--editor-accent,#286da8);border-color:var(--editor-accent-strong,#3a83c2);color:#fff}
+.source-control-create-panel .source-control-create-actions button:disabled{opacity:.5;cursor:default}
+.source-control-create-error{padding:7px 8px;background:#6b262622;border:1px solid #8f444466;border-radius:2px;color:#e2a4a4;font-size:10px;line-height:1.4}
+.source-control-create-panel[hidden]{display:none}
