@@ -1305,7 +1305,7 @@
           // Some upstreams/proxies return an HTML error document with status 200
           // for a missing or blocked stylesheet. Do not recursively parse it as CSS.
           const looksLikeHTML = /^\s*(?:<!doctype\s+html|<html\b|<head\b|<body\b)/i.test(importedCSS);
-          const looksLikeCSS = /(?:^|[;}\s])(?:@(?:charset|import|media|supports|font-face|keyframes)\b|[-\w.#:[\\]]+\s*\{)/i.test(importedCSS);
+          const looksLikeCSS = /(?:^|[;}\s])(?:@(?:charset|import|media|supports|font-face|keyframes)\b|[^{}]+\{[^{}]*:[^{}]*\})/i.test(importedCSS);
           if (looksLikeHTML || (!cssMimeType && !looksLikeCSS)) {
             console.warn('[Browser Emulator] Skipping invalid CSS response:', resolvedUrl, response.status, contentType);
             return;
