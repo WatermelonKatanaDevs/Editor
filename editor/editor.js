@@ -4015,7 +4015,6 @@ window.__editorInitPromise = (async function () {
         // page JavaScript on macOS, so the editor uses physical Control for
         // tab and panel management there. Command remains available for the
         // non-conflicting project shortcuts below.
-        const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent);
         const tabMod = e.ctrlKey;
         if (!mod && e.key !== 'F5') return;
         const focusedElement = document.activeElement;
