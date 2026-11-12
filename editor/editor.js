@@ -3941,6 +3941,15 @@ window.__editorInitPromise = (async function () {
       document.addEventListener('keydown', e => {
         const mod = e.ctrlKey || e.metaKey;
         if (!mod && e.key !== 'F5') return;
+        if (mod && e.key.toLowerCase() === 't' && !e.shiftKey && !e.altKey) {
+          const focusedElement = document.activeElement;
+          const browserHasFocus = [...(state.browserTabs?.values?.() || [])]
+            .some(info => info?.frame && info.frame === focusedElement);
+          if (browserHasFocus) return;
+          e.preventDefault();
+          openBuiltin('welcome', state.workbench?.getActiveGroup?.());
+          return;
+        }
         if (e.key === 'F5') {
           e.preventDefault();
           runConfigured().catch(logError);
