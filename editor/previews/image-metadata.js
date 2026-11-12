@@ -275,6 +275,8 @@
       setStatus('Saving metadata…');
 
       try {
+        const piskelInstance = ctx.tab._previewInstances?.get('piskel');
+        if (piskelInstance?.promise) await piskelInstance.promise;
         if (typeof ctx.tab._piskelFlush === 'function') {
           const flushed = await ctx.tab._piskelFlush();
           if (flushed === false) throw new Error('Piskel could not save its current image before the metadata update.');
