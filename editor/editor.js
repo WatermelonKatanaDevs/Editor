@@ -4011,11 +4011,11 @@ window.__editorInitPromise = (async function () {
       state._keybindingsBound = true;
       document.addEventListener('keydown', e => {
         const mod = e.ctrlKey || e.metaKey;
-        // Browser-reserved Command shortcuts (T, W, N, B) are handled before
-        // page JavaScript on macOS, so the editor uses physical Control for
-        // tab and panel management there. Command remains available for the
-        // non-conflicting project shortcuts below.
-        const tabMod = e.ctrlKey;
+        // macOS browsers reserve Command+T/W/N/Shift+T for browser tabs and
+        // windows before page handlers can reliably intercept them. Use the
+        // physical Control key for the editor's tab-management shortcuts on Mac.
+        const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent);
+        const tabMod = isMac ? (e.metaKey || e.ctrlKey) : e.ctrlKey;
         if (!mod && e.key !== 'F5') return;
         const focusedElement = document.activeElement;
         const browserHasFocus = [...(state.browserTabs?.values?.() || [])]
