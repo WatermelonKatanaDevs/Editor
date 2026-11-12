@@ -103,7 +103,7 @@ window.__editorInitPromise = (async function () {
     peerServers: new Map(),
     peerRuntimeEndpoint: null,
     peerSettings: {layer: '', pagePath: '/'},
-    deploymentSettings: {thirdParty: false, externalUrl: '', branch: '', commit: 'latest', path: '/'},
+    deploymentSettings: {thirdParty: false, externalUrl: '', branch: '', commit: 'latest', path: '/', usePeerServer: false},
     ai: null,
     environment: {},
     browserSettings: {
@@ -609,7 +609,8 @@ window.__editorInitPromise = (async function () {
       externalUrl: String(legacyDeployment.externalUrl || '').trim(),
       branch: String(legacyDeployment.branch || state.gitRemote?.branch || '').trim(),
       commit: String(legacyDeployment.commit || 'latest').trim() || 'latest',
-      path: normalizeDeploymentPath((legacyDeployment.path ?? legacyDeployment.url ?? state.runConfig?.config?.path) || '/')
+      path: normalizeDeploymentPath((legacyDeployment.path ?? legacyDeployment.url ?? state.runConfig?.config?.path) || '/'),
+      usePeerServer: legacyDeployment.usePeerServer === true || state.runConfig?.config?.usePeerServer === true
     };
     if (!state.projectId) state.projectId = makeProjectId();
     hydrateGitRemoteFromSavedSelection();
@@ -633,7 +634,8 @@ window.__editorInitPromise = (async function () {
       externalUrl: String(state.deploymentSettings?.externalUrl || '').trim(),
       branch: String(state.deploymentSettings?.branch || '').trim(),
       commit: String(state.deploymentSettings?.commit || 'latest').trim() || 'latest',
-      path: normalizeDeploymentPath(state.deploymentSettings?.path || state.deploymentSettings?.url || '/')
+      path: normalizeDeploymentPath(state.deploymentSettings?.path || state.deploymentSettings?.url || '/'),
+      usePeerServer: state.runConfig?.config?.usePeerServer === true
     };
     state.fs.writeFileSync(EDITOR_PROJECT_PATH, JSON.stringify({
       id: state.projectId,
@@ -753,11 +755,6 @@ window.__editorInitPromise = (async function () {
       exportZip.hidden = !canExport;
       exportZip.disabled = !canExport;
       exportZip.title = canExport ? 'Export project as a ZIP (Ctrl+E)' : '';
-    }
-    const compilePage = $('compilePageBtn');
-    if (compilePage) {
-      compilePage.disabled = !state.fs;
-      compilePage.title = state.fs ? 'Compile the current project as a standalone HTML page' : 'Open a project to compile a standalone HTML page';
     }
     const save = $('saveProjectBtn');
     if (save) {
