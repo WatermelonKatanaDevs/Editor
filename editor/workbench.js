@@ -363,7 +363,7 @@
         once: true
       }), 0);
     }
-    addTab(tab, g = this.getFirstLeaf()) {
+    addTab(tab, g = this.getFirstLeaf(), index = null) {
       if (!g) g = this.createGroup();
       const same = g.tabs.find(x => x.id === tab.id);
       if (same) {
@@ -371,7 +371,8 @@
         return g;
       }
       tab.group = g;
-      g.tabs.push(tab);
+      const insertAt = Number.isInteger(index) ? Math.max(0, Math.min(index, g.tabs.length)) : g.tabs.length;
+      g.tabs.splice(insertAt, 0, tab);
       this.renderGroup(g);
       this.activateTab(g, tab.id);
       return g;
