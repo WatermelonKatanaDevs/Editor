@@ -1,159 +1,141 @@
-# LocalAI runtime
+# LocalAI
 
-The standalone runtime is the UI-independent agent core. It has no dependency on the editor, the DOM, browser storage, or the Editor global namespace. It can be loaded as a browser script or required as a CommonJS module.
+`localai.js` is the complete reusable LocalAI library in one distributable JavaScript file. It combines the agent runtime, tool registry, conversations, provider client, protocol adapters, response normalization, streaming, cancellation, retries, and reasoning extraction.
 
-## Loading
+It does not depend on the Editor, `window.EditorAI`, browser storage, DOM elements, or an Editor networking layer. The host application supplies transport, credentials, provider metadata, preferences, analytics/events, and a local inference adapter.
+
+## Use the single file
 
 Browser:
 
 ~~~html
-<script src="runtime.js"></script>
-~~~
+<script src="localai.js"></script>
+<script>
+  const client = LocalAI.createProviderClient({
+    model: {
+      id: 'my-model',
+      model: 'my-model-id',
+      endpoint: 'https://api.example.com/v1',
+      protocol: 'openai-chat',
+      supportsTools: true,
+      supportsStreaming: true
+    },
+    transport: (url, init) => fetch(url, init),
+    resolveAuth: model => getApiKey(model.id)
+  });
 
-The API is exposed as window.LocalAI.
+  const ai = LocalAI.createRuntime({client});
+  ai.registerTool({
+    name: 'get_time',
+    description: 'Return the current time.',
+    parameters: {type:'object', properties:{}, additionalProperties:false},
+    execute: async () => new Date().toISOString()
+  });
+
+  const chat = ai.createConversation({systemPrompt:'You are a helpful assistant.'});
+  const result = await chat.send('What time is it?');
+  console.log(result.text);
+</script>
+~~~
 
 CommonJS:
 
 ~~~js
-const LocalAI = require('./runtime.js');
+const LocalAI = require('./localai.js');
+
+const client = LocalAI.createProviderClient({
+  model: {model:'my-model', protocol:'openai-chat', endpoint:'https://api.example.com/v1'},
+  transport: (url, init) => fetch(url, init),
+  resolveAuth: () => process.env.AI_API_KEY
+});
+
+const ai = LocalAI.createRuntime({client});
 ~~~
 
-## Creating a runtime
+## Exports
 
-The runtime deliberately accepts a model client adapter instead of owning provider configuration. That keeps API keys, provider-specific request formatting, networking and local-model execution outside the agent orchestration layer.
+- `createProviderClient(options)` — create the multi-provider model client.
+- `createRuntime(options)` — create the tool-using agent runtime.
+- `Agent`, `Runtime`, `Conversation`, `ToolRegistry`, `EventEmitter` — lower-level building blocks.
+- `SUPPORTED_PROTOCOLS` — supported protocol identifiers.
 
-The client contract is:
+The provider client implements the runtime client contract: `model()`, `complete(messages, options)`, `stream(messages, options)`, `cancel()`, and retry-aware `request(url, options)`.
 
-- model() returns the active model descriptor. At minimum it should include model (or id) and supportsTools.
-- complete(messages, options) returns a normalized assistant message: { content, tool_calls, reasoning_content }. Native tool calls use the OpenAI-compatible shape { id, function: { name, arguments } }.
-- stream(messages, options) is optional and returns an async iterable of cumulative { text, reasoning, reasoningKind } chunks. It is used for models with supportsTools: false; without it, the runtime falls back to complete() and the model can use the text-based tool-call protocol.
-- cancel() is optional.
+## Provider client dependencies
 
-Example:
+| Option | Purpose |
+| --- | --- |
+| `transport` or `fetch` | Function `(url, init, context) => Promise<Response|null>`, or object with `request(url, init, context)`. The transport receives the abort signal. |
+| `model` or `getModel()` | Fixed model descriptor or active-model resolver. |
+| `providers`, `providerRegistry`, or `registry` | Optional registry with `active()`, `providerForModel(model)`, and `provider(id)`. |
+| `resolveAuth(model, context)` | Resolve API keys or provider authentication. |
+| `getProviderDefinition(id, model)` or `providerDefinitions` | Model-specific request options and tool-call parse-recovery configuration. |
+| `getPreferences()` or `preferences` | Retry and recovery settings. |
+| `analytics(info)` | Receives usage and retry counters. |
+| `events(type, payload)` or `onEvent(event)` | Receives response, retry, and error notifications. |
+| `localExecutor` | Host adapter with `complete()`, optional `stream()`, and optional `cancel()` for local models. |
+| `sleep(ms, context)`, `random()` | Optional deterministic retry timing dependencies. |
 
-~~~js
-const client = {
-  model() {
-    return {
-      model: 'my-model',
-      protocol: 'openai-chat',
-      supportsTools: true
-    };
-  },
+A model descriptor uses a `protocol` from `SUPPORTED_PROTOCOLS`, a `model` ID, and (for remote models) an `endpoint`. Credentials are supplied by `resolveAuth` or the model's `apiKey` / `anonymousAuth` fields.
 
-  async complete(messages, options) {
-    const response = await fetch('https://api.example.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + API_KEY
-      },
-      body: JSON.stringify({
-        model: this.model().model,
-        messages,
-        tools: options.tools,
-        tool_choice: 'auto'
-      }),
-      signal: options.signal
-    });
+## Supported protocols
 
-    if (!response.ok) {
-      throw new Error('Model request failed (' + response.status + '): ' + await response.text());
-    }
+| Protocol | Behavior |
+| --- | --- |
+| `openai-chat` | OpenAI Chat Completions-compatible requests and streaming |
+| `openai-responses` | OpenAI Responses requests and streaming |
+| `anthropic-messages` | Anthropic Messages requests and streaming |
+| `google-gemini` | Gemini `generateContent` requests and streaming |
+| `cohere-v2` | Cohere Chat v2 requests; non-streaming fallback |
+| `gradio-space` | Gradio Space queue/call and event streaming |
+| `local-transformers` | Delegates to the injected `localExecutor` |
 
-    const data = await response.json();
-    const message = data.choices?.[0]?.message || {};
-    return {
-      role: 'assistant',
-      content: message.content || '',
-      tool_calls: message.tool_calls || [],
-      reasoning_content: message.reasoning_content || ''
-    };
-  }
-};
+Normalized assistant messages retain the agent contract:
+`{role:'assistant', content, tool_calls, reasoning_content}`.
+Tool calls use the OpenAI-compatible shape:
+`{id, type:'function', function:{name, arguments}}`.
 
-const ai = LocalAI.createRuntime({ client, maxSteps: 20 });
-~~~
+The provider engine retains provider-specific request formats and authentication, reasoning extraction, Groq model-specific reasoning options and tool-call parse recovery, HTTP 429 retries, transport retries, and cancellation.
 
-The provider layer is reusable separately as documented in [PROVIDER_CLIENT.md](./PROVIDER_CLIENT.md). The Editor supplies its existing multi-provider registry, shared network, auth resolver, preferences, analytics and local Transformers.js manager through a thin host adapter, so its existing saved model settings and provider behavior remain host-owned.
+## Tools and conversations
 
-## Registering tools
-
-A tool has a name, description, JSON Schema parameters and an async execution function:
+A tool has a name, description, JSON Schema parameters, and an `execute(args)` function:
 
 ~~~js
+const ai = LocalAI.createRuntime({client});
 ai.registerTool({
-  name: 'get_project',
-  description: 'Return project details.',
+  name: 'lookup',
+  description: 'Look up an item.',
   parameters: {
     type: 'object',
-    properties: {},
+    properties: {id:{type:'string'}},
+    required: ['id'],
     additionalProperties: false
   },
-  execute: async () => ({
-    name: 'Example project',
-    files: ['index.html', 'app.js']
-  })
+  execute: async ({id}) => ({id, found:true})
 });
+
+const chat = ai.createConversation({systemPrompt:'You are helpful.'});
+chat.on('tool:start', event => console.log('Tool:', event.name));
+const result = await chat.send('Look up item A');
 ~~~
 
-Tools can be added or removed at any time with registerTool() and unregisterTool(). Duplicate names are rejected unless registerTool(definition, { replace: true }) is explicitly used. The registry is also available as ai.tools and exposes get(), has(), list(), clear() and size.
+Tools can be added or removed with `registerTool()` and `unregisterTool()`. Conversations support `send()`, `getMessages()`, `setMessages()`, `clear()`, `cancel()`, and `dispose()`. Persistence remains the host application's responsibility.
 
-Arguments are checked against the supported JSON Schema subset before execution: object properties, required keys, additional properties, strings, numbers, integers, booleans, arrays, enums and basic numeric/string/array limits. Applications should still validate sensitive operations inside their own tool implementations.
+Arguments are validated against the supported JSON Schema subset before execution. Tool implementations must still enforce their own authorization, path restrictions, and safeguards for destructive operations.
 
-## Conversations and events
+## Local models
 
-createConversation() creates an in-memory conversation. Persistence is intentionally left to the host application:
+The reusable client accepts a `localExecutor` instead of bundling a framework-specific model loader. This keeps Transformers.js loading, device selection, model caching, progress UI, and model-settings persistence with the host application. Supply an adapter implementing `complete(messages, options)`, and optionally `stream(messages, options)` and `cancel()`.
 
-~~~js
-const chat = ai.createConversation({
-  systemPrompt: 'You are a helpful project assistant.'
-});
+The Editor uses its existing Transformers.js model manager through this adapter. Another application can use its own local inference engine without changing `localai.js`.
 
-chat.on('tool:start', event => {
-  console.log('Running', event.name, event.args);
-});
+## Tests
 
-chat.on('tool:complete', event => {
-  console.log('Finished', event.name, event.result, event.ok);
-});
+Run the mocked protocol suite with Node.js 18 or newer:
 
-chat.on('message', event => {
-  console.log('Assistant:', event.text);
-});
-
-const result = await chat.send('Inspect this project');
-console.log(result.text);
-
-// The host can persist and restore this array itself.
-const savedMessages = chat.getMessages();
+~~~sh
+node editor/ai/tests/localai.test.js
 ~~~
 
-Conversations also support setMessages(messages), clear(), cancel() and dispose(). A conversation stores user/assistant messages in memory; it does not write to localStorage or a project filesystem.
-
-The runtime emits events including step, request:start, tool:start, tool:complete, reasoning, assistant_activity, message and error. Use ai.on(eventName, callback) for runtime-wide events or chat.on(eventName, callback) for one conversation.
-
-## Permissions and hooks
-
-Tools are unrestricted by default when they do not declare a permission field. Set permission to a capability name to require a permission manager and request callback:
-
-~~~js
-const ai = LocalAI.createRuntime({
-  client,
-  permissions: {
-    get: capability => 'ask', // 'always', 'ask' or 'never'
-    set: (capability, value) => savePermission(capability, value)
-  },
-  requestPermission: async ({ tool, args }) => {
-    return await showPermissionPrompt(tool.name, args); // 'allow', 'always' or 'deny'
-  }
-});
-~~~
-
-Optional lifecycle hooks can be supplied as hooks.beforeTool({ tool, args }) and hooks.afterTool({ tool, args, result }). They may return modified payloads. The Editor uses this integration point to retain its existing extension hooks.
-
-## Security boundary
-
-Registering a tool grants model-generated arguments access to that tool's execution function. Treat all arguments as untrusted input. Permission prompts are policy gates, not a sandbox: tool implementations must enforce path restrictions, authorization, confirmation for destructive actions and any other application-specific safety checks.
-
-The runtime does not implement chat UI, conversation persistence, provider settings, model discovery, API-key storage or project context. Those remain host-application responsibilities.
+All provider responses are mocked; the suite does not contact live endpoints.
