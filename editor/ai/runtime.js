@@ -236,7 +236,11 @@
       }
     }
     async run(messages, options = {}) {
-      if (this.running) throw new Error('An AI task is already running.');
+      if (this.running) {
+        const error = new Error('An AI task is already running.');
+        this.emit('error', {error, message:error.message});
+        throw error;
+      }
       this.running = true;
       const maxSteps = Math.max(1, Math.min(100, Number(options.maxSteps) || this.maxSteps));
       try {
@@ -341,6 +345,9 @@
         finalText = stripToolProtocol(String(finalMessage.content || ''));
         this.emit('final', {text:finalText, reasoning, stepLimitReached:true});
         return {text:finalText, reasoning, stepLimitReached:true};
+      } catch (error) {
+        this.emit('error', {error, message:error?.message || String(error)});
+        throw error;
       } finally {
         this.running = false;
       }
@@ -385,7 +392,6 @@
         this.emit('assistant_message', {...assistantMessage, result});
         return result;
       } catch (error) {
-        this.emit('error', {error, message:error?.message || String(error)});
         throw error;
       } finally {
         this._activeUnsubscribe?.();
@@ -394,7 +400,13 @@
       }
     }
     cancel() { this.agent.cancel(); }
-    dispose() { this._activeUnsubscribe?.(); this._activeUnsubscribe = null; this.removeAllListeners(); }
+    dispose() {
+      this._activeUnsubscribe?.();
+      this._activeUnsubscribe = null;
+      this.removeAllListeners();
+      this._onDispose?.();
+      this._onDispose = null;
+    }
   }
 
   class Runtime extends EventEmitter {
@@ -420,13 +432,16 @@
     unregisterTool(name) { return this.tools.unregister(name); }
     getTools() { return this.tools.list(); }
     createConversation(options = {}) {
-      const conversation = new Conversation(this.agent, options);
+      let conversation;
+      conversation = new Conversation(this.agent, options);
+      conversation._onDispose = () => this._conversations.delete(conversation);
       this._conversations.add(conversation);
       return conversation;
     }
     run(messages, options = {}) { return this.agent.run(messages, options); }
     cancel() { this.agent.cancel(); }
     dispose() {
+      this.cancel();
       for (const conversation of this._conversations) conversation.dispose();
       this._conversations.clear();
       this.agent.removeAllListeners();
