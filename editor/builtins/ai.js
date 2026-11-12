@@ -535,8 +535,7 @@
     let loadedProjectId=null;
     let agentMode=false, busy=false, controller=null, editingIndex=-1;
     const toolset=aiRoot.makeAITools({state,openFile:onOpen,onRefresh:()=>{state.fileManager?.refresh?.();updateStatus?.();},runConfigured,ensureNodeRuntime:()=>state.ensureNodeRuntime?.()});
-    const aiRuntime=aiRoot.createRuntime({client:new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork,localManager),tools:toolset,permissions,requestPermission:permissionPrompt,extensionAPI:window.EditorExtensionAPI,maxSteps:24});
-    const agent=aiRuntime.agent;
+    const agent=new aiRoot.AIAgent({client:new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork,localManager),tools:toolset,permissions,requestPermission:permissionPrompt,extensionAPI:window.EditorExtensionAPI,emit:()=>{}});
     async function activateModel(id){
       const target=registry.settings.models.find(x=>x.id===id);
       if(!target)throw new Error('AI model not found.');
@@ -727,7 +726,7 @@
       const bubble=addMessage(chat,'assistant',''); if(liveActivity && bubble.parentNode?.parentNode===chat) chat.insertBefore(liveActivity.host,bubble.parentNode); let partial='';
       try {
         if(agentMode){
-          agent.onEvent=event=>{
+          agent.emit=event=>{
             if(event.type==='assistant'){partial=event.text||partial;renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
             else if(event.type==='assistant_activity'){appendActivity(liveActivity,{kind:'assistant',text:event.text});}
             else if(event.type==='tool_call'){appendActivity(liveActivity,{kind:'tool_call',name:event.name,args:event.args});}
@@ -738,7 +737,7 @@
             else if(event.type==='request_start'){appendActivity(liveActivity,{kind:'request_start',text:`Requesting ${event.model} (${event.protocol})…`});}
             else if(event.type==='reasoning_summary'){appendActivity(liveActivity,{kind:'reasoning_summary',text:event.text});} else if(event.type==='reasoning'){appendActivity(liveActivity,{kind:'reasoning',text:event.text||'Model reasoning is active.'});}
           };
-          const messages=activeMessages(); const prompt=systemPrompt(true); const hookInput={messages:[...messages],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'}; const prepared=await editorExtensionHooks('ai.beforeRun',hookInput); const result=await agent.run([{role:'system',content:prompt},...(prepared?.messages||messages)],{systemPrompt:prompt,maxTokens:2048,retryTransport:prefs.retryTransport,maxTransportRetries:prefs.maxTransportRetries,transportRetryDelay:prefs.transportRetryDelay,onRetry:info=>agent.emit?.(info?.kind==='tool_parse_recovery'?'provider_retry':info?.kind==='transport_retry'?'transport_retry':'retry',info)}); await editorExtensionHooks('ai.afterRun',{...hookInput,result}); partial=result.text||partial; renderMessage(bubble,partial,code=>insertCode(code)); const activityData=liveActivity?.items||[]; chatMessages.push({role:'assistant',content:partial,activity:activityData}); if(liveActivity)liveActivity.details.open=false;
+          const messages=activeMessages(); const prompt=systemPrompt(true); const hookInput={messages:[...messages],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'}; const prepared=await editorExtensionHooks('ai.beforeRun',hookInput); const result=await agent.run([{role:'system',content:prompt},...(prepared?.messages||messages)],{systemPrompt:prompt,maxTokens:2048,retryTransport:prefs.retryTransport,maxTransportRetries:prefs.maxTransportRetries,transportRetryDelay:prefs.transportRetryDelay,onRetry:info=>agent.emit?.({type:info?.kind==='tool_parse_recovery'?'provider_retry':info?.kind==='transport_retry'?'transport_retry':'retry',...info})}); await editorExtensionHooks('ai.afterRun',{...hookInput,result}); partial=result.text||partial; renderMessage(bubble,partial,code=>insertCode(code)); const activityData=liveActivity?.items||[]; chatMessages.push({role:'assistant',content:partial,activity:activityData}); if(liveActivity)liveActivity.details.open=false;
         } else {
           const messages=[{role:'system',content:systemPrompt(false)},...activeMessages()];
           const model=agent.client.model();
@@ -788,7 +787,6 @@
       openSettings:()=>settingsModal(registry,permissions,()=>{persist();render(currentGroup);},state.browserNetwork||window.__sharedBrowserNetwork),
       registry,
       permissions,
-      runtime:aiRuntime,
       getHistory:()=>chatMessages,
       getChats:()=>chatStore.list(false),
       newChat,
