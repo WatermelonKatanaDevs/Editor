@@ -4048,6 +4048,14 @@ window.__editorInitPromise = (async function () {
           openSidePanel(e.shiftKey ? 'top' : 'bottom');
           return;
         }
+        if (tabMod && e.key.toLowerCase() === 'g' && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          const name = window.prompt('Enter a name for the new group:', 'Group');
+          if (name != null && name.trim()) {
+            openBuiltin('group', getActiveWorkbenchGroup(), {groupName:name.trim()});
+          }
+          return;
+        }
         if (e.key === 'F5') {
           e.preventDefault();
           runConfigured().catch(logError);
