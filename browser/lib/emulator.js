@@ -1519,8 +1519,22 @@
           : __childProxy;
       };
 
-      // Module Registry
+      // Module Registry. Keep completed exports separate from modules that are
+      // currently evaluating so circular imports can reuse their partial exports.
       window.__moduleRegistry = new Map();
+      window.__moduleLoading = new Map();
+
+      function __createModuleLoadRecord() {
+        let resolve;
+        let reject;
+        const promise = new Promise((res, rej) => {
+          resolve = res;
+          reject = rej;
+        });
+        // A module may fail before another importer awaits this record.
+        promise.catch(() => {});
+        return { exports: {}, promise, resolve, reject, status: 'loading' };
+      }
 
       // Persistent global lexical environment for classic scripts.
       var __globalLexicalScope = Object.create(null);
@@ -1561,30 +1575,60 @@
         try {__scriptFileName = __scriptFileName || new URL(document.currentScript.getAttribute('data-raw-src'),BASE_ORIGIN).href;} catch(e) {__scriptFileName = DOCUMENT_URL;};
         return __scriptFileName;
       }
-      function __createModuleControls(__scriptFileName) {
+      function __createModuleControls(__scriptFileName, __moduleAncestry) {
         var __importModule = async function(url) {
           const parentUrl = __scriptFileName;
           const resolvedUrl = new URL(url, parentUrl).href;
-          
+
           if (window.__moduleRegistry.has(resolvedUrl)) {
             return window.__moduleRegistry.get(resolvedUrl);
           }
 
-          const res = await window.__pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, 'import');
-          if (!res || !res.ok) throw new Error(`Cannot import module: ${resolvedUrl}`);
-          
-          let sourceCode = await res.text();
-          
-          var __currentModuleExports = {};
-          
+          const ancestry = Array.isArray(__moduleAncestry)
+            ? __moduleAncestry
+            : (parentUrl ? [parentUrl] : []);
+          const loadingRecord = window.__moduleLoading.get(resolvedUrl);
+          if (loadingRecord) {
+            // A module importing one of its own ancestors is a cycle. Return
+            // the in-progress export object instead of fetching/evaluating it
+            // recursively. Unrelated concurrent imports still wait for it.
+            if (ancestry.includes(resolvedUrl)) return loadingRecord.exports;
+            try {
+              return await loadingRecord.promise;
+            } catch (_) {
+              return loadingRecord.exports;
+            }
+          }
+
+          const moduleRecord = __createModuleLoadRecord();
+          window.__moduleLoading.set(resolvedUrl, moduleRecord);
+          const nextAncestry = ancestry.concat(resolvedUrl);
+
           try {
-            __currentModuleExports = await window.__executeCodeModule(sourceCode, resolvedUrl, window.__windowProxy, undefined, resolvedUrl);
-          } catch(e) {}
-          
-          const finalizedExports = { ...__currentModuleExports };
-          window.__moduleRegistry.set(resolvedUrl, finalizedExports);
-          
-          return finalizedExports;
+            const res = await window.__pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, 'import');
+            if (!res || !res.ok) throw new Error('Cannot import module: ' + resolvedUrl);
+
+            const sourceCode = await res.text();
+            try {
+              await window.__executeCodeModule(
+                sourceCode,
+                resolvedUrl,
+                window.__windowProxy,
+                undefined,
+                resolvedUrl,
+                nextAncestry
+              );
+            } catch (_) {}
+
+            return window.__moduleRegistry.get(resolvedUrl) || moduleRecord.exports;
+          } catch (error) {
+            if (window.__moduleLoading.get(resolvedUrl) === moduleRecord) {
+              window.__moduleLoading.delete(resolvedUrl);
+            }
+            moduleRecord.status = 'failed';
+            moduleRecord.reject(error);
+            throw error;
+          }
         };
         __importModule.meta = new Proxy({}, {
           get(target, prop) {
@@ -1601,7 +1645,6 @@
 
         return { __importModule, __exportModule, __currentModuleExports };
       }
-      
       // do code later
       (function() { 
         
@@ -5559,31 +5602,78 @@
         }, executionThis, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
       };
 
-      window.__executeCodeModule = function(__codeString, __sourceURL, __thisArg, __event, __scriptFileName) {
-        var { __importModule, __exportModule, __currentModuleExports } = __createModuleControls(__getScriptFileName(__scriptFileName));
+      window.__executeCodeModule = function(__codeString, __sourceURL, __thisArg, __event, __scriptFileName, __moduleAncestry) {
+        const __moduleBaseUrl = __getScriptFileName(__scriptFileName);
+        let __moduleUrl = __scriptFileName ? __moduleBaseUrl : null;
+        if (!__moduleUrl) {
+          try {
+            const rawModuleUrl = document.currentScript?.getAttribute('data-raw-src');
+            if (rawModuleUrl) __moduleUrl = new URL(rawModuleUrl, BASE_ORIGIN).href;
+          } catch (_) {}
+        }
+
+        if (!__moduleAncestry && __moduleUrl && window.__moduleRegistry.has(__moduleUrl)) {
+          return Promise.resolve(window.__moduleRegistry.get(__moduleUrl));
+        }
+
+        let __moduleRecord = __moduleUrl ? window.__moduleLoading.get(__moduleUrl) : null;
+        if (!__moduleAncestry && __moduleRecord) return __moduleRecord.promise;
+        if (!__moduleRecord && __moduleUrl) {
+          __moduleRecord = __createModuleLoadRecord();
+          window.__moduleLoading.set(__moduleUrl, __moduleRecord);
+        }
+
+        const __ancestry = Array.isArray(__moduleAncestry)
+          ? __moduleAncestry.slice()
+          : (__moduleUrl ? [__moduleUrl] : []);
+        var { __importModule, __exportModule, __currentModuleExports } = __createModuleControls(__moduleBaseUrl, __ancestry);
         var __requireModule = __importModule;
 
-        __codeString = `
+        __codeString = \`
           (async function(){
-            ${window.__usefulHelpers.editCodeModule(__codeString)}
+            \${window.__usefulHelpers.editCodeModule(__codeString)}
           })();
-        `;
+        \`;
 
         __codeString = window.__usefulHelpers.editCode(__codeString);
-        
+
         const executionThis = __thisArg == null || __thisArg === window ? __windowProxy : __thisArg;
-        return __rawReflectApply(async function(window, self, globalThis, parent, top, location, document) {
+        const __execution = __rawReflectApply(async function(window, self, globalThis, parent, top, location, document) {
           let __execResult;
           with (__globalLexicalScope) {
-            await eval(`
-            ${__event ? 'let event = __event;' : ''}
-            ${__codeString.code}
-            \n//# sourceURL=`+__sourceURL);
+            await eval(\`
+            \${__event ? 'let event = __event;' : ''}
+            \${__codeString.code}
+            \n//# sourceURL=\`+__sourceURL);
           }
           return __currentModuleExports;
         }, executionThis, [__windowProxy, __windowProxy, __windowProxy, __windowProxy.parent, __windowProxy.top, __windowProxy.location, __windowProxy.document]);
 
-
+        return Promise.resolve(__execution).then(
+          exports => {
+            if (!__moduleRecord) return exports;
+            Object.assign(__moduleRecord.exports, exports || {});
+            __moduleRecord.status = 'loaded';
+            if (__moduleUrl) {
+              window.__moduleRegistry.set(__moduleUrl, __moduleRecord.exports);
+              if (window.__moduleLoading.get(__moduleUrl) === __moduleRecord) {
+                window.__moduleLoading.delete(__moduleUrl);
+              }
+            }
+            __moduleRecord.resolve(__moduleRecord.exports);
+            return __moduleRecord.exports;
+          },
+          error => {
+            if (__moduleUrl && window.__moduleLoading.get(__moduleUrl) === __moduleRecord) {
+              window.__moduleLoading.delete(__moduleUrl);
+            }
+            if (__moduleRecord) {
+              __moduleRecord.status = 'failed';
+              __moduleRecord.reject(error);
+            }
+            throw error;
+          }
+        );
       };
       // Hide emulator-only DOM state when page code serializes HTML.
       const nativeElementInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
