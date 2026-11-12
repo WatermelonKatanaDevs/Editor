@@ -294,6 +294,34 @@
 
         ctx.writeBinary(new Uint8Array(result.data), ctx.file.path);
         ctx.markDirty(ctx.file.path);
+
+        // Piskel exports a fresh PNG when it saves. Reapply metadata edited here
+        // so a later drawing save does not silently discard these changes.
+        ctx.tab._piskelMetadataTags ||= Object.create(null);
+        Object.assign(ctx.tab._piskelMetadataTags, changes);
+        if (typeof ctx.tab._piskelMetadataPatch !== 'function') {
+          const patchMetadataForPiskel = async pngBytes => {
+            const tags = ctx.tab._piskelMetadataTags || {};
+            if (!Object.keys(tags).length) return pngBytes;
+            const baseName = fileName(ctx).replace(/\\.[^.]+$/, '');
+            const patched = await engine.writeMetadata({
+              name: baseName + '.png',
+              data: asBytes(pngBytes)
+            }, tags, {
+              args: ['-m', '-q']
+            });
+            if (!patched.success) throw new Error(patched.error || 'Could not preserve edited metadata in the Piskel export.');
+            return new Uint8Array(patched.data);
+          };
+          ctx.tab._piskelMetadataPatch = patchMetadataForPiskel;
+          ctx.addCleanup(() => {
+            if (ctx.tab._piskelMetadataPatch === patchMetadataForPiskel) {
+              delete ctx.tab._piskelMetadataPatch;
+              delete ctx.tab._piskelMetadataTags;
+            }
+          });
+        }
+
         ctx.manager.dispose(ctx.tab, 'image-preview');
 
         entries = await readMetadata(engine, ctx);
