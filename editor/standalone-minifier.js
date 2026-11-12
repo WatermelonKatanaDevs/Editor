@@ -145,8 +145,13 @@
     for (const entry of entries) {
       if (previous) {
         const gap = source.slice(previous.end, entry.start);
+        // Keep every Acorn token lexically separate. A hand-maintained list of
+        // punctuator combinations is not sufficient: concatenating two tokens
+        // can change how the browser parses the result without causing a syntax
+        // error. Collapse whitespace, but retain a line terminator where the
+        // original source had one so automatic semicolon insertion is stable.
         if (/\r|\n/.test(gap)) output += '\n';
-        else if (needsJavaScriptSeparator(previous, entry)) output += ' ';
+        else output += ' ';
       }
       output += entry.raw;
       previous = entry;
