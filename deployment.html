@@ -88,6 +88,9 @@ window.__deploymentNetworkReady = (async function() {
   const network = new Network();
   const native = new NetworkEndpoint(true, true);
   native.__networkRole = 'native';
+  // Match the browser's direct-fetch fallback semantics. Loopback requests
+  // must stay inside the virtual runtime instead of reaching the real browser.
+  native.__browserDefaultFallback = true;
 
   // Keep the deployment network's base endpoints aligned with the browser:
   // native fetch is the default error source, followed by the primary proxy
