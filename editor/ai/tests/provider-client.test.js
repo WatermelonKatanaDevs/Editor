@@ -1,8 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const LocalAI = require('../runtime.js');
-const {createProviderClient} = require('../provider-client.js');
+const LocalAI = require('../../../localai.js');
+const {createProviderClient} = LocalAI;
 
 function jsonResponse(value, status = 200, headers = {}) {
   return new Response(JSON.stringify(value), {
