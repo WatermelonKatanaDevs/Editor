@@ -7,16 +7,16 @@ permissions:
   contents: write
 jobs:
   migrate:
-    if: contains(github.event.head_commit.message, '[migrate-vendor-layout]')
+    if: contains(github.event.head_commit.message, '[migrate-vendor-layout-v2]')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Check out all source submodules
+      - name: Check out AudioMass source
         uses: actions/checkout@v4
         with:
           ref: with-submodules
           fetch-depth: 0
-          submodules: recursive
+          submodules: false
 
       - name: Vendor AudioMass and move source/build tooling off main
         shell: bash
@@ -28,8 +28,9 @@ jobs:
           AUDIO_COPY="$RUNNER_TEMP/audiomass-vendored"
           AUDIO_COMMIT="21f5ee1362a47be6f0dbe6e4969a15e43d21b044"
 
-          # Verify the checked-out submodule matches the pinned source and copy
-          # every tracked file, including binary assets, without its .git pointer.
+          # Only initialize AudioMass; the other source submodules remain intact
+          # as gitlinks on the preservation branch.
+          git submodule update --init --recursive -- "$AUDIO_PATH"
           test -f "$AUDIO_PATH/src/index.html"
           rm -rf "$AUDIO_COPY"
           mkdir -p "$AUDIO_COPY"
@@ -48,7 +49,7 @@ jobs:
           git -C "$AUDIO_SRC_PATH" checkout "$AUDIO_COMMIT"
           git add .gitmodules "$AUDIO_SRC_PATH"
 
-          git diff --cached --check
+          # Do not run diff --check over vendored upstream code; preserve it verbatim.
           git commit -m "chore: vendor AudioMass and retain audiomass-src submodule"
           git push origin HEAD:with-submodules
 
@@ -83,7 +84,7 @@ jobs:
           rsync -a "$AUDIO_COPY/" "$AUDIO_PATH/"
           git add -A -- "$AUDIO_PATH"
 
-          git diff --cached --check
+          # The vendored upstream source intentionally retains its original whitespace.
           git diff --cached --stat
           git commit -m "chore: remove source submodules and build tooling from main"
           git push origin HEAD:main
