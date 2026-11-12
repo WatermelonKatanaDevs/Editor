@@ -968,3 +968,5 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .compilation-status{min-width:0;font-size:11px;color:var(--editor-muted);overflow-wrap:anywhere}
 .compilation-note{margin:8px 0 0}
 @media(max-width:650px){.compilation-page{padding:18px}.compilation-content{grid-template-columns:minmax(0,1fr)}.compilation-section{padding:15px}.compilation-field{grid-template-columns:1fr;gap:6px}}
+
+.ai-asset-studio-page{box-sizing:border-box;width:100%;height:100%;padding:28px;background:var(--editor-surface-2);color:var(--editor-text-secondary);font-family:sans-serif}.ai-asset-studio-page h2{margin:0 0 8px;font-size:20px;font-weight:500;color:var(--editor-text)}.ai-asset-studio-page p{margin:0;font-size:13px;color:var(--editor-muted)}
