@@ -232,13 +232,11 @@
       syncMode();
       void loadBranches(settings.branch, settings.commit);
 
-      compileButton.disabled = !state.fs;
-      compileButton.title = state.fs ? '' : 'Open a project before compiling.';
+      compileButton.disabled = false;
       compileButton.onclick = async () => {
         if (!state.fs || compileButton.dataset.busy === '1') return;
-        if (mode.value === 'third-party' && !externalUrl.value.trim()) {
-          status.textContent = 'Enter an external deployment URL first.';
-          externalUrl.focus();
+        if (!state.fs) {
+          status.textContent = 'Open a project before compiling.';
           return;
         }
         const exporter = window.StandalonePageExporter;
@@ -272,7 +270,7 @@
         } finally {
           delete compileButton.dataset.busy;
           setTimeout(() => {
-            compileButton.disabled = !state.fs;
+            compileButton.disabled = false;
             compileButton.textContent = originalText;
           }, 1800);
         }
