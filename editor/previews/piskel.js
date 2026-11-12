@@ -148,7 +148,7 @@
     const originalLoadSetting = settings?.loadSetting;
 
     saveFunction = async function (automatic = false) {
-      if (disposed) return;
+      if (disposed) return false;
 
       try {
         // The old implementation called settings._loadSetting, but that
@@ -166,7 +166,13 @@
         const bytes = bytesFromDataURL(dataURL);
         if (!bytes.length) throw new Error('Piskel produced an empty PNG');
 
-        ctx.writeBinary(bytes, ctx.file.path);
+        let outputBytes = bytes;
+        if (typeof ctx.tab._piskelMetadataPatch === 'function') {
+          outputBytes = await ctx.tab._piskelMetadataPatch(bytes);
+          if (!outputBytes || !outputBytes.length) throw new Error('Metadata preservation produced an empty PNG');
+        }
+
+        ctx.writeBinary(outputBytes, ctx.file.path);
 
         const json = pskl.app.piskelController.serialize();
         ctx.writeText(json, ctx.file.path + '.piskel');
@@ -177,9 +183,11 @@
         window.setTimeout(() => {
           if (!disposed) saveStatus.textContent = '';
         }, 1200);
+        return true;
       } catch (e) {
         saveStatus.textContent = 'Save failed';
         console.error('Piskel save failed:', e);
+        return false;
       }
     };
 
@@ -219,6 +227,19 @@
         try { dollar.unsubscribe(events.PISKEL_RESET, onChange); } catch (_) {}
       });
     }
+
+    // Let the metadata editor flush a pending Piskel autosave before it
+    // rewrites the image file, avoiding a delayed export overwriting metadata.
+    const flushForMetadata = async () => {
+      if (disposed) return false;
+      if (autoSaveTimer) clearTimeout(autoSaveTimer);
+      autoSaveTimer = null;
+      return typeof saveFunction === 'function' ? await saveFunction(true) : true;
+    };
+    ctx.tab._piskelFlush = flushForMetadata;
+    ctx.addCleanup(() => {
+      if (ctx.tab._piskelFlush === flushForMetadata) delete ctx.tab._piskelFlush;
+    });
   }
 
   window.EditorPreviewProviders = window.EditorPreviewProviders || [];
