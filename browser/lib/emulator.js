@@ -150,7 +150,7 @@
       if (configScript) {
         configScript.textContent = configScript.textContent.replace(
           '_FCONFIG_=Object.assign(_FCONFIG_,config)',
-          'for(const key of ["assetPathPrefix","soundPathPrefix"]){const value=config&&config[key];if(typeof value==="string"&&!/^[a-z][a-z0-9+.-]*:\/\//i.test(value))config[key]=new URL(value,"https://studio.code.org/").href;}_FCONFIG_=Object.assign(_FCONFIG_,config)'
+          'for(const key of ["assetPathPrefix","soundPathPrefix"]){const value=config&&config[key];if(typeof value==="string"&&!/^[a-z][a-z0-9+.-]*:/i.test(value))config[key]=new URL(value,"https://studio.code.org/").href;}_FCONFIG_=Object.assign(_FCONFIG_,config)'
         );
       }
     }
