@@ -535,7 +535,8 @@
     let loadedProjectId=null;
     let agentMode=false, busy=false, controller=null, editingIndex=-1;
     const toolset=aiRoot.makeAITools({state,openFile:onOpen,onRefresh:()=>{state.fileManager?.refresh?.();updateStatus?.();},runConfigured,ensureNodeRuntime:()=>state.ensureNodeRuntime?.()});
-    const agent=new aiRoot.AIAgent({client:new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork,localManager),tools:toolset,permissions,requestPermission:permissionPrompt,extensionAPI:window.EditorExtensionAPI,emit:()=>{}});
+    const aiRuntime=aiRoot.createRuntime({client:new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork,localManager),tools:toolset,permissions,requestPermission:permissionPrompt,extensionAPI:window.EditorExtensionAPI,maxSteps:24});
+    const agent=aiRuntime.agent;
     async function activateModel(id){
       const target=registry.settings.models.find(x=>x.id===id);
       if(!target)throw new Error('AI model not found.');
@@ -787,6 +788,7 @@
       openSettings:()=>settingsModal(registry,permissions,()=>{persist();render(currentGroup);},state.browserNetwork||window.__sharedBrowserNetwork),
       registry,
       permissions,
+      runtime:aiRuntime,
       getHistory:()=>chatMessages,
       getChats:()=>chatStore.list(false),
       newChat,
