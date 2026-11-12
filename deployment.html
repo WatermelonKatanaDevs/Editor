@@ -810,6 +810,21 @@ window.__deploymentNetworkReady = (async function() {
         .replace(/\$%7Bid%7D/gi, gameLabIdPlaceholder)
         .replace(/%24%7Bid%7D/gi, gameLabIdPlaceholder);
 
+      // A crossorigin attribute forces CORS even for a classic script. This
+      // endpoint is intended to be loaded as a normal script, so remove that
+      // attribute only from the Code.org export_config script element.
+      html = html.replace(/<script\b[^>]*>/gi, tag => {
+        const match = tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+        const src = match?.[1] ?? match?.[2] ?? match?.[3] ?? '';
+        if (!src) return tag;
+        let decodedSrc = src;
+        try { decodedSrc = decodeURIComponent(src); } catch (_) {}
+        if (!/^https?:\/\/studio\.code\.org\/projects\/gamelab\/\$\{id\}\/export_config(?:[?#]|$)/i.test(decodedSrc)) {
+          return tag;
+        }
+        return tag.replace(/\s+crossorigin(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/i, '');
+      });
+
       // Preserve the existing Game Lab resource resolver when an export omits
       // one of the usual identifying URLs.
       const markers = [];
