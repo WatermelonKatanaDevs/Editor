@@ -798,12 +798,13 @@ window.__deploymentNetworkReady = (async function() {
 
       deploymentUsesCodeOrgGameLab = true;
 
-      // Code.org exports sometimes percent-encode the braces in the \${id}
+      // Code.org exports sometimes percent-encode the braces in the ID
       // placeholder. The existing PageEmulator compatibility branch expects
       // the literal placeholder so it can leave this classic script native.
+      const gameLabIdPlaceholder = '${' + 'id}';
       html = html
-        .replace(/\$%7Bid%7D/gi, '\${id}')
-        .replace(/%24%7Bid%7D/gi, '\${id}');
+        .replace(/\$%7Bid%7D/gi, gameLabIdPlaceholder)
+        .replace(/%24%7Bid%7D/gi, gameLabIdPlaceholder);
 
       // Preserve the existing Game Lab resource resolver when an export omits
       // one of the usual identifying URLs.
