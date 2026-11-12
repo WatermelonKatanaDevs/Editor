@@ -7,7 +7,7 @@ permissions:
   contents: write
 jobs:
   migrate:
-    if: contains(github.event.head_commit.message, '[migrate-vendor-layout-v2]')
+    if: contains(github.event.head_commit.message, '[migrate-vendor-layout-v3]')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -22,6 +22,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           AUDIO_PATH="editor/previews/vendor/audiomass"
           AUDIO_SRC_PATH="editor/previews/vendor/audiomass-src"
@@ -49,7 +52,7 @@ jobs:
           git -C "$AUDIO_SRC_PATH" checkout "$AUDIO_COMMIT"
           git add .gitmodules "$AUDIO_SRC_PATH"
 
-          # Do not run diff --check over vendored upstream code; preserve it verbatim.
+          # Preserve upstream whitespace verbatim.
           git commit -m "chore: vendor AudioMass and retain audiomass-src submodule"
           git push origin HEAD:with-submodules
 
@@ -84,7 +87,6 @@ jobs:
           rsync -a "$AUDIO_COPY/" "$AUDIO_PATH/"
           git add -A -- "$AUDIO_PATH"
 
-          # The vendored upstream source intentionally retains its original whitespace.
           git diff --cached --stat
           git commit -m "chore: remove source submodules and build tooling from main"
           git push origin HEAD:main
