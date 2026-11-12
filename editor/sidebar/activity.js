@@ -33,6 +33,7 @@
       activitySearch: {kind: 'Search', show: () => search.show()},
       activitySource: {kind: 'Source Control', show: () => sourceControl.show()},
       activityRun: {kind: 'Run and Debug', show: () => runDebug.show()},
+      activityDocumentation: {kind: 'Documentation', show: () => placeholders.show('Documentation', 'Documentation Coming Soon')},
       activityExtensions: {kind: 'Extensions', show: () => extensions.show()},
       activitySettings: {kind: 'settings', show: () => settings.show()},
       activityExplorer: {kind: 'explorer', show: () => explorer.show()},
