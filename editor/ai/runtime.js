@@ -184,7 +184,9 @@
     }
     async runHook(name, payload) {
       try {
-        if (typeof this.hooks?.[name] === 'function') return await this.hooks[name](payload) || payload;
+        const shortName = name === 'ai.beforeTool' ? 'beforeTool' : name === 'ai.afterTool' ? 'afterTool' : name;
+        const hook = this.hooks?.[name] || this.hooks?.[shortName];
+        if (typeof hook === 'function') return await hook(payload) || payload;
         return await this.extensionAPI?.runAIHook?.(name, payload) || payload;
       } catch (error) {
         this.emit('extension_hook_error', {name, error:error?.message || String(error)});
@@ -396,7 +398,9 @@
     constructor(options = {}) {
       super();
       if (!options.client) throw new TypeError('Runtime requires a client adapter. See the runtime README for the client contract.');
-      this.tools = options.tools instanceof ToolRegistry ? options.tools : new ToolRegistry(options.tools || []);
+      this.tools = options.tools instanceof ToolRegistry || (options.tools && typeof options.tools.register === 'function' && typeof options.tools.list === 'function')
+        ? options.tools
+        : new ToolRegistry(options.tools || []);
       this.agent = new Agent({
         client:options.client,
         tools:this.tools,
