@@ -1662,12 +1662,33 @@ window.__editorInitPromise = (async function () {
     saveEditorSettings();
   }
 
-  const welcomeBuiltins = new Map();
+  // Every Welcome button uses the same registry. Groups determine visual placement;
+  // entries are only shown when their builtin factory is available.
+  const welcomeGroupOrder = ['navigation', 'configuration', 'ai', 'creative', 'repositories'];
+  const welcomeBuiltins = new Map([
+    ['browser', {label:'Browser', group:'navigation'}],
+    ['terminal', {label:'Terminal', group:'navigation'}],
+    ['run', {label:'Run Configuration', group:'configuration'}],
+    ['environment', {label:'Environment Variables', group:'configuration'}],
+    ['peer', {label:'Peer Server', group:'configuration'}],
+    ['compilation', {label:'HTML Compilation', group:'configuration'}],
+    ['ai', {label:'AI Chat', group:'ai'}],
+    ['ai-asset-studio', {label:'AI Asset Studio', group:'ai'}],
+    ['blockbench', {label:'Blockbench', group:'creative'}],
+    ['photocraft', {label:'PhotoCraft Image Editor', group:'creative'}],
+    ['soundcraft', {label:'SoundCraft DAW', group:'creative'}],
+    ['filmcraft', {label:'FilmCraft Video Editor', group:'creative'}],
+    ['github-repository', {label:'GitHub Repository', group:'repositories'}]
+  ]);
 
-  function addWelcomeBuiltin(kind, label) {
+  function addWelcomeBuiltin(kind, label, options = {}) {
     const key = String(kind || '').trim();
     if (!key) throw new Error('Welcome builtin kind is required.');
-    welcomeBuiltins.set(key, String(label || key));
+    const requestedGroup = typeof options === 'string' ? options : options?.group;
+    welcomeBuiltins.set(key, {
+      label: String(label || key),
+      group: String(requestedGroup || 'other').trim() || 'other'
+    });
     try {
       for (const g of state.workbench?.groups?.values?.() || []) {
         const active = g.tabs.find(t => t.id === g.active);
@@ -1718,20 +1739,18 @@ window.__editorInitPromise = (async function () {
     card.appendChild(groupCreate);
     const actions = document.createElement('div');
     actions.className = 'workbench-empty-actions welcome-actions';
-    const welcomeGroups = [
-      [['browser', 'Browser'], ['terminal', 'Terminal']],
-      [['run', 'Run Configuration'], ['environment', 'Environment Variables'], ['peer', 'Peer Server'], ['compilation', 'HTML Compilation']],
-      [['ai', 'AI Chat'], ['ai-asset-studio', 'AI Asset Studio']],
-      [['blockbench', 'Blockbench'], ['photocraft', 'PhotoCraft Image Editor'], ['soundcraft', 'SoundCraft DAW'], ['filmcraft', 'FilmCraft Video Editor']],
-      [['github-repository', 'Git Repository']]
-    ];
-    // The WatermelonKatana site registers this entry only when its extension is installed.
-    // Place it beside Git Repository rather than rendering it as a separate builtin group.
-    const watermelonKatanaLabel = welcomeBuiltins.get('watermelonkatanaEditor');
-    if (watermelonKatanaLabel && window.EditorBuiltinFactories?.watermelonkatanaEditor) {
-      welcomeGroups[welcomeGroups.length - 1].push(['watermelonkatanaEditor', watermelonKatanaLabel]);
+
+    // Collect all registered entries by group, preserving registration order within each group.
+    const groupedEntries = new Map(welcomeGroupOrder.map(groupId => [groupId, []]));
+    for (const [kind, entry] of welcomeBuiltins) {
+      if (!window.EditorBuiltinFactories?.[kind]) continue;
+      const groupId = entry.group || 'other';
+      if (!groupedEntries.has(groupId)) groupedEntries.set(groupId, []);
+      groupedEntries.get(groupId).push([kind, entry.label]);
     }
-    welcomeGroups.forEach((items, index) => {
+
+    const visibleGroups = [...groupedEntries.values()].filter(items => items.length);
+    visibleGroups.forEach((items, index) => {
       const group = document.createElement('div');
       group.className = 'welcome-action-group';
       items.forEach(([kind, label]) => {
@@ -1741,20 +1760,13 @@ window.__editorInitPromise = (async function () {
         group.appendChild(b);
       });
       actions.appendChild(group);
-      if (index < welcomeGroups.length - 1) {
+      if (index < visibleGroups.length - 1) {
         const divider = document.createElement('div');
         divider.className = 'welcome-action-divider';
         divider.setAttribute('aria-hidden', 'true');
         actions.appendChild(divider);
       }
     });
-    for (const [kind, label] of welcomeBuiltins) {
-      if (['photocraft', 'soundcraft', 'filmcraft', 'watermelonkatanaEditor'].includes(kind) || !window.EditorBuiltinFactories?.[kind]) continue;
-      const b = document.createElement('button');
-      b.textContent = label === 'WatermelonKatana Extension' ? '(WatermelonKatana Extension)' : label;
-      b.onclick = () => openBuiltin(kind, g);
-      actions.appendChild(b);
-    }
     card.appendChild(actions);
     div.appendChild(card);
     g.viewBody.appendChild(div);
