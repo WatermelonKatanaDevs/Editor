@@ -1684,10 +1684,13 @@ window.__editorInitPromise = (async function () {
   function addWelcomeBuiltin(kind, label, options = {}) {
     const key = String(kind || '').trim();
     if (!key) throw new Error('Welcome builtin kind is required.');
+    const existing = welcomeBuiltins.get(key);
     const requestedGroup = typeof options === 'string' ? options : options?.group;
     welcomeBuiltins.set(key, {
       label: String(label || key),
-      group: String(requestedGroup || 'other').trim() || 'other'
+      // Re-registering an existing builtin without group metadata must not
+      // discard the group assigned by its initial registration.
+      group: String(requestedGroup ?? existing?.group ?? 'other').trim() || 'other'
     });
     try {
       for (const g of state.workbench?.groups?.values?.() || []) {
