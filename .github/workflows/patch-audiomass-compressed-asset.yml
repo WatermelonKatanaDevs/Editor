@@ -1,0 +1,52 @@
+name: Include AudioMass compressed stylesheet
+on:
+  push:
+    branches:
+      - with-submodules
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, '[audiomass-br-fix]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source branch
+        uses: actions/checkout@v4
+        with:
+          ref: with-submodules
+          fetch-depth: 0
+          submodules: false
+
+      - name: Force-add upstream ignored asset to both branches
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          AUDIO_PATH="editor/previews/vendor/audiomass"
+          AUDIO_SRC_PATH="editor/previews/vendor/audiomass-src"
+          ASSET="src/main.build.css.br"
+          TEMP_ASSET="$RUNNER_TEMP/main.build.css.br"
+
+          git submodule update --init --recursive -- "$AUDIO_SRC_PATH"
+          test -s "$AUDIO_SRC_PATH/$ASSET"
+          cp "$AUDIO_SRC_PATH/$ASSET" "$AUDIO_PATH/$ASSET"
+          git add -f -- "$AUDIO_PATH/$ASSET"
+          git commit -m "fix: include AudioMass precompressed stylesheet"
+          git push origin HEAD:with-submodules
+
+          cp "$AUDIO_PATH/$ASSET" "$TEMP_ASSET"
+          git rm -f -- .github/workflows/patch-audiomass-compressed-asset.yml
+          git commit -m "chore: remove AudioMass asset patch workflow"
+          git push origin HEAD:with-submodules
+
+          git fetch origin main
+          git checkout -B main origin/main
+          cp "$TEMP_ASSET" "$AUDIO_PATH/$ASSET"
+          git add -f -- "$AUDIO_PATH/$ASSET"
+          git diff --cached --stat
+          git commit -m "fix: include AudioMass precompressed stylesheet in vendor copy"
+          git push origin HEAD:main
