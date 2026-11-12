@@ -36,20 +36,6 @@
             <label class="setting-check"><input id="setting-ignore-node-modules" type="checkbox"><span>Exclude node_modules from Source Control</span></label>
           </div>
           <div class="editor-settings-section">
-            <h3>Export</h3>
-            <label class="setting-check"><input id="setting-compile-minify" type="checkbox"><span>Minify HTML, CSS, and JavaScript when compiling</span></label>
-            <p class="editor-settings-note">Reduces the compiled project size. Original workspace files are left unchanged; files the parser cannot safely process are kept as-is.</p>
-            <label class="setting-check"><input id="setting-compile-raw-binary" type="checkbox"><span>Embed the ZIP as raw binary data</span></label>
-            <p class="editor-settings-note">Uses Windows-1252 byte storage instead of Base64, keeping the compiled HTML close to the ZIP's actual size.</p>
-            <label>Archive compression
-              <select id="setting-compile-compression">
-                <option value="6">Standard (DEFLATE level 6)</option>
-                <option value="9">Maximum (DEFLATE level 9)</option>
-              </select>
-            </label>
-            <p class="editor-settings-note">Controls ZIP compression during Compile Page. Maximum compression may take longer on large projects.</p>
-          </div>
-          <div class="editor-settings-section">
             <h3>Image Editing</h3>
             <label class="setting-check"><input id="setting-piskel-auto-save" type="checkbox"><span>Auto-save Piskel edits</span></label>
             <p class="editor-settings-note">Automatically saves Piskel changes to the image and its <code>.piskel</code> sidecar.</p>
@@ -87,36 +73,6 @@
       const hideNodeModules = $('setting-hide-node-modules');
       const ignoreNodeModules = $('setting-ignore-node-modules');
       const piskelAutoSave = $('setting-piskel-auto-save');
-      const compileMinify = $('setting-compile-minify');
-      const compileRawBinary = $('setting-compile-raw-binary');
-      const compileCompression = $('setting-compile-compression');
-      try {
-        const stored = localStorage.getItem('node-editor.compile.minify');
-        compileMinify.checked = stored === null ? true : stored === 'true';
-      } catch (_) {
-        compileMinify.checked = true;
-      }
-      compileMinify.onchange = () => {
-        try { localStorage.setItem('node-editor.compile.minify', compileMinify.checked ? 'true' : 'false'); } catch (_) {}
-      };
-      try {
-        const stored = localStorage.getItem('node-editor.compile.raw-binary');
-        compileRawBinary.checked = stored === null ? true : stored === 'true';
-      } catch (_) {
-        compileRawBinary.checked = true;
-      }
-      compileRawBinary.onchange = () => {
-        try { localStorage.setItem('node-editor.compile.raw-binary', compileRawBinary.checked ? 'true' : 'false'); } catch (_) {}
-      };
-      try {
-        const stored = localStorage.getItem('node-editor.compile.compression');
-        compileCompression.value = stored === '6' ? '6' : '9';
-      } catch (_) {
-        compileCompression.value = '9';
-      }
-      compileCompression.onchange = () => {
-        try { localStorage.setItem('node-editor.compile.compression', compileCompression.value === '6' ? '6' : '9'); } catch (_) {}
-      };
       const b = $('setting-hide-browser-bar');
       const defaultTab = $('setting-browser-default-tab');
       const primaryProxy = $('setting-browser-primary-proxy');
