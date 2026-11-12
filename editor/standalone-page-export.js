@@ -634,7 +634,7 @@
     html = html.replace(loaderPlaceholder, () => payloadParts.join('') + loaderTag);
     const charsetPattern = /<meta\s+charset=["']?[^"'>\s]+["']?\s*>/i;
     if (!charsetPattern.test(html)) {
-      throw new Error('The deployment template must declare a character encoding before raw archive bytes can be embedded.');
+      throw new Error('The deployment template must declare a character encoding before standalone payloads can be embedded.');
     }
     if (bundle.archiveEncoding === 'iso8859-2') {
       // Raw ZIP bytes are represented as ISO-8859-2 characters. Preserve that
