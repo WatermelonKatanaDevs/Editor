@@ -88,9 +88,6 @@ window.__deploymentNetworkReady = (async function() {
   const network = new Network();
   const native = new NetworkEndpoint(true, true);
   native.__networkRole = 'native';
-  // Match the browser's direct-fetch fallback semantics. Loopback requests
-  // must stay inside the virtual runtime instead of reaching the real browser.
-  native.__browserDefaultFallback = true;
 
   // Keep the deployment network's base endpoints aligned with the browser:
   // native fetch is the default error source, followed by the primary proxy
@@ -520,40 +517,10 @@ window.__deploymentNetworkReady = (async function() {
 
     const runtimeEndpoint = type === 'node' ? runtime.endpoint : runtime;
 
-    // Some exported Game Lab documents contain /blockly/... references which
-    // resolve against the deployment's localhost origin. Route those platform
-    // assets through the deployment proxies instead of the local project server.
-    let deploymentUsesCodeOrgGameLab = false;
-    const deploymentGameLabAssetEndpoint = new NetworkEndpoint(true);
-    deploymentGameLabAssetEndpoint.__deploymentGameLabAssetEndpoint = true;
-    deploymentGameLabAssetEndpoint.handleRequest = async function(request, requestType) {
-      if (!deploymentUsesCodeOrgGameLab) return null;
-
-      let source;
-      try { source = new URL(request.url); } catch (_) { return null; }
-      if (source.origin !== domain || !source.pathname.startsWith('/blockly/')) return null;
-
-      const targetUrl = 'https://studio.code.org' + source.pathname + source.search + source.hash;
-      const proxies = [
-        network.__deploymentBaseEndpoints.primary,
-        network.__deploymentBaseEndpoints.fallback
-      ];
-      for (const proxy of proxies) {
-        if (!proxy || proxy.enabled === false || typeof proxy.handleRequest !== 'function') continue;
-        try {
-          const forwarded = new Request(targetUrl, request.clone());
-          const response = await proxy.handleRequest(forwarded, requestType);
-          if (response?.ok) return response;
-        } catch (error) {
-          console.warn('[Deployment] Game Lab platform asset proxy failed:', targetUrl, error);
-        }
-      }
-      return null;
-    };
-
-    // Run this before the peer and local runtime endpoints so a missing local
-    // /blockly file cannot mask the real Code.org platform asset.
-    const deploymentEndpoints = [deploymentGameLabAssetEndpoint];
+    // Always give the online peer endpoint first priority. This is important
+    // when a local Node/static runtime also exists: the deployment should use
+    // the already-hosted peer instance rather than shadowing it with local files.
+    const deploymentEndpoints = [];
     if (peerEndpoint) deploymentEndpoints.push(peerEndpoint);
     deploymentEndpoints.push(runtimeEndpoint);
     deploymentEndpoints.push(
@@ -795,51 +762,6 @@ window.__deploymentNetworkReady = (async function() {
       })[character]);
     }
 
-    function prepareDeploymentHtml(rawHtml) {
-      let html = String(rawHtml ?? '');
-      const isGameLab =
-        /gamelab-api(?:\.min)?\.js/i.test(html) ||
-        /studio\.code\.org\/projects\/gamelab\//i.test(html) ||
-        /\/blockly\/media\/gamelab\//i.test(html);
-      if (!isGameLab) return html;
-
-      deploymentUsesCodeOrgGameLab = true;
-
-      // Code.org exports sometimes percent-encode the braces in the ID
-      // placeholder. The existing PageEmulator compatibility branch expects
-      // the literal placeholder so it can leave this classic script native.
-      const gameLabIdPlaceholder = '${' + 'id}';
-      html = html
-        .replace(/\$%7Bid%7D/gi, gameLabIdPlaceholder)
-        .replace(/%24%7Bid%7D/gi, gameLabIdPlaceholder);
-
-      // A crossorigin attribute forces CORS even for a classic script. This
-      // endpoint is intended to be loaded as a normal script, so remove that
-      // attribute only from the Code.org export_config script element.
-      html = html.replace(/<script\b[^>]*>/gi, tag => {
-        const match = tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
-        const src = match?.[1] ?? match?.[2] ?? match?.[3] ?? '';
-        if (!src) return tag;
-        let decodedSrc = src;
-        try { decodedSrc = decodeURIComponent(src); } catch (_) {}
-        if (!/^https?:\/\/studio\.code\.org\/projects\/gamelab\/\$\{id\}\/export_config(?:[?#]|$)/i.test(decodedSrc)) {
-          return tag;
-        }
-        return tag.replace(/\s+crossorigin(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/i, '');
-      });
-
-      // Preserve the existing Game Lab resource resolver when an export omits
-      // one of the usual identifying URLs.
-      const markers = [];
-      if (!/studio\.code\.org\/projects\/gamelab\//i.test(html)) {
-        markers.push('studio.code.org/projects/gamelab/');
-      }
-      if (!/gamelab-api\.js/i.test(html)) markers.push('gamelab-api.js');
-      if (markers.length) html += '\n<!-- ' + markers.join(' ') + ' -->';
-
-      return html;
-    }
-
     async function getDeploymentDocumentContent(response, url) {
       const contentType = String(response?.headers?.get?.('content-type') || 'text/html').toLowerCase();
       const parsedUrl = (() => {
@@ -929,7 +851,7 @@ window.__deploymentNetworkReady = (async function() {
         throw new Error(`Emulated page navigation failed (${response?.status || 'no response'}): ${resolved.href}`);
       }
 
-      const rawHtml = prepareDeploymentHtml(await getDeploymentDocumentContent(response, resolved.href));
+      const rawHtml = await getDeploymentDocumentContent(response, resolved.href);
       targetPage.setLocation(resolved.href, resolved.origin);
       await targetPage.setDocument(rawHtml, true, resolved.href);
       targetPage.history = Array.isArray(targetPage.history) ? targetPage.history : [];
@@ -1271,7 +1193,7 @@ window.__deploymentNetworkReady = (async function() {
           return;
         }
 
-                const rawHtml = prepareDeploymentHtml(await getDeploymentDocumentContent(response, targetUrl.href));
+                const rawHtml = await getDeploymentDocumentContent(response, targetUrl.href);
         if (navigationId !== undefined && frame.__iframeNavigationId !== navigationId) return;
 
         child.setLocation(targetUrl.href, targetUrl.origin);
@@ -1347,7 +1269,7 @@ window.__deploymentNetworkReady = (async function() {
           const child = frame.pageEmulator;
           if (!child) return;
 
-          const rawHtml = prepareDeploymentHtml(await getDeploymentDocumentContent(response, targetUrl.href));
+          const rawHtml = await getDeploymentDocumentContent(response, targetUrl.href);
           if (navigationId !== undefined && embed.__embedNavigationId !== navigationId) return;
 
           child.setLocation(targetUrl.href, targetUrl.origin);
@@ -1485,7 +1407,7 @@ window.__deploymentNetworkReady = (async function() {
       );
     }
 
-    const html = prepareDeploymentHtml(await response.text());
+    const html = await response.text();
     await page.setDocument(html, true, pageURL);
     stage.classList.add('ready');
     setProgress('Deployment ready', 100, pageURL);
