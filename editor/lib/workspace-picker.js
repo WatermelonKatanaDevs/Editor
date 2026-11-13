@@ -170,7 +170,21 @@
       const path = await savePath(options);
       if (!path) return null;
       const value = options.bytes ?? options.data ?? new Uint8Array();
-      writeFile(path, value instanceof Blob ? new Uint8Array(await value.arrayBuffer()) : value);
+
+      // Blob and File objects may come from an iframe, so instanceof Blob is
+      // not reliable across realms. Use the Blob/File arrayBuffer interface
+      // instead, then pass bytes to the synchronous workspace writer.
+      const bytes = value != null && typeof value.arrayBuffer === 'function'
+        ? new Uint8Array(await value.arrayBuffer())
+        : asBytes(value);
+
+      // Do not silently write a truncated/empty result if a Blob-like source
+      // advertises a different size from the bytes it returned.
+      if (typeof value?.size === 'number' && bytes.byteLength !== value.size) {
+        throw new Error('The exported file could not be read completely.');
+      }
+
+      writeFile(path, bytes);
       return path;
     }
 
