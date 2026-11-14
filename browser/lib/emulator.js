@@ -234,18 +234,15 @@
         const originalUrl = el.getAttribute(attr);
         if (!originalUrl || originalUrl.startsWith('data:') || originalUrl.startsWith('blob:')) return;
 
-        // Code.org's Game Lab export_config endpoint is designed to run as a
-        // classic cross-origin script (which does not require CORS). Keep it
-        // as a native script instead of fetching it through the emulator.
-        // Its URL template is resolved from the page's _FCONFIG_ channel.
-        if (codeOrgGameLab && el.tagName === "SCRIPT" &&
-            /https?:\/\/studio\.code\.org\/projects\/gamelab\/\$\{id\}\/export_config(?:[?#]|$)/i.test(originalUrl)) {
-          if (codeOrgChannel) el.setAttribute(attr, originalUrl.replace(/\$\{id\}/g, encodeURIComponent(codeOrgChannel)));
-          return;
-        }
+        // Keep the Game Lab channel substitution, but do not let this or any
+        // other executable script bypass the emulator's fetch-and-rewrite path.
+        const requestUrl = codeOrgGameLab && el.tagName === "SCRIPT" &&
+          /https?:\/\/studio\.code\.org\/projects\/gamelab\/\$\{id\}\/export_config(?:[?#]|$)/i.test(originalUrl) && codeOrgChannel
+            ? originalUrl.replace(/\$\{id\}/g, encodeURIComponent(codeOrgChannel))
+            : originalUrl;
 
-        const absoluteUrl = resolveUrl(originalUrl);
-        el.setAttribute(rawAttr, originalUrl);
+        const absoluteUrl = resolveUrl(requestUrl);
+        el.setAttribute(rawAttr, requestUrl);
         el.removeAttribute(attr);
 
         const response = await page.network.request(absoluteUrl, dynamicBaseOrigin, {}, selector);
@@ -267,7 +264,7 @@
           }
         }
 
-        const processedRes = await filter(response, absoluteUrl, originalUrl, el);
+        const processedRes = await filter(response, absoluteUrl, requestUrl, el);
 
         if (!processedRes) return;
 
@@ -5556,8 +5553,12 @@
         pageEmulator.__windowProxy = windowProxy;
         pageEmulator.__getCallerWindowProxy = getCallerWindowProxy;
         window.__rawReflectApply = rawReflectApply;
-        window.__hostURL = window.top.location.href;
-        window.__hostOrigin = window.top.location.origin;
+        // The editor browser can be embedded inside a cross-origin host page.
+        // Reading window.top.location.href/origin would throw a SecurityError and
+        // abort interceptor setup before __executeCode is installed. These
+        // informational values must come from this frame, never its top frame.
+        window.__hostURL = window.location.href;
+        window.__hostOrigin = window.location.origin;
       })();
 
       // The source transformer injects this identifier into rewritten calls.
