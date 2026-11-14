@@ -18,6 +18,20 @@
     const browserParams = new URLSearchParams({start: initialBrowserUrl, default: defaultBrowserUrl, defer: '1'});
     if (state.behavior.hideBrowserBar) browserParams.set('hideBrowserBar', '1');
     frame.src = 'browser/browser.html?' + browserParams.toString();
+    const syncHostContext = () => {
+      const context = window.__wkHostContext;
+      if (!context || !context.url || !context.origin || !frame.contentWindow) return;
+      try {
+        const targetOrigin = new URL(frame.src, window.location.href).origin;
+        frame.contentWindow.postMessage({
+          type: 'watermelonkatanas:host-context',
+          url: context.url,
+          origin: context.origin
+        }, targetOrigin);
+      } catch (_) {}
+    };
+    frame.addEventListener('load', syncHostContext);
+    window.addEventListener('wk-host-context-change', syncHostContext);
     const bar = document.createElement('div');
     bar.className = 'builtin-browser-toolbar';
     const status = document.createElement('span');
@@ -38,7 +52,8 @@
     const info = {
       frame,
       network: null,
-      ready: null
+      ready: null,
+      syncHostContext
     };
     state.browserTabs.set(t.id, info);
     let resolveReady, rejectReady;
@@ -182,6 +197,10 @@
       const info = t?.id ? state.browserTabs.get(t.id) : null;
       const frame = info?.frame || t?._viewElement?.querySelector?.('iframe');
       if (!frame) return;
+      try {
+        window.removeEventListener('wk-host-context-change', info?.syncHostContext);
+        if (info?.syncHostContext) frame.removeEventListener('load', info.syncHostContext);
+      } catch (_) {}
       try {
         const win = frame.contentWindow;
         const stopMedia = doc => {
