@@ -5557,8 +5557,25 @@
         // Reading window.top.location.href/origin would throw a SecurityError and
         // abort interceptor setup before __executeCode is installed. These
         // informational values must come from this frame, never its top frame.
-        window.__hostURL = window.location.href;
-        window.__hostOrigin = window.location.origin;
+        // The Browser shell receives this from the page embedding the Editor.
+        // Walk only same-origin ancestors and stop safely at any cross-origin boundary.
+        let injectedHostContext = null;
+        let hostContextWindow = window;
+        for (let depth = 0; depth < 32 && hostContextWindow; depth++) {
+          try {
+            const candidate = hostContextWindow.__wkHostContext;
+            if (candidate && typeof candidate.url === 'string' && typeof candidate.origin === 'string') {
+              injectedHostContext = candidate;
+              break;
+            }
+            if (hostContextWindow.parent === hostContextWindow) break;
+            hostContextWindow = hostContextWindow.parent;
+          } catch (_) {
+            break;
+          }
+        }
+        window.__hostURL = injectedHostContext?.url || window.location.href;
+        window.__hostOrigin = injectedHostContext?.origin || window.location.origin;
       })();
 
       // The source transformer injects this identifier into rewritten calls.
