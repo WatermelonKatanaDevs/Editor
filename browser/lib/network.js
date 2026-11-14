@@ -402,9 +402,12 @@ function resolveNetworkURL(url, baseOrigin) {
 
 
 function globalSingularInstance(prop) {
-  Object.defineProperty(window[prop], Symbol.hasInstance, {
+  const localConstructor = window[prop];
+  if (typeof localConstructor !== 'function') return;
+
+  Object.defineProperty(localConstructor, Symbol.hasInstance, {
     value: function(instance) {
-      if (!instance || typeof instance !== 'object') return false;
+      if (!instance || (typeof instance !== 'object' && typeof instance !== 'function')) return false;
 
       const visited = new Set();
 
@@ -413,21 +416,44 @@ function globalSingularInstance(prop) {
         visited.add(win);
 
         try {
-          if (win[prop] && Object.getPrototypeOf(instance) === win[prop].prototype) {
+          const Constructor = win[prop];
+          if (
+            typeof Constructor === 'function' &&
+            Constructor.prototype &&
+            Object.prototype.isPrototypeOf.call(Constructor.prototype, instance)
+          ) {
             return true;
           }
 
           for (let i = 0; i < win.frames.length; i++) {
-            if (checkWindow(win.frames[i])) {
-              return true;
-            }
+            if (checkWindow(win.frames[i])) return true;
           }
         } catch (e) {}
 
         return false;
       }
 
-      return checkWindow(window.top);
+      // Start at the highest ancestor we can actually inspect. window.top may
+      // belong to an unrelated origin when the Editor is embedded; touching
+      // its properties throws and would otherwise make every instanceof
+      // check fail, including checks for objects from this very frame.
+      let root = window;
+      while (true) {
+        let parent = null;
+        try {
+          const candidate = root.parent;
+          if (candidate && candidate !== root) {
+            // Reading document verifies that the parent is same-origin.
+            void candidate.document;
+            parent = candidate;
+          }
+        } catch (e) {}
+
+        if (!parent || visited.has(parent)) break;
+        root = parent;
+      }
+
+      return checkWindow(root);
     },
     configurable: true
   });
