@@ -1953,7 +1953,7 @@ window.__editorInitPromise = (async function () {
     if (!fs) return false;
     const nodeModulesPath = nodeRuntimePath(root, 'node_modules');
     if (fs.isDirectorySync?.(nodeModulesPath)) return true;
-    const prefix = nodeModulesPath.replace(/\\/+$/, '') + '/';
+    const prefix = nodeModulesPath.replace(/\/+$/, '') + '/';
     try {
       return fs.listFilesSync().some(path => String(path || '').startsWith(prefix));
     } catch (_) {
