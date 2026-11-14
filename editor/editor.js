@@ -1244,23 +1244,8 @@ window.__editorInitPromise = (async function () {
     }
   }
   function renderEmpty(g) {
+    // Keep the initial editor surface blank until a project or tab is opened.
     clearView(g);
-    const wrap = document.createElement('div');
-    wrap.className = 'workbench-empty';
-    const card = document.createElement('div');
-    card.className = 'workbench-empty-card';
-    card.innerHTML = '<h2>Welcome</h2><p>Choose what you want to add to this pane.</p>';
-    const actions = document.createElement('div');
-    actions.className = 'workbench-empty-actions';
-    for (const [k, label] of [['browser', 'Browser'], ['terminal', 'Terminal'], ['run', 'Run Configuration'], ['environment', 'Environment Variables'], ['peer', 'Peer Server'], ['compilation', 'HTML Compilation'], ['ai', 'AI Chat'], ['ai-asset-studio', 'AI Asset Studio'], ['blockbench', 'Blockbench'], ['photocraft', 'PhotoCraft Image Editor'], ['soundcraft', 'SoundCraft DAW'], ['filmcraft', 'FilmCraft Video Editor'], ['github-repository', 'GitHub Repository'], ['welcome', 'Welcome']]) {
-      const b = document.createElement('button');
-      b.textContent = label;
-      b.onclick = () => openBuiltin(k, g);
-      actions.appendChild(b);
-    }
-    card.appendChild(actions);
-    wrap.appendChild(card);
-    g.viewBody.appendChild(wrap);
   }
   function disposeTabView(t) {
     if (!t || t._previewHost) return;
