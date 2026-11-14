@@ -1,8 +1,3 @@
-[submodule "opendaw"]
-	path = editor/previews/vendor/opendaw-src
-	url = https://github.com/andremichelle/openDAW.git
-	branch = main
-
 [submodule "photocraft"]
 	path = editor/previews/vendor/photocraft-src
 	url = https://github.com/storytold/photocraft.git
