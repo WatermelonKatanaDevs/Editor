@@ -5867,7 +5867,7 @@
         url: 'http://localhost:3000/',
         origin: 'http://localhost:3000'
       };
-      this.hostContext = window.__wkHostContext || null;
+      this.hostContext = options.hostContext || window.__wkHostContext || null;
 
       this.history = history || [];
       this.historyIndex = -1;
