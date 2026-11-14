@@ -4073,10 +4073,8 @@ window.__editorInitPromise = (async function () {
           return;
         }
         if (e.key.toLowerCase() === 'e' && !e.shiftKey && !e.altKey) {
-          if (state.projectOwner === false || !state.projectId) {
-            e.preventDefault();
-            exportProject();
-          }
+          e.preventDefault();
+          exportProject();
           return;
         }
         if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
