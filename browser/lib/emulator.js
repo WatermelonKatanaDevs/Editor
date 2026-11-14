@@ -406,7 +406,15 @@
 
     const documentUrl = baseUrlOverride || page.location.url;
     const baseUrl = baseUrlOverride || getPageBaseUrl(page);
-    const runtimeInterceptor = createRuntimeInterceptor(documentUrl, page.location.origin, undefined, baseUrl);
+    const hostContext = page.hostContext || null;
+    const runtimeInterceptor = createRuntimeInterceptor(
+      documentUrl,
+      page.location.origin,
+      undefined,
+      baseUrl,
+      hostContext?.url,
+      hostContext?.origin
+    );
 
     let finalHtml = processedHtml;
 
@@ -1374,8 +1382,8 @@
   /*
    * createRuntimeInterceptor intentionally left as-is.
    */
-  function createRuntimeInterceptor(source_url, source_origin, name = "about:srcdoc", base_url) {
-    var interceptorFunction = function(BASE_ORIGIN, CURRENT_PAGE_URL, DOCUMENT_URL) { 
+  function createRuntimeInterceptor(source_url, source_origin, name = "about:srcdoc", base_url, host_url, host_origin) {
+    var interceptorFunction = function(BASE_ORIGIN, CURRENT_PAGE_URL, DOCUMENT_URL, HOST_URL, HOST_ORIGIN) { 
       DOCUMENT_URL = DOCUMENT_URL || CURRENT_PAGE_URL;
       if (window.__windowProxy) return;
 
@@ -5553,29 +5561,13 @@
         pageEmulator.__windowProxy = windowProxy;
         pageEmulator.__getCallerWindowProxy = getCallerWindowProxy;
         window.__rawReflectApply = rawReflectApply;
-        // The editor browser can be embedded inside a cross-origin host page.
-        // Reading window.top.location.href/origin would throw a SecurityError and
-        // abort interceptor setup before __executeCode is installed. These
-        // informational values must come from this frame, never its top frame.
-        // The Browser shell receives this from the page embedding the Editor.
-        // Walk only same-origin ancestors and stop safely at any cross-origin boundary.
-        let injectedHostContext = null;
-        let hostContextWindow = window;
-        for (let depth = 0; depth < 32 && hostContextWindow; depth++) {
-          try {
-            const candidate = hostContextWindow.__wkHostContext;
-            if (candidate && typeof candidate.url === 'string' && typeof candidate.origin === 'string') {
-              injectedHostContext = candidate;
-              break;
-            }
-            if (hostContextWindow.parent === hostContextWindow) break;
-            hostContextWindow = hostContextWindow.parent;
-          } catch (_) {
-            break;
-          }
-        }
-        window.__hostURL = injectedHostContext?.url || window.location.href;
-        window.__hostOrigin = injectedHostContext?.origin || window.location.origin;
+        // Host context is passed explicitly by PageEmulator when this
+        // srcdoc runtime is generated. Never infer it from srcdoc location or
+        // traverse parent frames, which may be opaque or cross-origin.
+        window.__hostURL = typeof HOST_URL === 'string' && HOST_URL ? HOST_URL : CURRENT_PAGE_URL;
+        window.__hostOrigin = typeof HOST_ORIGIN === 'string' && HOST_ORIGIN
+          ? HOST_ORIGIN
+          : (function() { try { return new URL(CURRENT_PAGE_URL).origin; } catch (_) { return BASE_ORIGIN; } })();
       })();
 
       // The source transformer injects this identifier into rewritten calls.
@@ -5832,7 +5824,13 @@
         }
       });
     }
-    return `(${interceptorFunction.toString()})("${source_origin}","${base_url || source_url}","${source_url}");//# sourceURL=${name}`;
+    return `(${interceptorFunction.toString()})(
+      ${JSON.stringify(source_origin)},
+      ${JSON.stringify(base_url || source_url)},
+      ${JSON.stringify(source_url)},
+      ${JSON.stringify(host_url || "")},
+      ${JSON.stringify(host_origin || "")}
+    );//# sourceURL=${name}`;
   }
 
   function createPageNetwork(network) {
@@ -5869,6 +5867,7 @@
         url: 'http://localhost:3000/',
         origin: 'http://localhost:3000'
       };
+      this.hostContext = window.__wkHostContext || null;
 
       this.history = history || [];
       this.historyIndex = -1;
