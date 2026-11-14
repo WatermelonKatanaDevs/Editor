@@ -34,7 +34,7 @@
       while(start<targetEnd){
         if(signal?.aborted)throw new DOMException('Aborted','AbortError');
         const stop=Math.min(start+chunkSize,targetEnd);
-        const started=performance.now?.()??Date.now();
+        const started=typeof performance!=='undefined'&&performance.now?performance.now():Date.now();
         const out=await model.forward({
           input_ids:inputIds.slice(null,[start,stop]),
           attention_mask:lib.ones([1,stop]),
@@ -48,7 +48,8 @@
         }
         if(cache)cache.update(entries);
         else cache=new lib.DynamicCache(entries);
-        const elapsed=Math.max(1,(performance.now?.()??Date.now())-started);
+        const now=typeof performance!=='undefined'&&performance.now?performance.now():Date.now();
+        const elapsed=Math.max(1,now-started);
         const rate=(stop-start)/elapsed;
         start=stop;
         chunkSize=Math.max(32,Math.min(1024,chunkSize*2,Math.round(rate*1500)));
@@ -62,7 +63,7 @@
         streamer
       });
     }finally{
-      await cache?.dispose?.();
+      try{await cache?.dispose?.();}catch(_){}
     }
   }
   class LocalModelManager{
