@@ -136,6 +136,28 @@ window.__deploymentNetworkReady = (async function() {
   const progressBar = document.getElementById('progressBar');
   const progressMeta = document.getElementById('progressMeta');
   const params = new URLSearchParams(location.search);
+  // Deployments may be embedded by WatermelonKatana. Carry that outer page's
+  // URL/origin into every emulated document instead of deriving it from srcdoc.
+  function getDeploymentHostContext() {
+    const suppliedUrl = String(params.get('wkHostURL') || '').trim();
+    const suppliedOrigin = String(params.get('wkHostOrigin') || '').trim();
+    let hostUrl = location.href;
+    let hostOrigin = location.origin;
+    try {
+      const parsedUrl = new URL(suppliedUrl || location.href);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('Unsupported host URL protocol');
+      hostUrl = parsedUrl.href;
+      hostOrigin = parsedUrl.origin;
+    } catch (_) {}
+    try {
+      const parsedOrigin = new URL(suppliedOrigin);
+      if (['http:', 'https:'].includes(parsedOrigin.protocol) && parsedOrigin.origin === hostOrigin) {
+        hostOrigin = parsedOrigin.origin;
+      }
+    } catch (_) {}
+    return Object.freeze({url: hostUrl, origin: hostOrigin});
+  }
+  const deploymentHostContext = getDeploymentHostContext();
 
   function formatBytes(bytes) {
     const n = Number(bytes) || 0;
@@ -569,6 +591,7 @@ window.__deploymentNetworkReady = (async function() {
     const page = new PageEmulator(iframe, {
       network,
       location: {url: pageURL, origin: domain},
+      hostContext: deploymentHostContext,
       history: []
     });
 
@@ -962,6 +985,7 @@ window.__deploymentNetworkReady = (async function() {
             url: 'about:blank',
             origin: parentPage.location?.origin || domain
           },
+          hostContext: parentPage.hostContext || deploymentHostContext,
           history: []
         });
       } else {
