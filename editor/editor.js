@@ -1950,15 +1950,23 @@ window.__editorInitPromise = (async function () {
   }
 
   function hasNodeDependencies(fs, root) {
-    if (!fs) return false;
-    const nodeModulesPath = nodeRuntimePath(root, 'node_modules');
-    if (fs.isDirectorySync?.(nodeModulesPath)) return true;
-    const prefix = nodeModulesPath.replace(/\/+$/, '') + '/';
+    const packageJsonPath = nodeRuntimePath(root, 'package.json');
+    if (!fs?.existsSync?.(packageJsonPath)) return false;
+
+    let packageJson;
     try {
-      return fs.listFilesSync().some(path => String(path || '').startsWith(prefix));
+      packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8') || '{}');
     } catch (_) {
       return false;
     }
+
+    const dependencies = [
+      ...Object.keys(packageJson.dependencies || {}),
+      ...Object.keys(packageJson.devDependencies || {})
+    ];
+    return dependencies.every(name =>
+      !!fs.existsSync?.(nodeRuntimePath(root, `node_modules/${name}/package.json`))
+    );
   }
 
   function nodeDependencyManifest(fs, config) {
@@ -1980,22 +1988,53 @@ window.__editorInitPromise = (async function () {
     if (!manifest.hasPackageJson || await hasNodeDependencies(fs, manifest.root)) return false;
 
     let useCi = false;
-  if (manifest.hasLockfile) {
-    try {
-      const lock = JSON.parse(state.fs.readFileSync(manifest.packageLock, 'utf8') || '{}');
-      useCi = !!lock?.packages && typeof lock.packages === 'object' && !Array.isArray(lock.packages);
-    } catch (_) {}
-  }
-  const command = useCi ? 'npm ci' : 'npm install';
+    if (manifest.hasLockfile) {
+      try {
+        const lock = JSON.parse(fs.readFileSync(manifest.packageLock, 'utf8') || '{}');
+        useCi = !!lock?.packages && typeof lock.packages === 'object' && !Array.isArray(lock.packages);
+      } catch (_) {}
+    }
+
+    if (useCi) {
+      if (remoteLoadProgress) {
+        updateRemoteLoadProgress(
+          'Installing Node dependencies…',
+          null,
+          'Running npm ci from package-lock.json'
+        );
+      }
+
+      try {
+        await runtime.terminalCommand('npm ci');
+        return true;
+      } catch (ciError) {
+        // npm ci is intentionally strict about lockfiles. If the lockfile is
+        // stale or incomplete, let npm install reconcile it with package.json.
+        for (const terminal of state.terminalTabs.values()) {
+          terminal.console?.error(
+            'npm ci failed; retrying with npm install to repair package-lock.json.',
+            ciError?.message || ciError
+          );
+        }
+        if (remoteLoadProgress) {
+          updateRemoteLoadProgress(
+            'Repairing Node dependencies…',
+            null,
+            'npm ci failed; retrying with npm install'
+          );
+        }
+      }
+    }
+
     if (remoteLoadProgress) {
       updateRemoteLoadProgress(
         'Installing Node dependencies…',
         null,
-        manifest.hasLockfile ? 'Running npm ci from package-lock.json' : 'Running npm install from package.json'
+        'Running npm install from package.json'
       );
     }
 
-    await runtime.terminalCommand(command);
+    await runtime.terminalCommand('npm install');
     return true;
   }
 
