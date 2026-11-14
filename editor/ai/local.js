@@ -77,7 +77,7 @@
           const canFallback=this.device==='webgpu'&&!!model&&!generated&&isWebGPUBufferFailure(error)&&!(signal&&signal.aborted);
           if(!canFallback)throw error;
           this.emit({loading:true,statusText:'WebGPU inference failed. Retrying this request on CPU (WASM)…'});
-          try{await this.load(model,{device:'wasm'});}
+          try{await this.unload(false);await this.load(model,{device:'wasm'});}
           catch(fallbackError){throw new Error('WebGPU inference failed and the CPU (WASM) fallback could not load: '+(fallbackError&&fallbackError.message||String(fallbackError)));}
           if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
           return await run();
