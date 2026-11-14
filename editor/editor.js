@@ -2520,7 +2520,6 @@ window.__editorInitPromise = (async function () {
         // initialize the persistent runtime used by Run and manual npm commands.
         getBuiltin('terminal')?.getOrOpenTerminal();
         await setupRuntime(state.browserNetwork);
-        state.nodeDependenciesError = null;
       } catch (e) {
         // Keep the editor usable if npm is temporarily unavailable while loading.
         // Run can retry setup after the underlying problem is corrected.
