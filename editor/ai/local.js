@@ -17,6 +17,54 @@
     }
     return /Failed to download data from buffer|mapAsync.{0,180}GPUBuffer|MapAsyncStatus|Invalid Buffer/i.test(parts.join('\n'));
   }
+  function cacheName(name){
+    return String(name).replace('present_conv','past_conv').replace('present_ssm','past_ssm').replace('present_recurrent','past_recurrent').replace('present','past_key_values');
+  }
+  async function generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,onProgress){
+    const tokenizer=generator.tokenizer,model=generator.model;
+    if(!model?.forward||!model?.generate||!tokenizer?.apply_chat_template||!lib.DynamicCache||!lib.Tensor||!lib.ones)return null;
+    const inputs=tokenizer.apply_chat_template(messages,{add_generation_prompt:true,return_dict:true});
+    const inputIds=inputs?.input_ids;
+    const dims=inputIds?.dims||[];
+    const tokenCount=Number(dims[dims.length-1]||0);
+    if(!inputIds||tokenCount<=256)return null;
+    const targetEnd=tokenCount-1; // leave at least one token for generate() to consume
+    let cache=null,start=0,chunkSize=256;
+    try{
+      while(start<targetEnd){
+        if(signal?.aborted)throw new DOMException('Aborted','AbortError');
+        const stop=Math.min(start+chunkSize,targetEnd);
+        const started=performance.now?.()??Date.now();
+        const out=await model.forward({
+          input_ids:inputIds.slice(null,[start,stop]),
+          attention_mask:lib.ones([1,stop]),
+          ...(cache?{past_key_values:cache}:{}),
+          num_logits_to_keep:new lib.Tensor('int64',[1n],[])
+        });
+        const entries={};
+        for(const [key,value] of Object.entries(out||{})){
+          if(key.startsWith('present'))entries[cacheName(key)]=value;
+          else value?.dispose?.();
+        }
+        if(cache)cache.update(entries);
+        else cache=new lib.DynamicCache(entries);
+        const elapsed=Math.max(1,(performance.now?.()??Date.now())-started);
+        const rate=(stop-start)/elapsed;
+        start=stop;
+        chunkSize=Math.max(32,Math.min(1024,chunkSize*2,Math.round(rate*1500)));
+        onProgress?.({processed:start,total:targetEnd,chunkSize});
+      }
+      if(signal?.aborted)throw new DOMException('Aborted','AbortError');
+      return await model.generate({
+        ...inputs,
+        ...(cache?{past_key_values:cache,attention_mask:lib.ones(dims)}:{}),
+        ...generationOptions,
+        streamer
+      });
+    }finally{
+      await cache?.dispose?.();
+    }
+  }
   class LocalModelManager{
     constructor(){this.libraryPromise=null;this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();}
     subscribe(fn){if(typeof fn!=='function')return ()=>{};this.listeners.add(fn);fn(this.status());return ()=>this.listeners.delete(fn);}
@@ -62,7 +110,14 @@
         const lib=await this.library();const Stopper=lib.InterruptableStoppingCriteria;const stopper=Stopper?new Stopper():null;this.stopper=stopper;
         const streamer=new lib.TextStreamer(generator.tokenizer,{skip_prompt:true,skip_special_tokens:true,callback_function:piece=>{generated+=String(piece||'');if(onText)onText(generated,String(piece||''));}});
         try{
-          const result=await generator(messages,{max_new_tokens:Math.max(64,Math.min(4096,Number(options.maxTokens)||1024)),do_sample:true,temperature:options.temperature!=null?options.temperature:.7,top_p:options.topP!=null?options.topP:.9,streamer:streamer,...(stopper?{stopping_criteria:[stopper]}:{})});
+          const generationOptions={max_new_tokens:Math.max(64,Math.min(4096,Number(options.maxTokens)||1024)),do_sample:true,temperature:options.temperature!=null?options.temperature:.7,top_p:options.topP!=null?options.topP:.9,...(stopper?{stopping_criteria:[stopper]}:{})};
+          let result=null;
+          if(this.device==='webgpu'){
+            result=await generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,progress=>{
+              this.emit({statusText:'WEBGPU · preparing prompt '+progress.processed+'/'+progress.total+' tokens'});
+            });
+          }
+          if(result===null)result=await generator(messages,{...generationOptions,streamer});
           if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
           return generatedText(result,generated)||generated;
         }finally{if(this.stopper===stopper)this.stopper=null;}
