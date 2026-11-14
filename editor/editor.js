@@ -1021,6 +1021,7 @@ window.__editorInitPromise = (async function () {
       if (e?.name === 'NotAllowedError' || e?.name === 'SecurityError') {
         state.saveProjectPermission = 'denied';
         updateStatus();
+        return await exportProject();
       }
       if (e?.name !== 'AbortError') logError(e);
       return false;
