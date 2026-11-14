@@ -756,18 +756,18 @@ window.__editorInitPromise = (async function () {
     if (projectEl && projectEl.tagName !== 'INPUT') projectEl.textContent = state.projectName || 'Workspace';
     const exportZip = $('saveZipBtn');
     if (exportZip) {
-      const canExport = !!state.fs && (state.projectOwner === false || !state.projectId);
+      const canExport = !!state.fs;
       exportZip.hidden = !canExport;
       exportZip.disabled = !canExport;
       exportZip.title = canExport ? 'Export project as a ZIP (Ctrl+E)' : '';
     }
     const save = $('saveProjectBtn');
     if (save) {
-      const hasHandle = !!state.fs?.canSave?.();
-      const canCreateHandle = !hasHandle && typeof showSaveFilePicker === 'function';
-      const canSave = hasHandle ? state.saveProjectPermission !== 'denied' : canCreateHandle;
+      const canSave = !!state.fs;
       save.disabled = !canSave;
-      save.title = hasHandle ? 'Save changes to the project file' : canCreateHandle ? 'Save project and choose a writable project file' : 'Save Project is unavailable for this workspace';
+      save.title = state.fs?.canSave?.()
+        ? 'Save changes to the project file'
+        : 'Download a ZIP copy of this project';
     }
   }
   async function refreshSaveProjectState() {
@@ -995,16 +995,22 @@ window.__editorInitPromise = (async function () {
     try {
       saveProjectMetadata();
       if (!state.fs.canSave?.()) {
-        if (typeof showSaveFilePicker !== 'function') return false;
-        const saved = await state.fs.saveAs((state.projectName || 'workspace') + '.zip');
-        if (!saved) return false;
-        state.saveProjectPermission = 'granted';
+        if (typeof showSaveFilePicker === 'function') {
+          const saved = await state.fs.saveAs((state.projectName || 'workspace') + '.zip');
+          if (saved) {
+            state.saveProjectPermission = 'granted';
+          } else {
+            return false;
+          }
+        } else {
+          return await exportProject();
+        }
       } else {
         const permission = await state.fs.permissionState?.();
         if (permission === 'denied') {
           state.saveProjectPermission = 'denied';
           updateStatus();
-          return false;
+          return await exportProject();
         }
         await state.fs.save();
       }
@@ -1021,7 +1027,7 @@ window.__editorInitPromise = (async function () {
     }
   }
   async function exportProject() {
-    if (!state.fs || state.projectOwner !== false) return false;
+    if (!state.fs) return false;
     try {
       const blob = await state.fs.exportZip();
       const a = document.createElement('a');
