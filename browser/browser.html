@@ -172,6 +172,49 @@
         window.__deploymentConfig={repo:q.get('github')||'',branch:q.get('branch')||'',commit:q.get('commit')||'',url:q.get('url')||'',peerServer:q.has('peerServer') ? q.get('peerServer')==='1' : null,peerLayer:q.get('peerLayer')||'peer'};
       })();
     </script>
+<script>
+(function () {
+  const MESSAGE_TYPE = 'watermelonkatanas:host-context';
+
+  function applyHostContext(payload) {
+    try {
+      const parsed = new URL(String(payload && payload.url || '').trim());
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+      if (payload.origin !== parsed.origin) return false;
+      const context = Object.freeze({url: parsed.href, origin: parsed.origin});
+      window.__wkHostContext = context;
+
+      // Update documents that were already opened before the host context arrived.
+      for (const page of Object.values(window.__pageRegistry || {})) {
+        if (!page || !page.iframe) continue;
+        page.hostContext = context;
+        try {
+          const pageWindow = page.iframe.contentWindow;
+          if (pageWindow) {
+            pageWindow.__hostURL = context.url;
+            pageWindow.__hostOrigin = context.origin;
+          }
+        } catch (_) {}
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  window.addEventListener('message', function (event) {
+    if (event.source !== window.parent || event.origin !== window.location.origin) return;
+    if (event.data && event.data.type === MESSAGE_TYPE) applyHostContext(event.data);
+  });
+
+  // The Editor may have received host context before this Browser iframe loaded.
+  try {
+    if (window.parent !== window && window.parent.__wkHostContext) {
+      applyHostContext(window.parent.__wkHostContext);
+    }
+  } catch (_) {}
+})();
+</script>
     <script>window.__workersConfigReady.then(function(workers){window.WorkerConfig=workers;var script=document.createElement('script');script.src='browser.js';document.body.appendChild(script);}).catch(console.error);</script>
   </body>
 </html>
