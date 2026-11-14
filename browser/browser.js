@@ -2770,7 +2770,14 @@ function setBrowserDefaultTab(url) {
   appSettings.defaultTab = normalized;
   try { updateSettings(); } catch (_) {}
   try { setStorageItem('appSettings', appSettings); } catch (_) {}
+  // Keep the editor-owned Browser settings in sync as well as this iframe's
+  // local storage, so Run Configuration can follow the previous run URL.
+  try { saveBrowserState(); } catch (_) {}
   return normalized;
+}
+
+function getBrowserDefaultTab() {
+  return normalizeBrowserStartupUrl(appSettings.defaultTab);
 }
 
 async function loadBrowserURL(url = appSettings.defaultTab, activate = true) {
@@ -2782,6 +2789,7 @@ async function loadBrowserURL(url = appSettings.defaultTab, activate = true) {
 }
 
 window.getStartupUrl = getStartupUrl;
+window.getBrowserDefaultTab = getBrowserDefaultTab;
 window.setBrowserDefaultTab = setBrowserDefaultTab;
 window.setBrowserChromeHidden = setBrowserChromeHidden;
 window.loadBrowserURL = loadBrowserURL;

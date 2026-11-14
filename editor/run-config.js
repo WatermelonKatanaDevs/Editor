@@ -134,6 +134,48 @@
       const p = this.normalizePath(this.config.path);
       return d + (p === '/' ? '/' : p);
     }
+    normalizeBrowserUrl(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      try {
+        return new URL(raw).href;
+      } catch (_) {
+        return raw.replace(/\/+$/, '/');
+      }
+    }
+    syncBrowserDefault(previousUrl, nextUrl) {
+      const previous = this.normalizeBrowserUrl(previousUrl);
+      const next = this.normalizeBrowserUrl(nextUrl);
+      if (!previous || !next || previous === next) return false;
+
+      const state = this.state;
+      let browser = null;
+      try { browser = state.browserFrame?.contentWindow || null; } catch (_) {}
+      let currentDefault = state.browserSettings?.defaultTab || '';
+      try {
+        currentDefault = browser?.getBrowserDefaultTab?.() || currentDefault;
+      } catch (_) {}
+
+      // Only follow the run target while the Browser's default page still
+      // points at the previous target. A user-selected default is independent.
+      if (this.normalizeBrowserUrl(currentDefault) !== previous) return false;
+
+      try {
+        if (typeof browser?.setBrowserDefaultTab === 'function') {
+          browser.setBrowserDefaultTab(nextUrl);
+        } else if (window.__editorBrowserStateBridge?.write) {
+          window.__editorBrowserStateBridge.write({
+            settings: {...(state.browserSettings || {}), defaultTab: nextUrl}
+          });
+        } else {
+          state.browserSettings = {...(state.browserSettings || {}), defaultTab: nextUrl};
+        }
+        return true;
+      } catch (error) {
+        console.warn('Could not update the Browser default page:', error);
+        return false;
+      }
+    }
     command() {
       const url = this.publicUrl();
       return this.config.serverType === 'node' ? `Start: ${this.config.nodeCommand || '(configure a server command)'} → ${url}` : `Open: ${url}`;
@@ -200,6 +242,7 @@
         cmd.disabled = !isNode;
       };
       const sync = () => {
+        const previousBrowserUrl = this.publicUrl();
         this.config.serverType = type.value;
         this.config.domain = this.normalizeDomain(domain.value);
         this.config.path = this.normalizePath(path.value);
@@ -209,6 +252,7 @@
         this.config.nodeCommand = cmd.value.trim();
         this.config.autoClear = clear.checked;
         this.state.nodeRoot = this.config.rootfolder.replace(/^\/+/, '');
+        this.syncBrowserDefault(previousBrowserUrl, this.publicUrl());
         this.save();
         command.textContent = this.command();
         syncModeVisibility();

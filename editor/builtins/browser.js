@@ -8,7 +8,14 @@
     const frame = document.createElement('iframe');
     frame.id = 'browser-frame-' + g.id;
     const initialBrowserUrl = state.runConfig?.publicUrl?.() || 'http://localhost:3000/';
-    const browserParams = new URLSearchParams({start: initialBrowserUrl, default: initialBrowserUrl, defer: '1'});
+    const configuredBrowserDefault = String(state.browserSettings?.defaultTab || '').trim();
+    // The untouched Browser default is seeded as example.com. On first use,
+    // retain the historical project-as-default behavior; afterwards preserve
+    // an independently selected default page across Browser tab reopenings.
+    const defaultBrowserUrl = !configuredBrowserDefault || configuredBrowserDefault === 'https://example.com'
+      ? initialBrowserUrl
+      : configuredBrowserDefault;
+    const browserParams = new URLSearchParams({start: initialBrowserUrl, default: defaultBrowserUrl, defer: '1'});
     if (state.behavior.hideBrowserBar) browserParams.set('hideBrowserBar', '1');
     frame.src = 'browser/browser.html?' + browserParams.toString();
     const bar = document.createElement('div');
@@ -53,15 +60,15 @@
         } catch (_) {}
         state.runConfig?.bindNetwork?.(net);
         try {
-          const defaultUrl = state.runConfig?.publicUrl?.() || state.runConfig?.config?.domain || 'http://localhost:3000/';
+          const runUrl = state.runConfig?.publicUrl?.() || state.runConfig?.config?.domain || 'http://localhost:3000/';
+          const currentDefault = String(state.browserSettings?.defaultTab || '').trim();
+          const defaultUrl = !currentDefault || currentDefault === 'https://example.com' ? runUrl : currentDefault;
           win.setBrowserDefaultTab?.(defaultUrl);
-          // The Browser's very first tab is created with defer=1 so it cannot
-          // race the runtime endpoint during startup. If a static runtime is
-          // already installed (for example when reopening the Browser tab),
-          // start that deferred tab now. Node waits until its server is live
-          // and is navigated by runConfigured after terminalCommand.
+          // The first page remains the project run URL. The default for newly
+          // opened tabs is tracked separately and may be a user-selected page.
+          // Keep the deferred first navigation behind runtime endpoint setup.
           if (state.staticEndpoint && typeof win.loadBrowserURL === 'function') {
-            void win.loadBrowserURL(defaultUrl, true).catch(() => {});
+            void win.loadBrowserURL(runUrl, true).catch(() => {});
           }
         } catch (_) {}
         state.runDebugRefresh?.();
