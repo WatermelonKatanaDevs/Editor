@@ -102,7 +102,7 @@ window.__deploymentNetworkReady = (async function() {
           return originalRequestObject.call(this, request, ...args);
         }
         const headers = new Headers(request.headers);
-        if (!headers.has('X-Emulator')) headers.set('X-Emulator', '1');
+        if (!headers.has('X-Emulator')) headers.set('X-From-Emulator', '1');
         const modifiedRequest = new Request(request, {headers});
         return originalRequestObject.call(this, modifiedRequest, ...args);
       };
