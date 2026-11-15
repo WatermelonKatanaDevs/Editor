@@ -86,29 +86,64 @@ window.__deploymentNetworkReady = (async function() {
         });
   window.WorkerConfig = workers;
   const network = new Network();
-  // Optional host integration: requests addressed to the configured host
-  // origin remain direct same-origin requests, with a caller-selected marker
-  // header. This keeps the deployment runtime independent of any host product.
-  const emulatorHostOriginValue = new URLSearchParams(location.search).get('emulatorHostOrigin');
-  const emulatorHeaderName = String(new URLSearchParams(location.search).get('emulatorHeader') || '').trim();
-  const emulatorHeaderValue = new URLSearchParams(location.search).get('emulatorHeaderValue') ?? '1';
-  if (emulatorHostOriginValue && emulatorHeaderName && network._requestObject) {
-    let emulatorHostOrigin = '';
-    try { emulatorHostOrigin = new URL(emulatorHostOriginValue).origin; } catch (_) {}
-    if (emulatorHostOrigin) {
-      const originalRequestObject = network._requestObject;
-      network._requestObject = function(request, ...args) {
-        let requestOrigin = '';
-        try { requestOrigin = new URL(request.url).origin; } catch (_) {}
-        if (requestOrigin !== emulatorHostOrigin) {
-          return originalRequestObject.call(this, request, ...args);
+  // Generic host-origin request relay. The parent wrapper performs the
+  // fetch at its own origin, preserving its same-origin cookies and session.
+  const postOriginValue = new URLSearchParams(location.search).get('postOrigin');
+  let postOrigin = '';
+  try { postOrigin = new URL(postOriginValue || '').origin; } catch (_) {}
+  if (postOrigin && window.parent !== window) {
+    const hostBridge = new NetworkEndpoint(true, true);
+    hostBridge.handleRequest = request => new Promise(resolve => {
+      let target;
+      try { target = new URL(request.url); } catch (_) { return resolve(null); }
+      if (target.origin !== postOrigin || !target.pathname.startsWith('/api/')) return resolve(null);
+      const id = (window.crypto?.randomUUID?.() || (Date.now() + '-' + Math.random().toString(36).slice(2)));
+      const finish = payload => {
+        window.removeEventListener('message', onMessage);
+        clearTimeout(timer);
+        const status = Number(payload.status) || 502;
+        const body = typeof payload.body === 'string' ? payload.body : '';
+        try {
+          resolve(new Response([204,205,304].includes(status) ? null : body, {
+            status: status >= 200 && status <= 599 ? status : 502,
+            statusText: String(payload.statusText || ''),
+            headers: Array.isArray(payload.headers) ? payload.headers : []
+          }));
+        } catch (_) {
+          resolve(new Response(body, {status:502, statusText:'Host bridge response error'}));
         }
-        const headers = new request.headers.constructor(request.headers);
-        if (!headers.has(emulatorHeaderName)) headers.append(emulatorHeaderName, emulatorHeaderValue);
-        const modifiedRequest = new request.constructor(request, {headers});
-        return originalRequestObject.call(this, modifiedRequest, ...args);
       };
-    }
+      const onMessage = event => {
+        if (event.source !== window.parent || event.origin !== postOrigin) return;
+        const data = event.data;
+        if (!data || data.type !== 'deployment-host-fetch-result' || data.id !== id) return;
+        finish(data);
+      };
+      const timer = setTimeout(() => finish({status:504, statusText:'Host bridge timeout', body:'The deployment host did not respond.'}), 15000);
+      window.addEventListener('message', onMessage);
+      (async () => {
+        try {
+          window.parent.postMessage({
+            type:'deployment-host-fetch',
+            id,
+            url:target.href,
+            method:request.method,
+            headers:Array.from(request.headers.entries()),
+            body:['GET','HEAD'].includes(request.method.toUpperCase()) ? undefined : await request.clone().text()
+          }, postOrigin);
+        } catch (error) {
+          finish({status:502, statusText:'Host bridge error', body:String(error?.message || error)});
+        }
+      })();
+    });
+    const native = new NetworkEndpoint(true, true);
+    native.__networkRole = 'native';
+    const primaryProxyUrl = String(workers.proxy || '').trim();
+    const fallbackProxyUrl = typeof workers.fallbackProxy === 'string' ? workers.fallbackProxy.trim() : '';
+    const primaryProxy = new ProxyNetworkEndpoint(primaryProxyUrl, true, !!primaryProxyUrl);
+    const fallbackProxy = new ProxyNetworkEndpoint(fallbackProxyUrl, true, !!fallbackProxyUrl);
+    network.setEndpoints([hostBridge, native, primaryProxy, fallbackProxy]);
+    network.__deploymentBaseEndpoints = {host:hostBridge, native, primary:primaryProxy, fallback:fallbackProxy};
   }
 
   const native = new NetworkEndpoint(true, true);
