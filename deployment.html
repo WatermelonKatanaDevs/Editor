@@ -53,6 +53,7 @@ window.__deploymentAssetsReady = (async function() {
   }
 })(); 
 </script>
+<script src="editor/remote-bridge.js"></script>
 </head>
 <body>
 <div id="stage"></div>
@@ -87,57 +88,48 @@ window.__deploymentNetworkReady = (async function() {
         });
   window.WorkerConfig = workers;
   const network = new Network();
-  // Generic host-origin request relay. The parent wrapper performs the
-  // fetch at its own origin, preserving its same-origin cookies and session.
+  // Use the same RPC host bridge as the WatermelonKatana editor integration.
+  // The parent performs same-origin requests so its cookies and session apply.
   const postOriginValue = new URLSearchParams(location.search).get('postOrigin');
   let postOrigin = '';
   try { postOrigin = new URL(postOriginValue || '').origin; } catch (_) {}
   let hostBridge = null;
   if (postOrigin && window.parent !== window) {
-    hostBridge = new NetworkEndpoint(true, true);
-    hostBridge.handleRequest = request => new Promise(resolve => {
-      let target;
-      try { target = new URL(request.url); } catch (_) { return resolve(null); }
-      if (target.origin !== postOrigin || !(target.pathname.startsWith('/api/') || target.pathname.startsWith('/datablock_storage/'))) return resolve(null);
-      const id = (window.crypto?.randomUUID?.() || (Date.now() + '-' + Math.random().toString(36).slice(2)));
-      const finish = payload => {
-        window.removeEventListener('message', onMessage);
-        clearTimeout(timer);
-        const status = Number(payload.status) || 502;
-        const body = typeof payload.body === 'string' ? payload.body : '';
-        try {
-          resolve(new Response([204,205,304].includes(status) ? null : body, {
-            status: status >= 200 && status <= 599 ? status : 502,
-            statusText: String(payload.statusText || ''),
-            headers: Array.isArray(payload.headers) ? payload.headers : []
-          }));
-        } catch (_) {
-          resolve(new Response(body, {status:502, statusText:'Host bridge response error'}));
-        }
+    const hostReady = await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const check = () => {
+        if (
+          window.EditorHost?.fetch &&
+          window.EditorHostConfig?.origin === postOrigin
+        ) return resolve(true);
+        if (Date.now() - started >= 15000) return reject(new Error('Timed out waiting for the deployment host bridge.'));
+        setTimeout(check, 25);
       };
-      const onMessage = event => {
-        if (event.source !== window.parent || event.origin !== postOrigin) return;
-        const data = event.data;
-        if (!data || data.type !== 'deployment-host-fetch-result' || data.id !== id) return;
-        finish(data);
-      };
-      const timer = setTimeout(() => finish({status:504, statusText:'Host bridge timeout', body:'The deployment host did not respond.'}), 15000);
-      window.addEventListener('message', onMessage);
-      (async () => {
-        try {
-          window.parent.postMessage({
-            type:'deployment-host-fetch',
-            id,
-            url:target.href,
-            method:request.method,
-            headers:Array.from(request.headers.entries()),
-            body:['GET','HEAD'].includes(request.method.toUpperCase()) ? undefined : await request.clone().text()
-          }, postOrigin);
-        } catch (error) {
-          finish({status:502, statusText:'Host bridge error', body:String(error?.message || error)});
-        }
-      })();
+      check();
     });
+    if (hostReady) {
+      hostBridge = new NetworkEndpoint(true, true);
+      hostBridge.handleRequest = async request => {
+        let target;
+        try { target = new URL(request.url); } catch (_) { return null; }
+        if (
+          target.origin !== postOrigin ||
+          !(target.pathname.startsWith('/api/') || target.pathname.startsWith('/datablock_storage/'))
+        ) return null;
+        const method = String(request.method || 'GET').toUpperCase();
+        const result = await window.EditorHost.fetch(target.href, {
+          method,
+          headers:Array.from(request.headers.entries()),
+          body:['GET','HEAD'].includes(method) ? undefined : await request.clone().text()
+        });
+        const status = Number(result?.status) || 502;
+        return new Response([204,205,304].includes(status) ? null : String(result?.body ?? ''), {
+          status: status >= 200 && status <= 599 ? status : 502,
+          statusText: String(result?.statusText || ''),
+          headers: Array.isArray(result?.headers) ? result.headers : []
+        });
+      };
+    }
   }
 
   const native = new NetworkEndpoint(true, true);
