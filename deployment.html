@@ -91,8 +91,9 @@ window.__deploymentNetworkReady = (async function() {
   const postOriginValue = new URLSearchParams(location.search).get('postOrigin');
   let postOrigin = '';
   try { postOrigin = new URL(postOriginValue || '').origin; } catch (_) {}
+  let hostBridge = null;
   if (postOrigin && window.parent !== window) {
-    const hostBridge = new NetworkEndpoint(true, true);
+    hostBridge = new NetworkEndpoint(true, true);
     hostBridge.handleRequest = request => new Promise(resolve => {
       let target;
       try { target = new URL(request.url); } catch (_) { return resolve(null); }
@@ -136,36 +137,22 @@ window.__deploymentNetworkReady = (async function() {
         }
       })();
     });
-    const native = new NetworkEndpoint(true, true);
-    native.__networkRole = 'native';
-    const primaryProxyUrl = String(workers.proxy || '').trim();
-    const fallbackProxyUrl = typeof workers.fallbackProxy === 'string' ? workers.fallbackProxy.trim() : '';
-    const primaryProxy = new ProxyNetworkEndpoint(primaryProxyUrl, true, !!primaryProxyUrl);
-    const fallbackProxy = new ProxyNetworkEndpoint(fallbackProxyUrl, true, !!fallbackProxyUrl);
-    network.setEndpoints([hostBridge, native, primaryProxy, fallbackProxy]);
-    network.__deploymentBaseEndpoints = {host:hostBridge, native, primary:primaryProxy, fallback:fallbackProxy};
   }
 
   const native = new NetworkEndpoint(true, true);
   native.__networkRole = 'native';
-
-  // Keep the deployment network's base endpoints aligned with the browser:
-  // native fetch is the default error source, followed by the primary proxy
-  // and the optional fallback proxy.
   const primaryProxyUrl = String(workers.proxy || '').trim();
   const fallbackProxyUrl = typeof workers.fallbackProxy === 'string' ? workers.fallbackProxy.trim() : '';
   const primaryProxy = new ProxyNetworkEndpoint(primaryProxyUrl, true, !!primaryProxyUrl);
   const fallbackProxy = new ProxyNetworkEndpoint(fallbackProxyUrl, true, !!fallbackProxyUrl);
-
-  network.setEndpoints([
-    native,
-    primaryProxy,
-    fallbackProxy
-  ]);
+  const baseEndpoints = [native, primaryProxy, fallbackProxy];
+  if (hostBridge) baseEndpoints.unshift(hostBridge);
+  network.setEndpoints(baseEndpoints);
   network.__deploymentBaseEndpoints = {
+    host:hostBridge,
     native,
-    primary: primaryProxy,
-    fallback: fallbackProxy
+    primary:primaryProxy,
+    fallback:fallbackProxy
   };
   return network;
 })();
