@@ -86,24 +86,26 @@ window.__deploymentNetworkReady = (async function() {
         });
   window.WorkerConfig = workers;
   const network = new Network();
-  const wkHostOriginValue = new URLSearchParams(location.search).get('wkHostOrigin');
-  if (wkHostOriginValue && network._requestObject) {
-    let wkHostOrigin = '';
-    try { wkHostOrigin = new URL(wkHostOriginValue).origin; } catch (_) {}
-    if (wkHostOrigin) {
+  // Optional host integration: requests addressed to the configured host
+  // origin remain direct same-origin requests, with a caller-selected marker
+  // header. This keeps the deployment runtime independent of any host product.
+  const emulatorHostOriginValue = new URLSearchParams(location.search).get('emulatorHostOrigin');
+  const emulatorHeaderName = String(new URLSearchParams(location.search).get('emulatorHeader') || '').trim();
+  const emulatorHeaderValue = new URLSearchParams(location.search).get('emulatorHeaderValue') ?? '1';
+  if (emulatorHostOriginValue && emulatorHeaderName && network._requestObject) {
+    let emulatorHostOrigin = '';
+    try { emulatorHostOrigin = new URL(emulatorHostOriginValue).origin; } catch (_) {}
+    if (emulatorHostOrigin) {
       const originalRequestObject = network._requestObject;
       network._requestObject = function(request, ...args) {
         let requestOrigin = '';
         try { requestOrigin = new URL(request.url).origin; } catch (_) {}
-        // WK-hosted API requests stay on the WK origin (normal same-origin
-        // browser requests); identify them so the server can apply emulator
-        // request policy without routing them through the deployment proxy.
-        if (requestOrigin !== wkHostOrigin) {
+        if (requestOrigin !== emulatorHostOrigin) {
           return originalRequestObject.call(this, request, ...args);
         }
-        const headers = new Headers(request.headers);
-        if (!headers.has('X-Emulator')) headers.set('X-Emulator', '1');
-        const modifiedRequest = new Request(request, {headers});
+        const headers = new request.headers.constructor(request.headers);
+        if (!headers.has(emulatorHeaderName)) headers.append(emulatorHeaderName, emulatorHeaderValue);
+        const modifiedRequest = new request.constructor(request, {headers});
         return originalRequestObject.call(this, modifiedRequest, ...args);
       };
     }
@@ -144,8 +146,8 @@ window.__deploymentNetworkReady = (async function() {
   // Deployments may be embedded by WatermelonKatana. Carry that outer page's
   // URL/origin into every emulated document instead of deriving it from srcdoc.
   function getDeploymentHostContext() {
-    const suppliedUrl = String(params.get('wkHostURL') || '').trim();
-    const suppliedOrigin = String(params.get('wkHostOrigin') || '').trim();
+    const suppliedUrl = String(params.get('hostURL') || params.get('wkHostURL') || '').trim();
+    const suppliedOrigin = String(params.get('hostOrigin') || params.get('wkHostOrigin') || '').trim();
     let hostUrl = location.href;
     let hostOrigin = location.origin;
     try {
