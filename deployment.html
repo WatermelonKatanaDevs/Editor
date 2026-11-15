@@ -93,12 +93,17 @@ window.__deploymentNetworkReady = (async function() {
     if (wkHostOrigin) {
       const originalRequestObject = network._requestObject;
       network._requestObject = function(request, ...args) {
-        if (!request?.url?.startsWith(wkHostOrigin)) {
+        let requestOrigin = '';
+        try { requestOrigin = new URL(request.url).origin; } catch (_) {}
+        // WK-hosted API requests stay on the WK origin (normal same-origin
+        // browser requests); identify them so the server can apply emulator
+        // request policy without routing them through the deployment proxy.
+        if (requestOrigin !== wkHostOrigin) {
           return originalRequestObject.call(this, request, ...args);
         }
-        const headers = new request.headers.constructor(request.headers);
-        if (!headers.has('X-From-Emulator')) headers.append('X-From-Emulator', '1');
-        const modifiedRequest = new request.constructor(request, {headers});
+        const headers = new Headers(request.headers);
+        if (!headers.has('X-Emulator')) headers.set('X-Emulator', '1');
+        const modifiedRequest = new Request(request, {headers});
         return originalRequestObject.call(this, modifiedRequest, ...args);
       };
     }
