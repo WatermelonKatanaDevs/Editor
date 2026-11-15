@@ -98,7 +98,7 @@ window.__deploymentNetworkReady = (async function() {
     hostBridge.handleRequest = request => new Promise(resolve => {
       let target;
       try { target = new URL(request.url); } catch (_) { return resolve(null); }
-      if (target.origin !== postOrigin || !target.pathname.startsWith('/api/')) return resolve(null);
+      if (target.origin !== postOrigin || !(target.pathname.startsWith('/api/') || target.pathname.startsWith('/datablock_storage/'))) return resolve(null);
       const id = (window.crypto?.randomUUID?.() || (Date.now() + '-' + Math.random().toString(36).slice(2)));
       const finish = payload => {
         window.removeEventListener('message', onMessage);
