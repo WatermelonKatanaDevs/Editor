@@ -2018,6 +2018,10 @@ window.__editorInitPromise = (async function () {
     }
 
     if (cacheAvailable && fingerprint && await cache.restore(fs, manifest.root, fingerprint)) {
+      // Dependency cache restoration writes to the host filesystem after the
+      // Node worker has taken its startup snapshot. Push the restored tree into
+      // the running worker before project code can call require().
+      await runtime.syncFilesystem?.();
       await cache.markInstalled(workspaceKey, manifest.root, fingerprint);
       for (const terminal of state.terminalTabs.values()) {
         terminal.console?.log?.('Restored Node dependencies from the local cache.');

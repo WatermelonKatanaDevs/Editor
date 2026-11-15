@@ -574,6 +574,10 @@ window.__deploymentNetworkReady = (async function() {
           : false;
 
         if (restored) {
+          // The Node worker starts with a filesystem snapshot. Cache restoration
+          // happens afterward on the host filesystem, so synchronize the restored
+          // node_modules into the worker before starting server.js.
+          await runtime.syncFilesystem?.();
           setProgress('Dependencies restored', 100, 'Reused cached node_modules');
         } else if (!hasNodeModules || (cacheAvailable && fingerprint)) {
           let useCi = false;
