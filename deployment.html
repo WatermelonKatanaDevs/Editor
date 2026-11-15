@@ -583,7 +583,7 @@ window.__deploymentNetworkReady = (async function() {
 
         if (restored) {
           setProgress('Dependencies restored', 100, 'Reused cached node_modules');
-        } else if (!hasNodeModules) {
+        } else if (!hasNodeModules || (cacheAvailable && fingerprint)) {
           let useCi = false;
           if (fs.existsSync(packageLockPath)) {
             try {
