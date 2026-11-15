@@ -31,6 +31,7 @@ window.__deploymentAssetsReady = (async function() {
     'browser/lib/network.js',
     'browser/lib/emulator.js',
     'browser/lib/npm.js',
+    'browser/lib/dependency-cache.js',
     'browser/lib/endpoints/app.js',
     'browser/lib/endpoints/static.js',
     'browser/external/peer.js',
@@ -541,41 +542,79 @@ window.__deploymentNetworkReady = (async function() {
       });
       await runtime.ready;
 
-      // Published repositories normally omit node_modules. Reconstruct the
-      // dependency tree inside the Node emulator before starting the app.
+      // Restore a matching dependency tree from persistent browser storage before reinstalling.
+      // The cache is shared by Editor workspaces and deployments on this Editor origin.
       const packageJsonPath = root === '/' ? '/package.json' : root + '/package.json';
       const packageLockPath = root === '/' ? '/package-lock.json' : root + '/package-lock.json';
       const nodeModulesPath = root === '/' ? '/node_modules' : root + '/node_modules';
-      // FileSystem normalizes paths without a leading slash and tracks directories separately.
       const normalizedNodeModulesPath = nodeModulesPath.replace(/^\/+|\/+$/g, '');
       const hasNodeModules = fs.isDirectorySync?.(nodeModulesPath) ||
         fs.listFilesSync().some(path => String(path || '').replace(/^\/+/, '').startsWith(normalizedNodeModulesPath + '/'));
       let hasDeclaredDependencies = fs.existsSync(packageJsonPath);
+      let dependencyNames = [];
       if (hasDeclaredDependencies) {
         try {
           const manifest = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8') || '{}');
-          hasDeclaredDependencies = [manifest.dependencies, manifest.devDependencies, manifest.optionalDependencies]
-            .some(dependencies => dependencies && typeof dependencies === 'object' && Object.keys(dependencies).length > 0);
+          dependencyNames = [
+            ...Object.keys(manifest.dependencies || {}),
+            ...Object.keys(manifest.devDependencies || {}),
+            ...Object.keys(manifest.optionalDependencies || {}),
+            ...Object.keys(manifest.peerDependencies || {})
+          ];
+          hasDeclaredDependencies = dependencyNames.length > 0;
         } catch (_) {
           // Leave installation enabled so npm reports an invalid package.json.
         }
       }
-      if (hasDeclaredDependencies && !hasNodeModules) {
-        let useCi = false;
-        if (fs.existsSync(packageLockPath)) {
+
+      if (hasDeclaredDependencies) {
+        const dependencyCache = window.NpmDependencyCache;
+        const cacheAvailable = !!(dependencyCache && await dependencyCache.isAvailable().catch(() => false));
+        const cacheOptions = {
+          nodeVersion: String(runtime?.process?.version || runtime?.process?.versions?.node || 'browser-emulated-node'),
+          platform: String(runtime?.process?.platform || 'browser-node-emulator')
+        };
+        const fingerprint = cacheAvailable
+          ? await dependencyCache.fingerprint(fs, root, cacheOptions)
+          : null;
+        const restored = cacheAvailable && fingerprint
+          ? await dependencyCache.restore(fs, root, fingerprint)
+          : false;
+
+        if (restored) {
+          setProgress('Dependencies restored', 100, 'Reused cached node_modules');
+        } else if (!hasNodeModules) {
+          let useCi = false;
+          if (fs.existsSync(packageLockPath)) {
+            try {
+              const lock = JSON.parse(fs.readFileSync(packageLockPath, 'utf8') || '{}');
+              useCi = !!lock?.packages && typeof lock.packages === 'object' && !Array.isArray(lock.packages);
+            } catch (_) {}
+          }
+
+          const packageCommand = useCi ? 'npm ci' : 'npm install';
+          setProgress(
+            'Installing Node dependencies…',
+            null,
+            useCi ? 'Running npm ci from package-lock.json' : (fs.existsSync(packageLockPath) ? 'Running npm install from package-lock.json' : 'Running npm install from package.json')
+          );
           try {
-            const lock = JSON.parse(fs.readFileSync(packageLockPath, 'utf8') || '{}');
-            useCi = !!lock?.packages && typeof lock.packages === 'object' && !Array.isArray(lock.packages);
-          } catch (_) {}
+            await runtime.terminalCommand(packageCommand);
+          } catch (installError) {
+            if (!useCi) throw installError;
+            setProgress('Repairing Node dependencies…', null, 'npm ci failed; retrying with npm install');
+            await runtime.terminalCommand('npm install');
+          }
+          setProgress('Dependencies installed', 100, useCi ? 'package-lock.json applied' : 'package dependencies installed');
+        } else {
+          // Preserve projects that intentionally include node_modules in their archive.
+          setProgress('Dependencies ready', 100, 'Using node_modules from the project archive');
         }
-        const packageCommand = useCi ? 'npm ci' : 'npm install';
-        setProgress(
-          'Installing Node dependencies…',
-          null,
-          useCi ? 'Running npm ci from package-lock.json' : (fs.existsSync(packageLockPath) ? 'Running npm install from package-lock.json' : 'Running npm install from package.json')
-        );
-        await runtime.terminalCommand(packageCommand);
-        setProgress('Dependencies installed', 100, useCi ? 'package-lock.json applied' : 'package dependencies installed');
+
+        if (cacheAvailable) {
+          const installedFingerprint = await dependencyCache.fingerprint(fs, root, cacheOptions);
+          if (installedFingerprint) await dependencyCache.store(fs, root, installedFingerprint);
+        }
       }
 
       if (runConfig.nodeCommand) await runtime.terminalCommand(runConfig.nodeCommand);

@@ -1985,7 +1985,45 @@ window.__editorInitPromise = (async function () {
   async function installNodeDependencies(runtime, config) {
     const fs = state.fs;
     const manifest = nodeDependencyManifest(fs, config);
-    if (!manifest.hasPackageJson || await hasNodeDependencies(fs, manifest.root)) return false;
+    if (!manifest.hasPackageJson) return false;
+
+    let packageJson;
+    try {
+      packageJson = JSON.parse(fs.readFileSync(manifest.packageJson, 'utf8') || '{}');
+    } catch (_) {
+      return false;
+    }
+    const dependencyNames = [
+      ...Object.keys(packageJson.dependencies || {}),
+      ...Object.keys(packageJson.devDependencies || {}),
+      ...Object.keys(packageJson.optionalDependencies || {}),
+      ...Object.keys(packageJson.peerDependencies || {})
+    ];
+    if (!dependencyNames.length) return false;
+
+    const cache = window.NpmDependencyCache;
+    const cacheAvailable = !!(cache && await cache.isAvailable().catch(() => false));
+    const workspaceKey = String(state.projectKey || state.projectId || state.projectName || 'default');
+    const cacheOptions = {
+      nodeVersion: String(runtime?.process?.version || runtime?.process?.versions?.node || 'browser-emulated-node'),
+      platform: String(runtime?.process?.platform || 'browser-node-emulator')
+    };
+    let fingerprint = cacheAvailable ? await cache.fingerprint(fs, manifest.root, cacheOptions) : null;
+    const dependenciesPresent = await hasNodeDependencies(fs, manifest.root);
+
+    if (dependenciesPresent) {
+      if (!cacheAvailable || !fingerprint) return false;
+      const installedFingerprint = await cache.getInstalledFingerprint(workspaceKey, manifest.root);
+      if (installedFingerprint === fingerprint) return false;
+    }
+
+    if (cacheAvailable && fingerprint && await cache.restore(fs, manifest.root, fingerprint)) {
+      await cache.markInstalled(workspaceKey, manifest.root, fingerprint);
+      for (const terminal of state.terminalTabs.values()) {
+        terminal.console?.log?.('Restored Node dependencies from the local cache.');
+      }
+      return true;
+    }
 
     let useCi = false;
     if (manifest.hasLockfile) {
@@ -2006,10 +2044,9 @@ window.__editorInitPromise = (async function () {
 
       try {
         await runtime.terminalCommand('npm ci');
-        return true;
       } catch (ciError) {
-        // npm ci is intentionally strict about lockfiles. If the lockfile is
-        // stale or incomplete, let npm install reconcile it with package.json.
+        // npm ci is strict about lockfiles. If the lockfile is stale or
+        // incomplete, let npm install reconcile it with package.json.
         for (const terminal of state.terminalTabs.values()) {
           terminal.console?.error(
             'npm ci failed; retrying with npm install to repair package-lock.json.',
@@ -2023,18 +2060,26 @@ window.__editorInitPromise = (async function () {
             'npm ci failed; retrying with npm install'
           );
         }
+        await runtime.terminalCommand('npm install');
+      }
+    } else {
+      if (remoteLoadProgress) {
+        updateRemoteLoadProgress(
+          'Installing Node dependencies…',
+          null,
+          'Running npm install from package.json'
+        );
+      }
+      await runtime.terminalCommand('npm install');
+    }
+
+    if (cacheAvailable) {
+      const installedFingerprint = await cache.fingerprint(fs, manifest.root, cacheOptions);
+      if (installedFingerprint) {
+        await cache.store(fs, manifest.root, installedFingerprint);
+        await cache.markInstalled(workspaceKey, manifest.root, installedFingerprint);
       }
     }
-
-    if (remoteLoadProgress) {
-      updateRemoteLoadProgress(
-        'Installing Node dependencies…',
-        null,
-        'Running npm install from package.json'
-      );
-    }
-
-    await runtime.terminalCommand('npm install');
     return true;
   }
 
