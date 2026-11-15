@@ -629,6 +629,11 @@ window.__deploymentNetworkReady = (async function() {
     // when a local Node/static runtime also exists: the deployment should use
     // the already-hosted peer instance rather than shadowing it with local files.
     const deploymentEndpoints = [];
+    // Keep the parent-host relay first: it must handle same-origin host API
+    // and storage URLs before peer, local runtime, or external proxy endpoints.
+    if (network.__deploymentBaseEndpoints.host) {
+      deploymentEndpoints.push(network.__deploymentBaseEndpoints.host);
+    }
     if (peerEndpoint) deploymentEndpoints.push(peerEndpoint);
     deploymentEndpoints.push(runtimeEndpoint);
     deploymentEndpoints.push(
