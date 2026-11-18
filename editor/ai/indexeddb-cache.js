@@ -155,11 +155,8 @@
     }
     async deleteModel(id){
       const db=await this.open();
-      const read=db.transaction([MODELS,FILES],'readonly'),readDone=transactionDone(read);
-      const [allModels,allFiles]=await Promise.all([
-        requestResult(read.objectStore(MODELS).getAll()),
-        requestResult(read.objectStore(FILES).getAll())
-      ]);
+      const read=db.transaction(MODELS,'readonly'),readDone=transactionDone(read);
+      const allModels=await requestResult(read.objectStore(MODELS).getAll());
       await readDone;
       const removed=(allModels||[]).filter(item=>item.id===String(id));
       if(!removed.length)return false;
@@ -187,28 +184,29 @@
     }
     requestPersistence(){
       if(!this.persistencePromise){
+        const storage=navigator.storage;
+        if(!storage)return Promise.resolve({supported:false,persisted:false});
+        // Invoke persist() immediately, while the model-load click may still carry user activation.
+        let request=Promise.resolve(false);
+        try{if(typeof storage.persist==='function')request=storage.persist();}catch(_){}
         this.persistencePromise=(async()=>{
-          if(!navigator.storage)return {supported:false,persisted:false};
           let persisted=false;
-          try{persisted=await navigator.storage.persisted?.()||false;}catch(_){}
-          if(!persisted&&typeof navigator.storage.persist==='function'){
-            try{persisted=await navigator.storage.persist();}catch(_){}
-          }
-          return {supported:typeof navigator.storage.persist==='function',persisted:!!persisted};
+          try{persisted=await storage.persisted?.()||false;}catch(_){}
+          if(!persisted){try{persisted=await request;}catch(_){}}
+          return {supported:typeof storage.persist==='function',persisted:!!persisted};
         })();
       }
       return this.persistencePromise;
     }
     async cacheStats(){
       const db=await this.open(),tx=db.transaction([FILES,MODELS],'readonly'),done=transactionDone(tx);
-      const [files,models]=await Promise.all([
-        requestResult(tx.objectStore(FILES).getAll()),
+      const [fileCount,models]=await Promise.all([
+        requestResult(tx.objectStore(FILES).count()),
         requestResult(tx.objectStore(MODELS).getAll())
       ]);
       await done;
       return {
-        bytes:(files||[]).reduce((sum,file)=>sum+(Number(file.size)||0),0),
-        fileCount:(files||[]).length,
+        fileCount:Number(fileCount)||0,
         modelCount:new Set((models||[]).filter(item=>item?.complete).map(item=>item.id)).size
       };
     }
