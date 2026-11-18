@@ -67,36 +67,101 @@
     }
   }
   class LocalModelManager{
-    constructor(){this.libraryPromise=null;this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();}
+    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;}
     subscribe(fn){if(typeof fn!=='function')return ()=>{};this.listeners.add(fn);fn(this.status());return ()=>this.listeners.delete(fn);}
-    status(){return {loading:this.loading,loadedModelId:this.loadedModelId,loaded:!!this.generator,progress:this.progress,text:this.statusText,device:this.device,dtype:this.dtype};}
+    status(){return {loading:this.loading,loadedModelId:this.loadedModelId,loaded:!!this.generator,progress:this.progress,text:this.statusText,device:this.device,dtype:this.dtype,offlineOnly:this.offlineOnly,cacheHit:this.cacheHit};}
     emit(patch){Object.assign(this,patch||{});const state=this.status();for(const fn of this.listeners){try{fn(state);}catch(e){console.warn('Local AI status listener failed:',e);}}}
     isLoaded(id){return !!this.generator&&(!id||this.loadedModelId===String(id));}
-    async library(){if(!this.libraryPromise)this.libraryPromise=import(root.LOCAL_MODEL_LIBRARY_URL||'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1');return this.libraryPromise;}
+    async library(){
+      if(!this.libraryPromise)this.libraryPromise=(async()=>{
+        if(!this.cache)throw new Error('IndexedDB local model storage is unavailable.');
+        await this.cache.open();
+        const url=root.LOCAL_MODEL_LIBRARY_URL||'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1/dist/transformers.min.js';
+        let response=await this.cache.match(url);
+        if(!response){
+          if(typeof navigator!=='undefined'&&navigator.onLine===false)throw new Error('The Transformers.js runtime is not cached. Connect to the internet once to download the local AI runtime.');
+          this.emit({loading:true,statusText:'Downloading the local AI runtime…'});
+          response=await fetch(url,{credentials:'omit'});
+          if(!response.ok)throw new Error('Could not download Transformers.js runtime ('+response.status+').');
+          await this.cache.put(url,response.clone());
+        }
+        const source=await response.text();
+        const blobUrl=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));
+        let lib;
+        try{lib=await import(blobUrl);this.libraryBlobUrl=blobUrl;}
+        catch(error){URL.revokeObjectURL(blobUrl);throw new Error('Could not load the cached Transformers.js runtime: '+(error&&error.message||String(error)));}
+        if(lib.env){
+          const env=lib.env;
+          env.useCustomCache=true;
+          env.customCache=this.cache;
+          env.useBrowserCache=false;
+          env.useFSCache=false;
+          env.useWasmCache=true;
+          env.allowLocalModels=false;
+          const baseFetch=env.fetch||window.fetch.bind(window);
+          env.fetch=async(input,options)=>{
+            if(this.offlineOnly){
+              const cached=await this.cache.match(input);
+              if(cached)return cached;
+              throw new Error('Offline local AI cache miss: '+String(input?.url||input));
+            }
+            return baseFetch(input,options);
+          };
+        }
+        return lib;
+      })();
+      return this.libraryPromise;
+    }
     async unload(notify=true){const old=this.generator;this.generator=null;this.model=null;this.loadedModelId='';this.stopper=null;if(old&&old.dispose){try{await old.dispose();}catch(e){console.warn('Local AI model disposal failed:',e);}}if(notify)this.emit({loading:false,progress:0,statusText:'Model unloaded.'});}
     async load(model,options={}){
       if(!model||model.protocol!=='local-transformers')throw new Error('Not a local browser model.');
       if(this.loading)throw new Error('A local model is already loading.');
       if(this.isLoaded(model.id)){this.emit({loading:false,progress:100,statusText:model.model+' ready.'});return model;}
       const requestedDevice=options.device==='wasm'?'wasm':options.device==='webgpu'?'webgpu':(navigator.gpu?'webgpu':'wasm');
-      this.loading=true;this.progress=0;this.device=requestedDevice;this.dtype=(this.device==='webgpu'?'q4f16':'q4');
-      this.statusText='Loading '+model.model+'…';this.emit({loading:true,progress:0,statusText:this.statusText});
+      this.device=requestedDevice;
+      this.dtype=(this.device==='webgpu'?'q4f16':'q4');
+      const variant=this.device+':'+this.dtype;
+      const strictOffline=options.offlineOnly===true;
+      this.loading=true;this.progress=0;this.cacheHit=false;this.offlineOnly=strictOffline;
+      this.statusText='Preparing '+model.model+'…';this.emit({loading:true,progress:0,statusText:this.statusText});
+      // Request persistent browser storage while the user is explicitly loading a model.
+      try{this.cache.requestPersistence();}catch(_){}
       try{
         const lib=await this.library();
-        if(lib.env){lib.env.useBrowserCache=true;lib.env.allowRemoteModels=true;lib.env.allowLocalModels=false;}
-        await this.unload(false);this.loading=true;this.device=requestedDevice;this.dtype=(this.device==='webgpu'?'q4f16':'q4');
-        this.emit({loading:true,progress:0,statusText:this.device.toUpperCase()+' · loading '+model.model+'…'});
+        const cached=!strictOffline&&await this.cache.isModelCached(model.id,model.model,variant);
+        this.cacheHit=!!cached;
+        this.offlineOnly=!!(strictOffline||cached);
+        if(lib.env)lib.env.allowRemoteModels=!this.offlineOnly;
+        await this.unload(false);
+        this.loading=true;this.device=requestedDevice;this.dtype=(this.device==='webgpu'?'q4f16':'q4');
+        this.cache.beginModel(model.id,model.model,variant);
+        this.emit({loading:true,progress:0,statusText:(this.offlineOnly?'INDEXEDDB CACHE':'DOWNLOADING')+' · '+this.device.toUpperCase()+' · '+model.model});
         const progress=info=>{
           let p=Number(info&&info.progress);if(!Number.isFinite(p))p=null;if(info&&info.status==='ready')p=100;
           if(p!=null)this.progress=Math.max(0,Math.min(100,p));
           const file=String((info&&((info.file||info.name)))||'').trim();
           const suffix=file?' · '+file.split('/').pop():'';
-          this.statusText=this.device.toUpperCase()+' · loading '+model.model+suffix+(p!=null?' · '+p.toFixed(1)+'%':'');
+          this.statusText=(this.offlineOnly?'INDEXEDDB CACHE':'DOWNLOADING')+' · '+this.device.toUpperCase()+' · '+model.model+suffix+(p!=null?' · '+p.toFixed(1)+'%':'');
           this.emit({loading:true});
         };
         this.generator=await lib.pipeline('text-generation',model.model,{device:this.device,dtype:this.dtype,progress_callback:progress});
-        this.model=model;this.loadedModelId=model.id;this.loading=false;this.progress=100;this.statusText=this.device.toUpperCase()+' · '+model.model+' ready';this.emit({loading:false,progress:100,statusText:this.statusText});return model;
-      }catch(e){this.generator=null;this.loadedModelId='';this.loading=false;this.emit({loading:false,progress:0,statusText:'Model load failed: '+(e&&e.message||String(e))});throw e;}
+        const manifest=await this.cache.finishModel();
+        if(!manifest?.complete)throw new Error('The model finished loading but could not be saved to IndexedDB.');
+        this.model=model;this.loadedModelId=model.id;this.loading=false;this.progress=100;
+        // Lock subsequent model/runtime reads to the persistent cache. Inference must not
+        // silently fall back to downloading a missing asset.
+        this.offlineOnly=true;
+        if(lib.env)lib.env.allowRemoteModels=false;
+        this.statusText=(this.cacheHit?'INDEXEDDB CACHE':'DOWNLOADED + CACHED')+' · '+this.device.toUpperCase()+' · '+model.model+' ready';
+        this.emit({loading:false,progress:100,statusText:this.statusText});return model;
+      }catch(e){
+        this.cache.cancelModel();
+        this.generator=null;this.loadedModelId='';this.loading=false;
+        const detail=e&&e.message||String(e);
+        const message=this.offlineOnly?'Offline cache could not fully load this model: '+detail:'Model load failed: '+detail;
+        this.emit({loading:false,progress:0,statusText:message});
+        throw new Error(message);
+      }
     }
     cancel(){try{if(this.stopper&&this.stopper.interrupt)this.stopper.interrupt();}catch(_){}}
     requireGenerator(){if(!this.generator)throw new Error('No local AI model is loaded. Open AI Settings and load a local model.');return this.generator;}
@@ -133,7 +198,7 @@
           const canFallback=this.device==='webgpu'&&!!model&&!generated&&isWebGPUBufferFailure(error)&&!(signal&&signal.aborted);
           if(!canFallback)throw error;
           this.emit({loading:true,statusText:'WebGPU inference failed. Retrying this request on CPU (WASM)…'});
-          try{await this.unload(false);await this.load(model,{device:'wasm'});}
+          try{await this.unload(false);await this.load(model,{device:'wasm',offlineOnly:true});}
           catch(fallbackError){throw new Error('WebGPU inference failed and the CPU (WASM) fallback could not load: '+(fallbackError&&fallbackError.message||String(fallbackError)));}
           if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
           return await run();
