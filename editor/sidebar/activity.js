@@ -226,6 +226,15 @@
     state.sidebar = 'explorer';
     return {
       explorer, runDebug, settings, extensions, search, sourceControl, profile, documentation, show, dispose() { extensions.dispose?.(); githubUnsubscribe?.(); },
+      refreshExplorer() {
+        explorer.refresh();
+      },
+      revealInExplorer(path) {
+        const visible = state.sidebar === 'explorer' && !tree.classList.contains('activity-collapsed');
+        if (!visible) show('explorer');
+        else explorer.show();
+        if (path) explorer.reveal(path);
+      },
       setActiveActivity(id) { document.querySelectorAll('.activity-button').forEach(x => x.classList.toggle('active', x.id === id)); },
       restoreCollapsed: paths => explorer.restoreCollapsed(paths),
       setWidth, collapse, expand, getWidth: () => width

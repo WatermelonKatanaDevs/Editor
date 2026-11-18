@@ -48,6 +48,7 @@
       this.hideNodeModules = !!options.hideNodeModules;
       this.readOnly = !!options.readOnly;
       this.canContextMenu = options.canContextMenu || (() => true);
+      this.shouldRender = typeof options.shouldRender === 'function' ? options.shouldRender : (() => true);
       this.selectedNode = null;
       this.errorToast = null;
       this.errorToastTimer = null;
@@ -105,11 +106,11 @@
     }
     setShowHiddenFiles(value) {
       this.showHiddenFiles = !!value;
-      this.refresh();
+      this.refresh({notify:false});
     }
     setHideNodeModules(value, refresh = true) {
       this.hideNodeModules = !!value;
-      if (refresh) this.refresh();
+      if (refresh) this.refresh({notify:false});
     }
     isHiddenPath(path) {
       return this.basename(path).startsWith('.');
@@ -289,14 +290,18 @@
       }));
       node.children?.forEach(x => this.sortTree(x));
     }
-    refresh() {
+    refresh(options = {}) {
+      const notify = options !== false && options.notify !== false;
       this.buildTree();
       this.render();
-      this.onChange();
+      if (notify) this.onChange();
     }
     render() {
       const container = this.tree;
-      if (!container) return;
+      // The file manager shares the sidebar's single content element with
+      // Settings, Search, Source Control, and the other activities. Keep the
+      // tree model current in the background, but never replace another panel.
+      if (!container || !this.shouldRender()) return;
       container.innerHTML = '';
       container.appendChild(document.createTextNode(typeof this.projectName === 'function' ? this.projectName() : this.projectName || 'Workspace'));
       const buttons = document.createElement('span');

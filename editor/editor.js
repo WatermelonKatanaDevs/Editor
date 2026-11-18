@@ -4023,6 +4023,10 @@ window.__editorInitPromise = (async function () {
       markDirty,
       onOpenResult: openSearchResult
     });
+    // Keep programmatic file-tree updates on the same path as the Explorer UI.
+    // Source Control restore and other workspace operations use this hook.
+    state.refreshExplorer = () => state.sidebarController?.refreshExplorer?.();
+    state.revealInExplorer = path => state.sidebarController?.revealInExplorer?.(path);
     state.sidebar = 'explorer';
     state.previews = new EditorPreviewManager(state);
     for (const provider of window.EditorPreviewProviders || []) state.previews.register(provider);
