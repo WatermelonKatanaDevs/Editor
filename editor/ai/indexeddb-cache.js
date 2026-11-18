@@ -92,6 +92,9 @@
         headers:Array.from(response.headers.entries()),
         storedAt:Date.now()
       };
+      // Record the expected file before writing. If IndexedDB quota is exhausted,
+      // post-load verification can detect the missing blob and refuse to mark it cached.
+      this.recordModelFile(url,body.size);
       const db=await this.open();
       const tx=db.transaction(FILES,'readwrite'),done=transactionDone(tx);
       tx.objectStore(FILES).put(record);
