@@ -146,7 +146,8 @@
         };
         this.generator=await lib.pipeline('text-generation',model.model,{device:this.device,dtype:this.dtype,progress_callback:progress});
         const manifest=await this.cache.finishModel();
-        if(!manifest?.complete)throw new Error('The model finished loading but could not be saved to IndexedDB.');
+        const persisted=manifest?.complete&&await this.cache.isModelCached(model.id,model.model,variant);
+        if(!persisted)throw new Error('The model loaded, but one or more files could not be persisted in IndexedDB. Check available browser storage and try again.');
         this.model=model;this.loadedModelId=model.id;this.loading=false;this.progress=100;
         // Lock subsequent model/runtime reads to the persistent cache. Inference must not
         // silently fall back to downloading a missing asset.
@@ -156,7 +157,9 @@
         this.emit({loading:false,progress:100,statusText:this.statusText});return model;
       }catch(e){
         this.cache.cancelModel();
+        const failedGenerator=this.generator;
         this.generator=null;this.loadedModelId='';this.loading=false;
+        try{await failedGenerator?.dispose?.();}catch(_){}
         const detail=e&&e.message||String(e);
         const message=this.offlineOnly?'Offline cache could not fully load this model: '+detail:'Model load failed: '+detail;
         this.emit({loading:false,progress:0,statusText:message});
