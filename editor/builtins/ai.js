@@ -286,7 +286,7 @@
           const modelBytes=[...groups.values()].reduce((sum,group)=>sum+[...group.files.values()].reduce((a,b)=>a+b,0),0);
           const quota=storage.quota?formatCacheBytes(storage.quota):'unreported';
           const persistence=storage.persisted?'persistent storage granted':'persistent storage not granted';
-          cacheSummary.textContent=groups.size+' cached model'+(groups.size===1?'':'s')+' · '+formatCacheBytes(modelBytes)+' model files · '+formatCacheBytes(Math.max(0,stats.bytes-modelBytes))+' runtime/other assets · '+persistence+' · origin quota '+quota;
+          cacheSummary.textContent=groups.size+' cached model'+(groups.size===1?'':'s')+' · '+formatCacheBytes(modelBytes)+' model files · '+stats.fileCount+' total cached assets including runtime files · '+persistence+' · origin quota '+quota;
           if(!groups.size){
             cacheList.innerHTML='<div class="ai-local-cache-empty">No completed local models are cached yet. Loading a local model will save it here.</div>';
           }else{
