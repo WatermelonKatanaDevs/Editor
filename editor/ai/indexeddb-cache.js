@@ -199,6 +199,19 @@
       }
       return this.persistencePromise;
     }
+    async cacheStats(){
+      const db=await this.open(),tx=db.transaction([FILES,MODELS],'readonly'),done=transactionDone(tx);
+      const [files,models]=await Promise.all([
+        requestResult(tx.objectStore(FILES).getAll()),
+        requestResult(tx.objectStore(MODELS).getAll())
+      ]);
+      await done;
+      return {
+        bytes:(files||[]).reduce((sum,file)=>sum+(Number(file.size)||0),0),
+        fileCount:(files||[]).length,
+        modelCount:new Set((models||[]).filter(item=>item?.complete).map(item=>item.id)).size
+      };
+    }
     async storageInfo(){
       let estimate={usage:null,quota:null};
       try{estimate=await navigator.storage?.estimate?.()||estimate;}catch(_){}
