@@ -255,9 +255,73 @@
   const edit=local?'<button data-local-edit="'+escapeHtml(m.id)+'">Edit</button>':'<button data-edit="'+escapeHtml(m.id)+'">Edit</button>';
   return '<div class="ai-model-row '+(active?'active ':'')+(local?'local':'remote')+'"><div class="ai-model-main"><strong>'+escapeHtml(m.name)+'</strong><span title="'+escapeHtml(details)+'">'+escapeHtml(details)+'</span></div><button data-use="'+escapeHtml(m.id)+'" '+(active&&(!local||loaded)?'disabled':'')+'>'+action+'</button>'+edit+'<button data-remove="'+escapeHtml(m.id)+'" '+(models.length<=1?'disabled title="At least one model must remain"':'')+'>×</button></div>';
 }).join('')}</div>
+<div class="ai-local-cache"><div class="ai-local-cache-heading"><strong>Persistent local AI cache</strong><button type="button" data-refresh-local-cache>Refresh</button></div><p>Model files and the Transformers.js runtime are stored in IndexedDB. Completed models can be loaded without network access.</p><div class="ai-local-cache-summary" data-local-cache-summary>Checking browser storage…</div><div class="ai-local-cache-list" data-local-cache-list></div></div>
 <div class="ai-model-actions"><button class="ai-settings-add" data-add>+ Add remote model</button><button class="ai-settings-add" data-add-local>+ Add local model</button></div><div class="ai-model-editor-slot"><div class="ai-local-model-editor" data-local-editor hidden><h3 data-local-editor-title>Add local model</h3><label>Name<input data-local-name placeholder="Qwen3 4B Instruct · Local"></label><label>Model ID<div class="ai-model-input-row"><input data-local-model placeholder="onnx-community/owner-model-ONNX"><button type="button" data-browse-local-models>Browse</button></div></label><div class="ai-local-editor-status" data-local-editor-status></div><div class="ai-add-actions"><button type="button" data-cancel-local>Cancel</button><button type="button" data-save-local>Save model</button></div></div>
 <div class="ai-add-model" hidden><label>Provider<select data-provider>${Object.entries(providers).filter(([id])=>id!=='local').map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>API format<select data-format>${Object.entries(aiRoot.AI_PROTOCOLS||{}).map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>Name<input data-name placeholder="My model"></label><label>Endpoint<input data-endpoint placeholder="https://api.example.com/v1"></label><label>Model ID <div class="ai-model-input-row"><input data-model placeholder="model-name"><button type="button" data-browse-models>Browse models</button></div></label><label>API key <input data-key type="password" placeholder="Enter your provider key"></label><label class="ai-check"><input data-remember type="checkbox"> Remember API key on this device</label><label class="ai-check"><input data-tools type="checkbox" checked> Supports native tool calling</label><label class="ai-check"><input data-thinking type="checkbox" checked> Supports reasoning</label><div class="ai-add-hint" data-protocol-hint>Select a provider to fill in its API format and endpoint. You can override the endpoint for compatible services.</div><div class="ai-add-actions"><button data-cancel-model>Cancel</button><button data-save-model>Save model</button></div></div></div><div class="ai-local-load-status" data-local-settings-status hidden><div data-local-settings-text></div><div class="ai-local-progress"><span data-local-settings-progress></span></div></div><div class="ai-hf-account"><div class="ai-section-title">Hugging Face</div><label>Your API key<input data-hf-global-key type="password" placeholder="hf_..."></label><label class="ai-check"><input data-hf-global-remember type="checkbox"> Remember your key on this device</label><div class="ai-add-hint">Used for Hugging Face models that do not have their own key. Add a key here or on an individual model.</div></div></section><section><div class="ai-section-title">Permissions</div><div class="ai-permission-list">${Object.entries(permissions.all()).map(([k,v])=>`<label><span>${escapeHtml(TOOL_PERMISSION_LABELS[k]||k)}</span><select data-permission="${k}"><option value="always" ${v==='always'?'selected':''}>Always allow</option><option value="ask" ${v==='ask'?'selected':''}>Ask each time</option><option value="never" ${v==='never'?'selected':''}>Never allow</option></select></label>`).join('')}</div><button data-reset-permissions class="ai-settings-reset">Reset permissions</button></section></div><div class="ai-settings-note">Providers can fill in the API format and default endpoint automatically. Providers may expose either a live model list or a fixed set of known models.</div></div><div data-settings-panel="context" hidden><div class="ai-context-panel"><h3 class="ai-section-title">Model context &amp; instructions</h3><p class="ai-settings-note-inline">These are added to the built-in coding-assistant instructions. They persist on this device and apply to your AI chats.</p><label>Additional instructions<textarea data-custom-instructions placeholder="Example: Prefer small, focused changes. Explain tradeoffs briefly."></textarea></label><label>Agent-only instructions<textarea data-agent-instructions placeholder="Example: Before editing, inspect related files and run a targeted verification after each major change."></textarea></label><label class="ai-check"><input data-show-activity type="checkbox"> Show agent activity in chat</label><h3 class="ai-section-title">Request recovery</h3><label class="ai-check"><input data-retry-429 type="checkbox"> Automatically retry HTTP 429 rate limits</label><div class="ai-retry-grid"><label>Max 429 retries<input data-max-retries type="number" min="0" max="10"></label><label>Base delay (ms)<input data-base-delay type="number" min="250" max="30000" step="250"></label></div><label class="ai-check"><input data-retry-transport type="checkbox"> Retry transport/CORS failures</label><div class="ai-retry-grid"><label>Max transport retries<input data-max-transport-retries type="number" min="0" max="10"></label><label>Transport delay (ms)<input data-transport-delay type="number" min="250" max="30000" step="250"></label></div><p class="ai-settings-note-inline">HTTP responses such as 429 are handled separately from transport failures such as CORS or connection errors.</p><h3 class="ai-section-title">Tool-call recovery</h3><label class="ai-check"><input data-tool-recovery type="checkbox"> Retry supported tool-call parse failures</label><div class="ai-retry-grid"><label>Max recovery retries<input data-tool-recovery-retries type="number" min="0" max="10"></label><span></span></div><p class="ai-settings-note-inline">Providers can opt into a recovery strategy through their API adapter. The agent itself does not special-case providers.</p></div></div><div data-settings-panel="analytics" hidden><div class="ai-analytics-panel"><div class="ai-analytics-cards" data-analytics-cards></div><h3 class="ai-section-title">By model</h3><div data-analytics-models class="ai-analytics-models"></div><button data-reset-analytics class="ai-settings-reset">Reset analytics</button></div></div></div>`;
       modal.querySelector('.editor-modal-close').onclick=()=>modal.remove(); modal.onclick=e=>{if(e.target===modal)modal.remove();};
+      const cacheSummary=modal.querySelector('[data-local-cache-summary]');
+      const cacheList=modal.querySelector('[data-local-cache-list]');
+      function formatCacheBytes(value){
+        const bytes=Math.max(0,Number(value)||0);
+        if(bytes<1024)return bytes+' B';
+        const units=['KB','MB','GB','TB'];let size=bytes/1024,index=0;
+        while(size>=1024&&index<units.length-1){size/=1024;index++;}
+        return size.toFixed(size>=100?0:size>=10?1:2)+' '+units[index];
+      }
+      async function renderLocalCache(){
+        if(!cacheSummary||!cacheList)return;
+        const cache=localManager?.cache;
+        if(!cache){cacheSummary.textContent='IndexedDB cache is unavailable.';return;}
+        cacheSummary.textContent='Reading IndexedDB…';cacheList.innerHTML='';
+        try{
+          const [entries,stats,storage]=await Promise.all([cache.listModels(),cache.cacheStats(),cache.storageInfo()]);
+          const groups=new Map();
+          for(const entry of entries){
+            const key=entry.id+'::'+entry.model;
+            if(!groups.has(key))groups.set(key,{id:entry.id,model:entry.model,variants:new Set(),files:new Map(),cachedAt:entry.cachedAt||0});
+            const group=groups.get(key);group.variants.add(entry.variant);
+            for(const file of entry.files||[])group.files.set(file.url,Number(file.size)||0);
+            group.cachedAt=Math.max(group.cachedAt,Number(entry.cachedAt)||0);
+          }
+          const modelBytes=[...groups.values()].reduce((sum,group)=>sum+[...group.files.values()].reduce((a,b)=>a+b,0),0);
+          const quota=storage.quota?formatCacheBytes(storage.quota):'unreported';
+          const persistence=storage.persisted?'persistent storage granted':'persistent storage not granted';
+          cacheSummary.textContent=groups.size+' cached model'+(groups.size===1?'':'s')+' · '+formatCacheBytes(modelBytes)+' model files · '+formatCacheBytes(Math.max(0,stats.bytes-modelBytes))+' runtime/other assets · '+persistence+' · origin quota '+quota;
+          if(!groups.size){
+            cacheList.innerHTML='<div class="ai-local-cache-empty">No completed local models are cached yet. Loading a local model will save it here.</div>';
+          }else{
+            cacheList.innerHTML=[...groups.values()].sort((a,b)=>b.cachedAt-a.cachedAt).map(group=>{
+              const name=registry.settings.models.find(model=>model.id===group.id)?.name||group.model;
+              const bytes=[...group.files.values()].reduce((sum,size)=>sum+size,0);
+              return '<div class="ai-local-cache-row"><div><strong>'+escapeHtml(name)+'</strong><span>'+escapeHtml(group.model)+' · '+escapeHtml([...group.variants].join(', '))+' · '+formatCacheBytes(bytes)+' · '+group.files.size+' files</span></div><button type="button" data-cache-remove="'+escapeHtml(group.id)+'">Delete cache</button></div>';
+            }).join('');
+            cacheList.querySelectorAll('[data-cache-remove]').forEach(button=>button.onclick=async()=>{
+              const id=button.dataset.cacheRemove;
+              const model=registry.settings.models.find(item=>item.id===id);
+              if(!confirm('Delete the cached files for "'+(model?.name||id)+'"? This does not remove the model from AI Settings.'))return;
+              button.disabled=true;
+              try{await cache.deleteModel(id);await renderLocalCache();}
+              catch(error){alert('Could not delete the cached model: '+(error?.message||String(error)));button.disabled=false;}
+            });
+          }
+          if(!storage.persisted){
+            const persist=document.createElement('button');persist.type='button';persist.className='ai-local-cache-persist';persist.textContent='Request persistent storage';
+            persist.onclick=async()=>{
+              persist.disabled=true;
+              try{
+                const result=await cache.requestPersistence();
+                persist.textContent=result.persisted?'Persistent storage granted':'Browser declined persistent storage';
+                await renderLocalCache();
+              }catch(error){persist.textContent='Could not request storage';}
+            };
+            cacheSummary.appendChild(document.createTextNode(' '));cacheSummary.appendChild(persist);
+          }
+        }catch(error){
+          cacheSummary.textContent='Could not read IndexedDB cache: '+(error?.message||String(error));
+        }
+      }
+      modal.querySelector('[data-refresh-local-cache]')?.addEventListener('click',renderLocalCache);
+      renderLocalCache();
       const prefs=aiRoot.getAIPreferences?.()||{};
       const tabButtons=[...modal.querySelectorAll('[data-settings-tab]')], panels=[...modal.querySelectorAll('[data-settings-panel]')];
       function selectSettingsTab(name){tabButtons.forEach(b=>b.classList.toggle('active',b.dataset.settingsTab===name));panels.forEach(p=>p.hidden=p.dataset.settingsPanel!==name);if(name==='analytics')renderAnalytics();}
