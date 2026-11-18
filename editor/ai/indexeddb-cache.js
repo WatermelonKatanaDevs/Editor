@@ -154,7 +154,12 @@
       const db=await this.open(),tx=db.transaction(MODELS,'readonly'),done=transactionDone(tx);
       const values=await requestResult(tx.objectStore(MODELS).getAll());
       await done;
-      return (values||[]).filter(item=>item?.complete).sort((a,b)=>(b.cachedAt||0)-(a.cachedAt||0));
+      const manifests=(values||[]).filter(item=>item?.complete);
+      const valid=[];
+      for(const manifest of manifests){
+        if(await this.isModelCached(manifest.id,manifest.model,manifest.variant))valid.push(manifest);
+      }
+      return valid.sort((a,b)=>(b.cachedAt||0)-(a.cachedAt||0));
     }
     async deleteModel(id){
       const db=await this.open();
