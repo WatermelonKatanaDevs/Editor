@@ -67,7 +67,7 @@
     }
   }
   class LocalModelManager{
-    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;}
+    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;this.runtimeAssets=[];}
     subscribe(fn){if(typeof fn!=='function')return ()=>{};this.listeners.add(fn);fn(this.status());return ()=>this.listeners.delete(fn);}
     status(){return {loading:this.loading,loadedModelId:this.loadedModelId,loaded:!!this.generator,progress:this.progress,text:this.statusText,device:this.device,dtype:this.dtype,offlineOnly:this.offlineOnly,cacheHit:this.cacheHit};}
     emit(patch){Object.assign(this,patch||{});const state=this.status();for(const fn of this.listeners){try{fn(state);}catch(e){console.warn('Local AI status listener failed:',e);}}}
@@ -92,6 +92,8 @@
         catch(error){URL.revokeObjectURL(blobUrl);throw new Error('Could not load the cached Transformers.js runtime: '+(error&&error.message||String(error)));}
         if(lib.env){
           const env=lib.env;
+          const wasmPaths=env.backends?.onnx?.wasm?.wasmPaths;
+          if(wasmPaths&&typeof wasmPaths==='object')this.runtimeAssets=[wasmPaths.wasm,wasmPaths.mjs].filter(value=>typeof value==='string'&&/^https?:/i.test(value));
           env.useCustomCache=true;
           env.customCache=this.cache;
           env.useBrowserCache=false;
@@ -128,7 +130,9 @@
       try{this.cache.requestPersistence();}catch(_){}
       try{
         const lib=await this.library();
-        const cached=!strictOffline&&await this.cache.isModelCached(model.id,model.model,variant);
+        const runtimeHits=await Promise.all(this.runtimeAssets.map(url=>this.cache.match(url).then(Boolean)));
+        const runtimeCached=runtimeHits.every(Boolean);
+        const cached=!strictOffline&&runtimeCached&&await this.cache.isModelCached(model.id,model.model,variant);
         this.cacheHit=!!cached;
         this.offlineOnly=!!(strictOffline||cached);
         if(lib.env)lib.env.allowRemoteModels=!this.offlineOnly;
@@ -145,6 +149,8 @@
           this.emit({loading:true});
         };
         this.generator=await lib.pipeline('text-generation',model.model,{device:this.device,dtype:this.dtype,progress_callback:progress});
+        const runtimePersisted=await Promise.all(this.runtimeAssets.map(url=>this.cache.match(url).then(Boolean)));
+        if(!runtimePersisted.every(Boolean))throw new Error('ONNX Runtime WASM assets could not be saved in IndexedDB. The model cannot be used offline until the runtime files are cached.');
         const manifest=await this.cache.finishModel();
         const persisted=manifest?.complete&&await this.cache.isModelCached(model.id,model.model,variant);
         if(!persisted)throw new Error('The model loaded, but one or more files could not be persisted in IndexedDB. Check available browser storage and try again.');
