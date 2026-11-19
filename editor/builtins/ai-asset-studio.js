@@ -53,31 +53,13 @@
       catch (error) { providerPromise = null; throw error; }
     }
     function setProgress(info) {
-      const p = info?.progress;
-      const percent = p == null ? null : Math.round(Math.max(0,Math.min(1,p))*100);
-      const phase = String(info?.phase || 'Working…');
+      const value = Number(info?.progress);
+      const percent = Number.isFinite(value) ? Math.round(Math.max(0,Math.min(1,value))*100) : null;
       progressBar.style.width = percent == null ? '0%' : percent + '%';
       progressPercent.textContent = percent == null ? '' : percent + '%';
-      progress.textContent = phase;
-
-      // Prompt encoding is computation, not a download. Only show byte counts
-      // when the provider actually reports downloaded bytes.
-      if (Number(info?.loaded) > 0 && !phase.startsWith('Drawing row')) {
-        const loaded = (Number(info.loaded)/1e6).toFixed(1);
-        progress.textContent += info.total > 0
-          ? ' · ' + loaded + ' / ' + (Number(info.total)/1e6).toFixed(1) + ' MB'
-          : ' · ' + loaded + ' MB downloaded';
-      } else if (info?.tokens) {
-        progress.textContent += ' · ' + info.tokens + ' tokens';
-      } else if (Number(info?.elapsedMs) > 0) {
-        progress.textContent += ' · ' + Number(info.elapsedMs).toFixed(0) + ' ms';
-      }
-
-      if (phase === 'Tokenizing prompt') status.textContent = 'Tokenizing prompt locally…';
-      else if (phase.startsWith('Running text encoder')) status.textContent = 'Encoding prompt locally on CPU…';
-      else if (phase === 'Prompt encoded') status.textContent = 'Prompt encoded · ' + Number(info.elapsedMs || 0).toFixed(0) + ' ms';
-      else if (phase.startsWith('Generating sprites')) status.textContent = phase;
-      else if (phase.startsWith('Drawing row')) status.textContent = 'Generating sprites · ' + (provider?.backend || 'local').toUpperCase();
+      // Providers own the wording and progress calculation. The Editor only
+      // renders the common message + normalized progress contract.
+      progress.textContent = info?.message || 'Working…';
     }
     function makeField(field) {
       const wrap = document.createElement('label'); wrap.className = 'ais-field'; wrap.dataset.key = field.key;
@@ -170,7 +152,7 @@
       generateButton.disabled = false;
       for (const url of objectUrls) URL.revokeObjectURL(url);
       objectUrls.clear(); results.replaceChildren(); caption.textContent = prompt;
-      status.textContent = 'Preparing prompt…'; progressBar.style.width = '0%';
+      status.textContent = 'Generating…'; progressBar.style.width = '0%';
       progress.textContent = 'Preparing prompt…'; progressPercent.textContent = '0%';
       const resetResults = () => {
         for (const url of objectUrls) URL.revokeObjectURL(url);
