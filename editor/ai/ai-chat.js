@@ -470,7 +470,7 @@
         sendEvent({type:'step',step:step+1,maxSteps});
         if(canNative) {
           sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps});
-          const msg=await provider.complete(working,{model,tools:toolDefs,signal:options.signal,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay,onResponse:info=>sendEvent({type:'request_response',...info})});
+          const msg=await provider.complete(working,{model,conversationId:options.conversationId,modelId:options.modelId||model.id||null,tools:toolDefs,signal:options.signal,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay,onResponse:info=>sendEvent({type:'request_response',...info})});
           const think=msg.reasoning_content||msg.reasoning||'';
           if(think){reasoning+=think;sendEvent({type:msg.reasoning_kind==='summary'?'reasoning_summary':'reasoning',text:think});}
           const calls=Array.isArray(msg.tool_calls)?msg.tool_calls.map((x,i)=>({id:x.id||x._geminiCallId||('tool-'+Date.now()+'-'+i),name:x.function?.name,arguments:x.function?.arguments||'{}',_geminiCallId:x._geminiCallId||null})).filter(x=>x.name):[];
@@ -502,7 +502,7 @@
         }
       }
       sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',final:true});
-      const finalMsg=await provider.complete(working,{model,signal:options.signal,systemPrompt:(options.systemPrompt||'')+(options.finalInstructions||this.finalInstructions||''),thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay,onResponse:info=>sendEvent({type:'request_response',...info})});
+      const finalMsg=await provider.complete(working,{model,conversationId:options.conversationId,modelId:options.modelId||model.id||null,signal:options.signal,systemPrompt:(options.systemPrompt||'')+(options.finalInstructions||this.finalInstructions||''),thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay,onResponse:info=>sendEvent({type:'request_response',...info})});
       const finalThink=finalMsg.reasoning_content||finalMsg.reasoning||'';
       if(finalThink){reasoning+=finalThink;sendEvent({type:finalMsg.reasoning_kind==='summary'?'reasoning_summary':'reasoning',text:finalThink});}
       finalText=stripToolProtocol(String(finalMsg.content||''),registeredTools);sendEvent({type:'final',text:finalText,reasoning,stepLimitReached:true});return {text:finalText,reasoning,stepLimitReached:true};
