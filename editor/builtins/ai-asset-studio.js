@@ -691,7 +691,7 @@
       window.addEventListener('beforeunload',releaseUrls,{once:true});
     }
     return {
-      title:'AI Asset Studio',
+      title:'AI Studio',
       icon:'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 4h16v16H4zM8 8h8v8H8z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2 9V2h7M15 2h7v7M22 15v7h-7M9 22H2v-7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
       render(group) { render(group); },
       dispose() { abortController?.abort(); releaseUrls(); releaseGalleryUrls(); closeContextMenu(); closeGalleryPopover(); provider?.dispose?.(); }
