@@ -348,7 +348,10 @@
           env.useBrowserCache=false;
           env.useFSCache=false;
           env.useWasmCache=true;
-          env.allowLocalModels=false;
+          // Keep the local model backend enabled. Offline mode disables remote model
+          // access separately; disabling both flags makes Transformers.js reject
+          // pipeline creation before the IndexedDB cache can be consulted.
+          env.allowLocalModels=true;
           const baseFetch=env.fetch||window.fetch.bind(window);
           env.fetch=async(input,options)=>{
             if(this.offlineOnly){
