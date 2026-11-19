@@ -199,7 +199,8 @@ const makeEditorTools = (() => {
 })();
 
 
-  const SYSTEM = 'You are the AI coding assistant inside a browser-based code editor. Be practical, precise, and concise. Use Markdown for explanations and fenced code blocks for code. Use the minimum number of tool calls necessary to complete the user\'s request. Decide after each tool result whether another tool call is actually needed; do not inspect files or run commands merely to be thorough. Once you have enough information to answer, give the final answer instead of taking another tool step. For read-only requests such as summarizing or explaining a file, stop after you have gathered the relevant information. For modification tasks, make the requested changes, perform a targeted verification when appropriate, and then stop once the task is complete. If you have already completed all necessary tool work and need to finish the agent immediately, use the exit_early tool and put the complete final answer in its message. Do not claim a change was made unless the tool succeeded. When working on the project, inspect existing files before changing them, preserve the project\'s existing style, and verify changes by running relevant commands when available. The run_command tool uses the editor\'s virtual Node runtime, not a real operating-system shell: never prefix commands with $ and do not assume arbitrary shell features such as pipes or shell redirection are available; simple commands such as echo are supported. For project filesystem work, use the dedicated file tools.';
+  const SYSTEM = 'You are an AI assistant inside a browser-based code editor. Be practical, precise, and concise. Use Markdown for explanations and fenced code blocks for code. Answer directly using the information provided in the conversation and any project context included below. Do not claim to have inspected, changed, or run anything unless that actually happened. When you cannot perform an action yourself, explain what the user can do or provide the code or steps they need.';
+  const AGENT_SYSTEM = 'You are the AI coding assistant inside a browser-based code editor. Be practical, precise, and concise. Use Markdown for explanations and fenced code blocks for code. Use the minimum number of tool calls necessary to complete the user\'s request. Decide after each tool result whether another tool call is actually needed; do not inspect files or run commands merely to be thorough. Once you have enough information to answer, give the final answer instead of taking another tool step. For read-only requests such as summarizing or explaining a file, stop after you have gathered the relevant information. For modification tasks, make the requested changes, perform a targeted verification when appropriate, and then stop once the task is complete. If you have already completed all necessary tool work and need to finish the agent immediately, use the exit_early tool and put the complete final answer in its message. Do not claim a change was made unless the tool succeeded. When working on the project, inspect existing files before changing them, preserve the project\'s existing style, and verify changes by running relevant commands when available. The run_command tool uses the editor\'s virtual Node runtime, not a real operating-system shell: never prefix commands with $ and do not assume arbitrary shell features such as pipes or shell redirection are available; simple commands such as echo are supported. For project filesystem work, use the dedicated file tools.';
   const AGENT_TOOL_INSTRUCTIONS = [
     'You can use the editor actions listed in the tool schemas below.',
     'When you need a tool, emit one or more <tool_call> JSON tags, each with a name and arguments object.',
@@ -907,11 +908,13 @@ const makeEditorTools = (() => {
     }
     function systemPrompt(forAgent=false) {
       const context=aiRoot.buildContext(state,{maxFileChars:20000});
-      const toolNames=toolset.list().map(x=>x.name).join(', ');
       const prefs=aiRoot.getAIPreferences?.()||{};
       const custom=String(prefs.customInstructions||'').trim();
       const agentExtra=forAgent?String(prefs.agentInstructions||'').trim():'';
-      return [SYSTEM,custom?`User instructions:\n${custom}`:'',agentExtra?`Agent instructions:\n${agentExtra}`:'',`Current project context:\n${context}\n\nAvailable tools: ${toolNames}. Use tools rather than guessing file contents. Do not claim a change was made unless the tool succeeded.`].filter(Boolean).join('\n\n');
+      const agentContext=forAgent
+        ? `\n\nAvailable tools: ${toolset.list().map(x=>x.name).join(', ')}. Use tools rather than guessing file contents. Do not claim a change was made unless the tool succeeded.`
+        : '';
+      return [forAgent?AGENT_SYSTEM:SYSTEM,custom?`User instructions:\n${custom}`:'',agentExtra?`Agent instructions:\n${agentExtra}`:'',`Current project context:\n${context}${agentContext}`].filter(Boolean).join('\n\n');
     }
     function chatManageModal() {
       const modal=document.createElement('div'); modal.className='editor-modal ai-chat-manage-modal';
