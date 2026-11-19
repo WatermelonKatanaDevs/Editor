@@ -538,11 +538,11 @@
       if(options.agentOptions)this.createAgent(options.agentOptions);
     }
     createAgent(options={}) {
-      const AgentRunner=root.AIAgent;if(typeof AgentRunner!=='function')throw new Error('Agent mode is unavailable.');
+      const AgentRunner=editorRoot.AIAgent;if(typeof AgentRunner!=='function')throw new Error('Agent mode is unavailable.');
       const agent=options instanceof AgentRunner?options:new AgentRunner({...options,chatAI:this});agent.chatAI=this;return this.registerAgent(agent);
     }
     registerAgent(agent) {
-      const AgentRunner=root.AIAgent;if(typeof AgentRunner!=='function'||!(agent instanceof AgentRunner))throw new TypeError('Agents must be AIAgent instances.');
+      const AgentRunner=editorRoot.AIAgent;if(typeof AgentRunner!=='function'||!(agent instanceof AgentRunner))throw new TypeError('Agents must be AIAgent instances.');
       if(!agent.id)agent.id='agent-'+Math.random().toString(36).slice(2);
       if(this.agents.has(agent.id)&&this.agents.get(agent.id)!==agent)throw new Error('Agent already exists: '+agent.id);
       agent.chatAI=this;this.agents.set(agent.id,agent);return agent;
