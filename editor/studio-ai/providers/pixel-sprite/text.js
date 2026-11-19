@@ -24,10 +24,10 @@ export async function loadTextEncoder({ ort, Tokenizer, files, fetchBytes, onPro
 
   async function encode(text, onProgress) {
     if (cache.has(text)) {
-      onProgress?.({ phase:"Prompt embedding cached", cached:true });
+      onProgress?.({ message:"Prompt embedding cached", progress:1, cached:true });
       return cache.get(text);
     }
-    onProgress?.({ phase:"Tokenizing prompt" });
+    onProgress?.({ message:"Tokenizing prompt", progress:null });
     let ids = tokenizer.encode(text).ids;
     if (ids.length > ENCODER.maxTokens) ids = [...ids.slice(0, ENCODER.maxTokens - 1), ids[ids.length - 1]];
     const n = ids.length, shape = [1, n];
@@ -40,7 +40,7 @@ export async function loadTextEncoder({ ort, Tokenizer, files, fetchBytes, onPro
     // browsers run WASM on the main thread when the selected decoder backend is
     // WebGPU, so otherwise the UI can appear frozen at "Preparing prompt".
     await new Promise(resolve => setTimeout(resolve, 0));
-    onProgress?.({ phase:"Running text encoder · WASM", tokens:n });
+    onProgress?.({ message:"Running text encoder · WASM", progress:null, tokens:n });
     const started = performance.now();
     const out = await session.run(feeds);
     const h = out[session.outputNames[0]].data, D = h.length / n, v = new Float32Array(D);
@@ -50,7 +50,7 @@ export async function loadTextEncoder({ ort, Tokenizer, files, fetchBytes, onPro
     norm = Math.sqrt(norm) || 1;
     for (let j = 0; j < D; j++) v[j] /= norm;
     cache.set(text, v);
-    onProgress?.({ phase:"Prompt encoded", elapsedMs:performance.now()-started, tokens:n });
+    onProgress?.({ message:"Prompt encoded", progress:1, elapsedMs:performance.now()-started, tokens:n });
     return v;
   }
   return { encode, tokenizer };
