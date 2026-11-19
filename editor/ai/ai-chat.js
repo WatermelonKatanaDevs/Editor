@@ -312,21 +312,25 @@
   function toolSchema(tools) { return tools.map(t => ({type:'function',function:{name:t.name,description:t.description,parameters:t.parameters||{type:'object',properties:{}}}})); }
   function parseToolArguments(value) {
     if(value==null||value==='')return {};
-    if(typeof value==='object'&&!Array.isArray(value))return value;
-    try { const parsed=JSON.parse(String(value).trim()); return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:{}; }
-    catch(_) { return null; }
+    if(typeof value==='object')return !Array.isArray(value)?value:null;
+    try {
+      const parsed=JSON.parse(String(value).trim());
+      return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:null;
+    } catch(_) { return null; }
   }
   function parseCompatToolBlock(body,allowed) {
-    const value=String(body||'').trim(); if(!value)return null;
+    const value=String(body||'').trim();
+    if(!value)return null;
     const firstLine=value.split(/\r?\n/,1)[0].trim();
     const jsonCall=parseToolArguments(value);
     if(jsonCall?.name&&allowed.has(String(jsonCall.name))) {
       const args=parseToolArguments(jsonCall.arguments??jsonCall.args);
-      return {name:String(jsonCall.name),arguments:args===null?{}:args};
+      return args===null?null:{name:String(jsonCall.name),arguments:args};
     }
     const match=firstLine.match(/^([a-zA-Z_][\w-]*)(?:\s*\(\s*([\s\S]*?)\s*\))?\s*$/);
     if(!match||!allowed.has(match[1]))return null;
-    let args={}; const inline=match[2],remaining=value.slice(firstLine.length).trim();
+    let args={};
+    const inline=match[2],remaining=value.slice(firstLine.length).trim();
     if(inline){const parsed=parseToolArguments(inline);if(parsed===null)return null;args=parsed;}
     else if(remaining){const parsed=parseToolArguments(remaining);if(parsed===null)return null;args=parsed;}
     return {name:match[1],arguments:args};
@@ -334,17 +338,43 @@
   function toolBlockRanges(text,tools=[]) {
     const value=String(text||''),allowed=new Set(tools.map(tool=>String(tool?.name||''))),ranges=[];
     if(!allowed.size)return ranges;
-    const fence=new RegExp('\\x60{3}[^\\r\\n\\x60]*\\r?\\n([\\s\\S]*?)(?:\\x60{3}|$)','g');
-    let match; while((match=fence.exec(value))){if(parseCompatToolBlock(match[1],allowed))ranges.push([match.index,fence.lastIndex]);}
+    const fence=/\x60{3}[^\r\n\x60]*\r?\n([\s\S]*?)(?:\x60{3}|$)/g;
+    let match;
+    while((match=fence.exec(value))){
+      const call=parseCompatToolBlock(match[1],allowed);
+      if(call)ranges.push([match.index,fence.lastIndex,call]);
+    }
     return ranges;
   }
   function parseToolProtocol(text,tools=[]) {
     const value=String(text||''),allowed=new Set(tools.map(tool=>String(tool?.name||''))),out=[];
-    const add=(name,args)=>{if(allowed.has(String(name)))out.push({id:'proto-'+Math.random().toString(36).slice(2),name:String(name),arguments:args||{}});};
-    const re=/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g; let match;
-    while((match=re.exec(value))){try{const call=JSON.parse(match[1]),args=parseToolArguments(call?.arguments??call?.args);if(call?.name&&args!==null)add(call.name,args);}catch(_){}}
-    for(const [start,end] of toolBlockRanges(value,tools)){
-      const block=value.slice(start,end).replace(new RegExp('^\\s*\\x60{3}[^\\r\\n\\x60]*\\r?\\n'),'').replace(new RegExp('\\x60{3}\\s*
+    const add=(name,args)=>{
+      if(allowed.has(String(name)))out.push({id:'proto-'+Math.random().toString(36).slice(2),name:String(name),arguments:args||{}});
+    };
+    const re=/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
+    let match;
+    while((match=re.exec(value))){
+      try {
+        const call=JSON.parse(match[1]);
+        const args=parseToolArguments(call?.arguments??call?.args);
+        if(call?.name&&args!==null)add(call.name,args);
+      } catch(_) {}
+    }
+    for(const [, , call] of toolBlockRanges(value,tools))add(call.name,call.arguments);
+    return out;
+  }
+  function stripToolProtocol(text,tools=[]) {
+    let value=String(text||'').replace(/<tool_call>[\s\S]*?<\/tool_call>/g,'');
+    const ranges=toolBlockRanges(value,tools);
+    for(let i=ranges.length-1;i>=0;i--)value=value.slice(0,ranges[i][0])+value.slice(ranges[i][1]);
+    return value.trim();
+  }
+  function visibleToolProtocolText(text,tools=[]) {
+    const value=String(text||''),tagStart=value.indexOf('<tool_call>'),ranges=toolBlockRanges(value,tools);
+    const firstBlock=ranges.length?ranges[0][0]:-1;
+    const start=tagStart>=0&&firstBlock>=0?Math.min(tagStart,firstBlock):tagStart>=0?tagStart:firstBlock;
+    return start>=0?value.slice(0,start).trimEnd():value;
+  }
   function stringifyResult(value, maxChars=120000) {
     let text;
     try { text=JSON.stringify(value); } catch(_) { text=String(value); }
