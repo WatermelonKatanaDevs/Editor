@@ -55,12 +55,29 @@
     function setProgress(info) {
       const p = info?.progress;
       const percent = p == null ? null : Math.round(Math.max(0,Math.min(1,p))*100);
+      const phase = String(info?.phase || 'Working…');
       progressBar.style.width = percent == null ? '0%' : percent + '%';
       progressPercent.textContent = percent == null ? '' : percent + '%';
-      progress.textContent = info?.phase || 'Working…';
-      if (info?.loaded && !String(info.phase || '').startsWith('Drawing row')) {
-        progress.textContent += ' · ' + (info.loaded/1e6).toFixed(0) + ' / ' + (info.total ? (info.total/1e6).toFixed(0) : '?') + ' MB';
+      progress.textContent = phase;
+
+      // Prompt encoding is computation, not a download. Only show byte counts
+      // when the provider actually reports downloaded bytes.
+      if (Number(info?.loaded) > 0 && !phase.startsWith('Drawing row')) {
+        const loaded = (Number(info.loaded)/1e6).toFixed(1);
+        progress.textContent += info.total > 0
+          ? ' · ' + loaded + ' / ' + (Number(info.total)/1e6).toFixed(1) + ' MB'
+          : ' · ' + loaded + ' MB downloaded';
+      } else if (info?.tokens) {
+        progress.textContent += ' · ' + info.tokens + ' tokens';
+      } else if (Number(info?.elapsedMs) > 0) {
+        progress.textContent += ' · ' + Number(info.elapsedMs).toFixed(0) + ' ms';
       }
+
+      if (phase === 'Tokenizing prompt') status.textContent = 'Tokenizing prompt locally…';
+      else if (phase.startsWith('Running text encoder')) status.textContent = 'Encoding prompt locally on CPU…';
+      else if (phase === 'Prompt encoded') status.textContent = 'Prompt encoded · ' + Number(info.elapsedMs || 0).toFixed(0) + ' ms';
+      else if (phase.startsWith('Generating sprites')) status.textContent = phase;
+      else if (phase.startsWith('Drawing row')) status.textContent = 'Generating sprites · ' + (provider?.backend || 'local').toUpperCase();
     }
     function makeField(field) {
       const wrap = document.createElement('label'); wrap.className = 'ais-field'; wrap.dataset.key = field.key;
@@ -169,7 +186,8 @@
         });
         const seconds = Math.max(result.metadata.elapsedMs/1000, 0.001);
         status.textContent = 'Finished · ' + result.assets.length + ' sprites · seed ' + result.metadata.seed + ' · ' +
-          seconds.toFixed(1) + 's · ' + (result.assets.length/seconds).toFixed(2) + ' sprites/s · ' + result.metadata.backend.toUpperCase();
+          seconds.toFixed(1) + 's · ' + (result.assets.length/seconds).toFixed(2) + ' sprites/s · ' + result.metadata.backend.toUpperCase() +
+          ' · prompt ' + Number(result.metadata.encodingMs || 0).toFixed(0) + ' ms';
         progress.textContent = 'Complete'; progressPercent.textContent = '100%';
         progressBar.style.width = '100%';
       } catch (error) {
