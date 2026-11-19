@@ -206,6 +206,7 @@ const makeEditorTools = (() => {
     'Preferred tool-call syntax: <tool_call>{"name":"list_files","arguments":{"directories":false}}</tool_call>. Replace the example with a registered tool name and a JSON arguments object matching its schema.',
     'A tool call is an instruction to execute, not text to show the user. Do not describe a call in prose or present it as an illustrative code sample.',
     'Local-model compatibility: if you cannot emit the XML tool-call syntax, you may instead put exactly one function-style call in a fenced code block, for example run_command("npm install express") or write_file("server.js", "contents"). Use JSON string literals and positional arguments in the exact order of the registered schema properties. Do not include explanations, multiple statements, or other code in that block.',
+    'To finish the Agent run immediately, use the exit_early tool with your complete final answer in its message argument. Preferred form: <tool_call>{"name":"exit_early","arguments":{"message":"Task completed."}}</tool_call>. Qwen compatibility form: put exit_early("Task completed.") alone on the very last non-empty line of your response. Do not merely print an exit_early example earlier in your response.',
     'For both formats, call only registered tools. Wait for the actual tool result before claiming an action succeeded.',
     'After receiving tool results, continue the task and call more tools only when needed.'
   ].join(' ');
