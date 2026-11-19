@@ -2,7 +2,7 @@
 
 The editor's AI implementation is consolidated into three runtime files:
 
-- `ai-chat.js` — `ChatAI`, conversations, model/provider registry, preferences, analytics, editor context, permissions, tool definitions, and optional agent mode.
+- `ai-chat.js` — `ChatAI`, conversations, model/provider registry, preferences, analytics, generic tool registration/execution API, and optional agent orchestration.
 - `local-chat-provider.js` — local model catalogue, IndexedDB model cache, Transformers.js runtime, and the local provider adapter.
 - `remote-chat-provider.js` — remote protocol client, request/stream handling, retries, and the remote provider adapter.
 
@@ -47,6 +47,6 @@ A `ChatAI` instance manages provider registration and selection, conversation li
 - `runAgent(messages, options)` when an agent-mode runner is configured
 - `cancel()` / `dispose()`
 
-Agent mode is an optional chat execution mode, not a separate framework layer. Its tool loop and tool protocol implementation live inside `ai-chat.js`; the chat UI simply chooses whether to call normal streaming or `runAgent()`.
+Agent mode is an optional chat execution mode, not a separate framework layer. `ChatAI` exposes `registerTool()`, `registerTools()`, `unregisterTool()`, `getTool()`, and `listTools()`. Applications register their own actions through this API and supply agent/tool instructions when configuring the agent. The generic agent loop handles tool schemas, execution, permissions, streaming, and completion without embedding application-specific tools or instructions. The editor's `editor/builtins/ai.js` registers project/editor/GitHub actions and supplies its coding-agent instructions.
 
 Consumers own conversation persistence and may serialize conversations with `toJSON()`. The framework does not create DOM or select a presentation.
