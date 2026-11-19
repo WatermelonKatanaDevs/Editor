@@ -139,7 +139,7 @@
       clearError(); setBusy(true); status.textContent = 'Loading model…'; progressBar.style.width = '0%';
       try {
         await prepareProvider();
-        const result = await provider.initialize({onProgress:setProgress});
+        const result = await provider.initialize({configuration:readConfiguration(),onProgress:setProgress});
         status.textContent = 'Ready · ' + result.backend.toUpperCase() + ' · model cached in this browser';
         generateButton.disabled = false; loadButton.disabled = true; loadButton.textContent = 'Model loaded';
         progressBar.style.width = '100%';
