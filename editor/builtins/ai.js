@@ -877,9 +877,33 @@ const makeEditorTools = (() => {
       input.focus();
       input.setSelectionRange(input.value.length,input.value.length);
       const send=view.t?._viewElement?.querySelector?.('[data-send]');
-      if (send) send.textContent='Resend';
+      if (send) {
+        send.textContent='Resend';
+        const bar=send.parentNode;
+        let cancel=bar?.querySelector?.('[data-cancel-edit]');
+        if(!cancel){
+          cancel=document.createElement('button');
+          cancel.type='button';
+          cancel.dataset.cancelEdit='';
+          cancel.textContent='Cancel';
+          cancel.title='Cancel prompt editing and send a new message instead';
+          cancel.onclick=()=>cancelEdit(input,send);
+          bar?.insertBefore(cancel,send);
+        }
+      }
     }
-    function cancelEdit() { editingIndex=-1; }
+    function cancelEdit(input,send) {
+      editingIndex=-1;
+      const view=getAIView();
+      input=input||view?.t?._viewElement?.querySelector?.('[data-input]')||view?.g?.viewBody?.querySelector?.('[data-input]');
+      send=send||view?.t?._viewElement?.querySelector?.('[data-send]')||view?.g?.viewBody?.querySelector?.('[data-send]');
+      if(send){
+        send.textContent='Send';
+        send.parentNode?.querySelector?.('[data-cancel-edit]')?.remove();
+      }
+      // Keep the text in the composer: it can now be sent as a normal new message.
+      input?.dispatchEvent?.(new Event('input',{bubbles:true}));
+    }
     function resendMessage(index,text,g,t,tree) {
       if (!Number.isInteger(index) || chatMessages[index]?.role !== 'user') return;
       chatMessages=chatMessages.slice(0,index);
@@ -991,7 +1015,7 @@ const makeEditorTools = (() => {
       input.addEventListener('input',updateSendState);
       send.onclick=submit; input.addEventListener('keydown',e=>{if(e.key==='Enter' && !e.shiftKey){e.preventDefault();submit();}});
       updateSendState();
-      if(editingIndex>=0){const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Cancel';cancel.title='Cancel prompt editing';cancel.onclick=()=>{cancelEdit();render(g,t);};send.parentNode.insertBefore(cancel,send);}
+      if(editingIndex>=0){const cancel=document.createElement('button');cancel.type='button';cancel.dataset.cancelEdit='';cancel.textContent='Cancel';cancel.title='Cancel prompt editing and send a new message instead';cancel.onclick=()=>cancelEdit(input,send);send.parentNode.insertBefore(cancel,send);}
       if(chatMessages.length)chat.scrollTop=chat.scrollHeight;
     }
     async function sendMessage(text,g,t,tree){
