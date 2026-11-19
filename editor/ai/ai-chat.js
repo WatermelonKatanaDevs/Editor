@@ -318,25 +318,77 @@
       return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:null;
     } catch(_) { return null; }
   }
+  function splitToolCallArguments(source) {
+    const value=String(source||'').trim();
+    if(!value)return [];
+    const parts=[];
+    let start=0,quoted=false,escaped=false,depth=0;
+    for(let i=0;i<value.length;i++){
+      const char=value[i];
+      if(quoted){
+        if(escaped){escaped=false;continue;}
+        if(char==='\\'){escaped=true;continue;}
+        if(char==='"')quoted=false;
+        continue;
+      }
+      if(char==='"'){quoted=true;continue;}
+      if(char==='{'||char==='[')depth++;
+      else if(char==='}'||char===']'){if(--depth<0)return null;}
+      else if(char===','&&depth===0){parts.push(value.slice(start,i).trim());start=i+1;}
+    }
+    if(quoted||escaped||depth!==0)return null;
+    parts.push(value.slice(start).trim());
+    return parts.some(part=>!part)?null:parts;
+  }
+  function parseFunctionStyleToolCall(value,tool) {
+    const match=String(value||'').trim().match(/^([a-zA-Z_][\w-]*)\s*\(([\s\S]*)\)\s*;?$/);
+    if(!match||match[1]!==String(tool?.name||''))return null;
+    const parts=splitToolCallArguments(match[2]);
+    if(parts===null)return null;
+    if(!parts.length)return {name:match[1],arguments:{}};
+    const properties=Object.keys(tool?.parameters?.properties||{});
+    if(parts.length===1){
+      try{
+        const object=JSON.parse(parts[0]);
+        if(object&&typeof object==='object'&&!Array.isArray(object))return {name:match[1],arguments:object};
+      }catch(_){}
+    }
+    if(parts.length>properties.length)return null;
+    const args={};
+    for(let i=0;i<parts.length;i++){
+      try{args[properties[i]]=JSON.parse(parts[i]);}catch(_){return null;}
+    }
+    const required=tool?.parameters?.required||[];
+    if(required.some(key=>!Object.prototype.hasOwnProperty.call(args,key)))return null;
+    return {name:match[1],arguments:args};
+  }
   function parseCompatToolBlock(body,allowed) {
     const value=String(body||'').trim();
     if(!value)return null;
-    const firstLine=value.split(/\r?\n/,1)[0].trim();
     const jsonCall=parseToolArguments(value);
     if(jsonCall?.name&&allowed.has(String(jsonCall.name))) {
       const args=parseToolArguments(jsonCall.arguments??jsonCall.args);
       return args===null?null:{name:String(jsonCall.name),arguments:args};
     }
-    const match=firstLine.match(/^([a-zA-Z_][\w-]*)(?:\s*\(\s*([\s\S]*?)\s*\))?\s*$/);
+    // Local models sometimes emit one exact function-style call in a fenced
+    // block. Interpret JSON string arguments against the registered tool schema;
+    // never evaluate the supplied code.
+    const functionMatch=value.match(/^([a-zA-Z_][\w-]*)\s*\(/);
+    const functionTool=functionMatch&&allowed.get(functionMatch[1]);
+    if(functionTool){
+      const call=parseFunctionStyleToolCall(value,functionTool);
+      if(call)return call;
+    }
+    const firstLine=value.split(/\r?\n/,1)[0].trim();
+    const match=firstLine.match(/^([a-zA-Z_][\w-]*)\s*$/);
     if(!match||!allowed.has(match[1]))return null;
-    let args={};
-    const inline=match[2],remaining=value.slice(firstLine.length).trim();
-    if(inline){const parsed=parseToolArguments(inline);if(parsed===null)return null;args=parsed;}
-    else if(remaining){const parsed=parseToolArguments(remaining);if(parsed===null)return null;args=parsed;}
-    return {name:match[1],arguments:args};
+    const remaining=value.slice(firstLine.length).trim();
+    if(!remaining)return {name:match[1],arguments:{}};
+    const args=parseToolArguments(remaining);
+    return args===null?null:{name:match[1],arguments:args};
   }
   function toolBlockRanges(text,tools=[]) {
-    const value=String(text||''),allowed=new Set(tools.map(tool=>String(tool?.name||''))),ranges=[];
+    const value=String(text||''),allowed=new Map(tools.map(tool=>[String(tool?.name||''),tool])),ranges=[];
     if(!allowed.size)return ranges;
     const fence=/\x60{3}[^\r\n\x60]*\r?\n([\s\S]*?)(?:\x60{3}|$)/g;
     let match;
