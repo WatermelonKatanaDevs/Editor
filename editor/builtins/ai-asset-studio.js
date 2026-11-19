@@ -7,7 +7,7 @@
     let configContainer = null;
     const values = {};
     let fields = [];
-    let status = null, progress = null, progressBar = null, loadButton = null, generateButton = null;
+    let status = null, progress = null, progressPercent = null, progressBar = null, loadButton = null, generateButton = null;
     let results = null, errorBox = null, caption = null;
 
     const style = `
@@ -21,7 +21,9 @@
       .ais-field input[type=range]{padding:0}.ais-field textarea{min-height:100px;resize:vertical}
       .ais-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.ais-actions button,.ais-card button{border:1px solid var(--border,#555);background:var(--button-bg,#333);color:inherit;border-radius:5px;padding:8px 11px;cursor:pointer}
       .ais-actions button.primary{background:var(--accent,#c5f36b);color:#171717;border-color:transparent;font-weight:700}.ais-actions button:disabled{opacity:.5;cursor:default}
-      .ais-status{margin-top:12px;font-size:12px;color:var(--muted,#aaa);min-height:18px}.ais-progress{height:5px;background:#444;border-radius:9px;overflow:hidden;margin-top:8px}.ais-progress i{display:block;width:0;height:100%;background:var(--accent,#c5f36b);transition:width .12s}
+      .ais-progress{height:5px;background:#444;border-radius:9px;overflow:hidden;margin-top:8px}.ais-progress i{display:block;width:0;height:100%;background:var(--accent,#c5f36b);transition:width .12s}
+      .ais-progress-meta{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:7px;font-size:12px;color:var(--muted,#aaa);min-height:18px}.ais-progress-percent{font-variant-numeric:tabular-nums;color:var(--text,#eee);font-weight:600}
+      .ais-status{margin-top:8px;font-size:12px;color:var(--muted,#aaa);min-height:18px}
       .ais-error{white-space:pre-wrap;color:#ff8585;font-size:12px;margin-top:10px}.ais-notice{font-size:11px;line-height:1.55;color:var(--muted,#aaa);border:1px solid var(--border,#444);border-radius:6px;padding:10px;margin-top:14px}
       .ais-results-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:12px}.ais-results-head h3{margin:0}.ais-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(116px,1fr));gap:10px}
       .ais-card{min-width:0;padding:8px;border:1px solid var(--border,#444);border-radius:7px;background:var(--panel,#252525)}
@@ -52,9 +54,13 @@
     }
     function setProgress(info) {
       const p = info?.progress;
-      progressBar.style.width = p == null ? '0%' : Math.round(Math.max(0,Math.min(1,p))*100)+'%';
+      const percent = p == null ? null : Math.round(Math.max(0,Math.min(1,p))*100);
+      progressBar.style.width = percent == null ? '0%' : percent + '%';
+      progressPercent.textContent = percent == null ? '' : percent + '%';
       progress.textContent = info?.phase || 'Working…';
-      if (info?.loaded) progress.textContent += ' · ' + (info.loaded/1e6).toFixed(0) + ' / ' + (info.total ? (info.total/1e6).toFixed(0) : '?') + ' MB';
+      if (info?.loaded && !String(info.phase || '').startsWith('Drawing row')) {
+        progress.textContent += ' · ' + (info.loaded/1e6).toFixed(0) + ' / ' + (info.total ? (info.total/1e6).toFixed(0) : '?') + ' MB';
+      }
     }
     function makeField(field) {
       const wrap = document.createElement('label'); wrap.className = 'ais-field'; wrap.dataset.key = field.key;
@@ -139,12 +145,23 @@
       for (const url of objectUrls) URL.revokeObjectURL(url);
       objectUrls.clear(); results.replaceChildren(); caption.textContent = prompt;
       status.textContent = 'Preparing prompt…'; progressBar.style.width = '0%';
+      progress.textContent = 'Preparing prompt…'; progressPercent.textContent = '0%';
+      const resetResults = () => {
+        for (const url of objectUrls) URL.revokeObjectURL(url);
+        objectUrls.clear(); results.replaceChildren();
+      };
       try {
-        const result = await provider.generateImage({prompt,parameters:{...values}}, {
+        const result = await provider.generateImage({
+          prompt, parameters:{...values},
+          onAsset:renderAsset,
+          onResetAssets:resetResults
+        }, {
           signal:abortController.signal, onProgress:setProgress
         });
-        for (let i=0;i<result.assets.length;i++) renderAsset(result.assets[i],i);
-        status.textContent = result.assets.length + ' sprites · seed ' + result.metadata.seed + ' · ' + (result.metadata.elapsedMs/1000).toFixed(1) + 's · ' + result.metadata.backend.toUpperCase();
+        const seconds = Math.max(result.metadata.elapsedMs/1000, 0.001);
+        status.textContent = 'Finished · ' + result.assets.length + ' sprites · seed ' + result.metadata.seed + ' · ' +
+          seconds.toFixed(1) + 's · ' + (result.assets.length/seconds).toFixed(2) + ' sprites/s · ' + result.metadata.backend.toUpperCase();
+        progress.textContent = 'Complete'; progressPercent.textContent = '100%';
         progressBar.style.width = '100%';
       } catch (error) {
         if (error?.name === 'AbortError') status.textContent = 'Generation stopped';
@@ -170,7 +187,10 @@
       generateButton = document.createElement('button'); generateButton.className = 'primary'; generateButton.textContent = 'Generate sprites'; generateButton.disabled = true;
       const actions = document.createElement('div'); actions.className = 'ais-actions'; actions.append(loadButton,generateButton); panel.append(actions);
       const progressWrap = document.createElement('div'); progressWrap.className = 'ais-progress'; progressBar = document.createElement('i'); progressWrap.append(progressBar); panel.append(progressWrap);
-      progress = document.createElement('div'); progress.className = 'ais-status'; progress.textContent = 'Load the model to begin.'; panel.append(progress);
+      const progressMeta = document.createElement('div'); progressMeta.className = 'ais-progress-meta';
+      progress = document.createElement('span'); progress.textContent = 'Load the model to begin.';
+      progressPercent = document.createElement('span'); progressPercent.className = 'ais-progress-percent';
+      progressMeta.append(progress,progressPercent); panel.append(progressMeta);
       status = document.createElement('div'); status.className = 'ais-status'; status.textContent = 'Model not loaded'; panel.append(status);
       errorBox = document.createElement('div'); errorBox.className = 'ais-error'; errorBox.hidden = true; panel.append(errorBox);
       const notice = document.createElement('div'); notice.className = 'ais-notice';
