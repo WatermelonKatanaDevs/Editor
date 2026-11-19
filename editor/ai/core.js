@@ -19,7 +19,17 @@
         ...(options.capabilities || {})
       });
     }
-    supports(capability) { return this.capabilities[capability] === true; }
+    supports(capability, model) { return this.getCapabilities(model)[capability] === true; }
+    getCapabilities(model) {
+      if (!model) return {...this.capabilities};
+      return {...this.capabilities,
+        tools:model.supportsTools === true || model.supportsAgentTools === true,
+        reasoning:model.supportsReasoning === true,
+        streaming:model.supportsStreaming !== false,
+        vision:model.supportsVision === true,
+        structuredOutput:model.supportsStructuredOutput === true
+      };
+    }
     async complete() { throw new Error(this.constructor.name + '.complete() is not implemented.'); }
     async *stream() { throw new Error(this.constructor.name + '.stream() is not implemented.'); }
     cancel() {}
@@ -140,7 +150,7 @@
       this.conversations = new Map();
       this.defaultProviderId = options.defaultProviderId || 'remote';
       this.agent = options.agent || null;
-      this.registerProvider(options.remoteProvider || new RemoteProviderAI({
+      if (options.remoteProvider || options.client) this.registerProvider(options.remoteProvider || new RemoteProviderAI({
         id:'remote', label:'Remote AI', client:options.client, registry:this.registry,
         capabilities:options.remoteCapabilities || {}
       }));
@@ -168,6 +178,7 @@
       if (modelId) return this.registry.settings?.models?.find(model => model.id === modelId) || null;
       return this.registry.active?.() || null;
     }
+    getCapabilities(modelId) { return this.getProvider(modelId).getCapabilities(this.getModel(modelId)); }
     getProvider(modelId) {
       const model = this.getModel(modelId);
       const id = model && (model.local || model.protocol === 'local-transformers') ? 'local' : this.defaultProviderId;
