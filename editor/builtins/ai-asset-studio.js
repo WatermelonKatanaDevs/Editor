@@ -285,11 +285,13 @@
       generateButton.textContent = abortController ? 'Stop' : 'Generate';
       modelSelect.disabled = busy;
     }
-    function openSettings() {
+    async function openSettings() {
+      try { await prepareProvider(providerId); }
+      catch (error) { showError(error); return; }
       if (settingsModal) { settingsModal.remove(); settingsModal = null; }
       const modal = document.createElement('div'); modal.className = 'editor-modal ai-settings-modal';
       settingsModal = modal;
-      modal.innerHTML = '<div class="editor-modal-content ais-settings-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>Studio AI Settings</h2><p>Available image models and browser-cached model files.</p><div class="ais-settings-tabs"><button class="active" data-tab="models">Models</button><button data-tab="cache">Cached models</button></div><section data-panel="models"><div class="ai-section-title">Available models</div><div class="ais-model-list" data-model-list></div><p class="ais-settings-note">Models are currently provided by local StudioAI integrations. Remote model APIs can be added through the provider registry later.</p></section><section data-panel="cache" hidden><div class="ai-section-title">Browser model cache</div><div class="ais-toolbar" style="margin-bottom:8px"><button data-refresh-cache>Refresh</button></div><div class="ais-cache-list" data-cache-list>Reading browser caches…</div><p class="ais-settings-note">Deleting a cache removes stored downloads. It does not remove a model from the available model list.</p></section></div>';
+      modal.innerHTML = '<div class="editor-modal-content ais-settings-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>Studio AI Settings</h2><p>Available image models and browser-cached model files.</p><div class="ais-settings-tabs"><button class="active" data-tab="models">Models</button><button data-tab="cache">Cached models</button></div><section data-panel="models"><div class="ai-section-title">Available models</div><div class="ais-model-list" data-model-list></div><p class="ais-settings-note">Models are currently provided by local StudioAI integrations. Remote model APIs can be added through the provider registry later.</p></section><section data-panel="cache" hidden><div class="ai-section-title">Browser model &amp; runtime cache</div><div class="ais-toolbar" style="margin-bottom:8px"><button data-refresh-cache>Refresh</button></div><div class="ais-cache-list" data-cache-list>Reading browser caches…</div><p class="ais-settings-note">Deleting a cache removes its stored downloads. Runtime assets may be downloaded again when needed.</p></section></div>';
       document.body.append(modal);
       const close = () => { modal.remove(); if (settingsModal === modal) settingsModal = null; };
       modal.querySelector('.editor-modal-close').onclick = close;
