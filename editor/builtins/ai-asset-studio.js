@@ -416,7 +416,7 @@
       for (const entry of entries) {
         try {
           const blob = new Blob([readBinaryBytes(entry.imagePath)], {type:'image/png'});
-          const url = URL.createObjectURL(blob); galleryUrls.push(url); urls.add(url);
+          const url = URL.createObjectURL(blob); galleryUrls.push(url);
           const card = document.createElement('button'); card.type = 'button'; card.className = 'ais-gallery-card';
           const image = document.createElement('img'); image.src = url; image.alt = entry.filename || 'Gallery image';
           const label = document.createElement('span'); label.textContent = entry.filename || 'sprite.png';
