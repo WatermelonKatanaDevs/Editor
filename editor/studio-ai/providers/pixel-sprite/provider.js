@@ -182,11 +182,6 @@ export class PixelSpriteProvider extends AssetProviderAI {
         if ((t+1)%view.S===0 || t+1===view.S*view.S)
           progress(onProgress,"Generating sprites",t+1,view.S*view.S);
       },
-      onSprite: async (id, indices) => {
-        const blob = await canvasBlob(this.model,indices,size);
-        assets[id] = { blob, mimeType:"image/png", width:size, height:size, metadata:{ index:id, seed:config.seed } };
-        request.onAsset?.(assets[id], id);
-      }
     };
     try {
       let result;
