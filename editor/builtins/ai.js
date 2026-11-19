@@ -600,11 +600,9 @@
     let agentMode=false, busy=false, controller=null, editingIndex=-1;
     const toolset=aiRoot.makeAITools({state,openFile:onOpen,onRefresh:()=>{state.fileManager?.refresh?.();updateStatus?.();},runConfigured,ensureNodeRuntime:()=>state.ensureNodeRuntime?.()});
     const client=new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork);
-    const agent=new aiRoot.AIAgent({client,tools:toolset,permissions,requestPermission:permissionPrompt,extensionAPI:window.EditorExtensionAPI,emit:()=>{}});
-    // ChatAI is the UI-independent API; this builtin adapts its DOM and project storage.
-    const chatAI=new aiRoot.ChatAI({registry,client,localManager});
-    chatAI.agent=agent;
-    agent.chatAI=chatAI;
+    // ChatAI owns both normal chat and the optional agent execution mode.
+    const chatAI=new aiRoot.ChatAI({registry,client,localManager,agentOptions:{client,tools:toolset,permissions,requestPermission:permissionPrompt,extensionAPI:window.EditorExtensionAPI,emit:()=>{}}});
+    const agent=chatAI.agent;
     let currentConversation=null;
     async function activateModel(id){
       const target=registry.settings.models.find(x=>x.id===id);
