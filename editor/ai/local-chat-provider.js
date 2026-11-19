@@ -11,7 +11,8 @@
 })();
 
 /* -------------------------------------------------------------------------- */
-/* Consolidated module: (function(){
+/* Consolidated module */
+(function(){
   const root=window.EditorAI=window.EditorAI||{};
   const DB_NAME='watermelonkatanadevs-local-ai';
   const DB_VERSION=1;
@@ -245,7 +246,8 @@
 })();
 
 /* -------------------------------------------------------------------------- */
-/* Consolidated module: (function(){
+/* Consolidated module */
+(function(){
   const root=window.EditorAI=window.EditorAI||{};
   function generatedText(result,fallback){
     const value=result&&result[0]&&result[0].generated_text;
@@ -474,7 +476,8 @@
 })();
 
 /* -------------------------------------------------------------------------- */
-/* Consolidated module: (function(global){
+/* Consolidated module */
+(function(global){
   'use strict';
   const root=global.EditorAI=global.EditorAI||{};
   const Base=root.ProviderAI;
