@@ -7,6 +7,7 @@
     let configFields = [], settingsModal = null, contextMenu = null;
     const assets = [];
     const urls = new Set();
+    let imageCount = 1;
     const promptState = { positive:'', negative:'', name:'sprite' };
 
     const style = [
@@ -25,6 +26,7 @@
       '.ais-config-field input:focus,.ais-config-field select:focus{border-color:#5a89b5}.ais-config-field input[type=range]{padding:0;accent-color:#3794ff}',
       '.ais-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.ais-toolbar button,.ais-image-menu button{background:#292929;color:#bbb;border:1px solid #414141;border-radius:2px;padding:5px 9px;font:10px sans-serif;cursor:pointer}.ais-toolbar button:hover,.ais-image-menu button:hover{background:#343434;color:var(--editor-text)}.ais-toolbar button.primary{background:var(--editor-accent);border-color:var(--editor-accent-strong);color:#fff}.ais-toolbar button:disabled{opacity:.4;cursor:default}',
       '.ais-load-state{margin-left:auto;color:#888;font:10px monospace}',
+      '.ai-head-actions button[data-load]{width:auto;height:27px;padding:0 9px;font-size:10px;white-space:nowrap}',
       '.ais-progress{height:5px;background:#252525;border:1px solid #383838;border-radius:3px;overflow:hidden;margin-top:9px}.ais-progress i{display:block;width:0;height:100%;background:var(--editor-accent);transition:width .12s}',
       '.ais-progress-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:5px;color:#888;font:10px monospace}.ais-progress-percent{color:#bbb}',
       '.ais-status{margin-top:5px;color:#888;font:10px monospace;overflow-wrap:anywhere}.ais-error{margin-top:8px;color:#e18c8c;font-size:10px;white-space:pre-wrap;overflow-wrap:anywhere}',
@@ -51,7 +53,7 @@
     }
     function fileName(index) {
       const base = cleanName(nameInput?.value || promptState.name);
-      return base + (assets.length > 1 ? '-' + (index + 1) : '') + '.png';
+      return base + (imageCount > 1 ? '-' + (index + 1) : '') + '.png';
     }
     function setProgress(info) {
       const raw = info?.progress, n = raw == null || raw === '' ? NaN : Number(raw);
@@ -190,6 +192,9 @@
       document.removeEventListener('pointerdown', closeContextMenu, true);
       document.removeEventListener('keydown', contextMenuKey);
     }
+    function closeContextMenuOutside(event) {
+      if (contextMenu && !contextMenu.contains(event.target)) closeContextMenu();
+    }
     function contextMenuKey(event) { if (event.key === 'Escape') closeContextMenu(); }
     function showContextMenu(event, asset, index) {
       closeContextMenu();
@@ -201,7 +206,7 @@
       document.body.append(contextMenu);
       const x = Math.min(event.clientX,window.innerWidth - 170), y = Math.min(event.clientY,window.innerHeight - 55);
       contextMenu.style.left = Math.max(4,x) + 'px'; contextMenu.style.top = Math.max(4,y) + 'px';
-      setTimeout(() => document.addEventListener('pointerdown',closeContextMenu,true),0);
+      setTimeout(() => document.addEventListener('pointerdown',closeContextMenuOutside,true),0);
       document.addEventListener('keydown',contextMenuKey);
     }
     function renderAsset(asset,index) {
@@ -251,6 +256,7 @@
       progressPercent.textContent = ''; progressBar.style.width = '0%';
       const selectedProvider = provider;
       const parameters = readConfiguration();
+      imageCount = Math.max(1,Number(parameters.count)||1);
       if (provider?.getCapabilities?.().negativePrompt) parameters.negativePrompt = promptState.negative;
       selectedProvider.generateImage({
         prompt,
