@@ -713,7 +713,7 @@
         modal.querySelector('[data-new-chat]').onclick=()=>{newChat();modal.remove();};
         modal.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{switchChat(b.dataset.open);modal.remove();});
         modal.querySelectorAll('[data-rename]').forEach(b=>b.onclick=()=>{const chat=chatStore.get(b.dataset.rename);const title=prompt('Chat name:',chat.title);if(title!=null){chatStore.rename(chat.id,title);render();}});
-        modal.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>{if(!confirm('Delete this chat?'))return;const id=b.dataset.delete;if(id===currentChatId){const ordered=chatStore.list(false).filter(x=>x.id!==id);chatStore.remove(id);currentChatId=ordered[0]?.id||chatStore.create().id;chatMessages=chatStore.get(currentChatId).messages;loadedProjectId=state.projectId||'global';}else chatStore.remove(id);render();});
+        modal.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>{if(!confirm('Delete this chat?'))return;const id=b.dataset.delete;if(id===currentChatId){const ordered=chatStore.list(false).filter(x=>x.id!==id);chatStore.remove(id);currentChatId=ordered[0]?.id||chatStore.create().id;chatMessages=chatStore.get(currentChatId).messages;currentConversation=chatAI.openConversation({id:currentChatId,messages:chatMessages,modelId:registry.active()?.id});loadedProjectId=state.projectId||'global';}else chatStore.remove(id);render();});
       };
       document.body.appendChild(modal);render();requestAnimationFrame(()=>modal.classList.add('show'));
     }
@@ -733,6 +733,7 @@
       const chat=chatStore.create();
       currentChatId=chat.id;
       chatMessages=chat.messages;
+      currentConversation=chatAI.openConversation({id:currentChatId,messages:chatMessages,modelId:registry.active()?.id});
       render(view.g,view.t);
     }
     function renameCurrent() {
