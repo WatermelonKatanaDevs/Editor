@@ -49,4 +49,33 @@ A `ChatAI` instance manages provider registration and selection, conversation li
 
 Agent mode is an optional chat execution mode, not a separate framework layer. `ChatAI` exposes `registerTool()`, `registerTools()`, `unregisterTool()`, `getTool()`, and `listTools()`. Applications register their own actions through this API and supply agent/tool instructions when configuring the agent. The generic agent loop handles tool schemas, execution, permissions, streaming, and completion without embedding application-specific tools or instructions. The editor's `editor/builtins/ai.js` registers project/editor/GitHub actions and supplies its coding-agent instructions.
 
+### Registering application tools
+
+Applications own their actions and their agent instructions. Register tools with the `ChatAI` instance rather than adding application actions to the framework:
+
+```js
+const ai = new EditorAI.ChatAI({registry, client, localManager});
+ai.registerTool({
+  name: 'read_document',
+  description: 'Read a document from this application.',
+  parameters: {
+    type: 'object',
+    required: ['id'],
+    properties: {id: {type: 'string'}}
+  },
+  permission: 'readDocuments',
+  execute: async ({id}) => documentStore.read(id)
+});
+
+ai.configureAgent({
+  client,
+  permissions,
+  requestPermission,
+  toolInstructions: 'Use the application tools when needed. Follow their schemas.',
+  finalInstructions: 'When finished, summarize the result.'
+});
+```
+
+Tool definitions accept a name, description, JSON-schema parameters, optional permission key, and an `execute(args)` function. The app supplies permission handling and any before/after execution hooks. The framework does not contain editor-specific tool actions or coding-agent prompts.
+
 Consumers own conversation persistence and may serialize conversations with `toJSON()`. The framework does not create DOM or select a presentation.
