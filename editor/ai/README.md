@@ -2,80 +2,84 @@
 
 The editor's AI implementation is consolidated into three runtime files:
 
-- `ai-chat.js` — `ChatAI`, conversations, model/provider registry, preferences, analytics, generic tool registration/execution API, and optional agent orchestration.
+- `ai-chat.js` — `ChatAI`, conversations, provider registry, preferences, analytics, agent registry, and generic agent orchestration.
 - `local-chat-provider.js` — local model catalogue, IndexedDB model cache, Transformers.js runtime, and the local provider adapter.
 - `remote-chat-provider.js` — remote protocol client, request/stream handling, retries, and the remote provider adapter.
 
-The editor UI remains in `editor/builtins/ai.js`. It adapts the existing DOM and project-backed chat persistence to the UI-independent `ChatAI` API. The refactor does not change the visible chat interface.
+The editor UI remains in `editor/builtins/ai.js`. It creates one shared editor agent, registers editor/project tools and permissions on that agent, and associates individual conversations with it when Agent mode is enabled.
 
 ## Load order
-
-Load the three framework scripts in this order:
 
 1. `editor/ai/ai-chat.js`
 2. `editor/ai/local-chat-provider.js`
 3. `editor/ai/remote-chat-provider.js`
 
-The editor loads these before starting the application. The builtin AI UI may be declared earlier because it only constructs the framework when the editor starts.
-
 ## API
-
-The framework is exposed as `window.ChatAIFramework`; editor compatibility aliases are also available on `window.EditorAI`.
-
-```js
-const ai = new EditorAI.ChatAI({
-  registry,
-  client,       // AIClient, used by the remote provider
-  localManager  // LocalModelManager, used by the local provider
-});
-
-const conversation = ai.createConversation({
-  systemPrompt: 'Be concise.'
-});
-
-const result = await conversation.send('Hello!');
-console.log(result.text);
-```
-
-A `ChatAI` instance manages provider registration and selection, conversation lifecycle, completion, streaming, cancellation, and optional agent mode:
-
-- `registerProvider(provider)`
-- `getProvider(modelId)`
-- `getCapabilities(modelId)`
-- `createConversation(options)` / `openConversation(options)`
-- `complete(messages, options)` / `stream(messages, options)`
-- `runAgent(messages, options)` when an agent-mode runner is configured
-- `cancel()` / `dispose()`
-
-Agent mode is an optional chat execution mode, not a separate framework layer. `ChatAI` exposes `registerTool()`, `registerTools()`, `unregisterTool()`, `getTool()`, and `listTools()`. Applications register their own actions through this API and supply agent/tool instructions when configuring the agent. The generic agent loop handles tool schemas, execution, permissions, streaming, and completion without embedding application-specific tools or instructions. The editor's `editor/builtins/ai.js` registers project/editor/GitHub actions and supplies its coding-agent instructions.
-
-### Registering application tools
-
-Applications own their actions and their agent instructions. Register tools with the `ChatAI` instance rather than adding application actions to the framework:
 
 ```js
 const ai = new EditorAI.ChatAI({registry, client, localManager});
-ai.registerTool({
-  name: 'read_document',
-  description: 'Read a document from this application.',
-  parameters: {
-    type: 'object',
-    required: ['id'],
-    properties: {id: {type: 'string'}}
-  },
-  permission: 'readDocuments',
-  execute: async ({id}) => documentStore.read(id)
-});
-
-ai.configureAgent({
-  client,
+const agent = ai.createAgent({
+  id: 'coding',
+  name: 'Coding Agent',
   permissions,
   requestPermission,
-  toolInstructions: 'Use the application tools when needed. Follow their schemas.',
-  finalInstructions: 'When finished, summarize the result.'
+  toolInstructions: 'Use the application tools when useful.'
 });
+
+agent.registerTools([{
+  name: 'read_document',
+  description: 'Read a document from this application.',
+  parameters: {type:'object',required:['id'],properties:{id:{type:'string'}}},
+  permission: 'readDocuments',
+  execute: async ({id}) => documentStore.read(id)
+}]);
+
+const conversation = ai.createConversation({
+  systemPrompt: 'Be concise.',
+  agent
+});
+
+const result = await conversation.send('Inspect this document.');
+console.log(result.text);
+
+// Agent mode can also be toggled later:
+conversation.setAgent(agent);
+conversation.removeAgent();
 ```
 
-Tool definitions accept a name, description, JSON-schema parameters, optional permission key, and an `execute(args)` function. The app supplies permission handling and any before/after execution hooks. The framework does not contain editor-specific tool actions or coding-agent prompts.
+### `ChatAI`
 
-Consumers own conversation persistence and may serialize conversations with `toJSON()`. The framework does not create DOM or select a presentation.
+`ChatAI` manages providers, conversations, and registered agents:
+
+- `createAgent(options)`, `registerAgent(agent)`, `getAgent(id)`, `listAgents()`, `removeAgent(id)`
+- `registerProvider(provider)`, `getProvider(modelId)`, `getCapabilities(modelId)`
+- `createConversation(options)`, `openConversation(options)`, `closeConversation(id)`
+- `complete(messages, options)`, `stream(messages, options)`
+- `runAgent(messages, {agent|agentId, ...options})`
+- `cancel()`, `dispose()`
+
+There is no global tool registry on `ChatAI`. Each agent owns an isolated tool registry and permission interface.
+
+### `AIAgent`
+
+An agent owns its tools, permission manager, instructions, and tool execution hooks:
+
+- `registerTool(definition)`, `registerTools(definitions)`
+- `unregisterTool(name)`, `getTool(name)`, `listTools()`
+- `setInstructions(text)`, `setPermission(name, policy)`, `getPermission(name)`
+- `run(messages, options)`
+
+Tool definitions accept a name, description, JSON-schema parameters, optional permission key, and an `execute(args)` function. The application supplies its own permission manager, permission prompt, and before/after tool hooks.
+
+An agent can be shared by many conversations. Tool definitions and permission policies are shared configuration, while each call to `run()` keeps its event handler, callbacks, step counter, and execution state local to that run. Concurrent runs therefore do not overwrite an agent-wide event callback or a shared running flag.
+
+### `ConversationAI`
+
+A conversation owns its message history, selected model, and optional agent association:
+
+- `setAgent(agentOrId)`, `getAgent()`, `removeAgent()`
+- `send(content, options)` streams normally when no agent is attached and runs the attached agent when one is present.
+- `runAgent(messages, options)` explicitly invokes its attached agent.
+- `toJSON()` includes `agentId` only when an agent is attached.
+
+Applications own conversation persistence. Store the optional agent ID with a conversation and pass it back as `agentId` when reopening it. The framework does not create DOM or select a presentation.
