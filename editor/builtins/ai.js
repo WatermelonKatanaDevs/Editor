@@ -1016,7 +1016,8 @@ const makeEditorTools = (() => {
       try {
         if(activeAgent){
           const emitAgentEvent=event=>{
-            if(event.type==='assistant'){partial=event.text||partial;renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
+            if(event.type==='assistant_delta'){partial=event.text??(partial+String(event.delta||''));renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
+            else if(event.type==='assistant'){partial=event.text??partial;renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
             else if(event.type==='assistant_activity'){appendActivity(liveActivity,{kind:'assistant',text:event.text});}
             else if(event.type==='tool_call'){appendActivity(liveActivity,{kind:'tool_call',name:event.name,args:event.args});}
             else if(event.type==='tool_result'){appendActivity(liveActivity,{kind:'tool_result',name:event.name,args:event.args,result:event.result,ok:event.ok});}
@@ -1043,10 +1044,20 @@ const makeEditorTools = (() => {
           if(response.message)response.message.activity=liveActivity?.items||[];
           if(liveActivity)liveActivity.details.open=false;
         } else {
+          // Unlike the agent path, plain chat streams directly from the provider.
+          // Record the prompt in the conversation before building the request so
+          // the final render cannot discard the temporary user bubble.
+          currentConversation.addMessage({role:'user',content:text});
+          chatMessages=currentConversation.getMessages();
           const messages=[{role:'system',content:systemPrompt(false)},...activeMessages()];
           const model=chatAI.getModel();
-          for await(const chunk of chatAI.stream(messages,{modelId:model?.id,thinking:true,maxTokens:2048,temperature:.7,topP:.9,signal:controller.signal,systemPrompt:systemPrompt(false),onRetry:info=>setStatus(info?.kind==='tool_parse_recovery' ? (info.text||'Retrying tool-call generation…') : info?.kind==='transport_retry' ? `Network retry in ${Math.ceil((info.waitMs||0)/1000)}s (attempt ${info.attempt}/${info.maxRetries})` : `Rate limited — retrying in ${Math.ceil(info.waitMs/1000)}s (attempt ${info.attempt}/${info.maxRetries})`)})){partial=chunk.text||partial;renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
-          chatMessages.push({role:'assistant',content:partial});
+          for await(const chunk of chatAI.stream(messages,{modelId:model?.id,thinking:true,maxTokens:2048,temperature:.7,topP:.9,signal:controller.signal,systemPrompt:systemPrompt(false),onRetry:info=>setStatus(info?.kind==='tool_parse_recovery' ? (info.text||'Retrying tool-call generation…') : info?.kind==='transport_retry' ? `Network retry in ${Math.ceil((info.waitMs||0)/1000)}s (attempt ${info.attempt}/${info.maxRetries})` : `Rate limited — retrying in ${Math.ceil(info.waitMs/1000)}s (attempt ${info.attempt}/${info.maxRetries})`)})){
+            partial=chunk.text??partial;
+            renderMessage(bubble,partial,code=>insertCode(code));
+            chat.scrollTop=chat.scrollHeight;
+          }
+          currentConversation.addMessage({role:'assistant',content:partial});
+          chatMessages=currentConversation.getMessages();
         }
         persist();
       } catch(e) {
