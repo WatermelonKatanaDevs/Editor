@@ -128,7 +128,7 @@ export class PixelSpriteProvider extends AssetProviderAI {
     this.loading = null;
   }
 
-  async initialize({ onProgress } = {}) {
+  async initialize({ onProgress, configuration = {} } = {}) {
     if (this.model) return { backend: this.backend, offlineModelCache: true };
     if (this.loading) return this.loading;
     this.loading = (async () => {
@@ -149,7 +149,7 @@ export class PixelSpriteProvider extends AssetProviderAI {
           onProgress: (loaded,total) => progress(onProgress,"Downloading sprite model",loaded,total)
         });
         progress(onProgress, "Warming up model");
-        await this.warmup();
+        await this.warmup(configuration);
       };
       try {
         await loadBackend(this.backend);
@@ -174,12 +174,16 @@ export class PixelSpriteProvider extends AssetProviderAI {
     finally { this.loading = null; }
   }
 
-  async warmup() {
-    // Match the original generator: CPU only needs a tiny cache for its one-step
-    // warmup. Allocating a full 32x32 KV cache here needlessly reserves hundreds
-    // of megabytes before the actual generation even starts.
-    const size = this.backend === "webgpu" ? 32 : 16;
-    const batch = this.backend === "webgpu" ? 2 : 1;
+  async warmup(configuration = {}) {
+    // Match the original generator's warmup shape. In particular, CPU only
+    // needs a tiny cache for its one-step warmup; allocating a full 32x32 KV
+    // cache there needlessly reserves hundreds of megabytes.
+    const config = { size:32, count:8, mode:"guided", batch:"auto", ...configuration };
+    const size = this.backend === "webgpu" ? Number(config.size) || 32 : 16;
+    const rowsPerSprite = config.mode === "fast" ? 1 : 2;
+    const automatic = deviceBatch(this.backend, rowsPerSprite, Number(config.count) || 8);
+    const chunk = config.batch === "auto" ? automatic : Math.max(1,Math.min(8,Number(config.batch)||automatic));
+    const batch = this.backend === "webgpu" ? Math.min(Number(config.count)||8,chunk) * rowsPerSprite : 1;
     const cacheLength = this.backend === "webgpu" ? 2 + size + size * size : 4;
     const cache = await this.model.cacheSet(batch, cacheLength);
     const x = new Float32Array(batch * this.model.d);
