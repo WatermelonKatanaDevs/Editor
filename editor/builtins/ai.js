@@ -997,7 +997,6 @@ const makeEditorTools = (() => {
       busy=true; controller=new AbortController();
       currentConversation=currentConversation||chatAI.openConversation({id:chatRecord.id,messages:chatMessages,modelId:registry.active()?.id,agentId:chatRecord.agentId||null});
       currentConversation.modelId=registry.active()?.id||null;
-      chatMessages.push({role:'user',content:text});
       currentConversation.setMessages(chatMessages);
       if(chatRecord.title==='New Chat') chatStore.rename(chatRecord.id,chatTitle(text));
       persist();
@@ -1023,17 +1022,21 @@ const makeEditorTools = (() => {
             else if(event.type==='request_start'){appendActivity(liveActivity,{kind:'request_start',text:`Requesting ${event.model} (${event.protocol})…`});}
             else if(event.type==='reasoning_summary'){appendActivity(liveActivity,{kind:'reasoning_summary',text:event.text});} else if(event.type==='reasoning'){appendActivity(liveActivity,{kind:'reasoning',text:event.text||'Model reasoning is active.'});}
           };
-          const messages=activeMessages(),prompt=systemPrompt(true);
-          const hookInput={messages:[...messages],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'};
-          const prepared=await editorExtensionHooks('ai.beforeRun',hookInput);
-          const result=await currentConversation.runAgent([{role:'system',content:prompt},...(prepared?.messages||messages)],{
+          const prompt=systemPrompt(true);
+          let hookInput={messages:[...activeMessages(),{role:'user',content:text}],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'};
+          const response=await currentConversation.send(text,{
             systemPrompt:prompt,maxTokens:2048,retryTransport:prefs.retryTransport,maxTransportRetries:prefs.maxTransportRetries,
             transportRetryDelay:prefs.transportRetryDelay,signal:controller.signal,emit:emitAgentEvent,
+            prepareMessages:async messages=>{
+              hookInput={...hookInput,messages:[...messages]};
+              const prepared=await editorExtensionHooks('ai.beforeRun',hookInput);
+              return [{role:'system',content:prompt},...(prepared?.messages||messages.filter(message=>message.role!=='system'))];
+            },
             onRetry:info=>emitAgentEvent({type:info?.kind==='tool_parse_recovery'?'provider_retry':info?.kind==='transport_retry'?'transport_retry':'retry',...info})
           });
-          await editorExtensionHooks('ai.afterRun',{...hookInput,result});
-          partial=result.text||partial;renderMessage(bubble,partial,code=>insertCode(code));
-          const activityData=liveActivity?.items||[];chatMessages.push({role:'assistant',content:partial,activity:activityData});
+          await editorExtensionHooks('ai.afterRun',{...hookInput,result:response.result});
+          partial=response.text||partial;renderMessage(bubble,partial,code=>insertCode(code));
+          if(response.message)response.message.activity=liveActivity?.items||[];
           if(liveActivity)liveActivity.details.open=false;
         } else {
           const messages=[{role:'system',content:systemPrompt(false)},...activeMessages()];
