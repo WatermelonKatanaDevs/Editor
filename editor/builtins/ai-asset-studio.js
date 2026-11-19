@@ -53,7 +53,8 @@
       catch (error) { providerPromise = null; throw error; }
     }
     function setProgress(info) {
-      const value = Number(info?.progress);
+      const raw = info?.progress;
+      const value = raw == null || raw === "" ? NaN : Number(raw);
       const percent = Number.isFinite(value) ? Math.round(Math.max(0,Math.min(1,value))*100) : null;
       progressBar.style.width = percent == null ? '0%' : percent + '%';
       progressPercent.textContent = percent == null ? '' : percent + '%';
