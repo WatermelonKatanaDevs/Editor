@@ -199,6 +199,11 @@ export class PixelSpriteProvider extends AssetProviderAI {
         settings.chunk = Math.max(1,Math.min(count,Math.floor(4/rowsPerSprite)));
         result = await this.model.generate(settings);
       }
+      for (let id = 0; id < result.images.length; id++) {
+        const blob = await canvasBlob(this.model, result.images[id], size);
+        assets[id] = { blob, mimeType:"image/png", width:size, height:size, metadata:{ index:id, seed:result.stats.seed } };
+        request.onAsset?.(assets[id], id);
+      }
       return {
         assets,
         metadata:{ provider:this.id, seed:result.stats.seed, sampled:result.stats.sampled, rejected:result.stats.rejected,
