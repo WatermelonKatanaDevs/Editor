@@ -27,7 +27,7 @@ The first provider lives in `providers/pixel-sprite/`. The ONNX inference engine
 
 It supports transparent 16×16 and 32×32 PNG sprites, batches of 4/8/12/16, deterministic seeds (or -1 for a random seed), guided and fast inference, shape/colour guidance in guided mode, browser progress, cancellation, WebGPU with CPU fallback, and Cache API storage for model and text-encoder files.
 
-The runtime libraries (ONNX Runtime Web and Hugging Face Tokenizers) are imported from jsDelivr. They may still need to be fetched by a fresh browser session; only model and text-encoder files are explicitly stored in the provider's Cache API cache.
+A scoped service worker caches jsDelivr runtime assets (ONNX Runtime Web and Hugging Face Tokenizers), while the provider's Cache API cache stores model and text-encoder files. After the initial online load, later sessions can reuse both sets of assets offline.
 
 ### Licensing
 
