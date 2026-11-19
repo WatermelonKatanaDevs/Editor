@@ -1036,6 +1036,7 @@ const makeEditorTools = (() => {
       // Show the user's prompt immediately. ConversationAI.send() records the same
       // message in history below; the final render rebuilds the transcript from that history.
       addMessage(chat,'user',text);
+      chat.querySelector('.ai-chat-disclaimer')?.remove();
       chat.scrollTop=chat.scrollHeight;
       const activeAgent=currentConversation?.getAgent?.()||null;
       const prefs=aiRoot.getAIPreferences?.()||{}; const liveActivity=activeAgent&&prefs.showActivity!==false?beginActivity(chat,true):null;
