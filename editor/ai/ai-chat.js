@@ -549,7 +549,7 @@
           if(!calls.length){finalText=String(msg.content||'');working.push({role:'assistant',content:finalText});sendEvent({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
           const narration=String(msg.content||'').trim();if(narration)sendEvent({type:'assistant_activity',text:narration});
           working.push({role:'assistant',content:msg.content||'',tool_calls:msg.tool_calls,_geminiContent:msg._geminiContent||null});
-          for(const call of calls){const result=await this.executeTool(call,runOptions);if(result?.exitEarly===true){finalText=String(result.message||'');sendEvent({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'tool',tool_call_id:call.id,_geminiCallId:call._geminiCallId,name:call.name,content:stringifyResult(result)});}
+          for(const call of calls){const result=await this.executeTool(call,runOptions);if(result?.exitEarly===true){finalText=String(result.message||narration||'');sendEvent({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'tool',tool_call_id:call.id,_geminiCallId:call._geminiCallId,name:call.name,content:stringifyResult(result)});}
         } else {
           let text='',lastReasoning='';
           sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps});
@@ -570,7 +570,7 @@
           const calls=parseToolProtocol(text,registeredTools);
           if(!calls.length){finalText=stripToolProtocol(text,registeredTools);sendEvent({type:'assistant',text:finalText});sendEvent({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
           const clean=stripToolProtocol(text,registeredTools);if(clean)sendEvent({type:'assistant_activity',text:clean});working.push({role:'assistant',content:clean});
-          for(const call of calls){const result=await this.executeTool(call,runOptions);if(result?.exitEarly===true){finalText=String(result.message||'');sendEvent({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'user',content:'Tool result for '+call.name+':\n'+stringifyResult(result)});}
+          for(const call of calls){const result=await this.executeTool(call,runOptions);if(result?.exitEarly===true){finalText=String(result.message||clean||'');sendEvent({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'user',content:'Tool result for '+call.name+':\n'+stringifyResult(result)});}
         }
       }
       sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',final:true});
