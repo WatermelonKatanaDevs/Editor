@@ -64,17 +64,17 @@ async function fetchBytes(url, onProgress) {
   return bytes;
 }
 
-function chooseBackend(ort) {
-  return (async () => {
-    if (!navigator.gpu) return "wasm";
+async function chooseBackend(ort) {
+  if (!navigator.gpu) return "wasm";
+  for (const powerPreference of ["high-performance", "low-power"]) {
     try {
-      if (await navigator.gpu.requestAdapter({ powerPreference: "high-performance" })) {
-        ort.env.webgpu.powerPreference = "high-performance";
-        return "webgpu";
-      }
+      const adapter = await navigator.gpu.requestAdapter({ powerPreference });
+      if (!adapter) continue;
+      ort.env.webgpu.powerPreference = powerPreference;
+      return "webgpu";
     } catch (_) {}
-    return "wasm";
-  })();
+  }
+  return "wasm";
 }
 
 function canvasBlob(model, indices, size) {
@@ -175,9 +175,13 @@ export class PixelSpriteProvider extends AssetProviderAI {
   }
 
   async warmup() {
+    // Match the original generator: CPU only needs a tiny cache for its one-step
+    // warmup. Allocating a full 32x32 KV cache here needlessly reserves hundreds
+    // of megabytes before the actual generation even starts.
     const size = this.backend === "webgpu" ? 32 : 16;
     const batch = this.backend === "webgpu" ? 2 : 1;
-    const cache = await this.model.cacheSet(batch, 2 + size + size * size);
+    const cacheLength = this.backend === "webgpu" ? 2 + size + size * size : 4;
+    const cache = await this.model.cacheSet(batch, cacheLength);
     const x = new Float32Array(batch * this.model.d);
     for (let row=0; row<batch; row++) this.model.writePixel(x,row*this.model.d,this.model.BOS,0,0,3);
     let output;
@@ -205,32 +209,56 @@ export class PixelSpriteProvider extends AssetProviderAI {
     progress(onProgress,"Encoding prompt");
     const vector = await this.encoder.encode(prompt);
     const started = performance.now();
-    const assets = new Array(count);
+    let assets = new Array(count);
+    let assetTasks = [];
+    const buildAsset = async (id, indices) => {
+      const blob = await canvasBlob(this.model, indices, size);
+      const asset = { blob, mimeType:"image/png", width:size, height:size, metadata:{ index:id, seed, prompt } };
+      assets[id] = asset;
+      request.onAsset?.(asset, id);
+      return asset;
+    };
     const settings = {
-      vector, n:count, size, seed, gShape:fast?1:Number(config.shape), gColour:fast?1:Number(config.colour),
+      vector, n:count, size, seed, gShape:fast?1:Number(config.shape ?? 1), gColour:fast?1:Number(config.colour ?? 2),
       filter:!fast, temperature:1, topP:1, chunk, signal:controller,
       onPixel:(ids,t,images,view) => {
-        if ((t+1)%view.S===0 || t+1===view.S*view.S)
-          progress(onProgress,"Generating sprites",t+1,view.S*view.S);
+        if ((t+1)%view.S===0 || t+1===view.S*view.S) {
+          const row = Math.ceil((t+1)/view.S);
+          progress(onProgress, "Drawing row · " + row + " / " + view.S, row, view.S);
+        }
+      },
+      onSprite:(id, indices) => {
+        // The original UI received sprites as soon as a batch finished. Preserve
+        // that behavior instead of making users wait for the entire generation.
+        assetTasks.push(buildAsset(id, indices));
       },
     };
     try {
       let result;
-      try { result = await this.model.generate(settings); }
+      const run = async () => {
+        assetTasks = [];
+        result = await this.model.generate(settings);
+        await Promise.all(assetTasks);
+        // Keep the result envelope complete even if a future engine version omits
+        // onSprite for a particular accepted image.
+        for (let id = 0; id < result.images.length; id++) {
+          if (!assets[id]) await buildAsset(id, result.images[id]);
+        }
+        return result;
+      };
+      try { await run(); }
       catch (error) {
         if (error?.name === "AbortError" || this.backend !== "webgpu") throw error;
+        await Promise.allSettled(assetTasks);
         try { await this.model.session.release(); } catch (_) {}
         this.backend = "wasm";
         this.ort.env.wasm.proxy = true;
         this.model = await loadModel({ort:this.ort,files:modelFiles(MODEL_BASE),ep:"wasm",fetchBytes,fixedCache:true});
         await this.warmup();
         settings.chunk = Math.max(1,Math.min(count,Math.floor(4/rowsPerSprite)));
-        result = await this.model.generate(settings);
-      }
-      for (let id = 0; id < result.images.length; id++) {
-        const blob = await canvasBlob(this.model, result.images[id], size);
-        assets[id] = { blob, mimeType:"image/png", width:size, height:size, metadata:{ index:id, seed:result.stats.seed, prompt } };
-        request.onAsset?.(assets[id], id);
+        assets = new Array(count);
+        request.onResetAssets?.();
+        await run();
       }
       return {
         assets,
