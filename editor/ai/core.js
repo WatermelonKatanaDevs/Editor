@@ -3,7 +3,8 @@
 
   // Framework layer: provider and conversation contracts. This module deliberately
   // contains no DOM/UI code; applications supply storage, networking and tools.
-  const root = global.EditorAI = global.EditorAI || {};
+  const root = global.ChatAIFramework = global.ChatAIFramework || {};
+  const editorRoot = global.EditorAI = global.EditorAI || {};
 
   class ProviderAI {
     constructor(options = {}) {
@@ -56,13 +57,12 @@
   class LocalProviderAI extends ProviderAI {
     constructor(options = {}) {
       super({...options, kind:'local'});
-      if (!options.client) throw new TypeError('LocalProviderAI requires a local client adapter.');
-      this.client = options.client;
+      this.client = options.client || null;
       this.runtime = options.runtime || null;
       this.registry = options.registry || null;
     }
     getModel() {
-      const model = this.registry?.active?.() || this.client.model?.() || null;
+      const model = this.registry?.active?.() || this.client?.model?.() || null;
       return model && (model.local || model.protocol === 'local-transformers') ? model : null;
     }
     async complete(messages, options = {}) {
@@ -236,4 +236,5 @@
   root.LocalProviderAI = LocalProviderAI;
   root.ConversationAI = ConversationAI;
   root.ChatAI = ChatAI;
+  Object.assign(editorRoot, {ProviderAI, RemoteProviderAI, LocalProviderAI, ConversationAI, ChatAI});
 })(window);
