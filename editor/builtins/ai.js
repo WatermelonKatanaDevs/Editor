@@ -599,10 +599,11 @@
     let loadedProjectId=null;
     let agentMode=false, busy=false, controller=null, editingIndex=-1;
     const toolset=aiRoot.makeAITools({state,openFile:onOpen,onRefresh:()=>{state.fileManager?.refresh?.();updateStatus?.();},runConfigured,ensureNodeRuntime:()=>state.ensureNodeRuntime?.()});
-    const client=new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork,localManager);
+    const client=new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork);
     const agent=new aiRoot.AIAgent({client,tools:toolset,permissions,requestPermission:permissionPrompt,extensionAPI:window.EditorExtensionAPI,emit:()=>{}});
     // ChatAI is the UI-independent API; this builtin adapts its DOM and project storage.
-    const chatAI=new aiRoot.ChatAI({registry,client,localManager,agent});
+    const chatAI=new aiRoot.ChatAI({registry,client,localManager});
+    agent.chatAI=chatAI;
     let currentConversation=null;
     async function activateModel(id){
       const target=registry.settings.models.find(x=>x.id===id);
