@@ -200,7 +200,8 @@
 
 
 /* -------------------------------------------------------------------------- */
-/* Consolidated module: (function() {
+/* Consolidated module */
+(function() {
   const root = window.EditorAI = window.EditorAI || {};
   function activeTab(state) {
     const wb = state?.workbench;
@@ -239,7 +240,8 @@
 
 
 /* -------------------------------------------------------------------------- */
-/* Consolidated module: (function() {
+/* Consolidated module */
+(function() {
   const root = window.EditorAI = window.EditorAI || {};
   const STORAGE_KEY = 'editor.aiPermissions.v1';
   const DEFAULTS = {
@@ -274,7 +276,8 @@
 
 
 /* -------------------------------------------------------------------------- */
-/* Consolidated module: (function() {
+/* Consolidated module */
+(function() {
   const root = window.EditorAI = window.EditorAI || {};
   const PREFS_KEY = 'editor.aiPreferences.v1';
   const ANALYTICS_KEY = 'editor.aiAnalytics.v1';
@@ -302,7 +305,8 @@
 
 
 /* -------------------------------------------------------------------------- */
-/* Consolidated module: (function() {
+/* Consolidated module */
+(function() {
   const root = window.EditorAI = window.EditorAI || {};
   function normalize(path) {
     const out = [];
@@ -500,7 +504,8 @@
 
 
 /* -------------------------------------------------------------------------- */
-/* Consolidated module: (function() {
+/* Consolidated module */
+(function() {
   const root = window.EditorAI = window.EditorAI || {};
   function toolSchema(tools) { return tools.list().map(t => ({type:'function',function:{name:t.name,description:t.description,parameters:t.parameters||{type:'object',properties:{}}}})); }
   function parseToolProtocol(text) {
@@ -649,7 +654,8 @@
 
 
 /* -------------------------------------------------------------------------- */
-/* Consolidated module: (function (global) {
+/* Consolidated module */
+(function (global) {
   'use strict';
 
   // Framework layer: provider and conversation contracts. This module deliberately
