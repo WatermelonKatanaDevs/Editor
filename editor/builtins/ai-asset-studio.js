@@ -4,7 +4,7 @@
   factories['ai-asset-studio'] = function (ctx) {
     let page = null, provider = null, abortController = null, disposed = false;
     const objectUrls = new Set();
-    const defaults = {};
+    let configContainer = null;
     const values = {};
     let fields = [];
     let status = null, progress = null, progressBar = null, loadButton = null, generateButton = null;
@@ -32,6 +32,18 @@
     function addStyle() {
       if (document.getElementById('ais-styles')) return;
       const el = document.createElement('style'); el.id = 'ais-styles'; el.textContent = style; document.head.appendChild(el);
+    }
+    async function prepareProvider() {
+      if (provider) return provider;
+      const mod = await import('./editor/studio-ai/providers/pixel-sprite/provider.js');
+      mod.registerPixelSpriteProvider(window.StudioAI);
+      provider = window.StudioAI.createImageProvider('pixel-sprite');
+      const schema = provider.getConfigurationSchema();
+      fields = [];
+      configContainer.replaceChildren();
+      for (const field of schema.fields || []) configContainer.append(makeField(field));
+      updateFieldVisibility();
+      return provider;
     }
     function setProgress(info) {
       const p = info?.progress;
@@ -106,9 +118,7 @@
     async function loadModel() {
       clearError(); setBusy(true); status.textContent = 'Loading model…'; progressBar.style.width = '0%';
       try {
-        const mod = await import('./editor/studio-ai/providers/pixel-sprite/provider.js');
-        mod.registerPixelSpriteProvider(window.StudioAI);
-        provider = window.StudioAI.createImageProvider('pixel-sprite');
+        await prepareProvider();
         const result = await provider.initialize({onProgress:setProgress});
         status.textContent = 'Ready · ' + result.backend.toUpperCase() + ' · model cached in this browser';
         generateButton.disabled = false; loadButton.disabled = true; loadButton.textContent = 'Model loaded';
@@ -148,7 +158,7 @@
       const promptLabel = document.createElement('label'); promptLabel.className = 'ais-field';
       const promptTitle = document.createElement('span'); promptTitle.textContent = 'Prompt'; promptInput = document.createElement('textarea'); promptInput.maxLength = 200; promptInput.placeholder = 'A tiny red dragon with cream horns and a curled tail';
       promptLabel.append(promptTitle,promptInput); panel.append(promptLabel);
-      const config = document.createElement('div'); config.className = 'ais-config'; panel.append(config);
+      const config = document.createElement('div'); config.className = 'ais-config'; configContainer = config; panel.append(config);
       loadButton = document.createElement('button'); loadButton.textContent = 'Load model';
       generateButton = document.createElement('button'); generateButton.className = 'primary'; generateButton.textContent = 'Generate sprites'; generateButton.disabled = true;
       const actions = document.createElement('div'); actions.className = 'ais-actions'; actions.append(loadButton,generateButton); panel.append(actions);
@@ -159,17 +169,7 @@
       const notice = document.createElement('div'); notice.className = 'ais-notice';
       notice.innerHTML = '<b>Local inference:</b> prompts and generated images stay on this device. Model weights and the text encoder are cached in browser storage after loading. The first load requires an internet connection; the runtime libraries are loaded from jsDelivr. WebGPU is preferred, with a slower CPU fallback.<br><br><b>License:</b> PixelSprite Canvas v2 model weights are CC BY-NC 4.0 (non-commercial use only). The inference implementation is Apache-2.0. Review the model and dependency licenses before using generated assets commercially.';
       panel.append(notice);
-      fields = [];
-      for (const field of [
-        {key:'size',label:'Sprite size',type:'select',default:32,options:[{label:'16 × 16',value:16},{label:'32 × 32',value:32}]},
-        {key:'count',label:'Variations',type:'select',default:8,options:[4,8,12,16].map(value=>({label:String(value),value}))},
-        {key:'batch',label:'Inference batch size',type:'select',default:'auto',options:[{label:'Auto · adapt to device',value:'auto'},...Array.from({length:8},(_,i)=>({label:String(i+1),value:String(i+1)}))]},
-        {key:'seed',label:'Seed (-1 = random)',type:'number',default:42,min:-1,step:1},
-        {key:'mode',label:'Inference mode',type:'select',default:'guided',options:[{label:'Quality · guided',value:'guided'},{label:'Fast',value:'fast'}]},
-        {key:'shape',label:'Shape guidance',type:'range',default:1,min:0,max:4,step:.25,visibleWhen:{key:'mode',equals:'guided'}},
-        {key:'colour',label:'Colour guidance',type:'range',default:2,min:0,max:4,step:.25,visibleWhen:{key:'mode',equals:'guided'}}
-      ]) config.append(makeField(field));
-      updateFieldVisibility();
+      prepareProvider().then(() => { status.textContent = 'Provider ready · load the model to begin'; }).catch(showError);
       const output = document.createElement('section'); output.className = 'ais-panel';
       const outputHead = document.createElement('div'); outputHead.className = 'ais-results-head';
       const outputTitle = document.createElement('h3'); outputTitle.textContent = 'Generated sprites';
