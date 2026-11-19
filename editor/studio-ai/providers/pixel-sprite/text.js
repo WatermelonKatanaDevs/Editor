@@ -22,8 +22,12 @@ export async function loadTextEncoder({ ort, Tokenizer, files, fetchBytes, onPro
   const session = await ort.InferenceSession.create(bytes, { executionProviders: ["wasm"], graphOptimizationLevel: "all" });
   const cache = new Map();
 
-  async function encode(text) {
-    if (cache.has(text)) return cache.get(text);
+  async function encode(text, onProgress) {
+    if (cache.has(text)) {
+      onProgress?.({ phase:"Prompt embedding cached", cached:true });
+      return cache.get(text);
+    }
+    onProgress?.({ phase:"Tokenizing prompt" });
     let ids = tokenizer.encode(text).ids;
     if (ids.length > ENCODER.maxTokens) ids = [...ids.slice(0, ENCODER.maxTokens - 1), ids[ids.length - 1]];
     const n = ids.length, shape = [1, n];
@@ -32,6 +36,12 @@ export async function loadTextEncoder({ ort, Tokenizer, files, fetchBytes, onPro
       attention_mask: new ort.Tensor("int64", new BigInt64Array(n).fill(1n), shape),
     };
     if (session.inputNames.includes("token_type_ids")) feeds.token_type_ids = new ort.Tensor("int64", new BigInt64Array(n), shape);
+    // Let the UI paint the stage change before CPU inference starts. Some
+    // browsers run WASM on the main thread when the selected decoder backend is
+    // WebGPU, so otherwise the UI can appear frozen at "Preparing prompt".
+    await new Promise(resolve => setTimeout(resolve, 0));
+    onProgress?.({ phase:"Running text encoder · WASM", tokens:n });
+    const started = performance.now();
     const out = await session.run(feeds);
     const h = out[session.outputNames[0]].data, D = h.length / n, v = new Float32Array(D);
     for (let t = 0; t < n; t++) for (let j = 0; j < D; j++) v[j] += h[t * D + j] / n;
@@ -40,6 +50,7 @@ export async function loadTextEncoder({ ort, Tokenizer, files, fetchBytes, onPro
     norm = Math.sqrt(norm) || 1;
     for (let j = 0; j < D; j++) v[j] /= norm;
     cache.set(text, v);
+    onProgress?.({ phase:"Prompt encoded", elapsedMs:performance.now()-started, tokens:n });
     return v;
   }
   return { encode, tokenizer };
