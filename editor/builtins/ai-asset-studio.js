@@ -135,7 +135,9 @@
       const prompt = promptInput.value.trim();
       if (!prompt) { promptInput.focus(); return; }
       abortController = new AbortController(); generateButton.textContent = 'Stop generation'; loadButton.disabled = true;
-      generateButton.disabled = false; results.replaceChildren(); caption.textContent = prompt;
+      generateButton.disabled = false;
+      for (const url of objectUrls) URL.revokeObjectURL(url);
+      objectUrls.clear(); results.replaceChildren(); caption.textContent = prompt;
       status.textContent = 'Preparing prompt…'; progressBar.style.width = '0%';
       try {
         const result = await provider.generateImage({prompt,parameters:{...values}}, {
