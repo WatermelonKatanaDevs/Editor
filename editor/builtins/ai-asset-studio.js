@@ -37,7 +37,7 @@
       if (provider) return provider;
       if (providerPromise) return providerPromise;
       providerPromise = (async () => {
-        const mod = await import('./editor/studio-ai/providers/pixel-sprite/provider.js');
+        const mod = await import('../studio-ai/providers/pixel-sprite/provider.js');
         mod.registerPixelSpriteProvider(window.StudioAI);
         provider = window.StudioAI.createImageProvider('pixel-sprite');
         const schema = provider.getConfigurationSchema();
