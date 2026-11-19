@@ -429,7 +429,7 @@
           let text='',lastReasoning='';
           sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps});
           const streamOptions={model,signal:options.signal,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay};
-          for await(const chunk of provider.stream(working,streamOptions)){
+          for await(const chunk of provider.streamEvents(working,streamOptions)){
             if(chunk.text!==undefined){
               const next=String(chunk.text??'');
               const delta=chunk.delta!==undefined?String(chunk.delta??''):next.startsWith(text)?next.slice(text.length):next;
@@ -482,6 +482,33 @@
         structuredOutput: !!options.capabilities?.structuredOutput,
         ...(options.capabilities || {})
       });
+      this.listeners = new Set();
+    }
+    subscribe(listener) {
+      if(typeof listener!=='function')throw new TypeError('A provider subscriber must be a function.');
+      this.listeners.add(listener);
+      return ()=>this.listeners.delete(listener);
+    }
+    publish(event) {
+      const value={providerId:this.id,at:Date.now(),...event};
+      for(const listener of [...this.listeners]){try{listener(value);}catch(error){console.error('AI provider subscriber failed:',error);}}
+      return value;
+    }
+    async *streamEvents(messages,options={}) {
+      const requestId='request-'+Math.random().toString(36).slice(2);
+      const modelId=options.modelId||options.model?.id||null;
+      this.publish({type:'stream_start',requestId,modelId});
+      try {
+        for await(const chunk of this.stream(messages,options)){
+          this.publish({type:'stream_chunk',requestId,modelId,chunk});
+          options.onChunk?.(chunk,{requestId,modelId,providerId:this.id});
+          yield chunk;
+        }
+        this.publish({type:'stream_end',requestId,modelId});
+      } catch(error) {
+        this.publish({type:'stream_error',requestId,modelId,error});
+        throw error;
+      }
     }
     supports(capability, model) { return this.getCapabilities(model)[capability] === true; }
     getCapabilities(model) {
@@ -537,7 +564,7 @@
           const assistant=this.addMessage({role:'assistant',content:String(result?.text||'')});
           return {userMessage,message:assistant,text:assistant.content,result};
         }
-        let text='';for await(const chunk of this.chat.stream(messages,{...options,prepareMessages:undefined,modelId:this.modelId})){text=chunk.text??text;options.onChunk?.(chunk);}
+        let text='';for await(const chunk of this.chat.stream(messages,{...options,prepareMessages:undefined,modelId:this.modelId})){text=chunk.text??text;}
         const assistant=this.addMessage({role:'assistant',content:text});return {userMessage,message:assistant,text};
       } finally { this.running=false; }
     }
@@ -585,7 +612,7 @@
     getConversation(id) { return this.conversations.get(String(id))||null; }
     closeConversation(id) { const conversation=this.getConversation(id);if(!conversation)return false;if(conversation.running)conversation.cancel();this.conversations.delete(String(id));return true; }
     async complete(messages,options={}) { return this.getProvider(options.modelId).complete(messages,{...options,model:this.getModel(options.modelId)}); }
-    stream(messages,options={}) { return this.getProvider(options.modelId).stream(messages,{...options,model:this.getModel(options.modelId)}); }
+    stream(messages,options={}) { return this.getProvider(options.modelId).streamEvents(messages,{...options,model:this.getModel(options.modelId)}); }
     runAgent(messages,options={}) { const agent=options.agent&&typeof options.agent.run==='function'?options.agent:this.getAgent(options.agentId||options.agent);if(!agent)throw new Error('No agent was specified. Pass an agent instance or registered agent ID.');if(agent.chatAI!==this)throw new Error('The requested agent belongs to a different ChatAI instance.');return agent.run(messages,options); }
     cancel() { for(const provider of this.providers.values())provider.cancel?.(); }
     dispose() { this.cancel();for(const provider of this.providers.values())provider.dispose?.();this.providers.clear();this.conversations.clear();this.agents.clear(); }
