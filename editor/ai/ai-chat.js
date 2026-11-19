@@ -429,7 +429,19 @@
           let text='',lastReasoning='';
           sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps});
           const streamOptions={model,signal:options.signal,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay};
-          for await(const chunk of provider.stream(working,streamOptions)){text=chunk.text||text;if(chunk.reasoning&&chunk.reasoning!==lastReasoning){const delta=chunk.reasoning.slice(lastReasoning.length);if(delta){reasoning+=delta;sendEvent({type:chunk.reasoningKind==='summary'?'reasoning_summary':'reasoning',text:delta});}lastReasoning=chunk.reasoning;}}
+          for await(const chunk of provider.stream(working,streamOptions)){
+            if(chunk.text!==undefined){
+              const next=String(chunk.text??'');
+              const delta=chunk.delta!==undefined?String(chunk.delta??''):next.startsWith(text)?next.slice(text.length):next;
+              text=next;
+              if(delta)sendEvent({type:'assistant_delta',delta,text});
+            }
+            if(chunk.reasoning&&chunk.reasoning!==lastReasoning){
+              const delta=chunk.reasoning.startsWith(lastReasoning)?chunk.reasoning.slice(lastReasoning.length):chunk.reasoning;
+              if(delta){reasoning+=delta;sendEvent({type:chunk.reasoningKind==='summary'?'reasoning_summary':'reasoning',text:delta});}
+              lastReasoning=chunk.reasoning;
+            }
+          }
           const calls=parseToolProtocol(text);
           if(!calls.length){finalText=stripToolProtocol(text);sendEvent({type:'assistant',text:finalText});sendEvent({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
           const clean=stripToolProtocol(text);if(clean)sendEvent({type:'assistant_activity',text:clean});working.push({role:'assistant',content:clean});
