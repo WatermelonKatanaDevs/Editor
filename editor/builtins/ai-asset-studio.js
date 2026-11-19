@@ -174,7 +174,7 @@
       const notice = document.createElement('div'); notice.className = 'ais-notice';
       notice.innerHTML = '<b>Local inference:</b> prompts and generated images stay on this device. Model weights and the text encoder are cached in browser storage after loading. The first load requires an internet connection; the runtime libraries are loaded from jsDelivr. WebGPU is preferred, with a slower CPU fallback.<br><br><b>License:</b> PixelSprite Canvas v2 model weights are <a href="https://huggingface.co/ihor-umanets/pixelsprite-canvas-v2" target="_blank" rel="noopener">CC BY-NC 4.0 (non-commercial use only)</a>. The inference implementation is Apache-2.0. Review the model and dependency licenses before using generated assets commercially.';
       panel.append(notice);
-      prepareProvider().then(() => { status.textContent = 'Provider ready · load the model to begin'; }).catch(showError);
+      prepareProvider().catch(showError);
       const output = document.createElement('section'); output.className = 'ais-panel';
       const outputHead = document.createElement('div'); outputHead.className = 'ais-results-head';
       const outputTitle = document.createElement('h3'); outputTitle.textContent = 'Generated sprites';
