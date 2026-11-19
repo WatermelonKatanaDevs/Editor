@@ -497,16 +497,17 @@
     async *streamEvents(messages,options={}) {
       const requestId='request-'+Math.random().toString(36).slice(2);
       const modelId=options.modelId||options.model?.id||null;
-      this.publish({type:'stream_start',requestId,modelId});
+      const conversationId=options.conversationId||null;
+      this.publish({type:'stream_start',requestId,modelId,conversationId});
       try {
         for await(const chunk of this.stream(messages,options)){
-          this.publish({type:'stream_chunk',requestId,modelId,chunk});
+          this.publish({type:'stream_chunk',requestId,modelId,conversationId,chunk});
           options.onChunk?.(chunk,{requestId,modelId,providerId:this.id});
           yield chunk;
         }
-        this.publish({type:'stream_end',requestId,modelId});
+        this.publish({type:'stream_end',requestId,modelId,conversationId});
       } catch(error) {
-        this.publish({type:'stream_error',requestId,modelId,error});
+        this.publish({type:'stream_error',requestId,modelId,conversationId,error});
         throw error;
       }
     }
@@ -551,7 +552,7 @@
     removeAgent() { delete this.agent;this.updatedAt=Date.now();return this; }
     getProvider() { return this.chat.getProvider(this.modelId); }
     async complete(options={}) { return this.chat.complete(this.messages,{...options,modelId:this.modelId,systemPrompt:options.systemPrompt??this.systemPrompt}); }
-    stream(options={}) { return this.chat.stream(this.messages,{...options,modelId:this.modelId,systemPrompt:options.systemPrompt??this.systemPrompt}); }
+    stream(options={}) { return this.chat.stream(this.messages,{...options,conversationId:this.id,modelId:this.modelId,systemPrompt:options.systemPrompt??this.systemPrompt}); }
     async send(content,options={}) {
       if(this.running)throw new Error('This conversation is already generating a response.');
       const userMessage=this.addMessage({role:'user',content});this.running=true;
@@ -560,11 +561,11 @@
         let messages=[...(prompt?[{role:'system',content:prompt}]:[]),...this.messages];
         if(typeof options.prepareMessages==='function'){const prepared=await options.prepareMessages(messages);if(Array.isArray(prepared))messages=prepared;else if(Array.isArray(prepared?.messages))messages=prepared.messages;}
         if(this.getAgent()){
-          const result=await this.getAgent().run(messages,{...options,prepareMessages:undefined,modelId:this.modelId});
+          const result=await this.getAgent().run(messages,{...options,prepareMessages:undefined,conversationId:this.id,modelId:this.modelId});
           const assistant=this.addMessage({role:'assistant',content:String(result?.text||'')});
           return {userMessage,message:assistant,text:assistant.content,result};
         }
-        let text='';for await(const chunk of this.chat.stream(messages,{...options,prepareMessages:undefined,modelId:this.modelId})){text=chunk.text??text;}
+        let text='';for await(const chunk of this.chat.stream(messages,{...options,prepareMessages:undefined,conversationId:this.id,modelId:this.modelId})){text=chunk.text??text;}
         const assistant=this.addMessage({role:'assistant',content:text});return {userMessage,message:assistant,text};
       } finally { this.running=false; }
     }
