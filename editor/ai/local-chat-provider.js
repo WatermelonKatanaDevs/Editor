@@ -269,17 +269,55 @@
   function cacheName(name){
     return String(name).replace('present_conv','past_conv').replace('present_ssm','past_ssm').replace('present_recurrent','past_recurrent').replace('present','past_key_values');
   }
-  async function generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,onProgress){
+  function tensorTokenIds(value){
+    if(value==null)return [];
+    const data=value.data!==undefined?value.data:value;
+    if(ArrayBuffer.isView(data)||Array.isArray(data))return Array.from(data,item=>Number(item)).filter(Number.isFinite);
+    if(typeof value.tolist==='function'){
+      try{
+        const flatten=(item,out)=>{if(Array.isArray(item)||ArrayBuffer.isView(item)){for(const child of item)flatten(child,out);}else if(typeof item==='number'||typeof item==='bigint'){const n=Number(item);if(Number.isFinite(n))out.push(n);}};
+        const out=[];flatten(value.tolist(),out);return out;
+      }catch(_){}
+    }
+    return [];
+  }
+  function tokenPrefixMatches(current,cached,length){
+    if(!Array.isArray(current)||!Array.isArray(cached)||!Number.isFinite(length)||length<0||length>current.length||length>cached.length)return false;
+    for(let i=0;i<length;i++)if(current[i]!==cached[i])return false;
+    return true;
+  }
+  async function generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,onProgress,cacheState){
     const tokenizer=generator.tokenizer,model=generator.model;
     if(!model?.forward||!model?.generate||!tokenizer?.apply_chat_template||!lib.DynamicCache||!lib.Tensor||!lib.ones)return null;
     const inputs=tokenizer.apply_chat_template(messages,{add_generation_prompt:true,return_dict:true});
     const inputIds=inputs?.input_ids;
     const dims=inputIds?.dims||[];
     const tokenCount=Number(dims[dims.length-1]||0);
-    if(!inputIds||tokenCount<=256)return null;
-    const targetEnd=tokenCount-1; // leave at least one token for generate() to consume
-    let cache=null,start=0,chunkSize=256;
+    if(!inputIds||tokenCount<=1)return null;
+    const inputTokenIds=tensorTokenIds(inputIds);
+    if(inputTokenIds.length<tokenCount)return null;
+    const targetEnd=tokenCount-1; // Leave the final prompt token for generate() to consume.
+    let cache=cacheState?.cache||null,reusedTokens=0,start=0,chunkSize=256;
+    if(cache){
+      try{reusedTokens=Number(cache.get_seq_length())||0;}catch(_){reusedTokens=0;}
+      if(reusedTokens<=0||reusedTokens>targetEnd||!tokenPrefixMatches(inputTokenIds,cacheState?.tokenIds,reusedTokens)){
+        try{await cache.dispose();}catch(_){}
+        cache=null;reusedTokens=0;
+      }
+    }
+    start=reusedTokens;
+    const streamedTokenIds=[];
+    if(streamer&&typeof streamer.put==='function'){
+      const originalPut=streamer.put.bind(streamer);
+      let firstPut=true;
+      streamer.put=tokenIds=>{
+        if(firstPut)firstPut=false;
+        else streamedTokenIds.push(...tensorTokenIds(tokenIds));
+        return originalPut(tokenIds);
+      };
+    }
     try{
+      onProgress?.({processed:start,total:targetEnd,cached:reusedTokens,chunkSize});
       while(start<targetEnd){
         if(signal?.aborted)throw new DOMException('Aborted','AbortError');
         const stop=Math.min(start+chunkSize,targetEnd);
@@ -302,21 +340,34 @@
         const rate=(stop-start)/elapsed;
         start=stop;
         chunkSize=Math.max(32,Math.min(1024,chunkSize*2,Math.round(rate*1500)));
-        onProgress?.({processed:start,total:targetEnd,chunkSize});
+        onProgress?.({processed:start,total:targetEnd,cached:reusedTokens,chunkSize});
       }
       if(signal?.aborted)throw new DOMException('Aborted','AbortError');
-      return await model.generate({
+      const result=await model.generate({
         ...inputs,
         ...(cache?{past_key_values:cache,attention_mask:lib.ones(dims)}:{}),
         ...generationOptions,
         streamer
       });
-    }finally{
+      const sequence=result?.sequences||result;
+      const sequenceTokenIds=tensorTokenIds(sequence);
+      const generatedTokenIds=sequenceTokenIds.length>=tokenCount
+        ?sequenceTokenIds.slice(tokenCount)
+        :streamedTokenIds;
+      const tokenIds=[...inputTokenIds,...generatedTokenIds];
+      const cacheLength=Number(cache?.get_seq_length?.())||0;
+      if(!cache||cacheLength<=0||cacheLength>tokenIds.length){
+        try{await cache?.dispose?.();}catch(_){}
+        return {result,cache:null,cacheLength:0,tokenIds:inputTokenIds,reusedTokens};
+      }
+      return {result,cache,cacheLength,tokenIds,reusedTokens};
+    }catch(error){
       try{await cache?.dispose?.();}catch(_){}
+      throw error;
     }
   }
   class LocalModelManager{
-    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;this.runtimeAssets=[];}
+    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;this.runtimeAssets=[];this.kvCache=null;this.kvCacheTokens=[];this.kvCacheConversationId='';this.kvCacheModelId='';this.maxReusableCacheTokens=4096;}
     subscribe(fn){if(typeof fn!=='function')return ()=>{};this.listeners.add(fn);fn(this.status());return ()=>this.listeners.delete(fn);}
     status(){return {loading:this.loading,loadedModelId:this.loadedModelId,loaded:!!this.generator,progress:this.progress,text:this.statusText,device:this.device,dtype:this.dtype,offlineOnly:this.offlineOnly,cacheHit:this.cacheHit};}
     emit(patch){Object.assign(this,patch||{});const state=this.status();for(const fn of this.listeners){try{fn(state);}catch(e){console.warn('Local AI status listener failed:',e);}}}
@@ -366,7 +417,8 @@
       })();
       return this.libraryPromise;
     }
-    async unload(notify=true){const old=this.generator;this.generator=null;this.model=null;this.loadedModelId='';this.stopper=null;if(old&&old.dispose){try{await old.dispose();}catch(e){console.warn('Local AI model disposal failed:',e);}}if(notify)this.emit({loading:false,progress:0,statusText:'Model unloaded.'});}
+    async clearKVCache(){const cache=this.kvCache;this.kvCache=null;this.kvCacheTokens=[];this.kvCacheConversationId='';this.kvCacheModelId='';try{await cache?.dispose?.();}catch(error){console.warn('Local AI KV cache disposal failed:',error);}}
+    async unload(notify=true){await this.clearKVCache();const old=this.generator;this.generator=null;this.model=null;this.loadedModelId='';this.stopper=null;if(old&&old.dispose){try{await old.dispose();}catch(e){console.warn('Local AI model disposal failed:',e);}}if(notify)this.emit({loading:false,progress:0,statusText:'Model unloaded.'});}
     async load(model,options={}){
       if(!model||model.protocol!=='local-transformers')throw new Error('Not a local browser model.');
       if(this.loading)throw new Error('A local model is already loading.');
@@ -440,9 +492,39 @@
           const generationOptions={max_new_tokens:Math.max(64,Math.min(4096,Number(options.maxTokens)||1024)),do_sample:true,temperature:options.temperature!=null?options.temperature:.7,top_p:options.topP!=null?options.topP:.9,...(stopper?{stopping_criteria:[stopper]}:{})};
           let result=null;
           if(this.device==='webgpu'){
-            result=await generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,progress=>{
-              this.emit({statusText:'WEBGPU · preparing prompt '+progress.processed+'/'+progress.total+' tokens'});
-            });
+            const conversationId=String(options.conversationId||'');
+            let cacheState=null;
+            if(conversationId&&this.kvCache&&this.kvCacheConversationId===conversationId&&this.kvCacheModelId===String(model?.id||'')){
+              cacheState={cache:this.kvCache,tokenIds:this.kvCacheTokens};
+            }else if(this.kvCache){
+              await this.clearKVCache();
+            }
+            let cachedGeneration=null;
+            try{
+              cachedGeneration=await generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,progress=>{
+                const reused=progress.cached?' · reused '+progress.cached+' cached tokens':'';
+                this.emit({statusText:'WEBGPU · preparing prompt '+progress.processed+'/'+progress.total+' tokens'+reused});
+              },cacheState);
+            }catch(error){
+              await this.clearKVCache();
+              throw error;
+            }
+            if(cachedGeneration!==null){
+              result=cachedGeneration.result;
+              const nextCache=cachedGeneration.cache;
+              const canRetain=!!conversationId&&!!nextCache&&cachedGeneration.cacheLength<=this.maxReusableCacheTokens;
+              if(canRetain){
+                this.kvCache=nextCache;
+                this.kvCacheTokens=cachedGeneration.tokenIds;
+                this.kvCacheConversationId=conversationId;
+                this.kvCacheModelId=String(model?.id||'');
+              }else{
+                try{await nextCache?.dispose?.();}catch(_){}
+                await this.clearKVCache();
+              }
+            }else{
+              await this.clearKVCache();
+            }
           }
           if(result===null)result=await generator(messages,{...generationOptions,streamer});
           if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
@@ -453,6 +535,7 @@
       try{
         try{return await run();}
         catch(error){
+          if(this.kvCacheConversationId===String(options.conversationId||''))await this.clearKVCache();
           // ORT's WebGPU buffer-download failure means the GPU inference context
           // is no longer usable. If prefill failed before emitting any text, retry
           // this exact request on WASM rather than making the user restart Agent.
