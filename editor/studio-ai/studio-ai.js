@@ -13,6 +13,23 @@
     }
     getCapabilities() { return clone(this._capabilities); }
     getConfigurationSchema() { return clone(this._configuration); }
+
+    /**
+     * Standard provider progress contract:
+     * { message: string, progress: number | null, ...optional provider metadata }.
+     * progress is normalized to [0, 1]; null means the operation has no measurable
+     * overall percentage yet. The UI renders the message and percentage without
+     * needing to understand provider-specific stages or terminology.
+     */
+    reportProgress(callback, update = {}) {
+      if (typeof callback !== "function") return null;
+      const raw = Number(update.progress);
+      const value = Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : null;
+      const event = { ...update, message: String(update.message || "Working…"), progress: value };
+      callback(event);
+      return event;
+    }
+
     async initialize() { this.initialized = true; }
     async dispose() { this.initialized = false; }
   }
