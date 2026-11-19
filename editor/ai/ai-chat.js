@@ -374,14 +374,14 @@
     // block. Interpret JSON string arguments against the registered tool schema;
     // never evaluate the supplied code.
     const functionMatch=value.match(/^([a-zA-Z_][\w-]*)\s*\(/);
-    const functionTool=functionMatch&&allowed.get(functionMatch[1]);
+    const functionTool=functionMatch&&functionMatch[1]!=='exit_early'&&allowed.get(functionMatch[1]);
     if(functionTool){
       const call=parseFunctionStyleToolCall(value,functionTool);
       if(call)return call;
     }
     const firstLine=value.split(/\r?\n/,1)[0].trim();
     const match=firstLine.match(/^([a-zA-Z_][\w-]*)\s*$/);
-    if(!match||!allowed.has(match[1]))return null;
+    if(!match||match[1]==='exit_early'||!allowed.has(match[1]))return null;
     const remaining=value.slice(firstLine.length).trim();
     if(!remaining)return {name:match[1],arguments:{}};
     const args=parseToolArguments(remaining);
