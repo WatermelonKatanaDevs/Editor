@@ -1132,7 +1132,7 @@ const makeEditorTools = (() => {
       if(activity.details){const summary=activity.details.querySelector('summary');if(summary)summary.textContent=activitySummary(activity.items);activity.details.scrollIntoView?.({block:'nearest'});}
     }
     return {
-      title:'AI',
+      title:'AI Chat',
       icon:'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.8c-4.1 0-7.4 2.3-7.4 6.8 0 2.1 1 3.5 2.5 4.6-.2 1.9-1 3.2-2 4.7 2.1-.2 4.1-1 5.7-2.3.4.1.8.1 1.2.1 4.7 0 7.4-2.8 7.4-7.1 0-4.5-3.3-6.8-7.4-6.8Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.8 10.5h6.4M12 7.3v6.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
       render(g,t){ render(g,t); },
       openSettings:()=>settingsModal(registry,permissions,()=>{persist();render(currentGroup);},state.browserNetwork||window.__sharedBrowserNetwork),
