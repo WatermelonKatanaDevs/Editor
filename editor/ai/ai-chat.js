@@ -770,6 +770,15 @@
         if (!options.localProvider && typeof LocalProvider !== 'function') throw new Error('Local chat provider has not been loaded.');
         this.registerProvider(options.localProvider || new LocalProvider({id:'local',label:'Local AI',client:options.client,runtime:options.localManager,registry:this.registry,capabilities:options.localCapabilities||{}}));
       }
+      if (options.agentOptions) this.configureAgent(options.agentOptions);
+      else if (this.agent) this.agent.chatAI = this;
+    }
+    configureAgent(options = {}) {
+      const AgentRunner = root.AIAgent;
+      if (typeof AgentRunner !== 'function') throw new Error('Agent mode is unavailable.');
+      this.agent = options instanceof AgentRunner ? options : new AgentRunner({...options, chatAI:this});
+      this.agent.chatAI = this;
+      return this.agent;
     }
     registerProvider(provider) {
       if (!(provider instanceof ProviderAI)) throw new TypeError('Providers must extend ProviderAI.');
