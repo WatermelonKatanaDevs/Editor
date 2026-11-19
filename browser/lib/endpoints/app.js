@@ -3107,15 +3107,28 @@
             for (const event of tracingEvents) if (typeof subscribers[event] === 'function') result[event].unsubscribe(subscribers[event]);
             return result;
           };
+          Object.defineProperty(result, 'hasSubscribers', {
+            enumerable: true,
+            get: () => tracingEvents.some(event => result[event].hasSubscribers)
+          });
           result.traceSync = (callback, context = {}, thisArg, ...args) => {
-            result.start.runStores(context, callback, thisArg, ...args);
-            result.end.publish(context);
-            return context.result;
+            if (!result.hasSubscribers) return callback.apply(thisArg, args);
+            try {
+              const value = result.start.runStores(context, callback, thisArg, ...args);
+              context.result = value;
+              result.end.publish(context);
+              return value;
+            } catch (error) {
+              context.error = error;
+              result.error.publish(context);
+              result.end.publish(context);
+              throw error;
+            }
           };
           result.tracePromise = (callback, context = {}, thisArg, ...args) => {
-            result.start.runStores(context, callback, thisArg, ...args);
+            if (!result.hasSubscribers) return callback.apply(thisArg, args);
             let value;
-            try { value = callback.apply(thisArg, args); }
+            try { value = result.start.runStores(context, callback, thisArg, ...args); }
             catch (error) {
               context.error = error;
               result.error.publish(context);
