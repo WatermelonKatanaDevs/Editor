@@ -205,6 +205,8 @@ export class PixelSpriteProvider extends AssetProviderAI {
     const automatic = deviceBatch(this.backend, rowsPerSprite, count);
     const chunk = config.batch === "auto" ? automatic : Math.max(1,Math.min(8,Number(config.batch)||automatic));
     const seed = Number.isFinite(Number(config.seed)) ? Number(config.seed) : 42;
+    const shapeGuidance = Number.isFinite(Number(config.shape)) ? Math.max(0,Math.min(4,Number(config.shape))) : 1;
+    const colourGuidance = Number.isFinite(Number(config.colour)) ? Math.max(0,Math.min(4,Number(config.colour))) : 2;
     const controller = signal;
     progress(onProgress,"Encoding prompt");
     const vector = await this.encoder.encode(prompt);
@@ -219,7 +221,7 @@ export class PixelSpriteProvider extends AssetProviderAI {
       return asset;
     };
     const settings = {
-      vector, n:count, size, seed, gShape:fast?1:Number(config.shape ?? 1), gColour:fast?1:Number(config.colour ?? 2),
+      vector, n:count, size, seed, gShape:fast?1:shapeGuidance, gColour:fast?1:colourGuidance,
       filter:!fast, temperature:1, topP:1, chunk, signal:controller,
       onPixel:(ids,t,images,view) => {
         if ((t+1)%view.S===0 || t+1===view.S*view.S) {
