@@ -330,118 +330,117 @@
     return text.slice(0,maxChars)+`\n… [truncated ${text.length-maxChars} characters]`;
   }
   class AIAgent {
-    constructor(options={}) { Object.assign(this,options); this.maxSteps=options.maxSteps||24; this.running=false; }
-    async permission(tool,args,resultPreview) {
-      const name=tool.permission || 'ask'; if(name==='none')return true; const manager=this.permissions;
-      const policy=manager?.get(name) || 'ask';
+    constructor(options={}) {
+      Object.assign(this,options);
+      this.id=String(options.id||('agent-'+Math.random().toString(36).slice(2)));
+      this.name=String(options.name||this.id);
+      this.chatAI=options.chatAI||null;
+      this.maxSteps=Math.max(1,Math.min(100,Number(options.maxSteps)||24));
+      this.tools=new Map();
+      if(Array.isArray(options.tools))this.registerTools(options.tools);
+    }
+    registerTool(definition) {
+      if(!definition||typeof definition!=='object')throw new TypeError('A tool definition is required.');
+      const name=String(definition.name||'').trim();
+      if(!name||typeof definition.execute!=='function')throw new TypeError('A tool needs a name and execute function.');
+      const tool={...definition,name,parameters:definition.parameters||{type:'object',properties:{}}};
+      this.tools.set(name,tool);return tool;
+    }
+    registerTools(definitions=[]) { return Array.from(definitions,definition=>this.registerTool(definition)); }
+    unregisterTool(name) { return this.tools.delete(String(name)); }
+    getTool(name) { return this.tools.get(String(name))||null; }
+    listTools() { return [...this.tools.values()]; }
+    setInstructions(value) { this.toolInstructions=String(value||'');return this; }
+    setPermission(name,policy) {
+      if(!this.permissions||typeof this.permissions.set!=='function')throw new Error('This agent does not have a configurable permission manager.');
+      this.permissions.set(String(name),policy);return this;
+    }
+    getPermission(name) { return this.permissions?.get?.(String(name))||'ask'; }
+    async permission(tool,args,resultPreview,runOptions={}) {
+      const name=tool.permission||'ask';if(name==='none')return true;
+      const manager=runOptions.permissions||this.permissions,policy=manager?.get(name)||'ask';
       if(policy==='always')return true;
-      if(policy==='never')throw new Error(`Permission denied: ${tool.name}`);
-      if(typeof this.requestPermission!=='function')throw new Error(`Permission required: ${tool.name}`);
-      const decision=await this.requestPermission({tool,args,preview:resultPreview});
+      if(policy==='never')throw new Error('Permission denied: '+tool.name);
+      const requestPermission=runOptions.requestPermission||this.requestPermission;
+      if(typeof requestPermission!=='function')throw new Error('Permission required: '+tool.name);
+      const decision=await requestPermission({tool,args,preview:resultPreview,agent:this});
       if(decision==='always')manager?.set(name,'always');
-      if(decision==='deny' || decision===false)throw new Error(`Permission denied: ${tool.name}`);
+      if(decision==='deny'||decision===false)throw new Error('Permission denied: '+tool.name);
       return true;
     }
-    async executeTool(call) {
-      const started=performance.now?.() ?? Date.now();
-      let tool=this.chatAI?.getTool?.(call?.name);
-      let args={};
+    async executeTool(call,runOptions={}) {
+      const started=performance.now?.()??Date.now(),emit=runOptions.emit||this.emit;
+      const tool=this.getTool(call?.name);let args={};
       try {
-        if(!tool) throw new Error(`Unknown tool: ${call?.name || 'unnamed tool'}`);
-        args=typeof call.arguments==='string' ? JSON.parse(call.arguments||'{}') : (call.arguments||{});
-        if(!args || typeof args!=='object' || Array.isArray(args)) throw new Error('Tool arguments must be a JSON object.');
-        const before=await this.beforeTool?.({tool,args}) || {args};
-        args=before?.args && typeof before.args==='object' ? before.args : args;
-        this.emit?.({type:'tool_call',name:tool.name,args});
-        await this.permission(tool,args,call.preview || args);
+        if(!tool)throw new Error("Unknown tool: "+(call?.name||'unnamed tool'));
+        args=typeof call.arguments==='string'?JSON.parse(call.arguments||'{}'):(call.arguments||{});
+        if(!args||typeof args!=='object'||Array.isArray(args))throw new Error('Tool arguments must be a JSON object.');
+        const beforeTool=runOptions.beforeTool||this.beforeTool;
+        const before=await beforeTool?.({tool,args,agent:this})||{args};
+        args=before?.args&&typeof before.args==='object'?before.args:args;
+        emit?.({type:'tool_call',name:tool.name,args});
+        await this.permission(tool,args,call.preview||args,runOptions);
         let result=await tool.execute(args);
-        const after=await this.afterTool?.({tool,args,result}) || {result};
-        if(after && Object.prototype.hasOwnProperty.call(after,'result')) result=after.result;
-        const durationMs=Math.max(0,Math.round((performance.now?.() ?? Date.now())-started));
-        this.emit?.({type:'tool_result',name:tool.name,args,result,ok:true,durationMs});
-        return result;
+        const afterTool=runOptions.afterTool||this.afterTool;
+        const after=await afterTool?.({tool,args,result,agent:this})||{result};
+        if(after&&Object.prototype.hasOwnProperty.call(after,'result'))result=after.result;
+        const durationMs=Math.max(0,Math.round((performance.now?.()??Date.now())-started));
+        emit?.({type:'tool_result',name:tool.name,args,result,ok:true,durationMs});return result;
       } catch(e) {
-        const durationMs=Math.max(0,Math.round((performance.now?.() ?? Date.now())-started));
+        const durationMs=Math.max(0,Math.round((performance.now?.()??Date.now())-started));
         const error={error:e?.message||String(e)};
-        if(!tool) error.tool=call?.name||'';
-        if(/Permission denied|Permission required/.test(error.error)) error.permissionDenied=true;
-        this.emit?.({type:'tool_result',name:tool?.name||call?.name||'unknown',args,result:error,ok:false,durationMs});
-        return error;
+        if(!tool)error.tool=call?.name||'';
+        if(/Permission denied|Permission required/.test(error.error))error.permissionDenied=true;
+        emit?.({type:'tool_result',name:tool?.name||call?.name||'unknown',args,result:error,ok:false,durationMs});return error;
       }
     }
-    async run(messages, options={}) {
-      if(this.running)throw new Error('An AI task is already running.');
-      this.running=true;
-      try {
-        const model=this.chatAI?.getModel?.() || this.client.model();
-        const provider=this.chatAI?.getProvider?.(model?.id) || this.client;
-        const registeredTools=this.chatAI?.listTools?.() || [];
-        const toolDefs=toolSchema(registeredTools);
-        const canNative=!!model.supportsTools && registeredTools.length>0;
-        const working=messages.map(x=>({role:x.role,content:x.content,...(x.tool_call_id?{tool_call_id:x.tool_call_id}:{}),...(x.name?{name:x.name}:{}),...(Array.isArray(x.tool_calls)?{tool_calls:x.tool_calls}:{}),...(x.role==='assistant'&&x._geminiContent?{_geminiContent:x._geminiContent}:{}),...(x._geminiCallId?{_geminiCallId:x._geminiCallId}: {})}));
-        if(!canNative){
-          const instructions = String(options.toolInstructions || this.toolInstructions || '') + (registeredTools.length ? '\n\nAvailable tool schemas:\n' + registeredTools.map(t => JSON.stringify({name:t.name,description:t.description,parameters:t.parameters||{type:'object',properties:{}}})).join('\n') : '');
-          if(working[0]?.role === 'system') working[0] = {...working[0], content:working[0].content + instructions};
-          else working.unshift({role:'system',content:(options.systemPrompt||'') + instructions});
+    async run(messages,options={}) {
+      const emit=typeof options.emit==='function'?options.emit:this.emit;
+      const sendEvent=event=>{try{emit?.(event);}catch(error){console.error('AI agent event handler failed:',error);}};
+      const maxSteps=Math.max(1,Math.min(100,Number(options.maxSteps??this.maxSteps)||24));
+      const model=this.chatAI?.getModel?.(options.modelId)||this.client?.model?.();
+      if(!model)throw new Error('No AI model is selected.');
+      const provider=this.chatAI?.getProvider?.(model.id)||this.client;
+      if(!provider)throw new Error('No AI provider is available.');
+      const registeredTools=this.listTools(),toolDefs=toolSchema(registeredTools);
+      const canNative=!!model.supportsTools&&registeredTools.length>0;
+      const runOptions={emit:sendEvent,permissions:options.permissions||this.permissions,requestPermission:options.requestPermission||this.requestPermission,beforeTool:options.beforeTool||this.beforeTool,afterTool:options.afterTool||this.afterTool};
+      const working=messages.map(x=>({role:x.role,content:x.content,...(x.tool_call_id?{tool_call_id:x.tool_call_id}:{}),...(x.name?{name:x.name}:{}),...(Array.isArray(x.tool_calls)?{tool_calls:x.tool_calls}:{}),...(x.role==='assistant'&&x._geminiContent?{_geminiContent:x._geminiContent}:{}),...(x._geminiCallId?{_geminiCallId:x._geminiCallId}:{})}));
+      if(!canNative) {
+        const instructions=String(options.toolInstructions||this.toolInstructions||'')+(registeredTools.length?'\n\nAvailable tool schemas:\n'+registeredTools.map(t=>JSON.stringify({name:t.name,description:t.description,parameters:t.parameters||{type:'object',properties:{}}})).join('\n'):'');
+        if(working[0]?.role==='system')working[0]={...working[0],content:working[0].content+instructions};
+        else working.unshift({role:'system',content:(options.systemPrompt||'')+instructions});
+      }
+      let finalText='',reasoning='';
+      for(let step=0;step<maxSteps;step++) {
+        if(options.signal?.aborted)throw new DOMException('Aborted','AbortError');
+        sendEvent({type:'step',step:step+1,maxSteps});
+        if(canNative) {
+          sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps});
+          const msg=await provider.complete(working,{model,tools:toolDefs,signal:options.signal,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay,onResponse:info=>sendEvent({type:'request_response',...info})});
+          const think=msg.reasoning_content||msg.reasoning||'';
+          if(think){reasoning+=think;sendEvent({type:msg.reasoning_kind==='summary'?'reasoning_summary':'reasoning',text:think});}
+          const calls=Array.isArray(msg.tool_calls)?msg.tool_calls.map((x,i)=>({id:x.id||x._geminiCallId||('tool-'+Date.now()+'-'+i),name:x.function?.name,arguments:x.function?.arguments||'{}',_geminiCallId:x._geminiCallId||null})).filter(x=>x.name):[];
+          if(!calls.length){finalText=String(msg.content||'');working.push({role:'assistant',content:finalText});sendEvent({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
+          const narration=String(msg.content||'').trim();if(narration)sendEvent({type:'assistant_activity',text:narration});
+          working.push({role:'assistant',content:msg.content||'',tool_calls:msg.tool_calls,_geminiContent:msg._geminiContent||null});
+          for(const call of calls){const result=await this.executeTool(call,runOptions);if(result?.exitEarly===true){finalText=String(result.message||'');sendEvent({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'tool',tool_call_id:call.id,_geminiCallId:call._geminiCallId,name:call.name,content:stringifyResult(result)});}
+        } else {
+          let text='',lastReasoning='';
+          sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps});
+          const streamOptions={model,signal:options.signal,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay};
+          for await(const chunk of provider.stream(working,streamOptions)){text=chunk.text||text;if(chunk.reasoning&&chunk.reasoning!==lastReasoning){const delta=chunk.reasoning.slice(lastReasoning.length);if(delta){reasoning+=delta;sendEvent({type:chunk.reasoningKind==='summary'?'reasoning_summary':'reasoning',text:delta});}lastReasoning=chunk.reasoning;}}
+          const calls=parseToolProtocol(text);
+          if(!calls.length){finalText=stripToolProtocol(text);sendEvent({type:'assistant',text:finalText});sendEvent({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
+          const clean=stripToolProtocol(text);if(clean)sendEvent({type:'assistant_activity',text:clean});working.push({role:'assistant',content:clean});
+          for(const call of calls){const result=await this.executeTool(call,runOptions);if(result?.exitEarly===true){finalText=String(result.message||'');sendEvent({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'user',content:'Tool result for '+call.name+':\n'+stringifyResult(result)});}
         }
-        let finalText=''; let reasoning='';
-        for(let step=0;step<this.maxSteps;step++){
-          this.emit?.({type:'step',step:step+1,maxSteps:this.maxSteps});
-          if(canNative){
-            this.emit?.({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps:this.maxSteps});
-            const msg=await provider.complete(working,{model,tools:toolDefs,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay,onResponse:info=>this.emit?.({type:'request_response',...info})});
-            const think=msg.reasoning_content||msg.reasoning||''; if(think){reasoning+=think;this.emit?.({type:msg.reasoning_kind==='summary'?'reasoning_summary':'reasoning',text:think});}
-            const calls=Array.isArray(msg.tool_calls)?msg.tool_calls.map((x,i)=>({id:x.id||x._geminiCallId||`tool-${Date.now()}-${i}`,name:x.function?.name,arguments:x.function?.arguments||'{}',_geminiCallId:x._geminiCallId||null})).filter(x=>x.name):[];
-            if(!calls.length){ finalText=String(msg.content||''); working.push({role:'assistant',content:finalText}); this.emit?.({type:'final',text:finalText,reasoning}); return {text:finalText,reasoning}; }
-             const narration=String(msg.content||'').trim();if(narration)this.emit?.({type:'assistant_activity',text:narration});
-            working.push({role:'assistant',content:msg.content||'',tool_calls:msg.tool_calls,_geminiContent:msg._geminiContent||null});
-            for(const call of calls){ const result=await this.executeTool(call); if(result?.exitEarly===true){ finalText=String(result.message||''); this.emit?.({type:'final',text:finalText,reasoning,exitedEarly:true}); return {text:finalText,reasoning,exitedEarly:true}; } working.push({role:'tool',tool_call_id:call.id,_geminiCallId:call._geminiCallId,name:call.name,content:stringifyResult(result)}); }
-          } else {
-            let text=''; let lastReasoning='';
-            this.emit?.({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps:this.maxSteps});
-            const streamOptions={model,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429};
-            for await(const chunk of provider.stream(working,streamOptions)){text=chunk.text||text; if(chunk.reasoning&&chunk.reasoning!==lastReasoning){const delta=chunk.reasoning.slice(lastReasoning.length);if(delta){reasoning+=delta;this.emit?.({type:chunk.reasoningKind==='summary'?'reasoning_summary':'reasoning',text:delta});}lastReasoning=chunk.reasoning;}}
-            const calls=parseToolProtocol(text);
-            if(!calls.length){finalText=stripToolProtocol(text);this.emit?.({type:'assistant',text:finalText});this.emit?.({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
-            const clean=stripToolProtocol(text);if(clean)this.emit?.({type:'assistant_activity',text:clean});working.push({role:'assistant',content:clean});
-            for(const call of calls){const result=await this.executeTool(call);if(result?.exitEarly===true){finalText=String(result.message||'');this.emit?.({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'user',content:`Tool result for ${call.name}:\n${stringifyResult(result)}`});}
-          }
-        }
-        // Tool steps are limited, but the agent still gets a final response pass
-        // using the results it already collected. This pass has no tools, so it
-        // cannot consume another tool step.
-        this.emit?.({
-          type:'request_start',
-          model:model.model||model.id||'model',
-          protocol:model.protocol||model.kind||'unknown',
-          final:true
-        });
-        const finalMsg=await provider.complete(working,{
-          model,
-          systemPrompt:(options.systemPrompt||'') + (options.finalInstructions || this.finalInstructions || ''),
-          thinking:true,
-          maxTokens:options.maxTokens,
-          onRetry:options.onRetry,
-          max429Retries:options.max429Retries,
-          baseRetryDelay:options.baseRetryDelay,
-          retry429:options.retry429,
-          retryTransport:options.retryTransport,
-          maxTransportRetries:options.maxTransportRetries,
-          transportRetryDelay:options.transportRetryDelay,
-          onResponse:info=>this.emit?.({type:'request_response',...info})
-        });
-        const finalThink=finalMsg.reasoning_content||finalMsg.reasoning||'';
-        if(finalThink){
-          reasoning+=finalThink;
-          this.emit?.({
-            type:finalMsg.reasoning_kind==='summary'?'reasoning_summary':'reasoning',
-            text:finalThink
-          });
-        }
-        finalText=stripToolProtocol(String(finalMsg.content||''));
-        this.emit?.({type:'final',text:finalText,reasoning,stepLimitReached:true});
-        return {text:finalText,reasoning,stepLimitReached:true};
-      } finally { this.running=false; }
+      }
+      sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',final:true});
+      const finalMsg=await provider.complete(working,{model,signal:options.signal,systemPrompt:(options.systemPrompt||'')+(options.finalInstructions||this.finalInstructions||''),thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay,onResponse:info=>sendEvent({type:'request_response',...info})});
+      const finalThink=finalMsg.reasoning_content||finalMsg.reasoning||'';
+      if(finalThink){reasoning+=finalThink;sendEvent({type:finalMsg.reasoning_kind==='summary'?'reasoning_summary':'reasoning',text:finalThink});}
+      finalText=stripToolProtocol(String(finalMsg.content||''));sendEvent({type:'final',text:finalText,reasoning,stepLimitReached:true});return {text:finalText,reasoning,stepLimitReached:true};
     }
   }
   root.AIAgent=AIAgent;
@@ -490,172 +489,89 @@
   }
 
   class ConversationAI {
-    constructor(chat, options = {}) {
-      if (!chat) throw new TypeError('ConversationAI requires a ChatAI instance.');
-      this.chat = chat;
-      this.id = String(options.id || ('conversation-' + Math.random().toString(36).slice(2)));
-      this.modelId = options.modelId || null;
-      this.systemPrompt = String(options.systemPrompt || '');
-      this.messages = Array.isArray(options.messages) ? options.messages : [];
-      this.metadata = {...(options.metadata || {})};
-      this.createdAt = Number(options.createdAt) || Date.now();
-      this.updatedAt = Number(options.updatedAt) || this.createdAt;
-      this.running = false;
+    constructor(chat,options={}) {
+      if(!chat)throw new TypeError('ConversationAI requires a ChatAI instance.');
+      this.chat=chat;this.id=String(options.id||('conversation-'+Math.random().toString(36).slice(2)));
+      this.modelId=options.modelId||null;this.systemPrompt=String(options.systemPrompt||'');
+      this.messages=Array.isArray(options.messages)?options.messages:[];this.metadata={...(options.metadata||{})};
+      this.createdAt=Number(options.createdAt)||Date.now();this.updatedAt=Number(options.updatedAt)||this.createdAt;this.running=false;
+      const agent=Object.prototype.hasOwnProperty.call(options,'agent')?options.agent:options.agentId;
+      if(agent)this.setAgent(agent);
     }
     getMessages() { return this.messages; }
-    setMessages(messages) {
-      if (!Array.isArray(messages)) throw new TypeError('Conversation messages must be an array.');
-      this.messages = messages;
-      this.updatedAt = Date.now();
-      return this;
+    setMessages(messages) { if(!Array.isArray(messages))throw new TypeError('Conversation messages must be an array.');this.messages=messages;this.updatedAt=Date.now();return this; }
+    addMessage(message) { if(!message||typeof message!=='object'||!message.role)throw new TypeError('A message with a role is required.');this.messages.push({...message});this.updatedAt=Date.now();return this.messages[this.messages.length-1]; }
+    clear() { this.messages=[];this.updatedAt=Date.now();return this; }
+    getAgent() { return this.agent||null; }
+    setAgent(agentOrId) {
+      const agent=typeof agentOrId==='string'?this.chat.getAgent(agentOrId):agentOrId;
+      if(!agent||typeof agent.run!=='function')throw new Error('The requested conversation agent is not registered with ChatAI.');
+      if(agent.chatAI!==this.chat)throw new Error('A conversation agent must belong to the same ChatAI instance.');
+      this.agent=agent;this.updatedAt=Date.now();return this;
     }
-    addMessage(message) {
-      if (!message || typeof message !== 'object' || !message.role) throw new TypeError('A message with a role is required.');
-      this.messages.push({...message});
-      this.updatedAt = Date.now();
-      return this.messages[this.messages.length - 1];
-    }
-    clear() { this.messages = []; this.updatedAt = Date.now(); return this; }
+    removeAgent() { delete this.agent;this.updatedAt=Date.now();return this; }
     getProvider() { return this.chat.getProvider(this.modelId); }
-    async complete(options = {}) {
-      return this.chat.complete(this.messages, {...options, modelId:this.modelId, systemPrompt:options.systemPrompt ?? this.systemPrompt});
-    }
-    stream(options = {}) {
-      return this.chat.stream(this.messages, {...options, modelId:this.modelId, systemPrompt:options.systemPrompt ?? this.systemPrompt});
-    }
-    async send(content, options = {}) {
-      if (this.running) throw new Error('This conversation is already generating a response.');
-      const userMessage = this.addMessage({role:'user', content});
-      this.running = true;
+    async complete(options={}) { return this.chat.complete(this.messages,{...options,modelId:this.modelId,systemPrompt:options.systemPrompt??this.systemPrompt}); }
+    stream(options={}) { return this.chat.stream(this.messages,{...options,modelId:this.modelId,systemPrompt:options.systemPrompt??this.systemPrompt}); }
+    runAgent(messages,options={}) { const agent=this.getAgent();if(!agent)throw new Error('This conversation does not have an agent attached.');return agent.run(messages,{...options,modelId:this.modelId}); }
+    async send(content,options={}) {
+      if(this.running)throw new Error('This conversation is already generating a response.');
+      const userMessage=this.addMessage({role:'user',content});this.running=true;
       try {
-        const prompt = options.systemPrompt ?? this.systemPrompt;
-        const messages = [...(prompt ? [{role:'system', content:prompt}] : []), ...this.messages];
-        let text = '';
-        for await (const chunk of this.chat.stream(messages, {...options, modelId:this.modelId})) {
-          text = chunk.text ?? text;
-          options.onChunk?.(chunk);
-        }
-        const assistant = this.addMessage({role:'assistant', content:text});
-        return {userMessage, message:assistant, text};
-      } catch (error) {
-        throw error;
-      } finally { this.running = false; }
+        const prompt=options.systemPrompt??this.systemPrompt,messages=[...(prompt?[{role:'system',content:prompt}]:[]),...this.messages];
+        if(this.getAgent()){const result=await this.runAgent(messages,options);const assistant=this.addMessage({role:'assistant',content:String(result?.text||'')});return {userMessage,message:assistant,text:assistant.content,result};}
+        let text='';for await(const chunk of this.chat.stream(messages,{...options,modelId:this.modelId})){text=chunk.text??text;options.onChunk?.(chunk);}
+        const assistant=this.addMessage({role:'assistant',content:text});return {userMessage,message:assistant,text};
+      } finally { this.running=false; }
     }
     cancel() { this.chat.cancel(); }
-    toJSON() {
-      return {id:this.id, modelId:this.modelId, systemPrompt:this.systemPrompt, messages:this.messages,
-        metadata:this.metadata, createdAt:this.createdAt, updatedAt:this.updatedAt};
-    }
+    toJSON() { return {id:this.id,modelId:this.modelId,systemPrompt:this.systemPrompt,messages:this.messages,metadata:this.metadata,createdAt:this.createdAt,updatedAt:this.updatedAt,...(this.agent?.id?{agentId:this.agent.id}:{})}; }
   }
 
   class ChatAI {
-    constructor(options = {}) {
-      this.registry = options.registry || null;
-      this.providers = new Map();
-      this.conversations = new Map();
-      this.tools = new Map();
-      this.defaultProviderId = options.defaultProviderId || 'remote';
-      this.agent = options.agent || null;
-      if (options.remoteProvider || options.client) {
-        const RemoteProvider = root.RemoteProviderAI;
-        if (!options.remoteProvider && typeof RemoteProvider !== 'function') throw new Error('Remote chat provider has not been loaded.');
-        this.registerProvider(options.remoteProvider || new RemoteProvider({id:'remote',label:'Remote AI',client:options.client,registry:this.registry,capabilities:options.remoteCapabilities||{}}));
-      }
-      if (options.localProvider || options.localManager) {
-        const LocalProvider = root.LocalProviderAI;
-        if (!options.localProvider && typeof LocalProvider !== 'function') throw new Error('Local chat provider has not been loaded.');
-        this.registerProvider(options.localProvider || new LocalProvider({id:'local',label:'Local AI',client:options.client,runtime:options.localManager,registry:this.registry,capabilities:options.localCapabilities||{}}));
-      }
-      if (Array.isArray(options.tools)) this.registerTools(options.tools);
-      if (options.agentOptions) this.configureAgent(options.agentOptions);
-      else if (this.agent) this.agent.chatAI = this;
+    constructor(options={}) {
+      this.registry=options.registry||null;this.providers=new Map();this.conversations=new Map();this.agents=new Map();
+      this.defaultProviderId=options.defaultProviderId||'remote';
+      if(options.remoteProvider||options.client){const RemoteProvider=root.RemoteProviderAI;if(!options.remoteProvider&&typeof RemoteProvider!=='function')throw new Error('Remote chat provider has not been loaded.');this.registerProvider(options.remoteProvider||new RemoteProvider({id:'remote',label:'Remote AI',client:options.client,registry:this.registry,capabilities:options.remoteCapabilities||{}}));}
+      if(options.localProvider||options.localManager){const LocalProvider=root.LocalProviderAI;if(!options.localProvider&&typeof LocalProvider!=='function')throw new Error('Local chat provider has not been loaded.');this.registerProvider(options.localProvider||new LocalProvider({id:'local',label:'Local AI',client:options.client,runtime:options.localManager,registry:this.registry,capabilities:options.localCapabilities||{}}));}
+      if(options.agent)this.registerAgent(options.agent);
+      if(options.agentOptions)this.createAgent(options.agentOptions);
     }
-    configureAgent(options = {}) {
-      const AgentRunner = editorRoot.AIAgent;
-      if (typeof AgentRunner !== 'function') throw new Error('Agent mode is unavailable.');
-      this.agent = options instanceof AgentRunner ? options : new AgentRunner({...options, chatAI:this});
-      this.agent.chatAI = this;
-      return this.agent;
+    createAgent(options={}) {
+      const AgentRunner=root.AIAgent;if(typeof AgentRunner!=='function')throw new Error('Agent mode is unavailable.');
+      const agent=options instanceof AgentRunner?options:new AgentRunner({...options,chatAI:this});agent.chatAI=this;return this.registerAgent(agent);
     }
-    registerTool(definition) {
-      if (!definition || typeof definition !== 'object') throw new TypeError('A tool definition is required.');
-      const name=String(definition.name||'').trim();
-      if (!name || typeof definition.execute!=='function') throw new TypeError('A tool needs a name and execute function.');
-      const tool={...definition,name,parameters:definition.parameters||{type:'object',properties:{}}};
-      this.tools.set(name,tool);
-      return tool;
+    registerAgent(agent) {
+      const AgentRunner=root.AIAgent;if(typeof AgentRunner!=='function'||!(agent instanceof AgentRunner))throw new TypeError('Agents must be AIAgent instances.');
+      if(!agent.id)agent.id='agent-'+Math.random().toString(36).slice(2);
+      if(this.agents.has(agent.id)&&this.agents.get(agent.id)!==agent)throw new Error('Agent already exists: '+agent.id);
+      agent.chatAI=this;this.agents.set(agent.id,agent);return agent;
     }
-    registerTools(definitions=[]) { return Array.from(definitions,definition=>this.registerTool(definition)); }
-    unregisterTool(name) { return this.tools.delete(String(name)); }
-    getTool(name) { return this.tools.get(String(name)) || null; }
-    listTools() { return [...this.tools.values()]; }
-    registerProvider(provider) {
-      if (!(provider instanceof ProviderAI)) throw new TypeError('Providers must extend ProviderAI.');
-      this.providers.set(provider.id, provider);
-      return provider;
-    }
-    unregisterProvider(id) {
-      const provider = this.providers.get(String(id));
-      if (!provider) return false;
-      provider.dispose?.();
-      this.providers.delete(String(id));
-      return true;
-    }
-    getModel(modelId) {
-      if (!this.registry) return null;
-      if (modelId) return this.registry.settings?.models?.find(model => model.id === modelId) || null;
-      return this.registry.active?.() || null;
-    }
+    getAgent(id) { return this.agents.get(String(id||''))||null; }
+    listAgents() { return [...this.agents.values()]; }
+    removeAgent(id) { const agent=this.getAgent(id);if(!agent)return false;for(const conversation of this.conversations.values())if(conversation.getAgent?.()===agent)conversation.removeAgent();this.agents.delete(agent.id);return true; }
+    registerProvider(provider) { if(!(provider instanceof ProviderAI))throw new TypeError('Providers must extend ProviderAI.');this.providers.set(provider.id,provider);return provider; }
+    unregisterProvider(id) { const provider=this.providers.get(String(id));if(!provider)return false;provider.dispose?.();this.providers.delete(String(id));return true; }
+    getModel(modelId) { if(!this.registry)return null;if(modelId)return this.registry.settings?.models?.find(model=>model.id===modelId)||null;return this.registry.active?.()||null; }
     getCapabilities(modelId) { return this.getProvider(modelId).getCapabilities(this.getModel(modelId)); }
-    getProvider(modelId) {
-      const model = this.getModel(modelId);
-      const id = model && (model.local || model.protocol === 'local-transformers') ? 'local' : this.defaultProviderId;
-      const provider = this.providers.get(id);
-      if (!provider) throw new Error('No ' + id + ' AI provider is registered.');
-      return provider;
-    }
-    createConversation(options = {}) {
-      const conversation = new ConversationAI(this, options);
-      if (this.conversations.has(conversation.id)) throw new Error('Conversation already exists: ' + conversation.id);
-      this.conversations.set(conversation.id, conversation);
-      return conversation;
-    }
-    openConversation(options = {}) {
-      const id = String(options.id || '');
-      if (id && this.conversations.has(id)) {
-        const existing = this.conversations.get(id);
-        if (Array.isArray(options.messages)) existing.setMessages(options.messages);
-        if (options.modelId !== undefined) existing.modelId = options.modelId;
+    getProvider(modelId) { const model=this.getModel(modelId),id=model&&(model.local||model.protocol==='local-transformers')?'local':this.defaultProviderId,provider=this.providers.get(id);if(!provider)throw new Error('No '+id+' AI provider is registered.');return provider; }
+    createConversation(options={}) { const conversation=new ConversationAI(this,options);if(this.conversations.has(conversation.id))throw new Error('Conversation already exists: '+conversation.id);this.conversations.set(conversation.id,conversation);return conversation; }
+    openConversation(options={}) {
+      const id=String(options.id||'');
+      if(id&&this.conversations.has(id)){
+        const existing=this.conversations.get(id);if(Array.isArray(options.messages))existing.setMessages(options.messages);if(options.modelId!==undefined)existing.modelId=options.modelId;
+        if(Object.prototype.hasOwnProperty.call(options,'agent')||Object.prototype.hasOwnProperty.call(options,'agentId')){const requested=Object.prototype.hasOwnProperty.call(options,'agent')?options.agent:options.agentId;if(requested)existing.setAgent(requested);else existing.removeAgent();}
         return existing;
       }
       return this.createConversation(options);
     }
-    getConversation(id) { return this.conversations.get(String(id)) || null; }
-    closeConversation(id) {
-      const conversation = this.getConversation(id);
-      if (!conversation) return false;
-      if (conversation.running) conversation.cancel();
-      this.conversations.delete(String(id));
-      return true;
-    }
-    async complete(messages, options = {}) {
-      return this.getProvider(options.modelId).complete(messages, {...options, model:this.getModel(options.modelId)});
-    }
-    stream(messages, options = {}) {
-      return this.getProvider(options.modelId).stream(messages, {...options, model:this.getModel(options.modelId)});
-    }
-    async runAgent(messages, options = {}) {
-      if (!this.agent) throw new Error('No agent runner has been configured.');
-      return this.agent.run(messages, options);
-    }
-    cancel() { for (const provider of this.providers.values()) provider.cancel?.(); }
-    dispose() {
-      this.cancel();
-      for (const provider of this.providers.values()) provider.dispose?.();
-      this.providers.clear();
-      this.conversations.clear();
-      this.tools.clear();
-    }
+    getConversation(id) { return this.conversations.get(String(id))||null; }
+    closeConversation(id) { const conversation=this.getConversation(id);if(!conversation)return false;if(conversation.running)conversation.cancel();this.conversations.delete(String(id));return true; }
+    async complete(messages,options={}) { return this.getProvider(options.modelId).complete(messages,{...options,model:this.getModel(options.modelId)}); }
+    stream(messages,options={}) { return this.getProvider(options.modelId).stream(messages,{...options,model:this.getModel(options.modelId)}); }
+    runAgent(messages,options={}) { const agent=options.agent&&typeof options.agent.run==='function'?options.agent:this.getAgent(options.agentId||options.agent);if(!agent)throw new Error('No agent was specified. Pass an agent instance or registered agent ID.');if(agent.chatAI!==this)throw new Error('The requested agent belongs to a different ChatAI instance.');return agent.run(messages,options); }
+    cancel() { for(const provider of this.providers.values())provider.cancel?.(); }
+    dispose() { this.cancel();for(const provider of this.providers.values())provider.dispose?.();this.providers.clear();this.conversations.clear();this.agents.clear(); }
   }
 
   root.ProviderAI = ProviderAI;
