@@ -68,12 +68,14 @@
     async complete(messages, options = {}) {
       const model = options.model || this.getModel();
       if (!model) throw new Error('The selected model is not a local model.');
-      return this.client.complete(messages, {...options, model});
+      if (!this.runtime?.complete) throw new Error('Local inference runtime is unavailable.');
+      return this.runtime.complete(messages, options);
     }
     stream(messages, options = {}) {
       const model = options.model || this.getModel();
       if (!model) throw new Error('The selected model is not a local model.');
-      return this.client.stream(messages, {...options, model});
+      if (!this.runtime?.stream) throw new Error('Local inference runtime is unavailable.');
+      return this.runtime.stream(messages, options);
     }
     async load(model = this.getModel(), options = {}) {
       if (!model) throw new Error('No local model is selected.');
