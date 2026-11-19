@@ -23,8 +23,9 @@
      */
     reportProgress(callback, update = {}) {
       if (typeof callback !== "function") return null;
-      const raw = Number(update.progress);
-      const value = Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : null;
+      const raw = update.progress;
+      const numeric = raw == null || raw === "" ? NaN : Number(raw);
+      const value = Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : null;
       const event = { ...update, message: String(update.message || "Working…"), progress: value };
       callback(event);
       return event;
