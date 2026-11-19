@@ -112,22 +112,25 @@ export class PixelSpriteProvider extends AssetProviderAI {
       this.ort.env.wasm.numThreads = self.crossOriginIsolated ? 0 : 1;
       this.backend = await chooseBackend(this.ort);
       this.ort.env.wasm.proxy = this.backend === "wasm";
-      try {
+      const loadBackend = async backend => {
+        this.backend = backend;
         progress(onProgress, "Loading sprite model");
         this.model = await loadModel({
-          ort: this.ort, files: modelFiles(MODEL_BASE), ep: this.backend,
-          fetchBytes,
-          fixedCache: true,
+          ort: this.ort, files: modelFiles(MODEL_BASE), ep: backend,
+          fetchBytes, fixedCache: true,
           onProgress: (loaded,total) => progress(onProgress,"Downloading sprite model",loaded,total)
         });
+        progress(onProgress, "Warming up model");
+        await this.warmup();
+      };
+      try {
+        await loadBackend(this.backend);
       } catch (error) {
         if (this.backend !== "webgpu") throw error;
-        this.backend = "wasm";
-        this.model = await loadModel({ ort:this.ort, files:modelFiles(MODEL_BASE), ep:"wasm", fetchBytes, fixedCache:true,
-          onProgress:(loaded,total)=>progress(onProgress,"Downloading sprite model",loaded,total) });
+        try { await this.model?.session?.release?.(); } catch (_) {}
+        this.model = null;
+        await loadBackend("wasm");
       }
-      progress(onProgress, "Warming up model");
-      await this.warmup();
       progress(onProgress, "Loading text encoder");
       const { Tokenizer } = await import(TOKENIZERS_URL);
       this.encoder = await loadTextEncoder({
@@ -139,7 +142,7 @@ export class PixelSpriteProvider extends AssetProviderAI {
       return { backend:this.backend, offlineModelCache:true };
     })();
     try { return await this.loading; }
-    catch (error) { this.model = null; this.encoder = null; throw error; }
+    catch (error) { try { await this.model?.session?.release?.(); } catch (_) {} this.model = null; this.encoder = null; throw error; }
     finally { this.loading = null; }
   }
 
