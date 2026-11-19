@@ -114,6 +114,7 @@ export class PixelSpriteProvider extends AssetProviderAI {
       this.ort.env.wasm.proxy = this.backend === "wasm";
       const loadBackend = async backend => {
         this.backend = backend;
+        this.ort.env.wasm.proxy = backend === "wasm";
         progress(onProgress, "Loading sprite model");
         this.model = await loadModel({
           ort: this.ort, files: modelFiles(MODEL_BASE), ep: backend,
