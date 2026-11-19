@@ -9,6 +9,7 @@ StudioAI is the reusable asset-generation layer. Editor-specific presentation an
 - `StudioAI.createImageProvider(id)` creates an image provider instance.
 - Providers expose `getCapabilities()` and `getConfigurationSchema()`.
 - Providers implement `initialize({ onProgress })`, `generateImage(request, { signal, onProgress })`, and `dispose()`.
+- `AssetProviderAI.reportProgress(onProgress, update)` emits the shared progress event shape: `{ message, progress }`. `message` is provider-authored display text; `progress` is a normalized 0–1 fraction or `null` when indeterminate. Providers may include additional metadata, but the UI must not interpret provider-specific message text.
 
 Generation requests use a common envelope while keeping model-specific controls under `parameters`:
 
