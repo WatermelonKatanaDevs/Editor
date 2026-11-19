@@ -9,10 +9,6 @@ const ORT_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/ort.we
 const TOKENIZERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/tokenizers@0.2.0/dist/tokenizers.min.mjs";
 const CACHE_NAME = "studio-ai-pixel-sprite-model-v1";
 
-function progress(onProgress, phase, loaded, total) {
-  onProgress?.({ phase, loaded: loaded || 0, total: total || 0, progress: total ? loaded / total : null });
-}
-
 async function prepareOfflineSupport() {
   if (!("serviceWorker" in navigator)) throw new Error("Offline runtime caching requires service-worker support. Open the Editor over HTTPS in a supported browser.");
   const scriptUrl = new URL("../../../../studio-ai-sw.js", import.meta.url);
@@ -132,9 +128,9 @@ export class PixelSpriteProvider extends AssetProviderAI {
     if (this.model) return { backend: this.backend, offlineModelCache: true };
     if (this.loading) return this.loading;
     this.loading = (async () => {
-      progress(onProgress, "Preparing offline runtime cache");
+      this.reportProgress(onProgress, { message:"Preparing offline runtime cache" });
       await prepareOfflineSupport();
-      progress(onProgress, "Loading ONNX Runtime Web");
+      this.reportProgress(onProgress, { message:"Loading ONNX Runtime Web" });
       this.ort = await import(ORT_URL);
       this.ort.env.wasm.numThreads = self.crossOriginIsolated ? 0 : 1;
       this.backend = await chooseBackend(this.ort);
@@ -142,13 +138,16 @@ export class PixelSpriteProvider extends AssetProviderAI {
       const loadBackend = async backend => {
         this.backend = backend;
         this.ort.env.wasm.proxy = backend === "wasm";
-        progress(onProgress, "Loading sprite model");
+        this.reportProgress(onProgress, { message:"Loading sprite model" });
         this.model = await loadModel({
           ort: this.ort, files: modelFiles(MODEL_BASE), ep: backend,
           fetchBytes, fixedCache: true,
-          onProgress: (loaded,total) => progress(onProgress,"Downloading sprite model",loaded,total)
+          onProgress: (loaded,total) => this.reportProgress(onProgress, {
+            message:"Downloading sprite model · " + (loaded/1e6).toFixed(1) + (total ? " / " + (total/1e6).toFixed(1) + " MB" : " MB"),
+            progress:total ? loaded/total : null
+          })
         });
-        progress(onProgress, "Warming up model");
+        this.reportProgress(onProgress, { message:"Warming up model" });
         await this.warmup(configuration);
       };
       try {
@@ -159,13 +158,16 @@ export class PixelSpriteProvider extends AssetProviderAI {
         this.model = null;
         await loadBackend("wasm");
       }
-      progress(onProgress, "Loading text encoder");
+      this.reportProgress(onProgress, { message:"Loading text encoder" });
       const { Tokenizer } = await import(TOKENIZERS_URL);
       this.encoder = await loadTextEncoder({
         ort:this.ort, Tokenizer, files:encoderFiles(ENCODER_BASE), fetchBytes,
-        onProgress:(loaded,total)=>progress(onProgress,"Downloading text encoder",loaded,total)
+        onProgress:(loaded,total)=>this.reportProgress(onProgress, {
+          message:"Downloading text encoder · " + (loaded/1e6).toFixed(1) + (total ? " / " + (total/1e6).toFixed(1) + " MB" : " MB"),
+          progress:total ? loaded/total : null
+        })
       });
-      progress(onProgress, "Ready");
+      this.reportProgress(onProgress, { message:"Ready", progress:1 });
       this.initialized = true;
       return { backend:this.backend, offlineModelCache:true };
     })();
@@ -213,9 +215,9 @@ export class PixelSpriteProvider extends AssetProviderAI {
     const colourGuidance = Number.isFinite(Number(config.colour)) ? Math.max(0,Math.min(4,Number(config.colour))) : 2;
     const controller = signal;
     const encodingStarted = performance.now();
-    const vector = await this.encoder.encode(prompt, info => onProgress?.(info));
+    const vector = await this.encoder.encode(prompt, info => this.reportProgress(onProgress, info));
     const encodingMs = performance.now() - encodingStarted;
-    progress(onProgress, "Generating sprites · " + this.backend.toUpperCase());
+    this.reportProgress(onProgress, { message:"Generating sprites · " + this.backend.toUpperCase(), progress:0 });
     const started = performance.now();
     let assets = new Array(count);
     let assetTasks = [];
@@ -232,7 +234,10 @@ export class PixelSpriteProvider extends AssetProviderAI {
       onPixel:(ids,t,images,view) => {
         if ((t+1)%view.S===0 || t+1===view.S*view.S) {
           const row = Math.ceil((t+1)/view.S);
-          progress(onProgress, "Drawing row · " + row + " / " + view.S, row, view.S);
+          this.reportProgress(onProgress, {
+            message:"Drawing row · " + row + " / " + view.S,
+            progress:(t+1)/(view.S*view.S)
+          });
         }
       },
       onSprite:(id, indices) => {
