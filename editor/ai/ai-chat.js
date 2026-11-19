@@ -774,7 +774,7 @@
       else if (this.agent) this.agent.chatAI = this;
     }
     configureAgent(options = {}) {
-      const AgentRunner = root.AIAgent;
+      const AgentRunner = editorRoot.AIAgent;
       if (typeof AgentRunner !== 'function') throw new Error('Agent mode is unavailable.');
       this.agent = options instanceof AgentRunner ? options : new AgentRunner({...options, chatAI:this});
       this.agent.chatAI = this;
