@@ -995,7 +995,7 @@ const makeEditorTools = (() => {
       if(!g?.viewBody || !t) return;
       const chatRecord=currentChat();
       busy=true; controller=new AbortController();
-      currentConversation=currentConversation||chatAI.openConversation({id:chatRecord.id,messages:chatMessages});
+      currentConversation=currentConversation||chatAI.openConversation({id:chatRecord.id,messages:chatMessages,modelId:registry.active()?.id,agentId:chatRecord.agentId||null});
       currentConversation.modelId=registry.active()?.id||null;
       chatMessages.push({role:'user',content:text});
       currentConversation.setMessages(chatMessages);
