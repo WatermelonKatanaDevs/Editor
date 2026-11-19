@@ -377,7 +377,7 @@
     }
   }
   class LocalModelManager{
-    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;this.runtimeAssets=[];this.kvCache=null;this.kvCacheTokens=[];this.kvCacheConversationId='';this.kvCacheModelId='';this.maxReusableCacheTokens=4096;}
+    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;this.runtimeAssets=[];this.kvCaches=new Map();this.maxReusableCacheTokens=4096;this.maxReusableCacheSessions=2;this.maxReusableCacheTotalTokens=4096;}
     subscribe(fn){if(typeof fn!=='function')return ()=>{};this.listeners.add(fn);fn(this.status());return ()=>this.listeners.delete(fn);}
     status(){return {loading:this.loading,loadedModelId:this.loadedModelId,loaded:!!this.generator,progress:this.progress,text:this.statusText,device:this.device,dtype:this.dtype,offlineOnly:this.offlineOnly,cacheHit:this.cacheHit};}
     emit(patch){Object.assign(this,patch||{});const state=this.status();for(const fn of this.listeners){try{fn(state);}catch(e){console.warn('Local AI status listener failed:',e);}}}
@@ -427,7 +427,25 @@
       })();
       return this.libraryPromise;
     }
-    async clearKVCache(){const cache=this.kvCache;this.kvCache=null;this.kvCacheTokens=[];this.kvCacheConversationId='';this.kvCacheModelId='';try{await cache?.dispose?.();}catch(error){console.warn('Local AI KV cache disposal failed:',error);}}
+    async clearKVCache(conversationId){
+      const ids=conversationId===undefined?[...this.kvCaches.keys()]:[String(conversationId)];
+      for(const id of ids){
+        const state=this.kvCaches.get(id);
+        if(!state)continue;
+        this.kvCaches.delete(id);
+        try{await state.cache?.dispose?.();}catch(error){console.warn('Local AI KV cache disposal failed:',error);}
+      }
+    }
+    async evictKVCache(preferredConversationId){
+      const totalTokens=()=>[...this.kvCaches.values()].reduce((sum,state)=>sum+(Number(state.cacheLength)||0),0);
+      while(this.kvCaches.size>this.maxReusableCacheSessions||totalTokens()>this.maxReusableCacheTotalTokens){
+        const candidates=[...this.kvCaches.entries()]
+          .filter(([id,state])=>id!==String(preferredConversationId||'')&&!state.inUse)
+          .sort((a,b)=>(a[1].lastUsed||0)-(b[1].lastUsed||0));
+        if(!candidates.length)break;
+        await this.clearKVCache(candidates[0][0]);
+      }
+    }
     async unload(notify=true){await this.clearKVCache();const old=this.generator;this.generator=null;this.model=null;this.loadedModelId='';this.stopper=null;if(old&&old.dispose){try{await old.dispose();}catch(e){console.warn('Local AI model disposal failed:',e);}}if(notify)this.emit({loading:false,progress:0,statusText:'Model unloaded.'});}
     async load(model,options={}){
       if(!model||model.protocol!=='local-transformers')throw new Error('Not a local browser model.');
@@ -504,10 +522,13 @@
           if(this.device==='webgpu'){
             const conversationId=String(options.conversationId||'');
             let cacheState=null;
-            if(conversationId&&this.kvCache&&this.kvCacheConversationId===conversationId&&this.kvCacheModelId===String(model?.id||'')){
-              cacheState={cache:this.kvCache,tokenIds:this.kvCacheTokens};
-            }else if(this.kvCache){
-              await this.clearKVCache();
+            const previousState=conversationId?this.kvCaches.get(conversationId):null;
+            if(previousState&&previousState.modelId===String(model?.id||'')){
+              previousState.inUse=true;
+              previousState.lastUsed=Date.now();
+              cacheState=previousState;
+            }else if(previousState){
+              await this.clearKVCache(conversationId);
             }
             let cachedGeneration=null;
             try{
@@ -516,7 +537,7 @@
                 this.emit({statusText:'WEBGPU · preparing prompt '+progress.processed+'/'+progress.total+' tokens'+reused});
               },cacheState);
             }catch(error){
-              await this.clearKVCache();
+              if(conversationId)await this.clearKVCache(conversationId);
               throw error;
             }
             if(cachedGeneration!==null){
@@ -524,17 +545,23 @@
               const nextCache=cachedGeneration.cache;
               const canRetain=!!conversationId&&!!nextCache&&cachedGeneration.cacheLength<=this.maxReusableCacheTokens;
               if(canRetain){
-                this.kvCache=nextCache;
-                this.kvCacheTokens=cachedGeneration.tokenIds;
-                this.kvCacheConversationId=conversationId;
-                this.kvCacheModelId=String(model?.id||'');
+                this.kvCaches.set(conversationId,{
+                  cache:nextCache,
+                  tokenIds:cachedGeneration.tokenIds,
+                  cacheLength:cachedGeneration.cacheLength,
+                  modelId:String(model?.id||''),
+                  inUse:false,
+                  lastUsed:Date.now()
+                });
               }else{
                 try{await nextCache?.dispose?.();}catch(_){}
-                await this.clearKVCache();
+                if(conversationId)await this.clearKVCache(conversationId);
               }
-            }else{
-              await this.clearKVCache();
+            }else if(conversationId){
+              await this.clearKVCache(conversationId);
             }
+            if(previousState)previousState.inUse=false;
+            await this.evictKVCache(conversationId);
           }
           if(result===null)result=await generator(messages,{...generationOptions,streamer});
           if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
@@ -545,7 +572,7 @@
       try{
         try{return await run();}
         catch(error){
-          if(this.kvCacheConversationId===String(options.conversationId||''))await this.clearKVCache();
+          if(options.conversationId)await this.clearKVCache(String(options.conversationId));
           // ORT's WebGPU buffer-download failure means the GPU inference context
           // is no longer usable. If prefill failed before emitting any text, retry
           // this exact request on WASM rather than making the user restart Agent.
