@@ -200,7 +200,7 @@ export class PixelSpriteProvider extends AssetProviderAI {
       }
       for (let id = 0; id < result.images.length; id++) {
         const blob = await canvasBlob(this.model, result.images[id], size);
-        assets[id] = { blob, mimeType:"image/png", width:size, height:size, metadata:{ index:id, seed:result.stats.seed } };
+        assets[id] = { blob, mimeType:"image/png", width:size, height:size, metadata:{ index:id, seed:result.stats.seed, prompt } };
         request.onAsset?.(assets[id], id);
       }
       return {
