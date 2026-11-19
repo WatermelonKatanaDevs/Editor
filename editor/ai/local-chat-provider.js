@@ -269,35 +269,36 @@
   function cacheName(name){
     return String(name).replace('present_conv','past_conv').replace('present_ssm','past_ssm').replace('present_recurrent','past_recurrent').replace('present','past_key_values');
   }
-  function tensorTokenIds(value){
+  function flattenTokenIds(value){
+    const out=[];
+    const visit=item=>{
+      if(ArrayBuffer.isView(item)||Array.isArray(item)){
+        for(const child of item)visit(child);
+      }else if(typeof item==='number'||typeof item==='bigint'){
+        const number=Number(item);
+        if(Number.isFinite(number))out.push(number);
+      }
+    };
+    visit(value);
+    return out;
+  }
+  async function tensorTokenIds(value){
     if(value==null)return [];
-    const data=value.data!==undefined?value.data:value;
-    if(ArrayBuffer.isView(data)||Array.isArray(data))return Array.from(data,item=>Number(item)).filter(Number.isFinite);
-    if(typeof value.tolist==='function'){
-      try{
-        const flatten=(item,out)=>{if(Array.isArray(item)||ArrayBuffer.isView(item)){for(const child of item)flatten(child,out);}else if(typeof item==='number'||typeof item==='bigint'){const n=Number(item);if(Number.isFinite(n))out.push(n);}};
-        const out=[];flatten(value.tolist(),out);return out;
-      }catch(_){}
+    try{
+      if(value.location&&value.location!=='cpu'&&value.location!=='cpu-pinned'&&typeof value.getData==='function'){
+        return flattenTokenIds(await value.getData());
+      }
+      if(value.data!==undefined)return flattenTokenIds(value.data);
+    }catch(error){
+      if(typeof value.getData==='function')return flattenTokenIds(await value.getData());
+      throw error;
     }
-    return [];
+    return flattenTokenIds(value);
   }
   function tokenPrefixMatches(current,cached,length){
     if(!Array.isArray(current)||!Array.isArray(cached)||!Number.isFinite(length)||length<0||length>current.length||length>cached.length)return false;
     for(let i=0;i<length;i++)if(current[i]!==cached[i])return false;
     return true;
-  }
-  function cloneDynamicCache(lib,cache){
-    const entries={};
-    try{
-      for(const [key,value] of Object.entries(cache||{})){
-        if(value&&typeof value.clone==='function')entries[key]=value.clone();
-      }
-      if(!Object.keys(entries).length)return null;
-      return new lib.DynamicCache(entries);
-    }catch(error){
-      for(const value of Object.values(entries))try{value?.dispose?.();}catch(_){}
-      throw error;
-    }
   }
   async function generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,onProgress,cacheState){
     const tokenizer=generator.tokenizer,model=generator.model;
@@ -307,7 +308,7 @@
     const dims=inputIds?.dims||[];
     const tokenCount=Number(dims[dims.length-1]||0);
     if(!inputIds||tokenCount<=1)return null;
-    const inputTokenIds=tensorTokenIds(inputIds);
+    const inputTokenIds=await tensorTokenIds(inputIds);
     if(inputTokenIds.length<tokenCount)return null;
     const targetEnd=tokenCount-1; // Leave the final prompt token for generate() to consume.
     let cache=cacheState?.cache||null,reusedTokens=0,start=0,chunkSize=256;
@@ -322,7 +323,19 @@
     // Once a conversation has a cache, even a short continuation can reuse it.
     if(tokenCount<=256&&!cache)return null;
     start=reusedTokens;
-    let snapshot=null;
+    const streamedTokenIds=[];
+    if(streamer&&typeof streamer.put==='function'){
+      const originalPut=streamer.put.bind(streamer);
+      let firstPut=true;
+      streamer.put=tokenIds=>{
+        // Transformers.js sends the prompt to the streamer first. Later values are
+        // generated token IDs (bigint[][]), which can be retained without touching
+        // GPU-resident attention tensors.
+        if(firstPut)firstPut=false;
+        else streamedTokenIds.push(...flattenTokenIds(tokenIds));
+        return originalPut(tokenIds);
+      };
+    }
     try{
       onProgress?.({processed:start,total:targetEnd,cached:reusedTokens,chunkSize});
       while(start<targetEnd){
@@ -350,28 +363,23 @@
         onProgress?.({processed:start,total:targetEnd,cached:reusedTokens,chunkSize});
       }
       if(signal?.aborted)throw new DOMException('Aborted','AbortError');
-      // Keep a snapshot of the completed prompt cache. generate() mutates its
-      // cache as it emits tokens, so it receives the original while the cloned
-      // snapshot is retained for the next conversation turn.
-      const promptCacheLength=Number(cache?.get_seq_length?.())||0;
-      snapshot=cache?cloneDynamicCache(lib,cache):null;
+      // generate() mutates this cache as it consumes the final prompt token and
+      // emits new tokens. Keep the same GPU cache; never clone its GPU tensors.
       const result=await model.generate({
         ...inputs,
         ...(cache?{past_key_values:cache,attention_mask:lib.ones(dims)}:{}),
         ...generationOptions,
         streamer
       });
-      try{await cache?.dispose?.();}catch(_){}
-      cache=null;
-      const cacheLength=Number(snapshot?.get_seq_length?.())||0;
-      if(!snapshot||cacheLength<=0||cacheLength>inputTokenIds.length){
-        try{await snapshot?.dispose?.();}catch(_){}
-        snapshot=null;
+      const cacheLength=Number(cache?.get_seq_length?.())||0;
+      const tokenIds=[...inputTokenIds,...streamedTokenIds];
+      if(!cache||cacheLength<=0||cacheLength>tokenIds.length){
+        try{await cache?.dispose?.();}catch(_){}
+        cache=null;
         return {result,cache:null,cacheLength:0,tokenIds:inputTokenIds,reusedTokens};
       }
-      return {result,cache:snapshot,cacheLength:cacheLength||promptCacheLength,tokenIds:inputTokenIds,reusedTokens};
+      return {result,cache,cacheLength,tokenIds,reusedTokens};
     }catch(error){
-      try{await snapshot?.dispose?.();}catch(_){}
       try{await cache?.dispose?.();}catch(_){}
       throw error;
     }
