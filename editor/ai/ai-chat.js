@@ -391,11 +391,32 @@
     const value=String(text||''),allowed=new Map(tools.map(tool=>[String(tool?.name||''),tool])),ranges=[];
     if(!allowed.size)return ranges;
     const fence=/\x60{3}[^\r\n\x60]*\r?\n([\s\S]*?)(?:\x60{3}|$)/g;
+    const fencedRanges=[];
     let match;
     while((match=fence.exec(value))){
+      fencedRanges.push([match.index,fence.lastIndex]);
       const call=parseCompatToolBlock(match[1],allowed);
       if(call)ranges.push([match.index,fence.lastIndex,call]);
     }
+
+    // Qwen sometimes appends exit_early(...) as a bare final line after its
+    // prose answer. Treat only that exact terminal control line as a tool call;
+    // do not interpret arbitrary JavaScript or inline examples as executable.
+    const exitTool=allowed.get('exit_early');
+    if(exitTool){
+      const line=/([^\r\n]*)(?:\r?\n|$)/g;
+      let lineMatch;
+      while((lineMatch=line.exec(value))){
+        const lineText=lineMatch[1];
+        const lineStart=lineMatch.index;
+        if(!lineText.trim())continue;
+        if(fencedRanges.some(([start,end])=>lineStart>=start&&lineStart<end))continue;
+        const call=parseFunctionStyleToolCall(lineText.trim(),exitTool);
+        if(call)ranges.push([lineStart,lineStart+lineText.length,call]);
+        if(line.lastIndex>=value.length)break;
+      }
+    }
+    ranges.sort((a,b)=>a[0]-b[0]);
     return ranges;
   }
   function parseToolProtocol(text,tools=[]) {
