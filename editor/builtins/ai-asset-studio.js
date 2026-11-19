@@ -330,7 +330,7 @@
       document.removeEventListener('keydown', galleryEscape);
     }
     function closeGalleryOutside(event) {
-      if (galleryPopover && !galleryPopover.contains(event.target) && event.target !== galleryButton) closeGalleryPopover();
+      if (galleryPopover && !galleryPopover.contains(event.target) && event.target !== galleryButton && !contextMenu?.contains(event.target)) closeGalleryPopover();
     }
     function galleryEscape(event) { if (event.key === 'Escape') closeGalleryPopover(); }
     function showGalleryDetails(entry) {
@@ -351,7 +351,9 @@
       addField('Negative prompt', entry.prompt?.negative || entry.request?.negativePrompt || '');
       addField('Resolved seed', entry.seed);
       addField('Provider instructions', entry.instructions);
-      addField('Generation settings', { ...(entry.parameters || {}), resolvedSeed:entry.seed, ...(entry.seedWasRandom ? { seedWasRandom:true } : {}) });
+      addField('Exact generation request', entry.request);
+      addField('Original settings', entry.requestedParameters);
+      addField('Resolved settings', { ...(entry.parameters || {}), resolvedSeed:entry.seed, ...(entry.seedWasRandom ? { seedWasRandom:true } : {}) });
       const actions = document.createElement('div'); actions.className = 'ais-gallery-detail-actions';
       const use = document.createElement('button'); use.className = 'primary'; use.textContent = 'Use these settings';
       use.onclick = async () => { try { await applyGallerySettings(entry); closeGalleryPopover(); } catch (error) { showError(error); } };
@@ -564,6 +566,7 @@
       modelSelect.disabled = busy;
     }
     async function openSettings() {
+      loadStudioSettings();
       try { await prepareProvider(providerId); }
       catch (error) { showError(error); return; }
       if (settingsModal) { settingsModal.remove(); settingsModal = null; }
