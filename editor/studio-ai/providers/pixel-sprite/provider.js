@@ -1,0 +1,225 @@
+import { HF_REPO, modelFiles, loadModel } from "./engine.js";
+import { ENCODER, encoderFiles, loadTextEncoder } from "./text.js";
+
+const { AssetProviderAI } = window.StudioAIFramework;
+const MODEL_REVISION = "0a29494e9fc020a26feb6f97ec2047fc207ce898";
+const MODEL_BASE = "https://huggingface.co/" + HF_REPO + "/resolve/" + MODEL_REVISION;
+const ENCODER_BASE = "https://huggingface.co/" + ENCODER.repo + "/resolve/" + ENCODER.revision;
+const ORT_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/ort.webgpu.min.mjs";
+const TOKENIZERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/tokenizers@0.2.0/dist/tokenizers.min.mjs";
+const CACHE_NAME = "studio-ai-pixel-sprite-model-v1";
+
+function progress(onProgress, phase, loaded, total) {
+  onProgress?.({ phase, loaded: loaded || 0, total: total || 0, progress: total ? loaded / total : null });
+}
+
+async function fetchBytes(url, onProgress) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(url);
+  if (cached) return new Uint8Array(await cached.arrayBuffer());
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Model download failed (" + response.status + "): " + url);
+  const total = Number(response.headers.get("content-length")) || 0;
+  let bytes;
+  if (onProgress && response.body) {
+    const reader = response.body.getReader(), chunks = [];
+    let received = 0;
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      chunks.push(part.value);
+      received += part.value.length;
+      onProgress(received, total);
+    }
+    bytes = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  } else bytes = new Uint8Array(await response.arrayBuffer());
+  try { await cache.put(url, new Response(bytes)); }
+  catch (error) { throw new Error("Could not cache model data for offline use. Check browser storage availability. " + error.message); }
+  return bytes;
+}
+
+function chooseBackend(ort) {
+  return (async () => {
+    if (!navigator.gpu) return "wasm";
+    try {
+      if (await navigator.gpu.requestAdapter({ powerPreference: "high-performance" })) {
+        ort.env.webgpu.powerPreference = "high-performance";
+        return "webgpu";
+      }
+    } catch (_) {}
+    return "wasm";
+  })();
+}
+
+function canvasBlob(model, indices, size) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d", { willReadFrequently: false });
+  const image = context.createImageData(size, size);
+  image.data.set(model.rgba(indices));
+  context.putImageData(image, 0, 0);
+  return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Could not encode generated sprite as PNG.")), "image/png"));
+}
+
+function deviceBatch(backend, rowsPerSprite, count) {
+  const memory = Number(navigator.deviceMemory);
+  const cores = navigator.hardwareConcurrency || 4;
+  const lowMemory = Number.isFinite(memory) && memory > 0 ? memory <= 4 : cores <= 4;
+  const rowBudget = backend === "webgpu" && memory >= 8 && cores >= 8 ? 12 : lowMemory ? 4 : 8;
+  return Math.max(1, Math.min(count, Math.floor(rowBudget / rowsPerSprite)));
+}
+
+export class PixelSpriteProvider extends AssetProviderAI {
+  constructor() {
+    super({
+      id: "pixel-sprite",
+      name: "PixelSprite Canvas v2",
+      type: "image",
+      description: "Browser-local autoregressive pixel-art sprite generation.",
+      capabilities: {
+        prompt: true, seed: true, batch: true, transparentBackground: true,
+        outputFormats: ["image/png"], outputDimensions: ["16x16", "32x32"],
+        localInference: true, cancellation: true, progress: true
+      },
+      configuration: {
+        fields: [
+          { key: "size", label: "Sprite size", type: "select", default: 32, options: [{label:"16 × 16",value:16},{label:"32 × 32",value:32}] },
+          { key: "count", label: "Variations", type: "select", default: 8, options: [4,8,12,16].map(value=>({label:String(value),value})) },
+          { key: "batch", label: "Inference batch size", type: "select", default: "auto", options: [{label:"Auto · adapt to device",value:"auto"},...Array.from({length:8},(_,i)=>({label:String(i+1),value:String(i+1)}))] },
+          { key: "seed", label: "Seed (-1 = random)", type: "number", default: 42, min: -1, step: 1 },
+          { key: "mode", label: "Inference mode", type: "select", default: "guided", options: [{label:"Quality · guided",value:"guided"},{label:"Fast",value:"fast"}] },
+          { key: "shape", label: "Shape guidance", type: "range", default: 1, min: 0, max: 4, step: 0.25, visibleWhen: { key:"mode", equals:"guided" } },
+          { key: "colour", label: "Colour guidance", type: "range", default: 2, min: 0, max: 4, step: 0.25, visibleWhen: { key:"mode", equals:"guided" } }
+        ]
+      }
+    });
+    this.ort = null;
+    this.model = null;
+    this.encoder = null;
+    this.backend = "wasm";
+    this.loading = null;
+  }
+
+  async initialize({ onProgress } = {}) {
+    if (this.model) return { backend: this.backend, offlineModelCache: true };
+    if (this.loading) return this.loading;
+    this.loading = (async () => {
+      progress(onProgress, "Loading ONNX Runtime Web");
+      this.ort = await import(ORT_URL);
+      this.ort.env.wasm.numThreads = self.crossOriginIsolated ? 0 : 1;
+      this.backend = await chooseBackend(this.ort);
+      this.ort.env.wasm.proxy = this.backend === "wasm";
+      try {
+        progress(onProgress, "Loading sprite model");
+        this.model = await loadModel({
+          ort: this.ort, files: modelFiles(MODEL_BASE), ep: this.backend,
+          fetchBytes,
+          fixedCache: true,
+          onProgress: (loaded,total) => progress(onProgress,"Downloading sprite model",loaded,total)
+        });
+      } catch (error) {
+        if (this.backend !== "webgpu") throw error;
+        this.backend = "wasm";
+        this.model = await loadModel({ ort:this.ort, files:modelFiles(MODEL_BASE), ep:"wasm", fetchBytes, fixedCache:true,
+          onProgress:(loaded,total)=>progress(onProgress,"Downloading sprite model",loaded,total) });
+      }
+      progress(onProgress, "Warming up model");
+      await this.warmup();
+      progress(onProgress, "Loading text encoder");
+      const { Tokenizer } = await import(TOKENIZERS_URL);
+      this.encoder = await loadTextEncoder({
+        ort:this.ort, Tokenizer, files:encoderFiles(ENCODER_BASE), fetchBytes,
+        onProgress:(loaded,total)=>progress(onProgress,"Downloading text encoder",loaded,total)
+      });
+      progress(onProgress, "Ready");
+      this.initialized = true;
+      return { backend:this.backend, offlineModelCache:true };
+    })();
+    try { return await this.loading; }
+    catch (error) { this.model = null; this.encoder = null; throw error; }
+    finally { this.loading = null; }
+  }
+
+  async warmup() {
+    const size = this.backend === "webgpu" ? 32 : 16;
+    const batch = this.backend === "webgpu" ? 2 : 1;
+    const cache = await this.model.cacheSet(batch, 2 + size + size * size);
+    const x = new Float32Array(batch * this.model.d);
+    for (let row=0; row<batch; row++) this.model.writePixel(x,row*this.model.d,this.model.BOS,0,0,3);
+    let output;
+    try { output = await this.model.stepFixed(x,batch,0,cache); }
+    finally {
+      this.model.constructor.release(cache);
+      if (output?.cache) this.model.constructor.release(output.cache);
+    }
+  }
+
+  async generateImage(request = {}, { signal, onProgress } = {}) {
+    if (!this.model || !this.encoder) throw new Error("Load the PixelSprite model before generating.");
+    const prompt = String(request.prompt || "").trim();
+    if (!prompt) throw new Error("A prompt is required.");
+    const config = { size:32, count:8, seed:42, mode:"guided", shape:1, colour:2, batch:"auto", ...(request.parameters || {}) };
+    const size = Number(config.size), count = Number(config.count);
+    if (![16,32].includes(size)) throw new Error("Sprite size must be 16 or 32.");
+    if (![4,8,12,16].includes(count)) throw new Error("Variation count must be 4, 8, 12 or 16.");
+    const fast = config.mode === "fast";
+    const rowsPerSprite = fast ? 1 : 2;
+    const automatic = deviceBatch(this.backend, rowsPerSprite, count);
+    const chunk = config.batch === "auto" ? automatic : Math.max(1,Math.min(8,Number(config.batch)||automatic));
+    const seed = Number.isFinite(Number(config.seed)) ? Number(config.seed) : 42;
+    const controller = signal;
+    progress(onProgress,"Encoding prompt");
+    const vector = await this.encoder.encode(prompt);
+    const started = performance.now();
+    const assets = new Array(count);
+    const settings = {
+      vector, n:count, size, seed, gShape:fast?1:Number(config.shape), gColour:fast?1:Number(config.colour),
+      filter:!fast, temperature:1, topP:1, chunk, signal:controller,
+      onPixel:(ids,t,images,view) => {
+        if ((t+1)%view.S===0 || t+1===view.S*view.S)
+          progress(onProgress,"Generating sprites",t+1,view.S*view.S);
+      },
+      onSprite: async (id, indices) => {
+        const blob = await canvasBlob(this.model,indices,size);
+        assets[id] = { blob, mimeType:"image/png", width:size, height:size, metadata:{ index:id, seed:config.seed } };
+        request.onAsset?.(assets[id], id);
+      }
+    };
+    try {
+      let result;
+      try { result = await this.model.generate(settings); }
+      catch (error) {
+        if (error?.name === "AbortError" || this.backend !== "webgpu") throw error;
+        try { await this.model.session.release(); } catch (_) {}
+        this.backend = "wasm";
+        this.model = await loadModel({ort:this.ort,files:modelFiles(MODEL_BASE),ep:"wasm",fetchBytes,fixedCache:true});
+        settings.chunk = Math.max(1,Math.min(count,Math.floor(4/rowsPerSprite)));
+        result = await this.model.generate(settings);
+      }
+      return {
+        assets,
+        metadata:{ provider:this.id, seed:result.stats.seed, sampled:result.stats.sampled, rejected:result.stats.rejected,
+          rounds:result.stats.rounds, elapsedMs:performance.now()-started, backend:this.backend }
+      };
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      throw error;
+    }
+  }
+
+  async dispose() {
+    try { await this.model?.session?.release?.(); } catch (_) {}
+    this.model = null; this.encoder = null; this.ort = null;
+    this.initialized = false;
+  }
+}
+
+export function registerPixelSpriteProvider(studioAI = window.StudioAI) {
+  const factory = () => new PixelSpriteProvider();
+  factory.metadata = { name:"PixelSprite Canvas v2", type:"image", description:"Browser-local pixel-art generation" };
+  if (!studioAI.providers.has("pixel-sprite")) studioAI.registerProvider("pixel-sprite",factory);
+  return studioAI;
+}
