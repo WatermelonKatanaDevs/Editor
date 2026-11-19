@@ -146,7 +146,7 @@
       if (!asset?.blob) throw new Error('The generated image is not available.');
       const saved = savedGalleryAssets.get(asset);
       if (saved) return saved;
-      if (busy) throw new Error('Wait for generation to finish before saving the final seed and settings to the gallery.');
+      if (busy && !options.allowBusy) throw new Error('Wait for generation to finish before saving the final seed and settings to the gallery.');
       const fs = ctx.state?.fs;
       if (!fs) throw new Error('No project filesystem is available.');
       ensureEditorDirectory();
@@ -546,7 +546,7 @@
         if (addToGalleryByDefault) {
           try {
             let savedCount = 0;
-            for (let index = 0; index < assets.length; index++) if (assets[index]) { await saveAssetToGallery(assets[index], index, {quiet:true}); savedCount++; }
+            for (let index = 0; index < assets.length; index++) if (assets[index]) { await saveAssetToGallery(assets[index], index, {quiet:true,allowBusy:true}); savedCount++; }
             if (savedCount) status.textContent += ' · ' + savedCount + ' added to gallery';
           } catch (error) { showError(error); }
         }
@@ -577,9 +577,10 @@
       const autoGalleryToggle = modal.querySelector('[data-auto-gallery]');
       autoGalleryToggle.checked = addToGalleryByDefault;
       autoGalleryToggle.onchange = () => {
+        const previous = addToGalleryByDefault;
         addToGalleryByDefault = autoGalleryToggle.checked;
         try { saveStudioSettings(); }
-        catch (error) { showError(error); autoGalleryToggle.checked = !addToGalleryByDefault; }
+        catch (error) { addToGalleryByDefault = previous; autoGalleryToggle.checked = previous; showError(error); }
       };
       const models = window.StudioAI.listProviders('image');
       const list = modal.querySelector('[data-model-list]');
