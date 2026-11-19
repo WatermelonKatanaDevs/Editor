@@ -354,7 +354,8 @@ const makeEditorTools = (() => {
         title: String(raw.title || 'New Chat'),
         createdAt: Number(raw.createdAt) || Date.now(),
         updatedAt: Number(raw.updatedAt) || Number(raw.createdAt) || Date.now(),
-        messages: validMessages(raw.messages)
+        messages: validMessages(raw.messages),
+        ...(raw.agentId ? {agentId:String(raw.agentId)} : {})
       } : {id, title:'New Chat', createdAt:Date.now(), updatedAt:Date.now(), messages:[]};
       memory.set(chat.id, chat);
       return chat;
@@ -801,13 +802,13 @@ const makeEditorTools = (() => {
     let currentChatId='';
     let chatMessages=[];
     let loadedProjectId=null;
-    let agentMode=false, busy=false, controller=null, editingIndex=-1;
+    let busy=false, controller=null, editingIndex=-1;
     const toolset=makeEditorTools({state,openFile:onOpen,onRefresh:()=>{state.fileManager?.refresh?.();updateStatus?.();},runConfigured,ensureNodeRuntime:()=>state.ensureNodeRuntime?.()});
     const client=new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork);
-    // ChatAI owns both normal chat and the optional agent execution mode.
-    const chatAI=new aiRoot.ChatAI({registry,client,localManager,agentOptions:{client,permissions,requestPermission:permissionPrompt,toolInstructions:AGENT_TOOL_INSTRUCTIONS,finalInstructions:AGENT_FINAL_INSTRUCTIONS,emit:()=>{},beforeTool:async payload=>(await editorExtensionHooks('ai.beforeTool',payload))||payload,afterTool:async payload=>(await editorExtensionHooks('ai.afterTool',payload))||payload}});
-    chatAI.registerTools(toolset.list());
-    const agent=chatAI.agent;
+    // All editor conversations share one agent; each conversation opts in independently.
+    const chatAI=new aiRoot.ChatAI({registry,client,localManager});
+    const agent=chatAI.createAgent({id:'editor',name:'Editor Assistant',client,permissions,requestPermission:permissionPrompt,toolInstructions:AGENT_TOOL_INSTRUCTIONS,finalInstructions:AGENT_FINAL_INSTRUCTIONS,beforeTool:async payload=>(await editorExtensionHooks('ai.beforeTool',payload))||payload,afterTool:async payload=>(await editorExtensionHooks('ai.afterTool',payload))||payload});
+    agent.registerTools(toolset.list());
     let currentConversation=null;
     async function activateModel(id){
       const target=registry.settings.models.find(x=>x.id===id);
@@ -856,11 +857,15 @@ const makeEditorTools = (() => {
       if (!currentChatId || !recent.some(x=>x.id===currentChatId)) currentChatId=recent[0]?.id || chatStore.create().id;
       const chat=chatStore.get(currentChatId);
       chatMessages=chat.messages;
-      currentConversation=chatAI.openConversation({id:currentChatId,messages:chatMessages,modelId:registry.active()?.id});
+      currentConversation=chatAI.openConversation({id:currentChatId,messages:chatMessages,modelId:registry.active()?.id,agentId:chat.agentId||null});
     }
     function currentChat() { syncChats(); return chatStore.get(currentChatId); }
     function activeMessages() { return (currentConversation?.getMessages?.() || chatMessages).map(m=>({role:m.role,content:m.content})); }
-    function persist() { const chat=currentChat(); chat.messages=chatMessages; currentConversation?.setMessages?.(chatMessages); chatStore.touch(chat.id); }
+    function persist() {
+      const chat=currentChat();chat.messages=chatMessages;currentConversation?.setMessages?.(chatMessages);
+      const attached=currentConversation?.getAgent?.();if(attached)chat.agentId=attached.id;else delete chat.agentId;
+      chatStore.touch(chat.id);
+    }
     function beginEdit(index) {
       if (busy || !Number.isInteger(index) || chatMessages[index]?.role !== 'user') return;
       const view=getAIView(); if (!view) return;
@@ -918,7 +923,7 @@ const makeEditorTools = (() => {
         modal.querySelector('[data-new-chat]').onclick=()=>{newChat();modal.remove();};
         modal.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{switchChat(b.dataset.open);modal.remove();});
         modal.querySelectorAll('[data-rename]').forEach(b=>b.onclick=()=>{const chat=chatStore.get(b.dataset.rename);const title=prompt('Chat name:',chat.title);if(title!=null){chatStore.rename(chat.id,title);render();}});
-        modal.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>{if(!confirm('Delete this chat?'))return;const id=b.dataset.delete;if(id===currentChatId){const ordered=chatStore.list(false).filter(x=>x.id!==id);chatStore.remove(id);currentChatId=ordered[0]?.id||chatStore.create().id;chatMessages=chatStore.get(currentChatId).messages;currentConversation=chatAI.openConversation({id:currentChatId,messages:chatMessages,modelId:registry.active()?.id});loadedProjectId=state.projectId||'global';}else chatStore.remove(id);render();});
+        modal.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>{if(!confirm('Delete this chat?'))return;const id=b.dataset.delete;if(id===currentChatId){const ordered=chatStore.list(false).filter(x=>x.id!==id);chatStore.remove(id);currentChatId=ordered[0]?.id||chatStore.create().id;chatMessages=chatStore.get(currentChatId).messages;currentConversation=chatAI.openConversation({id:currentChatId,messages:chatMessages,modelId:registry.active()?.id,agentId:chatStore.get(currentChatId)?.agentId||null});loadedProjectId=state.projectId||'global';}else chatStore.remove(id);render();});
       };
       document.body.appendChild(modal);render();requestAnimationFrame(()=>modal.classList.add('show'));
     }
@@ -928,7 +933,7 @@ const makeEditorTools = (() => {
       persist();
       currentChatId=id;
       chatMessages=chatStore.get(id).messages;
-      currentConversation=chatAI.openConversation({id,messages:chatMessages,modelId:registry.active()?.id});
+      currentConversation=chatAI.openConversation({id,messages:chatMessages,modelId:registry.active()?.id,agentId:chatStore.get(id)?.agentId||null});
       render(view.g,view.t);
     }
     function newChat() {
@@ -938,7 +943,7 @@ const makeEditorTools = (() => {
       const chat=chatStore.create();
       currentChatId=chat.id;
       chatMessages=chat.messages;
-      currentConversation=chatAI.openConversation({id:currentChatId,messages:chatMessages,modelId:registry.active()?.id});
+      currentConversation=chatAI.openConversation({id:currentChatId,messages:chatMessages,modelId:registry.active()?.id,agentId:chatStore.get(currentChatId)?.agentId||null});
       render(view.g,view.t);
     }
     function renameCurrent() {
@@ -961,11 +966,12 @@ const makeEditorTools = (() => {
       }
       tree.style.display = '';
       const model=registry.active(); const localModel=!!model?.local||model?.protocol==='local-transformers'; const localLoaded=!localModel||localManager.isLoaded(model.id); const chats=chatStore.list(true); const current=currentChat();
-      if(!model.supportsTools && !model.supportsAgentTools) agentMode=false;
+      if(!model.supportsTools&&!model.supportsAgentTools&&currentConversation?.getAgent?.()){currentConversation.removeAgent();delete current.agentId;persist();}
+      const agentMode=!!currentConversation?.getAgent?.();
       tree.innerHTML=`<div class="ai-panel-inner"><div class="ai-header"><div class="ai-header-left"><strong>AI Chat</strong><span class="ai-model-label">${escapeHtml(makeModelLabel(model,registry,localManager))}</span></div><div class="ai-header-right"><select class="ai-chat-select" data-chat-select ${busy?'disabled':''} title="Recent chats">${chats.map(c=>`<option value="${escapeHtml(c.id)}" ${c.id===currentChatId?'selected':''}>${escapeHtml(c.title)}</option>`).join('')}${!chats.length?'<option>No chats</option>':''}</select><div class="ai-head-actions"><button data-chat-manage ${busy?'disabled':''} title="Manage chats" aria-label="Manage chats">☰</button><button data-new ${busy?'disabled':''} title="New chat" aria-label="New chat">＋</button><button data-settings title="AI Settings" aria-label="AI Settings">⚙</button></div><div class="ai-local-head-action">${localModel&&!localLoaded?'<button data-local-load>Load model</button>':''}</div></div></div><div class="ai-chat" data-chat>${chatMessages.length ? '' : '<div class="ai-chat-disclaimer">Chats are saved inside this project. If this project is published or pushed to Git, saved chats may be visible to others.</div>'}</div><div class="ai-request-status" data-status ${busy?'':'hidden'}>${busy?'Working…':''}</div><div class="ai-local-status" data-local-status hidden><div data-local-status-text></div><div class="ai-local-progress"><span data-local-status-progress></span></div></div><div class="ai-compose"><textarea data-input placeholder="Ask anything about your project…" rows="3"></textarea><div class="ai-compose-bar"><label class="ai-agent-toggle"><input data-agent type="checkbox" ${agentMode?'checked':''} ${model.supportsTools||model.supportsAgentTools?'':'disabled'}> Agent mode${model.supportsTools||model.supportsAgentTools?'':' (not supported by this model)'}</label><label class="ai-agent-steps">Steps <input data-agent-steps type="number" min="1" max="100" step="1" value="${Math.max(1,Math.min(100,Number(agent.maxSteps)||24))}" ${model.supportsTools||model.supportsAgentTools?'':'disabled'}></label><button data-stop ${busy?'':'disabled'}>Stop</button><button class="primary" data-send ${busy?'disabled':''}>Send</button></div></div></div>`;
       const chat=tree.querySelector('[data-chat]');
       for(let i=0;i<chatMessages.length;i++){const m=chatMessages[i];addMessage(chat,m.role,m.content,i,m);}
-      tree.querySelector('[data-agent]').onchange=e=>{agentMode=e.target.checked;};
+      tree.querySelector('[data-agent]').onchange=e=>{if(e.target.checked)currentConversation?.setAgent(agent);else currentConversation?.removeAgent();persist();};
       const stepsInput=tree.querySelector('[data-agent-steps]');
       stepsInput.onchange=()=>{const n=Math.max(1,Math.min(100,Math.floor(Number(stepsInput.value)||24)));agent.maxSteps=n;stepsInput.value=n;};
       tree.querySelector('[data-settings]').onclick=()=>settingsModal(registry,permissions,()=>{persist();render(g,t);},state.browserNetwork||window.__sharedBrowserNetwork,localManager,activateModel);
@@ -1001,11 +1007,12 @@ const makeEditorTools = (() => {
       const chat=tree.querySelector('[data-chat]');
       if(!chat) { busy=false; controller=null; return; }
       const setStatus=text=>{const el=tree.querySelector('[data-status]');if(!el)return;el.replaceChildren(document.createTextNode(text||''));el.hidden=!text;};
-      const prefs=aiRoot.getAIPreferences?.()||{}; const liveActivity=agentMode&&prefs.showActivity!==false?beginActivity(chat,true):null;
+      const activeAgent=currentConversation?.getAgent?.()||null;
+      const prefs=aiRoot.getAIPreferences?.()||{}; const liveActivity=activeAgent&&prefs.showActivity!==false?beginActivity(chat,true):null;
       const bubble=addMessage(chat,'assistant',''); if(liveActivity && bubble.parentNode?.parentNode===chat) chat.insertBefore(liveActivity.host,bubble.parentNode); let partial='';
       try {
-        if(agentMode){
-          agent.emit=event=>{
+        if(activeAgent){
+          const emitAgentEvent=event=>{
             if(event.type==='assistant'){partial=event.text||partial;renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
             else if(event.type==='assistant_activity'){appendActivity(liveActivity,{kind:'assistant',text:event.text});}
             else if(event.type==='tool_call'){appendActivity(liveActivity,{kind:'tool_call',name:event.name,args:event.args});}
@@ -1016,7 +1023,18 @@ const makeEditorTools = (() => {
             else if(event.type==='request_start'){appendActivity(liveActivity,{kind:'request_start',text:`Requesting ${event.model} (${event.protocol})…`});}
             else if(event.type==='reasoning_summary'){appendActivity(liveActivity,{kind:'reasoning_summary',text:event.text});} else if(event.type==='reasoning'){appendActivity(liveActivity,{kind:'reasoning',text:event.text||'Model reasoning is active.'});}
           };
-          const messages=activeMessages(); const prompt=systemPrompt(true); const hookInput={messages:[...messages],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'}; const prepared=await editorExtensionHooks('ai.beforeRun',hookInput); const result=await chatAI.runAgent([{role:'system',content:prompt},...(prepared?.messages||messages)],{systemPrompt:prompt,maxTokens:2048,retryTransport:prefs.retryTransport,maxTransportRetries:prefs.maxTransportRetries,transportRetryDelay:prefs.transportRetryDelay,onRetry:info=>agent.emit?.({type:info?.kind==='tool_parse_recovery'?'provider_retry':info?.kind==='transport_retry'?'transport_retry':'retry',...info})}); await editorExtensionHooks('ai.afterRun',{...hookInput,result}); partial=result.text||partial; renderMessage(bubble,partial,code=>insertCode(code)); const activityData=liveActivity?.items||[]; chatMessages.push({role:'assistant',content:partial,activity:activityData}); if(liveActivity)liveActivity.details.open=false;
+          const messages=activeMessages(),prompt=systemPrompt(true);
+          const hookInput={messages:[...messages],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'};
+          const prepared=await editorExtensionHooks('ai.beforeRun',hookInput);
+          const result=await currentConversation.runAgent([{role:'system',content:prompt},...(prepared?.messages||messages)],{
+            systemPrompt:prompt,maxTokens:2048,retryTransport:prefs.retryTransport,maxTransportRetries:prefs.maxTransportRetries,
+            transportRetryDelay:prefs.transportRetryDelay,emit:emitAgentEvent,
+            onRetry:info=>emitAgentEvent({type:info?.kind==='tool_parse_recovery'?'provider_retry':info?.kind==='transport_retry'?'transport_retry':'retry',...info})
+          });
+          await editorExtensionHooks('ai.afterRun',{...hookInput,result});
+          partial=result.text||partial;renderMessage(bubble,partial,code=>insertCode(code));
+          const activityData=liveActivity?.items||[];chatMessages.push({role:'assistant',content:partial,activity:activityData});
+          if(liveActivity)liveActivity.details.open=false;
         } else {
           const messages=[{role:'system',content:systemPrompt(false)},...activeMessages()];
           const model=chatAI.getModel();
