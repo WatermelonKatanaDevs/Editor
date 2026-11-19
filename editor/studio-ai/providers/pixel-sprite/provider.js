@@ -13,6 +13,25 @@ function progress(onProgress, phase, loaded, total) {
   onProgress?.({ phase, loaded: loaded || 0, total: total || 0, progress: total ? loaded / total : null });
 }
 
+async function prepareOfflineSupport() {
+  if (!("serviceWorker" in navigator)) throw new Error("Offline runtime caching requires service-worker support. Open the Editor over HTTPS in a supported browser.");
+  const scriptUrl = new URL("../../../../studio-ai-sw.js", import.meta.url);
+  const scope = new URL("../../../../", import.meta.url).pathname;
+  await navigator.serviceWorker.register(scriptUrl.href, { scope, updateViaCache:"none" });
+  await navigator.serviceWorker.ready;
+  if (!navigator.serviceWorker.controller) {
+    await new Promise((resolve,reject) => {
+      const timeout = setTimeout(() => {
+        navigator.serviceWorker.removeEventListener("controllerchange",finish);
+        reject(new Error("The offline runtime cache is installing. Reload the Editor and press Load model again."));
+      },10000);
+      const finish = () => { clearTimeout(timeout); resolve(); };
+      navigator.serviceWorker.addEventListener("controllerchange",finish,{once:true});
+      if (navigator.serviceWorker.controller) finish();
+    });
+  }
+}
+
 async function fetchBytes(url, onProgress) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(url);
@@ -107,6 +126,8 @@ export class PixelSpriteProvider extends AssetProviderAI {
     if (this.model) return { backend: this.backend, offlineModelCache: true };
     if (this.loading) return this.loading;
     this.loading = (async () => {
+      progress(onProgress, "Preparing offline runtime cache");
+      await prepareOfflineSupport();
       progress(onProgress, "Loading ONNX Runtime Web");
       this.ort = await import(ORT_URL);
       this.ort.env.wasm.numThreads = self.crossOriginIsolated ? 0 : 1;
