@@ -1006,6 +1006,10 @@ const makeEditorTools = (() => {
       const chat=tree.querySelector('[data-chat]');
       if(!chat) { busy=false; controller=null; return; }
       const setStatus=text=>{const el=tree.querySelector('[data-status]');if(!el)return;el.replaceChildren(document.createTextNode(text||''));el.hidden=!text;};
+      // Show the user's prompt immediately. ConversationAI.send() records the same
+      // message in history below; the final render rebuilds the transcript from that history.
+      addMessage(chat,'user',text);
+      chat.scrollTop=chat.scrollHeight;
       const activeAgent=currentConversation?.getAgent?.()||null;
       const prefs=aiRoot.getAIPreferences?.()||{}; const liveActivity=activeAgent&&prefs.showActivity!==false?beginActivity(chat,true):null;
       const bubble=addMessage(chat,'assistant',''); if(liveActivity && bubble.parentNode?.parentNode===chat) chat.insertBefore(liveActivity.host,bubble.parentNode); let partial='';
@@ -1047,7 +1051,13 @@ const makeEditorTools = (() => {
         persist();
       } catch(e) {
         if(e?.name!=='AbortError') { partial=`**Error:** ${e?.message||String(e)}`; renderMessage(bubble,partial); if(liveActivity) appendActivity(liveActivity,{kind:'error',text:e?.message||String(e)}); const activityData=liveActivity?.items||[]; chatMessages.push({role:'assistant',content:partial,activity:activityData}); if(liveActivity) liveActivity.details.open=false; persist(); }
-      } finally { busy=false; controller=null; render(g,t); }
+      } finally {
+        // Keep the editor's persisted transcript aligned with ConversationAI, which
+        // owns insertion of both the user and assistant messages.
+        if(currentConversation?.getMessages)chatMessages=currentConversation.getMessages();
+        persist();
+        busy=false; controller=null; render(g,t);
+      }
     }
     function activityValue(value,maxChars=20000){let text;try{text=JSON.stringify(value,null,2);}catch(_){text=String(value);}text=String(text??'');return text.length<=maxChars?text:text.slice(0,maxChars)+`\n… [truncated ${text.length-maxChars} characters]`;}
     function activitySummary(items){const list=items||[];const steps=list.filter(x=>x?.kind==='step').length;const tools=list.filter(x=>x?.kind==='tool_call').length;const retries=list.filter(x=>['retry','transport_retry','provider_retry'].includes(x?.kind)).length;const parts=['Agent activity'];if(steps)parts.push(`${steps} step${steps===1?'':'s'}`);if(tools)parts.push(`${tools} tool${tools===1?'':'s'}`);if(retries)parts.push(`${retries} retr${retries===1?'y':'ies'}`);return parts.join(' · ');}
