@@ -212,8 +212,10 @@ export class PixelSpriteProvider extends AssetProviderAI {
     const shapeGuidance = Number.isFinite(Number(config.shape)) ? Math.max(0,Math.min(4,Number(config.shape))) : 1;
     const colourGuidance = Number.isFinite(Number(config.colour)) ? Math.max(0,Math.min(4,Number(config.colour))) : 2;
     const controller = signal;
-    progress(onProgress,"Encoding prompt");
-    const vector = await this.encoder.encode(prompt);
+    const encodingStarted = performance.now();
+    const vector = await this.encoder.encode(prompt, info => onProgress?.(info));
+    const encodingMs = performance.now() - encodingStarted;
+    progress(onProgress, "Generating sprites · " + this.backend.toUpperCase());
     const started = performance.now();
     let assets = new Array(count);
     let assetTasks = [];
@@ -270,7 +272,7 @@ export class PixelSpriteProvider extends AssetProviderAI {
       return {
         assets,
         metadata:{ provider:this.id, seed:result.stats.seed, sampled:result.stats.sampled, rejected:result.stats.rejected,
-          rounds:result.stats.rounds, elapsedMs:performance.now()-started, backend:this.backend,
+          rounds:result.stats.rounds, elapsedMs:performance.now()-started, encodingMs, backend:this.backend,
           mode:fast?"fast":"guided", shapeGuidance:fast?1:shapeGuidance, colourGuidance:fast?1:colourGuidance }
       };
     } catch (error) {
