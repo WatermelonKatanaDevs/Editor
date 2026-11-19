@@ -1,4 +1,6 @@
 (function () {
+  const clone = value => typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
+
   class AssetProviderAI {
     constructor(metadata = {}) {
       this.id = metadata.id || "";
@@ -9,8 +11,8 @@
       this._configuration = metadata.configuration || {};
       this.initialized = false;
     }
-    getCapabilities() { return structuredClone(this._capabilities); }
-    getConfigurationSchema() { return structuredClone(this._configuration); }
+    getCapabilities() { return clone(this._capabilities); }
+    getConfigurationSchema() { return clone(this._configuration); }
     async initialize() { this.initialized = true; }
     async dispose() { this.initialized = false; }
   }
