@@ -260,16 +260,18 @@ export class PixelSpriteProvider extends AssetProviderAI {
         this.backend = "wasm";
         this.ort.env.wasm.proxy = true;
         this.model = await loadModel({ort:this.ort,files:modelFiles(MODEL_BASE),ep:"wasm",fetchBytes,fixedCache:true});
-        await this.warmup();
+        await this.warmup(config);
         settings.chunk = Math.max(1,Math.min(count,Math.floor(4/rowsPerSprite)));
         assets = new Array(count);
         request.onResetAssets?.();
         await run();
       }
+      for (const asset of assets) if (asset) asset.metadata.seed = result.stats.seed;
       return {
         assets,
         metadata:{ provider:this.id, seed:result.stats.seed, sampled:result.stats.sampled, rejected:result.stats.rejected,
-          rounds:result.stats.rounds, elapsedMs:performance.now()-started, backend:this.backend }
+          rounds:result.stats.rounds, elapsedMs:performance.now()-started, backend:this.backend,
+          mode:fast?"fast":"guided", shapeGuidance:fast?1:shapeGuidance, colourGuidance:fast?1:colourGuidance }
       };
     } catch (error) {
       if (error?.name === "AbortError") throw error;
