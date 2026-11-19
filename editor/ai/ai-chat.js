@@ -404,16 +404,15 @@
     // do not interpret arbitrary JavaScript or inline examples as executable.
     const exitTool=allowed.get('exit_early');
     if(exitTool){
-      const line=/([^\r\n]*)(?:\r?\n|$)/g;
-      let lineMatch;
-      while((lineMatch=line.exec(value))){
-        const lineText=lineMatch[1];
-        const lineStart=lineMatch.index;
-        if(!lineText.trim())continue;
-        if(fencedRanges.some(([start,end])=>lineStart>=start&&lineStart<end))continue;
-        const call=parseFunctionStyleToolCall(lineText.trim(),exitTool);
-        if(call)ranges.push([lineStart,lineStart+lineText.length,call]);
-        if(line.lastIndex>=value.length)break;
+      const lines=[...value.matchAll(/[^\r\n]+/g)];
+      const lastLine=lines.reverse().find(item=>item[0].trim());
+      if(lastLine){
+        const lineStart=lastLine.index;
+        const insideFence=fencedRanges.some(([start,end])=>lineStart>=start&&lineStart<end);
+        if(!insideFence){
+          const call=parseFunctionStyleToolCall(lastLine[0].trim(),exitTool);
+          if(call)ranges.push([lineStart,lineStart+lastLine[0].length,call]);
+        }
       }
     }
     ranges.sort((a,b)=>a[0]-b[0]);
