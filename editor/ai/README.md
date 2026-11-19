@@ -79,7 +79,7 @@ A conversation owns its message history, selected model, and optional agent asso
 
 - `setAgent(agentOrId)`, `getAgent()`, `removeAgent()`
 - `send(content, options)` streams normally when no agent is attached and runs the attached agent when one is present.
-- `runAgent(messages, options)` explicitly invokes its attached agent.
+- `send(content, options)` is the sole conversation message entry point; it streams through the selected provider when no agent is attached and delegates to the attached agent otherwise.
 - `toJSON()` includes `agentId` only when an agent is attached.
 
 Applications own conversation persistence. Store the optional agent ID with a conversation and pass it back as `agentId` when reopening it. The framework does not create DOM or select a presentation.
