@@ -287,7 +287,6 @@ export class PixelSpriteProvider extends AssetProviderAI {
   }
 
   async dispose() {
-    try { this.model?.gpuSampler?.embeddings?.destroy?.(); } catch (_) {}
     try { await this.model?.session?.release?.(); } catch (_) {}
     this.model = null; this.encoder = null; this.ort = null;
     this.initialized = false;
