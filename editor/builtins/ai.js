@@ -1051,7 +1051,7 @@ const makeEditorTools = (() => {
           chatMessages=currentConversation.getMessages();
           const messages=[{role:'system',content:systemPrompt(false)},...activeMessages()];
           const model=chatAI.getModel();
-          for await(const chunk of chatAI.stream(messages,{modelId:model?.id,thinking:true,maxTokens:2048,temperature:.7,topP:.9,signal:controller.signal,systemPrompt:systemPrompt(false),onRetry:info=>setStatus(info?.kind==='tool_parse_recovery' ? (info.text||'Retrying tool-call generation…') : info?.kind==='transport_retry' ? `Network retry in ${Math.ceil((info.waitMs||0)/1000)}s (attempt ${info.attempt}/${info.maxRetries})` : `Rate limited — retrying in ${Math.ceil(info.waitMs/1000)}s (attempt ${info.attempt}/${info.maxRetries})`)})){
+          for await(const chunk of chatAI.stream(messages,{modelId:model?.id,conversationId:currentConversation.id,thinking:true,maxTokens:2048,temperature:.7,topP:.9,signal:controller.signal,systemPrompt:systemPrompt(false),onRetry:info=>setStatus(info?.kind==='tool_parse_recovery' ? (info.text||'Retrying tool-call generation…') : info?.kind==='transport_retry' ? `Network retry in ${Math.ceil((info.waitMs||0)/1000)}s (attempt ${info.attempt}/${info.maxRetries})` : `Rate limited — retrying in ${Math.ceil(info.waitMs/1000)}s (attempt ${info.attempt}/${info.maxRetries})`)})){
             partial=chunk.text??partial;
             renderMessage(bubble,partial,code=>insertCode(code));
             chat.scrollTop=chat.scrollHeight;
