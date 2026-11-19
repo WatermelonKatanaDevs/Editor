@@ -2,7 +2,7 @@
   const factories = window.EditorBuiltinFactories = window.EditorBuiltinFactories || {};
 
   factories['ai-asset-studio'] = function (ctx) {
-    let page = null, provider = null, abortController = null, disposed = false;
+    let page = null, provider = null, providerPromise = null, abortController = null;
     const objectUrls = new Set();
     let configContainer = null;
     const values = {};
@@ -35,15 +35,20 @@
     }
     async function prepareProvider() {
       if (provider) return provider;
-      const mod = await import('./editor/studio-ai/providers/pixel-sprite/provider.js');
-      mod.registerPixelSpriteProvider(window.StudioAI);
-      provider = window.StudioAI.createImageProvider('pixel-sprite');
-      const schema = provider.getConfigurationSchema();
-      fields = [];
-      configContainer.replaceChildren();
-      for (const field of schema.fields || []) configContainer.append(makeField(field));
-      updateFieldVisibility();
-      return provider;
+      if (providerPromise) return providerPromise;
+      providerPromise = (async () => {
+        const mod = await import('./editor/studio-ai/providers/pixel-sprite/provider.js');
+        mod.registerPixelSpriteProvider(window.StudioAI);
+        provider = window.StudioAI.createImageProvider('pixel-sprite');
+        const schema = provider.getConfigurationSchema();
+        fields = [];
+        configContainer.replaceChildren();
+        for (const field of schema.fields || []) configContainer.append(makeField(field));
+        updateFieldVisibility();
+        return provider;
+      })();
+      try { return await providerPromise; }
+      catch (error) { providerPromise = null; throw error; }
     }
     function setProgress(info) {
       const p = info?.progress;
@@ -188,10 +193,9 @@
     }
     let promptInput = null;
     async function dispose() {
-      disposed = true;
       try { abortController?.abort(); } catch (_) {}
       try { await provider?.dispose?.(); } catch (_) {}
-      provider = null;
+      provider = null; providerPromise = null;
       for (const url of objectUrls) URL.revokeObjectURL(url);
       objectUrls.clear();
       page?.remove(); page = null;
