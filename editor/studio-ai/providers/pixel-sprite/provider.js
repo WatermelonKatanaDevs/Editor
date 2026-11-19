@@ -104,7 +104,8 @@ export class PixelSpriteProvider extends AssetProviderAI {
       type: "image",
       description: "Browser-local autoregressive pixel-art sprite generation.",
       capabilities: {
-        prompt: true, seed: true, batch: true, transparentBackground: true,
+        prompt: true, negativePrompt: false, seed: true, batch: true, transparentBackground: true,
+        guidedMode: true, fastMode: true, silhouetteConditioning: false,
         outputFormats: ["image/png"], outputDimensions: ["16x16", "32x32"],
         localInference: true, cancellation: true, progress: true
       },
