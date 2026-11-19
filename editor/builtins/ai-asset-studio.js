@@ -95,6 +95,15 @@
         wrap.hidden = !!rule && values[rule.key] !== rule.equals;
       }
     }
+    function readConfiguration() {
+      const config = {};
+      for (const wrap of fields) {
+        const { key, type } = wrap._schema;
+        const raw = wrap._input.value;
+        config[key] = type === 'number' || type === 'range' ? Number(raw) : raw;
+      }
+      return config;
+    }
     function setBusy(busy) {
       loadButton.disabled = busy || !!provider?.initialized;
       generateButton.disabled = busy || !provider?.initialized;
@@ -152,7 +161,7 @@
       };
       try {
         const result = await provider.generateImage({
-          prompt, parameters:{...values},
+          prompt, parameters:readConfiguration(),
           onAsset:renderAsset,
           onResetAssets:resetResults
         }, {
