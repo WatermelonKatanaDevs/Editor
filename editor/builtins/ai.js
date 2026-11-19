@@ -1028,7 +1028,7 @@ const makeEditorTools = (() => {
           const prepared=await editorExtensionHooks('ai.beforeRun',hookInput);
           const result=await currentConversation.runAgent([{role:'system',content:prompt},...(prepared?.messages||messages)],{
             systemPrompt:prompt,maxTokens:2048,retryTransport:prefs.retryTransport,maxTransportRetries:prefs.maxTransportRetries,
-            transportRetryDelay:prefs.transportRetryDelay,emit:emitAgentEvent,
+            transportRetryDelay:prefs.transportRetryDelay,signal:controller.signal,emit:emitAgentEvent,
             onRetry:info=>emitAgentEvent({type:info?.kind==='tool_parse_recovery'?'provider_retry':info?.kind==='transport_retry'?'transport_retry':'retry',...info})
           });
           await editorExtensionHooks('ai.afterRun',{...hookInput,result});
