@@ -599,7 +599,11 @@
     let loadedProjectId=null;
     let agentMode=false, busy=false, controller=null, editingIndex=-1;
     const toolset=aiRoot.makeAITools({state,openFile:onOpen,onRefresh:()=>{state.fileManager?.refresh?.();updateStatus?.();},runConfigured,ensureNodeRuntime:()=>state.ensureNodeRuntime?.()});
-    const agent=new aiRoot.AIAgent({client:new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork,localManager),tools:toolset,permissions,requestPermission:permissionPrompt,extensionAPI:window.EditorExtensionAPI,emit:()=>{}});
+    const client=new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork,localManager);
+    const agent=new aiRoot.AIAgent({client,tools:toolset,permissions,requestPermission:permissionPrompt,extensionAPI:window.EditorExtensionAPI,emit:()=>{}});
+    // ChatAI is the UI-independent API; this builtin adapts its DOM and project storage.
+    const chatAI=new aiRoot.ChatAI({registry,client,localManager,agent});
+    let currentConversation=null;
     async function activateModel(id){
       const target=registry.settings.models.find(x=>x.id===id);
       if(!target)throw new Error('AI model not found.');
@@ -647,10 +651,11 @@
       if (!currentChatId || !recent.some(x=>x.id===currentChatId)) currentChatId=recent[0]?.id || chatStore.create().id;
       const chat=chatStore.get(currentChatId);
       chatMessages=chat.messages;
+      currentConversation=chatAI.openConversation({id:currentChatId,messages:chatMessages,modelId:registry.active()?.id});
     }
     function currentChat() { syncChats(); return chatStore.get(currentChatId); }
-    function activeMessages() { return chatMessages.map(m=>({role:m.role,content:m.content})); }
-    function persist() { const chat=currentChat(); chat.messages=chatMessages; chatStore.touch(chat.id); }
+    function activeMessages() { return (currentConversation?.getMessages?.() || chatMessages).map(m=>({role:m.role,content:m.content})); }
+    function persist() { const chat=currentChat(); chat.messages=chatMessages; currentConversation?.setMessages?.(chatMessages); chatStore.touch(chat.id); }
     function beginEdit(index) {
       if (busy || !Number.isInteger(index) || chatMessages[index]?.role !== 'user') return;
       const view=getAIView(); if (!view) return;
@@ -718,6 +723,7 @@
       persist();
       currentChatId=id;
       chatMessages=chatStore.get(id).messages;
+      currentConversation=chatAI.openConversation({id,messages:chatMessages,modelId:registry.active()?.id});
       render(view.g,view.t);
     }
     function newChat() {
@@ -762,7 +768,7 @@
       tree.querySelector('[data-local-load]')?.addEventListener('click',async()=>{try{await activateModel(model.id);render(g,t);}catch(e){alert(e?.message||String(e));updateLocalStatusUI(localManager.status());}});
       updateLocalStatusUI(localManager.status());
       tree.querySelector('[data-new]').onclick=()=>newChat();
-      tree.querySelector('[data-stop]').onclick=()=>{controller?.abort();agent.client.cancel();busy=false;render(g,t);};
+      tree.querySelector('[data-stop]').onclick=()=>{controller?.abort();chatAI.cancel();busy=false;render(g,t);};
       const input=tree.querySelector('[data-input]'); const send=tree.querySelector('[data-send]');
       const submit=async()=>{const text=input.value.trim();if(!text||busy)return;if(editingIndex>=0){const index=editingIndex;input.value='';resendMessage(index,text,g,t,tree);}else{input.value='';await sendMessage(text,g,t,tree);}};
       send.textContent=editingIndex>=0?'Resend':'Send';
@@ -777,7 +783,10 @@
       if(!g?.viewBody || !t) return;
       const chatRecord=currentChat();
       busy=true; controller=new AbortController();
+      currentConversation=currentConversation||chatAI.openConversation({id:chatRecord.id,messages:chatMessages});
+      currentConversation.modelId=registry.active()?.id||null;
       chatMessages.push({role:'user',content:text});
+      currentConversation.setMessages(chatMessages);
       if(chatRecord.title==='New Chat') chatStore.rename(chatRecord.id,chatTitle(text));
       persist();
       render(g,t);
@@ -801,11 +810,11 @@
             else if(event.type==='request_start'){appendActivity(liveActivity,{kind:'request_start',text:`Requesting ${event.model} (${event.protocol})…`});}
             else if(event.type==='reasoning_summary'){appendActivity(liveActivity,{kind:'reasoning_summary',text:event.text});} else if(event.type==='reasoning'){appendActivity(liveActivity,{kind:'reasoning',text:event.text||'Model reasoning is active.'});}
           };
-          const messages=activeMessages(); const prompt=systemPrompt(true); const hookInput={messages:[...messages],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'}; const prepared=await editorExtensionHooks('ai.beforeRun',hookInput); const result=await agent.run([{role:'system',content:prompt},...(prepared?.messages||messages)],{systemPrompt:prompt,maxTokens:2048,retryTransport:prefs.retryTransport,maxTransportRetries:prefs.maxTransportRetries,transportRetryDelay:prefs.transportRetryDelay,onRetry:info=>agent.emit?.({type:info?.kind==='tool_parse_recovery'?'provider_retry':info?.kind==='transport_retry'?'transport_retry':'retry',...info})}); await editorExtensionHooks('ai.afterRun',{...hookInput,result}); partial=result.text||partial; renderMessage(bubble,partial,code=>insertCode(code)); const activityData=liveActivity?.items||[]; chatMessages.push({role:'assistant',content:partial,activity:activityData}); if(liveActivity)liveActivity.details.open=false;
+          const messages=activeMessages(); const prompt=systemPrompt(true); const hookInput={messages:[...messages],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'}; const prepared=await editorExtensionHooks('ai.beforeRun',hookInput); const result=await chatAI.runAgent([{role:'system',content:prompt},...(prepared?.messages||messages)],{systemPrompt:prompt,maxTokens:2048,retryTransport:prefs.retryTransport,maxTransportRetries:prefs.maxTransportRetries,transportRetryDelay:prefs.transportRetryDelay,onRetry:info=>agent.emit?.({type:info?.kind==='tool_parse_recovery'?'provider_retry':info?.kind==='transport_retry'?'transport_retry':'retry',...info})}); await editorExtensionHooks('ai.afterRun',{...hookInput,result}); partial=result.text||partial; renderMessage(bubble,partial,code=>insertCode(code)); const activityData=liveActivity?.items||[]; chatMessages.push({role:'assistant',content:partial,activity:activityData}); if(liveActivity)liveActivity.details.open=false;
         } else {
           const messages=[{role:'system',content:systemPrompt(false)},...activeMessages()];
-          const model=agent.client.model();
-          for await(const chunk of agent.client.stream(messages,{thinking:true,maxTokens:2048,temperature:.7,topP:.9,signal:controller.signal,systemPrompt:systemPrompt(false),onRetry:info=>setStatus(info?.kind==='tool_parse_recovery' ? (info.text||'Retrying tool-call generation…') : info?.kind==='transport_retry' ? `Network retry in ${Math.ceil((info.waitMs||0)/1000)}s (attempt ${info.attempt}/${info.maxRetries})` : `Rate limited — retrying in ${Math.ceil(info.waitMs/1000)}s (attempt ${info.attempt}/${info.maxRetries})`)})){partial=chunk.text||partial;renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
+          const model=chatAI.getModel();
+          for await(const chunk of chatAI.stream(messages,{modelId:model?.id,thinking:true,maxTokens:2048,temperature:.7,topP:.9,signal:controller.signal,systemPrompt:systemPrompt(false),onRetry:info=>setStatus(info?.kind==='tool_parse_recovery' ? (info.text||'Retrying tool-call generation…') : info?.kind==='transport_retry' ? `Network retry in ${Math.ceil((info.waitMs||0)/1000)}s (attempt ${info.attempt}/${info.maxRetries})` : `Rate limited — retrying in ${Math.ceil(info.waitMs/1000)}s (attempt ${info.attempt}/${info.maxRetries})`)})){partial=chunk.text||partial;renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
           chatMessages.push({role:'assistant',content:partial});
         }
         persist();
@@ -851,6 +860,7 @@
       openSettings:()=>settingsModal(registry,permissions,()=>{persist();render(currentGroup);},state.browserNetwork||window.__sharedBrowserNetwork),
       registry,
       permissions,
+      chatAI,
       getHistory:()=>chatMessages,
       getChats:()=>chatStore.list(false),
       newChat,
