@@ -3045,6 +3045,103 @@
         return module.exports;
       })();
 
+      /**
+       * diagnostics_channel (lightweight Node-compatible diagnostics channels)
+       *
+       * Express 5's router optionally uses tracingChannel() to publish lifecycle
+       * events. The browser runtime does not provide Node's AsyncLocalStorage,
+       * but it can still expose the channel contract. With no subscribers,
+       * router's shouldTrace() fast path stays disabled and request handling
+       * behaves normally.
+       */
+      polyfills.diagnostics_channel = (function() {
+        const channels = new Map();
+        const tracingEvents = ['start', 'end', 'asyncStart', 'asyncEnd', 'error'];
+
+        function channel(name) {
+          const key = typeof name === 'symbol' ? name : String(name);
+          if (channels.has(key)) return channels.get(key);
+          const listeners = new Set();
+          const result = {
+            name,
+            get hasSubscribers() { return listeners.size > 0; },
+            publish(message) {
+              for (const listener of [...listeners]) {
+                try { listener(message, name); }
+                catch (error) { setTimeout(() => { throw error; }, 0); }
+              }
+            },
+            subscribe(listener) {
+              if (typeof listener !== 'function') throw new TypeError('A diagnostics channel subscriber must be a function.');
+              listeners.add(listener);
+              return this;
+            },
+            unsubscribe(listener) {
+              listeners.delete(listener);
+              return this;
+            },
+            // AsyncLocalStorage-backed store propagation is not available in
+            // this browser runtime. Preserve the invocation contract so
+            // diagnostics consumers can still observe synchronous events.
+            runStores(context, callback, thisArg, ...args) {
+              this.publish(context);
+              return typeof callback === 'function' ? callback.apply(thisArg, args) : undefined;
+            },
+            bindStore() { return this; },
+            unbindStore() { return this; }
+          };
+          channels.set(key, result);
+          return result;
+        }
+
+        function tracingChannel(name) {
+          const result = { name };
+          for (const event of tracingEvents) result[event] = channel(String(name) + '.' + event);
+          result.subscribe = subscribers => {
+            if (!subscribers || typeof subscribers !== 'object') return result;
+            for (const event of tracingEvents) if (typeof subscribers[event] === 'function') result[event].subscribe(subscribers[event]);
+            return result;
+          };
+          result.unsubscribe = subscribers => {
+            if (!subscribers || typeof subscribers !== 'object') return result;
+            for (const event of tracingEvents) if (typeof subscribers[event] === 'function') result[event].unsubscribe(subscribers[event]);
+            return result;
+          };
+          result.traceSync = (callback, context = {}, thisArg, ...args) => {
+            result.start.runStores(context, callback, thisArg, ...args);
+            result.end.publish(context);
+            return context.result;
+          };
+          result.tracePromise = (callback, context = {}, thisArg, ...args) => {
+            result.start.runStores(context, callback, thisArg, ...args);
+            let value;
+            try { value = callback.apply(thisArg, args); }
+            catch (error) {
+              context.error = error;
+              result.error.publish(context);
+              result.end.publish(context);
+              throw error;
+            }
+            result.end.publish(context);
+            if (!value || typeof value.then !== 'function') return value;
+            result.asyncStart.publish(context);
+            return Promise.resolve(value).then(
+              resolved => { context.result = resolved; result.asyncEnd.publish(context); return resolved; },
+              error => { context.error = error; result.error.publish(context); result.asyncEnd.publish(context); throw error; }
+            );
+          };
+          return result;
+        }
+
+        return {
+          channel,
+          hasSubscribers(name) { return channel(name).hasSubscribers; },
+          subscribe(name, listener) { channel(name).subscribe(listener); },
+          unsubscribe(name, listener) { channel(name).unsubscribe(listener); },
+          tracingChannel
+        };
+      })();
+
     }
 
     // --- Node Module Resolver System ---
