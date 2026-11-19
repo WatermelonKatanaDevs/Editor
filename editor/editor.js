@@ -1863,6 +1863,32 @@ window.__editorInitPromise = (async function () {
     return removed;
   }
 
+  function appendWelcomeBuiltinIcon(button, iconMarkup) {
+    const raw = String(iconMarkup || '').trim();
+    if (!raw) return;
+    try {
+      const template = document.createElement('template');
+      template.innerHTML = raw;
+      const sourceImage = template.content.querySelector('img');
+      const sourceSvg = template.content.querySelector('svg');
+      if (!sourceImage && !sourceSvg) return;
+
+      const icon = document.createElement('span');
+      icon.className = 'welcome-action-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      if (sourceImage) {
+        const image = sourceImage.cloneNode(true);
+        image.style.width = '100%';
+        image.style.height = '100%';
+        image.style.objectFit = 'contain';
+        icon.appendChild(image);
+      } else {
+        icon.appendChild(sourceSvg.cloneNode(true));
+      }
+      button.appendChild(icon);
+    } catch (_) {}
+  }
+
   function renderWelcome(g) {
     const div = document.createElement('div');
     div.className = 'builtin-welcome';
@@ -1898,16 +1924,23 @@ window.__editorInitPromise = (async function () {
       if (!window.EditorBuiltinFactories?.[kind]) continue;
       const groupId = entry.group || 'other';
       if (!groupedEntries.has(groupId)) groupedEntries.set(groupId, []);
-      groupedEntries.get(groupId).push([kind, entry.label]);
+      groupedEntries.get(groupId).push([kind, entry]);
     }
 
     const visibleGroups = [...groupedEntries.values()].filter(items => items.length);
     visibleGroups.forEach((items, index) => {
       const group = document.createElement('div');
       group.className = 'welcome-action-group';
-      items.forEach(([kind, label]) => {
+      items.forEach(([kind, entry]) => {
         const b = document.createElement('button');
-        b.textContent = label;
+        let iconMarkup = '';
+        try { iconMarkup = getBuiltin(kind)?.icon || ''; } catch (_) {}
+        appendWelcomeBuiltinIcon(b, iconMarkup);
+
+        const label = document.createElement('span');
+        label.className = 'welcome-action-label';
+        label.textContent = entry.label;
+        b.appendChild(label);
         b.onclick = () => openBuiltin(kind, g, {replace:true});
         group.appendChild(b);
       });
