@@ -513,14 +513,19 @@
     getProvider() { return this.chat.getProvider(this.modelId); }
     async complete(options={}) { return this.chat.complete(this.messages,{...options,modelId:this.modelId,systemPrompt:options.systemPrompt??this.systemPrompt}); }
     stream(options={}) { return this.chat.stream(this.messages,{...options,modelId:this.modelId,systemPrompt:options.systemPrompt??this.systemPrompt}); }
-    runAgent(messages,options={}) { const agent=this.getAgent();if(!agent)throw new Error('This conversation does not have an agent attached.');return agent.run(messages,{...options,modelId:this.modelId}); }
     async send(content,options={}) {
       if(this.running)throw new Error('This conversation is already generating a response.');
       const userMessage=this.addMessage({role:'user',content});this.running=true;
       try {
-        const prompt=options.systemPrompt??this.systemPrompt,messages=[...(prompt?[{role:'system',content:prompt}]:[]),...this.messages];
-        if(this.getAgent()){const result=await this.runAgent(messages,options);const assistant=this.addMessage({role:'assistant',content:String(result?.text||'')});return {userMessage,message:assistant,text:assistant.content,result};}
-        let text='';for await(const chunk of this.chat.stream(messages,{...options,modelId:this.modelId})){text=chunk.text??text;options.onChunk?.(chunk);}
+        const prompt=options.systemPrompt??this.systemPrompt;
+        let messages=[...(prompt?[{role:'system',content:prompt}]:[]),...this.messages];
+        if(typeof options.prepareMessages==='function'){const prepared=await options.prepareMessages(messages);if(Array.isArray(prepared))messages=prepared;else if(Array.isArray(prepared?.messages))messages=prepared.messages;}
+        if(this.getAgent()){
+          const result=await this.getAgent().run(messages,{...options,prepareMessages:undefined,modelId:this.modelId});
+          const assistant=this.addMessage({role:'assistant',content:String(result?.text||'')});
+          return {userMessage,message:assistant,text:assistant.content,result};
+        }
+        let text='';for await(const chunk of this.chat.stream(messages,{...options,prepareMessages:undefined,modelId:this.modelId})){text=chunk.text??text;options.onChunk?.(chunk);}
         const assistant=this.addMessage({role:'assistant',content:text});return {userMessage,message:assistant,text};
       } finally { this.running=false; }
     }
