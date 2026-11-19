@@ -72,6 +72,8 @@
       loadButton.textContent = loaded ? 'Loaded' : 'Load model';
       loadButton.disabled = busy || loaded;
       generateButton.disabled = busy || !loaded;
+      generateButton.textContent = abortController ? 'Stop' : 'Generate';
+      if (modelSelect) modelSelect.disabled = busy;
       const info = window.StudioAI.listProviders('image').find(item => item.id === providerId);
       loadButton.title = loaded ? 'Model is ready' : 'Load ' + (info?.name || providerId);
       document.querySelectorAll('.ais-model-row').forEach(row => row.classList.toggle('active', row.dataset.model === providerId));
@@ -164,7 +166,8 @@
     function updateGalleryCount() {
       const count = assets.length;
       const label = page.querySelector('[data-gallery-count]');
-      if (label) label.textContent = count + ' image' + (count === 1 ? '' : 's');
+      const completed = assets.filter(Boolean).length;
+      if (label) label.textContent = completed + ' image' + (completed === 1 ? '' : 's');
     }
     function createFile(asset,index) {
       return new File([asset.blob],fileName(index),{type:'image/png',lastModified:Date.now()});
@@ -189,7 +192,7 @@
     }
     function closeContextMenu() {
       contextMenu?.remove(); contextMenu = null;
-      document.removeEventListener('pointerdown', closeContextMenu, true);
+      document.removeEventListener('pointerdown', closeContextMenuOutside, true);
       document.removeEventListener('keydown', contextMenuKey);
     }
     function closeContextMenuOutside(event) {
