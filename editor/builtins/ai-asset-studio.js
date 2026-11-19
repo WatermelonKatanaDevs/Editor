@@ -106,7 +106,7 @@
     async function loadModel() {
       clearError(); setBusy(true); status.textContent = 'Loading model…'; progressBar.style.width = '0%';
       try {
-        const mod = await import('./studio-ai/providers/pixel-sprite/provider.js');
+        const mod = await import('./editor/studio-ai/providers/pixel-sprite/provider.js');
         mod.registerPixelSpriteProvider(window.StudioAI);
         provider = window.StudioAI.createImageProvider('pixel-sprite');
         const result = await provider.initialize({onProgress:setProgress});
