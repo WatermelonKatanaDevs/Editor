@@ -203,8 +203,9 @@ const makeEditorTools = (() => {
   const AGENT_SYSTEM = 'You are the AI coding assistant inside a browser-based code editor. Be practical, precise, and concise. Use Markdown for explanations and fenced code blocks for code. Use the minimum number of tool calls necessary to complete the user\'s request. Decide after each tool result whether another tool call is actually needed; do not inspect files or run commands merely to be thorough. Once you have enough information to answer, give the final answer instead of taking another tool step. For read-only requests such as summarizing or explaining a file, stop after you have gathered the relevant information. For modification tasks, make the requested changes, perform a targeted verification when appropriate, and then stop once the task is complete. If you have already completed all necessary tool work and need to finish the agent immediately, use the exit_early tool and put the complete final answer in its message. Do not claim a change was made unless the tool succeeded. When working on the project, inspect existing files before changing them, preserve the project\'s existing style, and verify changes by running relevant commands when available. The run_command tool uses the editor\'s virtual Node runtime, not a real operating-system shell: never prefix commands with $ and do not assume arbitrary shell features such as pipes or shell redirection are available; simple commands such as echo are supported. For project filesystem work, use the dedicated file tools.';
   const AGENT_TOOL_INSTRUCTIONS = [
     'You can use the editor actions listed in the tool schemas below.',
-    'When you need a tool, emit one or more <tool_call> JSON tags, each with a name and arguments object.',
-    'Do not put tool calls inside Markdown code fences. Use valid JSON arguments matching the supplied schemas.',
+    'When you need a tool, call it using exactly this syntax: <tool_call>{"name":"list_files","arguments":{"directories":false}}</tool_call>.',
+    'Replace the example tool name and arguments with a real tool and arguments matching its schema. Arguments must always be a JSON object.',
+    'A tool call is an instruction to execute, not text to show the user. Never put it in a Markdown code fence, never describe the call in prose, and never output only a tool name.',
     'After receiving tool results, continue the task and call more tools only when needed.'
   ].join(' ');
   const AGENT_FINAL_INSTRUCTIONS = '\n\nThe tool-step limit has been reached. Do not call more tools. Give the user the best final answer using the results already collected.';
@@ -1018,7 +1019,7 @@ const makeEditorTools = (() => {
       try {
         if(activeAgent){
           const emitAgentEvent=event=>{
-            if(event.type==='assistant_delta'){partial=event.text??(partial+String(event.delta||''));renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
+            if(event.type==='assistant_delta'){partial=event.visibleText??event.text??(partial+String(event.delta||''));renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
             else if(event.type==='assistant'){partial=event.text??partial;renderMessage(bubble,partial,code=>insertCode(code));chat.scrollTop=chat.scrollHeight;}
             else if(event.type==='assistant_activity'){appendActivity(liveActivity,{kind:'assistant',text:event.text});}
             else if(event.type==='tool_call'){appendActivity(liveActivity,{kind:'tool_call',name:event.name,args:event.args});}
