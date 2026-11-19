@@ -286,6 +286,19 @@
     for(let i=0;i<length;i++)if(current[i]!==cached[i])return false;
     return true;
   }
+  function cloneDynamicCache(lib,cache){
+    const entries={};
+    try{
+      for(const [key,value] of Object.entries(cache||{})){
+        if(value&&typeof value.clone==='function')entries[key]=value.clone();
+      }
+      if(!Object.keys(entries).length)return null;
+      return new lib.DynamicCache(entries);
+    }catch(error){
+      for(const value of Object.values(entries))try{value?.dispose?.();}catch(_){}
+      throw error;
+    }
+  }
   async function generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,onProgress,cacheState){
     const tokenizer=generator.tokenizer,model=generator.model;
     if(!model?.forward||!model?.generate||!tokenizer?.apply_chat_template||!lib.DynamicCache||!lib.Tensor||!lib.ones)return null;
@@ -305,17 +318,11 @@
         cache=null;reusedTokens=0;
       }
     }
+    // Preserve the established pipeline path for short, uncached prompts.
+    // Once a conversation has a cache, even a short continuation can reuse it.
+    if(tokenCount<=256&&!cache)return null;
     start=reusedTokens;
-    const streamedTokenIds=[];
-    if(streamer&&typeof streamer.put==='function'){
-      const originalPut=streamer.put.bind(streamer);
-      let firstPut=true;
-      streamer.put=tokenIds=>{
-        if(firstPut)firstPut=false;
-        else streamedTokenIds.push(...tensorTokenIds(tokenIds));
-        return originalPut(tokenIds);
-      };
-    }
+    let snapshot=null;
     try{
       onProgress?.({processed:start,total:targetEnd,cached:reusedTokens,chunkSize});
       while(start<targetEnd){
@@ -343,25 +350,28 @@
         onProgress?.({processed:start,total:targetEnd,cached:reusedTokens,chunkSize});
       }
       if(signal?.aborted)throw new DOMException('Aborted','AbortError');
+      // Keep a snapshot of the completed prompt cache. generate() mutates its
+      // cache as it emits tokens, so it receives the original while the cloned
+      // snapshot is retained for the next conversation turn.
+      const promptCacheLength=Number(cache?.get_seq_length?.())||0;
+      snapshot=cache?cloneDynamicCache(lib,cache):null;
       const result=await model.generate({
         ...inputs,
         ...(cache?{past_key_values:cache,attention_mask:lib.ones(dims)}:{}),
         ...generationOptions,
         streamer
       });
-      const sequence=result?.sequences||result;
-      const sequenceTokenIds=tensorTokenIds(sequence);
-      const generatedTokenIds=sequenceTokenIds.length>=tokenCount
-        ?sequenceTokenIds.slice(tokenCount)
-        :streamedTokenIds;
-      const tokenIds=[...inputTokenIds,...generatedTokenIds];
-      const cacheLength=Number(cache?.get_seq_length?.())||0;
-      if(!cache||cacheLength<=0||cacheLength>tokenIds.length){
-        try{await cache?.dispose?.();}catch(_){}
+      try{await cache?.dispose?.();}catch(_){}
+      cache=null;
+      const cacheLength=Number(snapshot?.get_seq_length?.())||0;
+      if(!snapshot||cacheLength<=0||cacheLength>inputTokenIds.length){
+        try{await snapshot?.dispose?.();}catch(_){}
+        snapshot=null;
         return {result,cache:null,cacheLength:0,tokenIds:inputTokenIds,reusedTokens};
       }
-      return {result,cache,cacheLength,tokenIds,reusedTokens};
+      return {result,cache:snapshot,cacheLength:cacheLength||promptCacheLength,tokenIds:inputTokenIds,reusedTokens};
     }catch(error){
+      try{await snapshot?.dispose?.();}catch(_){}
       try{await cache?.dispose?.();}catch(_){}
       throw error;
     }
