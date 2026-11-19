@@ -348,7 +348,8 @@
 
 
 /* -------------------------------------------------------------------------- */
-/* Consolidated module: (function(global){
+/* Consolidated module */
+(function(global){
   'use strict';
   const root=global.EditorAI=global.EditorAI||{};
   const Base=root.ProviderAI;
