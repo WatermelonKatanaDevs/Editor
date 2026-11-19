@@ -1179,7 +1179,7 @@ window.__editorInitPromise = (async function () {
   }
   function makeBuiltinTab(kind, options = {}) {
     const builtin = getBuiltin(kind);
-    const titles = { welcome: 'Welcome', browser: 'Browser', blockbench: 'Blockbench', opendaw: 'openDAW Studio', peer: 'Peer Server', terminal: 'Terminal', run: 'Run Configuration', environment: 'Environment Variables', ai: 'AI Chat', 'ai-asset-studio': 'AI Asset Studio', 'github-repository': 'GitHub Repository', group: 'Group', 'source-control-diff': 'Diff Viewer' };
+    const titles = { welcome: 'Welcome', browser: 'Browser', blockbench: 'Blockbench', opendaw: 'openDAW Studio', peer: 'Peer Server', terminal: 'Terminal', run: 'Run Configuration', environment: 'Environment Variables', ai: 'AI Chat', 'ai-asset-studio': 'AI Studio', 'github-repository': 'GitHub Repository', group: 'Group', 'source-control-diff': 'Diff Viewer' };
     const welcomeIcon = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 5h16v14H4z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 9h10M7 13h7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
     const groupIcon = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="3.5" y="4" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="13.5" y="4" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="8.5" y="13" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
     const groupName = kind === 'group' ? String(options.groupName ?? options.name ?? '').trim() || 'Group' : '';
@@ -1822,7 +1822,7 @@ window.__editorInitPromise = (async function () {
     ['peer', {label:'Peer Server', group:'configuration'}],
     ['compilation', {label:'HTML Compilation', group:'configuration'}],
     ['ai', {label:'AI Chat', group:'ai'}],
-    ['ai-asset-studio', {label:'AI Asset Studio', group:'ai'}],
+    ['ai-asset-studio', {label:'AI Studio', group:'ai'}],
     ['blockbench', {label:'Blockbench', group:'creative'}],
     ['photocraft', {label:'PhotoCraft Image Editor', group:'creative'}],
     ['soundcraft', {label:'SoundCraft DAW', group:'creative'}],
