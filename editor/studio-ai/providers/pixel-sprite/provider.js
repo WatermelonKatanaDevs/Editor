@@ -220,7 +220,9 @@ export class PixelSpriteProvider extends AssetProviderAI {
         if (error?.name === "AbortError" || this.backend !== "webgpu") throw error;
         try { await this.model.session.release(); } catch (_) {}
         this.backend = "wasm";
+        this.ort.env.wasm.proxy = true;
         this.model = await loadModel({ort:this.ort,files:modelFiles(MODEL_BASE),ep:"wasm",fetchBytes,fixedCache:true});
+        await this.warmup();
         settings.chunk = Math.max(1,Math.min(count,Math.floor(4/rowsPerSprite)));
         result = await this.model.generate(settings);
       }
