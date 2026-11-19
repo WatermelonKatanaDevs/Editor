@@ -19,13 +19,18 @@ async function prepareOfflineSupport() {
   const scope = new URL("../../../../", import.meta.url).pathname;
   await navigator.serviceWorker.register(scriptUrl.href, { scope, updateViaCache:"none" });
   await navigator.serviceWorker.ready;
-  if (!navigator.serviceWorker.controller) {
+  const isControlled = () => navigator.serviceWorker.controller?.scriptURL === scriptUrl.href;
+  if (!isControlled()) {
     await new Promise((resolve,reject) => {
       const timeout = setTimeout(() => {
         navigator.serviceWorker.removeEventListener("controllerchange",finish);
         reject(new Error("The offline runtime cache is installing. Reload the Editor and press Load model again."));
       },10000);
-      const finish = () => { clearTimeout(timeout); resolve(); };
+      const finish = () => {
+        clearTimeout(timeout);
+        if (isControlled()) resolve();
+        else reject(new Error("The Editor is controlled by a different service worker. Reload the Editor and try loading the model again."));
+      };
       navigator.serviceWorker.addEventListener("controllerchange",finish,{once:true});
       if (navigator.serviceWorker.controller) finish();
     });
