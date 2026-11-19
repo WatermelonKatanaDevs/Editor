@@ -3,7 +3,7 @@
   factories['ai-asset-studio'] = function (ctx) {
     let page, provider, providerId = 'pixel-sprite', busy = false, abortController = null;
     let modelSelect, loadButton, settingsButton, promptInput, negativeInput, negativeWrap, nameInput;
-    let configContainer, results, progressText, progressPercent, progressBar, status, errorBox, emptyState;
+    let configContainer, promptGrid, results, progressText, progressPercent, progressBar, status, errorBox, emptyState;
     let configFields = [], settingsModal = null, contextMenu = null;
     const assets = [];
     const urls = new Set();
@@ -12,21 +12,22 @@
 
     const style = [
       '.ai-asset-studio-page{position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--editor-surface-2);color:var(--editor-text-secondary);font:12px sans-serif}',
-      '.ais-main{flex:1;min-height:0;overflow:auto;padding:14px 16px 24px;display:flex;flex-direction:column;gap:12px}',
-      '.ais-section{min-width:0;border:1px solid var(--editor-border);background:#1b1b1b;padding:11px;border-radius:3px}',
+      '.ais-main{flex:1;min-height:0;overflow:auto;padding:0;display:flex;flex-direction:column;gap:0;width:100%;box-sizing:border-box}',
+      '.ais-section{min-width:0;border:0;border-bottom:1px solid var(--editor-border);background:transparent;padding:12px 10px;border-radius:0;box-sizing:border-box}',
       '.ais-section-title{font-size:11px;color:#ccc;font-weight:600;margin:0 0 9px}',
-      '.ais-prompt-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:9px}',
-      '.ais-field{display:flex;flex-direction:column;gap:5px;min-width:0;color:#999;font-size:10px}',
+      '.ais-prompt-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:9px}.ais-prompt-grid.single{grid-template-columns:minmax(0,1fr)}',
+      '.ais-field{display:flex;flex-direction:column;gap:5px;min-width:0;color:#999;font-size:10px}.ais-field[hidden],.ais-config-field[hidden]{display:none!important}',
       '.ais-field input,.ais-field textarea,.ais-field select{width:100%;min-width:0;box-sizing:border-box;background:var(--editor-bg);color:var(--editor-text-secondary);border:1px solid #3a3a3a;border-radius:3px;padding:7px 8px;font:11px/1.4 sans-serif;outline:none}',
       '.ais-field textarea{min-height:66px;resize:vertical}.ais-field input:focus,.ais-field textarea:focus,.ais-field select:focus{border-color:#5a89b5}',
-      '.ais-name-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,260px);gap:9px;margin-top:9px}',
-      '.ais-settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0 12px}',
+      '.ais-name-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:9px;margin-top:9px}.ais-name-row .ais-toolbar{justify-content:flex-end}.ais-name-row .ais-toolbar button{min-width:100px}',
+      '.ais-settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0 12px}.ais-settings-section>summary{list-style:none;cursor:pointer;user-select:none}.ais-settings-section>summary::-webkit-details-marker{display:none}.ais-settings-section>summary::before{content:"▸";display:inline-block;width:14px;color:#888}.ais-settings-section[open]>summary::before{content:"▾"}.ais-settings-section:not([open])>summary{margin-bottom:0}',
       '.ais-config-field{display:flex;flex-direction:column;gap:5px;padding:8px 0;border-top:1px solid #292929;color:#999;font-size:10px;min-width:0}',
       '.ais-config-field input,.ais-config-field select{width:100%;min-width:0;box-sizing:border-box;background:var(--editor-bg);color:var(--editor-text-secondary);border:1px solid #3a3a3a;border-radius:3px;padding:6px 7px;font:11px sans-serif;outline:none}',
       '.ais-config-field input:focus,.ais-config-field select:focus{border-color:#5a89b5}.ais-config-field input[type=range]{padding:0;accent-color:#3794ff}',
       '.ais-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.ais-toolbar button,.ais-image-menu button{background:#292929;color:#bbb;border:1px solid #414141;border-radius:2px;padding:5px 9px;font:10px sans-serif;cursor:pointer}.ais-toolbar button:hover,.ais-image-menu button:hover{background:#343434;color:var(--editor-text)}.ais-toolbar button.primary{background:var(--editor-accent);border-color:var(--editor-accent-strong);color:#fff}.ais-toolbar button:disabled{opacity:.4;cursor:default}',
-      '.ais-load-state{margin-left:auto;color:#888;font:10px monospace}',
+      '.ais-action-status{display:flex;justify-content:flex-end;min-height:12px;margin-top:5px;color:#888;font:10px monospace}.ais-load-state{color:#888;font:10px monospace}',
       '.ai-head-actions button[data-load]{width:auto;height:27px;padding:0 9px;font-size:10px;white-space:nowrap}',
+      '.ai-asset-studio-page>.ai-panel-inner{width:100%;min-width:0;min-height:0;margin:0;padding:0;box-sizing:border-box}',
       '.ais-progress{height:5px;background:#252525;border:1px solid #383838;border-radius:3px;overflow:hidden;margin-top:9px}.ais-progress i{display:block;width:0;height:100%;background:var(--editor-accent);transition:width .12s}',
       '.ais-progress-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:5px;color:#888;font:10px monospace}.ais-progress-percent{color:#bbb}',
       '.ais-status{margin-top:5px;color:#888;font:10px monospace;overflow-wrap:anywhere}.ais-error{margin-top:8px;color:#e18c8c;font-size:10px;white-space:pre-wrap;overflow-wrap:anywhere}',
@@ -94,9 +95,10 @@
     }
     function updatePromptCapabilities() {
       const caps = provider?.getCapabilities?.() || {};
-      negativeWrap.hidden = !caps.negativePrompt;
-      negativeInput.disabled = !caps.negativePrompt;
-      if (!caps.negativePrompt) negativeInput.value = '';
+      const supportsNegativePrompt = !!caps.negativePrompt;
+      negativeWrap.hidden = !supportsNegativePrompt;
+      promptGrid.classList.toggle('single', !supportsNegativePrompt);
+      negativeInput.disabled = !supportsNegativePrompt;
     }
     function buildConfiguration() {
       configContainer.replaceChildren();
@@ -251,7 +253,8 @@
       const prompt = promptInput.value.trim();
       if (!prompt) { promptInput.focus(); return; }
       promptState.positive = prompt;
-      promptState.negative = negativeInput.value.trim();
+      const supportsNegativePrompt = !!provider?.getCapabilities?.().negativePrompt;
+      if (supportsNegativePrompt) promptState.negative = negativeInput.value.trim();
       promptState.name = nameInput.value;
       abortController = new AbortController(); busy = true; updateModelState();
       clearResults();
@@ -260,15 +263,16 @@
       const selectedProvider = provider;
       const parameters = readConfiguration();
       imageCount = Math.max(1,Number(parameters.count)||1);
-      if (provider?.getCapabilities?.().negativePrompt) parameters.negativePrompt = promptState.negative;
-      selectedProvider.generateImage({
+      if (supportsNegativePrompt) parameters.negativePrompt = promptState.negative;
+      const request = {
         prompt,
-        negativePrompt:promptState.negative,
         name:cleanName(promptState.name),
         parameters,
         onAsset:renderAsset,
         onResetAssets:resetGeneratedImages
-      },{signal:abortController.signal,onProgress:setProgress}).then(result => {
+      };
+      if (supportsNegativePrompt) request.negativePrompt = promptState.negative;
+      selectedProvider.generateImage(request,{signal:abortController.signal,onProgress:setProgress}).then(result => {
         const seconds = Math.max(Number(result?.metadata?.elapsedMs || 0)/1000,0.001);
         status.textContent = 'Finished · ' + result.assets.length + ' images · ' + seconds.toFixed(1) + 's · ' + String(result.metadata?.backend || 'local').toUpperCase();
         progressText.textContent = 'Complete'; progressPercent.textContent = '100%'; progressBar.style.width = '100%';
@@ -342,7 +346,7 @@
     function render(group) {
       addStyle();
       page = document.createElement('div'); page.className = 'ai-asset-studio-page builtin-ai';
-      page.innerHTML = '<div class="ai-panel-inner"><header class="ai-header"><div class="ai-header-left"><strong class="ais-header-title">AI Asset Studio</strong><select class="ai-chat-select" data-model-select title="Select image model"></select></div><div class="ai-header-right"><div class="ai-head-actions"><button data-load title="Load model">Load model</button><button data-settings title="Studio AI Settings" aria-label="Studio AI Settings">⚙</button></div></div></header><main class="ais-main"><section class="ais-section"><div class="ais-section-title">Prompt</div><div class="ais-prompt-grid"><label class="ais-field">Positive prompt<textarea data-positive placeholder="A tiny red dragon with cream horns and a curled tail" maxlength="200"></textarea></label><label class="ais-field" data-negative-wrap>Negative prompt<textarea data-negative placeholder="Things to avoid…" maxlength="200"></textarea></label></div><div class="ais-name-row"><label class="ais-field">Image name<input data-image-name type="text" value="sprite" placeholder="sprite"></label><div class="ais-toolbar" style="align-self:end"><button class="primary" data-generate disabled>Generate</button><span class="ais-load-state" data-status>Model not loaded</span></div></div><div class="ais-progress"><i data-progress-bar></i></div><div class="ais-progress-meta"><span data-progress-text>Load a model to begin.</span><span class="ais-progress-percent" data-progress-percent></span></div><div class="ais-error" data-error hidden></div></section><section class="ais-section"><div class="ais-section-title">Settings</div><div class="ais-settings-grid" data-config></div></section><section class="ais-section"><div class="ais-gallery-head"><strong>Generated images</strong><span class="ais-gallery-count" data-gallery-count>0 images</span></div><div class="ais-results" data-results><div class="ais-empty">Generated images will appear here. Drag an image into the project explorer or right-click it to Save As.</div></div></section></main></div>';
+      page.innerHTML = '<div class="ai-panel-inner"><header class="ai-header"><div class="ai-header-left"><strong class="ais-header-title">AI Asset Studio</strong><select class="ai-chat-select" data-model-select title="Select image model"></select></div><div class="ai-header-right"><div class="ai-head-actions"><button data-load title="Load model">Load model</button><button data-settings title="Studio AI Settings" aria-label="Studio AI Settings">⚙</button></div></div></header><main class="ais-main"><section class="ais-section"><div class="ais-section-title">Prompt</div><div class="ais-prompt-grid" data-prompt-grid><label class="ais-field">Positive prompt<textarea data-positive placeholder="A tiny red dragon with cream horns and a curled tail" maxlength="200"></textarea></label><label class="ais-field" data-negative-wrap>Negative prompt<textarea data-negative placeholder="Things to avoid…" maxlength="200"></textarea></label></div><div class="ais-name-row"><label class="ais-field">Image name<input data-image-name type="text" value="sprite" placeholder="sprite"></label><div class="ais-toolbar"><button class="primary" data-generate disabled>Generate</button></div></div><div class="ais-action-status"><span class="ais-load-state" data-status>Model not loaded</span></div><div class="ais-progress"><i data-progress-bar></i></div><div class="ais-progress-meta"><span data-progress-text>Load a model to begin.</span><span class="ais-progress-percent" data-progress-percent></span></div><div class="ais-error" data-error hidden></div></section><details class="ais-section ais-settings-section"><summary class="ais-section-title">Settings</summary><div class="ais-settings-grid" data-config></div></details><section class="ais-section"><div class="ais-gallery-head"><strong>Generated images</strong><span class="ais-gallery-count" data-gallery-count>0 images</span></div><div class="ais-results" data-results><div class="ais-empty">Generated images will appear here. Drag an image into the project explorer or right-click it to Save As.</div></div></section></main></div>';
       group.viewBody.append(page);
       modelSelect = page.querySelector('[data-model-select]');
       loadButton = page.querySelector('[data-load]');
@@ -350,6 +354,7 @@
       promptInput = page.querySelector('[data-positive]');
       negativeInput = page.querySelector('[data-negative]');
       negativeWrap = page.querySelector('[data-negative-wrap]');
+      promptGrid = page.querySelector('[data-prompt-grid]');
       nameInput = page.querySelector('[data-image-name]');
       configContainer = page.querySelector('[data-config]');
       results = page.querySelector('[data-results]');
