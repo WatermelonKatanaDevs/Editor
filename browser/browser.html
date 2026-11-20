@@ -225,11 +225,32 @@
 async function downloadEditorBrowserProxyExtension() {
   const button = document.getElementById('install-editor-browser-proxy-extension');
   const originalLabel = button?.innerHTML || 'Install Extension';
+  let progressWrap = document.getElementById('editor-proxy-download-progress');
+
+  if (button && !progressWrap) {
+    progressWrap = document.createElement('div');
+    progressWrap.id = 'editor-proxy-download-progress';
+    progressWrap.className = 'mt-2 w-full';
+    progressWrap.innerHTML = '<div class="flex justify-between gap-2 mb-1"><span data-progress-label class="text-[10px] text-gray-400">Preparing extension…</span><span data-progress-value class="text-[10px] text-gray-500 tabular-nums">0%</span></div><div class="h-1.5 rounded-full bg-gray-800 overflow-hidden"><div data-progress-bar class="h-full rounded-full bg-indigo-500 transition-[width] duration-150" style="width:0%"></div></div>';
+    button.parentElement.appendChild(progressWrap);
+  }
+
+  const progressLabel = progressWrap?.querySelector('[data-progress-label]');
+  const progressValue = progressWrap?.querySelector('[data-progress-value]');
+  const progressBar = progressWrap?.querySelector('[data-progress-bar]');
+  const setProgress = (percent, label) => {
+    const value = Math.max(0, Math.min(100, percent));
+    if (progressLabel) progressLabel.textContent = label;
+    if (progressValue) progressValue.textContent = Math.round(value) + '%';
+    if (progressBar) progressBar.style.width = value + '%';
+  };
 
   if (button) {
     button.disabled = true;
     button.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Preparing…';
   }
+  if (progressWrap) progressWrap.classList.remove('hidden');
+  setProgress(0, 'Preparing extension…');
 
   try {
     const Zip = window.JSZip || window.jszip || (typeof JSZip !== 'undefined' ? JSZip : null);
@@ -247,7 +268,10 @@ async function downloadEditorBrowserProxyExtension() {
     const zip = new Zip();
     const folder = zip.folder('editor-browser-proxy');
 
-    for (const filename of files) {
+    for (let index = 0; index < files.length; index++) {
+      const filename = files[index];
+      setProgress((index / files.length) * 70, 'Loading ' + filename + ' (' + (index + 1) + '/' + files.length + ')');
+      if (button) button.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading ' + (index + 1) + '/' + files.length;
       const sourceUrl = new URL(packagePath + filename, document.baseURI);
       const response = await fetch(sourceUrl.href, {cache:'no-store'});
       if (!response.ok) throw new Error('Could not load ' + filename + ' (' + response.status + ').');
@@ -263,9 +287,16 @@ async function downloadEditorBrowserProxyExtension() {
       }
 
       folder.file(filename, content);
+      setProgress(((index + 1) / files.length) * 70, 'Loaded ' + filename);
     }
 
-    const archive = await zip.generateAsync({type:'blob'});
+    if (button) button.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Creating ZIP…';
+    setProgress(70, 'Creating ZIP archive…');
+    const archive = await zip.generateAsync({type:'blob'}, metadata => {
+      setProgress(70 + (metadata.percent * 0.28), 'Creating ZIP archive…');
+    });
+
+    setProgress(98, 'Starting browser download…');
     const downloadUrl = URL.createObjectURL(archive);
     const link = document.createElement('a');
     link.href = downloadUrl;
@@ -276,14 +307,25 @@ async function downloadEditorBrowserProxyExtension() {
     link.remove();
     setTimeout(() => URL.revokeObjectURL(downloadUrl), 30000);
 
-    if (typeof showToast === 'function') showToast('Editor Browser Proxy downloaded for ' + host, 'success');
+    setProgress(100, 'Download started — check your browser Downloads');
+    if (button) button.innerHTML = '<i class="fa-solid fa-check mr-1"></i> Download Started';
+    if (typeof showToast === 'function') showToast('Editor Browser Proxy download started for ' + host, 'success');
+    setTimeout(() => {
+      if (progressWrap) progressWrap.classList.add('hidden');
+      if (button) button.innerHTML = originalLabel;
+    }, 5000);
   } catch (error) {
+    setProgress(100, 'Download failed: ' + (error?.message || 'Unknown error'));
+    if (progressValue) progressValue.textContent = '!';
+    if (progressBar) progressBar.classList.remove('bg-indigo-500'), progressBar.classList.add('bg-rose-500');
+    if (button) button.innerHTML = originalLabel;
     if (typeof showToast === 'function') showToast(error?.message || 'Could not download extension', 'error');
+    setTimeout(() => {
+      if (progressWrap) progressWrap.classList.add('hidden');
+      if (progressBar) progressBar.classList.remove('bg-rose-500'), progressBar.classList.add('bg-indigo-500');
+    }, 7000);
   } finally {
-    if (button) {
-      button.disabled = false;
-      button.innerHTML = originalLabel;
-    }
+    if (button) button.disabled = false;
   }
 }
 </script>
