@@ -5512,8 +5512,14 @@
         }
 
         const storagePrefix = BASE_ORIGIN + ":";
-        const localStorageProxy = createStorageProxy(window.localStorage, storagePrefix);
-        const sessionStorageProxy = createStorageProxy(window.sessionStorage, storagePrefix);
+        // Use providers captured by PageEmulator in the host context rather
+        // than touching this document's native Storage getters. Opaque-origin
+        // documents (notably data: URLs) throw SecurityError on that access.
+        const storageProviders = pageEmulator?.storageProviders || {};
+        const localStorageProvider = storageProviders.local || window.localStorage;
+        const sessionStorageProvider = storageProviders.session || window.sessionStorage;
+        const localStorageProxy = createStorageProxy(localStorageProvider, storagePrefix);
+        const sessionStorageProxy = createStorageProxy(sessionStorageProvider, storagePrefix);
         Object.defineProperty(window, 'localStorage', {
           get: function() { return localStorageProxy; },
           set: undefined,
@@ -6482,6 +6488,13 @@
       const { network, location, history } = options;
 
       this.iframe = iframe;
+      // Capture storage from the host browsing context. The emulated document
+      // may physically live at a data: URL, where reading window.localStorage
+      // throws because that document has an opaque origin.
+      this.storageProviders = options.storageProviders || {
+        local: window.localStorage,
+        session: window.sessionStorage
+      };
       iframe.setAttribute('data-page-id',this.id);
       iframe.pageEmulator = this;
       iframe.usefulHelpers = usefulHelpers;
