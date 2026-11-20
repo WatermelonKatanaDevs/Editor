@@ -1507,24 +1507,19 @@
             : __elemWindow.__windowProxy;
         }
         // The live iframe src may be an internal data URL (with an #f= filename
-        // suffix). Page code must resolve the logical navigation URL retained in
-        // data-raw-src instead. Prefer the child PageEmulator URL only when the
-        // element has no preserved source URL.
+        // suffix). The logical navigation URL is retained in data-raw-src and
+        // must be used when initializing the child window's virtual location.
         const nativeGetFrameAttribute = Element.prototype.getAttribute;
-        const rawSrcdoc = nativeGetFrameAttribute.call(__elem, 'data-raw-srcdoc');
-        const nativeSrcdoc = nativeGetFrameAttribute.call(__elem, 'srcdoc');
-        const rawFrameSrc = rawSrcdoc !== null || nativeSrcdoc !== null
+        const hasSrcdoc = nativeGetFrameAttribute.call(__elem, 'data-raw-srcdoc') !== null ||
+          nativeGetFrameAttribute.call(__elem, 'srcdoc') !== null;
+        const rawFrameSrc = hasSrcdoc
           ? null
           : nativeGetFrameAttribute.call(__elem, 'data-raw-src');
-        const nativeFrameSrc = nativeGetFrameAttribute.call(__elem, 'src');
-        const childPageUrl = __childPage?.location?.url;
-        const frameUrl = rawFrameSrc !== null
+        const frameSrc = rawFrameSrc !== null
           ? rawFrameSrc
-          : (childPageUrl && childPageUrl !== 'about:blank' && childPageUrl !== 'about:srcdoc'
-            ? childPageUrl
-            : (nativeFrameSrc || childPageUrl || 'about:srcdoc'));
+          : nativeGetFrameAttribute.call(__elem, 'src');
         const frameBaseUrl = __childPage?.parent?.location?.url || CURRENT_PAGE_URL || BASE_ORIGIN;
-        var PATH_URL = new URL(frameUrl, frameBaseUrl);
+        var PATH_URL = new URL(frameSrc !== null ? frameSrc : 'about:srcdoc', frameBaseUrl);
         var __baseUrl = PATH_URL.href;
         try {
           if (/^about:srcdoc$/i.test(PATH_URL.href) && __childPage?.parent?.location?.url) __baseUrl = __childPage.parent.location.url;
