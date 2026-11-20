@@ -59,16 +59,17 @@ async function handleProxyRequest(message, signal) {
     credentials: ["omit", "same-origin", "include"].includes(message.credentials)
       ? message.credentials
       : "same-origin",
-    cache: ["default", "no-store", "reload", "no-cache", "force-cache", "only-if-cached"].includes(message.cache)
+    cache: ["default", "no-store", "reload", "no-cache", "force-cache"].includes(message.cache)
       ? message.cache
-      : "default",
+      : (message.cache === "only-if-cached" ? "force-cache" : "default"),
     redirect: ["follow", "error", "manual"].includes(message.redirect)
       ? message.redirect
       : "follow",
-    referrerPolicy: String(message.referrerPolicy || ""),
     signal
   };
   if (body !== undefined) options.body = body;
+  if (message.referrerPolicy) options.referrerPolicy = message.referrerPolicy;
+  if (message.integrity) options.integrity = String(message.integrity);
 
   const response = await fetch(target.href, options);
 
@@ -80,7 +81,16 @@ async function handleProxyRequest(message, signal) {
   }
 
   const responseBody = response.body === null ? null : await response.arrayBuffer();
-  const responseHeaders = Array.from(response.headers.entries());
+  const responseHeaders = Array.from(response.headers.entries()).filter(([name]) => {
+    return ![
+      "content-encoding",
+      "content-length",
+      "transfer-encoding",
+      "connection",
+      "set-cookie",
+      "set-cookie2"
+    ].includes(name.toLowerCase());
+  });
 
   return {
     ok: true,
