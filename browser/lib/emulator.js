@@ -2958,6 +2958,473 @@
           });
         }, true);
 
+
+        // Chrome Apps used chrome.fileSystem.chooseEntry() to obtain FileEntry
+        // objects. The API is not available to ordinary browser pages, so expose
+        // a workspace-backed implementation only when the Editor preference is on.
+        function installChromeFileSystemShim() {
+          function getEditorHost() {
+            try {
+              let current = browserWindow;
+              const seen = new Set();
+              while (current && !seen.has(current)) {
+                seen.add(current);
+                if (current.EditorApp && current.EditorWorkspacePicker) return current;
+                if (current.parent === current) break;
+                current = current.parent;
+              }
+            } catch (_) {}
+            return null;
+          }
+
+          const editorHost = getEditorHost();
+          const pickerApi = editorHost?.EditorWorkspacePicker;
+          if (!editorHost || !pickerApi || pickerApi.getUseInBrowser?.() === false ||
+              typeof editorHost.EditorApp?.getWorkspacePicker !== 'function') return;
+
+          function getPicker() {
+            try {
+              if (pickerApi.getUseInBrowser?.() === false) return null;
+              const container = browserWindow.frameElement?.parentElement || null;
+              return editorHost.EditorApp.getWorkspacePicker(container);
+            } catch (_) {
+              return null;
+            }
+          }
+
+          const initialPicker = getPicker();
+          if (!initialPicker) return;
+
+          const chromeObject = window.chrome || {};
+          const nativeFileSystem = chromeObject.fileSystem || null;
+          if (nativeFileSystem?.__wkWorkspaceFileSystemShim) return;
+
+          let activeLastError = null;
+          const runtime = chromeObject.runtime || {};
+          if (!chromeObject.runtime) {
+            try { chromeObject.runtime = runtime; } catch (_) {}
+          }
+          try {
+            const descriptor = Object.getOwnPropertyDescriptor(runtime, 'lastError');
+            if (!descriptor || descriptor.configurable) {
+              Object.defineProperty(runtime, 'lastError', {
+                configurable: true,
+                enumerable: true,
+                get: () => activeLastError
+              });
+            }
+          } catch (_) {}
+
+          function callbackResult(promise, callback) {
+            if (typeof callback !== 'function') return promise;
+            Promise.resolve(promise).then(
+              value => callback(value),
+              error => {
+                activeLastError = {message: error?.message || String(error)};
+                try { callback(undefined); }
+                finally { activeLastError = null; }
+              }
+            );
+            return undefined;
+          }
+
+          function delegateOrFail(method, args, callbackIndex) {
+            const nativeMethod = nativeFileSystem?.[method];
+            if (typeof nativeMethod === 'function') {
+              return nativeMethod.apply(nativeFileSystem, args);
+            }
+            const callback = callbackIndex >= 0 ? args[callbackIndex] : null;
+            if (typeof callback === 'function') {
+              activeLastError = {message: 'chrome.fileSystem is unavailable while Use in Browser is disabled.'};
+              try { callback(undefined); }
+              finally { activeLastError = null; }
+              return undefined;
+            }
+            throw new Error('chrome.fileSystem is unavailable while Use in Browser is disabled.');
+          }
+
+          function normalizePath(value) {
+            const parts = [];
+            for (const part of String(value || '').replace(/\\/g, '/').split('/')) {
+              if (!part || part === '.') continue;
+              if (part === '..') { if (parts.length) parts.pop(); continue; }
+              parts.push(part);
+            }
+            return parts.join('/');
+          }
+
+          function acceptedTypes(options) {
+            const result = [];
+            const add = value => {
+              const normalized = String(value || '').trim().toLowerCase();
+              if (!normalized) return;
+              const item = normalized.startsWith('.') || normalized.includes('/')
+                ? normalized
+                : '.' + normalized.replace(/^\./, '');
+              if (!result.includes(item)) result.push(item);
+            };
+            for (const item of Array.isArray(options?.accepts) ? options.accepts : []) {
+              for (const extension of Array.isArray(item?.extensions) ? item.extensions : []) add(extension);
+              for (const mime of Array.isArray(item?.mimeTypes) ? item.mimeTypes : []) add(mime);
+            }
+            return result;
+          }
+
+          const fileSystemObject = {name: 'watermelonkatanas-workspace'};
+          const retainedEntries = new Map();
+          const entryRecords = new WeakMap();
+          let nextRetainedEntryId = 1;
+
+          function makeFileEntry(file, writable, forcedPath) {
+            const workspacePath = file?.__wkWorkspacePath || null;
+            const relativePath = forcedPath || workspacePath || file?.webkitRelativePath || file?.name || 'untitled';
+            const path = normalizePath(relativePath);
+            const name = path.split('/').pop() || String(file?.name || 'untitled');
+            const record = {
+              path,
+              name,
+              file: file || null,
+              writable: writable === true,
+              workspace: !!workspacePath,
+              mimeType: file?.type || 'application/octet-stream'
+            };
+
+            const entry = {
+              isFile: true,
+              isDirectory: false,
+              name,
+              fullPath: '/' + path,
+              filesystem: fileSystemObject,
+              toURL() {
+                return 'filesystem:' + CURRENT_PAGE_URL + '/temporary/' +
+                  path.split('/').map(part => encodeURIComponent(part)).join('/');
+              },
+              file(successCallback, errorCallback) {
+                if (record.file) {
+                  successCallback?.(record.file);
+                  return;
+                }
+                const error = new Error('The selected file is no longer available.');
+                if (typeof errorCallback === 'function') errorCallback(error);
+              },
+              getMetadata(successCallback, errorCallback) {
+                if (!record.file) {
+                  errorCallback?.(new Error('The file is not available yet.'));
+                  return;
+                }
+                successCallback?.({
+                  size: record.file.size || 0,
+                  modificationTime: new Date(record.file.lastModified || Date.now())
+                });
+              },
+              getParent(successCallback) {
+                successCallback?.(fileSystemObject.root);
+              },
+              createWriter(successCallback, errorCallback) {
+                if (!record.writable) {
+                  errorCallback?.(new Error('This file entry is read-only.'));
+                  return;
+                }
+                successCallback?.(createWriter(record));
+              },
+              remove(successCallback, errorCallback) {
+                errorCallback?.(new Error('Deleting entries through chrome.fileSystem is not supported.'));
+              }
+            };
+            entryRecords.set(entry, record);
+            return entry;
+          }
+
+          function makeDirectoryEntry(name, files) {
+            const entries = (files || []).map(file => makeFileEntry(file, false));
+            return {
+              isFile: false,
+              isDirectory: true,
+              name: name || 'Selected folder',
+              fullPath: '/' + normalizePath(name || 'Selected folder'),
+              filesystem: fileSystemObject,
+              toURL() {
+                return 'filesystem:' + CURRENT_PAGE_URL + '/temporary/' +
+                  encodeURIComponent(normalizePath(name || 'Selected folder'));
+              },
+              getParent(successCallback) {
+                successCallback?.(fileSystemObject.root);
+              },
+              createReader() {
+                let read = false;
+                return {
+                  readEntries(successCallback) {
+                    if (read) successCallback?.([]);
+                    else {
+                      read = true;
+                      successCallback?.(entries.slice());
+                    }
+                  }
+                };
+              }
+            };
+          }
+
+          fileSystemObject.root = {
+            isFile: false,
+            isDirectory: true,
+            name: '',
+            fullPath: '/',
+            filesystem: fileSystemObject,
+            toURL() {
+              return 'filesystem:' + CURRENT_PAGE_URL + '/temporary/';
+            },
+            createReader() {
+              return {
+                readEntries(successCallback) {
+                  const picker = getPicker();
+                  const paths = picker?.listFiles?.() || [];
+                  const entries = paths.map(path => makeFileEntry(null, false, path));
+                  successCallback?.(entries);
+                }
+              };
+            }
+          };
+
+          function bytesFrom(value) {
+            if (value instanceof Uint8Array) return value.slice();
+            if (value instanceof ArrayBuffer) return new Uint8Array(value.slice(0));
+            if (ArrayBuffer.isView(value)) {
+              return new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+            }
+            if (typeof value === 'string') return new TextEncoder().encode(value);
+            return new Uint8Array(value || []);
+          }
+
+          async function valueBytes(value) {
+            if (value && typeof value.arrayBuffer === 'function') {
+              return new Uint8Array(await value.arrayBuffer());
+            }
+            return bytesFrom(value);
+          }
+
+          async function persistEntryBytes(record, bytes) {
+            const picker = getPicker();
+            if (!picker) throw new Error('Use in Browser is disabled or the Editor workspace is unavailable.');
+            if (record.workspace && record.path && typeof picker.writeFile === 'function') {
+              picker.writeFile(record.path, bytes);
+            } else {
+              const savedPath = await picker.saveFile({
+                title: 'Save Chrome FileSystem Entry',
+                suggestedName: record.name || 'untitled',
+                data: new Blob([bytes], {type: record.mimeType || 'application/octet-stream'}),
+                mimeType: record.mimeType || 'application/octet-stream'
+              });
+              if (typeof savedPath === 'string') {
+                record.path = normalizePath(savedPath);
+                record.name = record.path.split('/').pop() || record.name;
+                record.workspace = true;
+              }
+            }
+            record.file = new File([bytes], record.name, {
+              type: record.mimeType || 'application/octet-stream',
+              lastModified: Date.now()
+            });
+          }
+
+          function createWriter(record) {
+            const writer = {
+              INIT: 0,
+              WRITING: 1,
+              DONE: 2,
+              readyState: 0,
+              position: 0,
+              length: record.file?.size || 0,
+              error: null,
+              onwritestart: null,
+              onprogress: null,
+              onwrite: null,
+              onwriteend: null,
+              onerror: null,
+              onabort: null,
+              seek(offset) {
+                const value = Number(offset);
+                if (!Number.isFinite(value)) return;
+                this.position = value < 0 ? Math.max(0, this.length + value) : Math.min(value, this.length);
+              },
+              write(value) {
+                if (this.readyState === this.WRITING) throw new DOMException('A write is already in progress.', 'InvalidStateError');
+                this.readyState = this.WRITING;
+                this.error = null;
+                const event = type => ({type, target: writer});
+                try { this.onwritestart?.(event('writestart')); } catch (_) {}
+                Promise.resolve().then(async () => {
+                  const incoming = await valueBytes(value);
+                  const existing = record.file ? await valueBytes(record.file) : new Uint8Array();
+                  const start = Math.min(this.position, existing.length);
+                  const end = start + incoming.length;
+                  const output = new Uint8Array(Math.max(existing.length, end));
+                  output.set(existing.subarray(0, start), 0);
+                  output.set(incoming, start);
+                  if (end < existing.length) output.set(existing.subarray(end), end);
+                  await persistEntryBytes(record, output);
+                  this.position = end;
+                  this.length = output.length;
+                  this.readyState = this.DONE;
+                  try { this.onwrite?.(event('write')); } catch (_) {}
+                  try { this.onwriteend?.(event('writeend')); } catch (_) {}
+                }).catch(error => {
+                  this.error = error;
+                  this.readyState = this.DONE;
+                  try { this.onerror?.(event('error')); } catch (_) {}
+                  try { this.onwriteend?.(event('writeend')); } catch (_) {}
+                });
+              },
+              truncate(size) {
+                if (this.readyState === this.WRITING) throw new DOMException('A write is already in progress.', 'InvalidStateError');
+                const targetSize = Math.max(0, Math.floor(Number(size) || 0));
+                this.readyState = this.WRITING;
+                const event = type => ({type, target: writer});
+                Promise.resolve().then(async () => {
+                  const existing = record.file ? await valueBytes(record.file) : new Uint8Array();
+                  const output = new Uint8Array(targetSize);
+                  output.set(existing.subarray(0, targetSize));
+                  await persistEntryBytes(record, output);
+                  this.length = targetSize;
+                  this.position = Math.min(this.position, targetSize);
+                  this.readyState = this.DONE;
+                  try { this.onwrite?.(event('write')); } catch (_) {}
+                  try { this.onwriteend?.(event('writeend')); } catch (_) {}
+                }).catch(error => {
+                  this.error = error;
+                  this.readyState = this.DONE;
+                  try { this.onerror?.(event('error')); } catch (_) {}
+                  try { this.onwriteend?.(event('writeend')); } catch (_) {}
+                });
+              },
+              abort() {
+                if (this.readyState !== this.WRITING) return;
+                this.readyState = this.DONE;
+                try { this.onabort?.({type: 'abort', target: writer}); } catch (_) {}
+                try { this.onwriteend?.({type: 'writeend', target: writer}); } catch (_) {}
+              }
+            };
+            return writer;
+          }
+
+          function chooseEntry(options, callback) {
+            const settings = options && typeof options === 'object' ? options : {};
+            const type = settings.type || 'openFile';
+            const operation = async () => {
+              const picker = getPicker();
+              if (!picker) throw new Error('Use in Browser is disabled or the Editor workspace is unavailable.');
+              if (type === 'saveFile') {
+                if (typeof picker.savePath !== 'function') throw new Error('The Editor workspace save picker is unavailable.');
+                const path = await picker.savePath({
+                  title: 'Save to Editor Workspace',
+                  suggestedName: settings.suggestedName || 'untitled',
+                  accept: acceptedTypes(settings)
+                });
+                return path ? makeFileEntry(null, true, path) : undefined;
+              }
+              if (!['openFile', 'openWritableFile', 'openDirectory'].includes(type)) {
+                throw new Error('Unsupported chrome.fileSystem entry type: ' + type);
+              }
+              if (typeof picker.open !== 'function') throw new Error('The Editor workspace open picker is unavailable.');
+              const multiple = type === 'openDirectory' || settings.acceptsMultiple === true;
+              const files = await picker.open({
+                title: type === 'openDirectory' ? 'Choose a folder' : 'Choose a file',
+                accept: acceptedTypes(settings),
+                multiple,
+                directory: type === 'openDirectory',
+                allowDevice: true
+              });
+              if (!files?.length) return undefined;
+              if (type === 'openDirectory') {
+                const relative = String(files[0]?.webkitRelativePath || '').split('/')[0];
+                return makeDirectoryEntry(relative || files[0]?.name || 'Selected folder', files);
+              }
+              const entries = files.map(file => makeFileEntry(file, type === 'openWritableFile'));
+              return multiple ? entries : entries[0];
+            };
+            const picker = getPicker();
+            if (!picker) return delegateOrFail('chooseEntry', [options, callback], 1);
+            return callbackResult(operation(), callback);
+          }
+
+          const fileSystemShim = Object.create(nativeFileSystem || null);
+          Object.defineProperties(fileSystemShim, {
+            __wkWorkspaceFileSystemShim: {value: true},
+            chooseEntry: {value: chooseEntry, configurable: true, writable: true},
+            getWritableEntry: {
+              configurable: true, writable: true,
+              value(entry, callback) {
+                if (!getPicker()) return delegateOrFail('getWritableEntry', [entry, callback], 1);
+                const record = entry && entryRecords.get(entry);
+                if (record) record.writable = true;
+                return callbackResult(Promise.resolve(entry), callback);
+              }
+            },
+            isWritableEntry: {
+              configurable: true, writable: true,
+              value(entry, callback) {
+                if (!getPicker()) return delegateOrFail('isWritableEntry', [entry, callback], 1);
+                const record = entry && entryRecords.get(entry);
+                return callbackResult(Promise.resolve(!!record?.writable), callback);
+              }
+            },
+            getDisplayPath: {
+              configurable: true, writable: true,
+              value(entry, callback) {
+                if (!getPicker()) return delegateOrFail('getDisplayPath', [entry, callback], 1);
+                const record = entry && entryRecords.get(entry);
+                return callbackResult(Promise.resolve(record?.path || entry?.fullPath?.replace(/^\/+/, '') || ''), callback);
+              }
+            },
+            getBytesInUse: {
+              configurable: true, writable: true,
+              value(entry, callback) {
+                if (!getPicker()) return delegateOrFail('getBytesInUse', [entry, callback], 1);
+                const record = entry && entryRecords.get(entry);
+                return callbackResult(Promise.resolve(record?.file?.size || 0), callback);
+              }
+            },
+            retainEntry: {
+              configurable: true, writable: true,
+              value(entry) {
+                if (!getPicker()) {
+                  const nativeMethod = nativeFileSystem?.retainEntry;
+                  return typeof nativeMethod === 'function' ? nativeMethod.call(nativeFileSystem, entry) : null;
+                }
+                const id = 'wk-entry-' + nextRetainedEntryId++;
+                retainedEntries.set(id, entry);
+                return id;
+              }
+            },
+            restoreEntry: {
+              configurable: true, writable: true,
+              value(id, callback) {
+                if (!getPicker()) return delegateOrFail('restoreEntry', [id, callback], 1);
+                return callbackResult(Promise.resolve(retainedEntries.get(String(id))), callback);
+              }
+            },
+            isRestorable: {
+              configurable: true, writable: true,
+              value(id) {
+                if (!getPicker()) {
+                  const nativeMethod = nativeFileSystem?.isRestorable;
+                  return typeof nativeMethod === 'function' ? nativeMethod.call(nativeFileSystem, id) : false;
+                }
+                return retainedEntries.has(String(id));
+              }
+            }
+          });
+
+          try {
+            chromeObject.fileSystem = fileSystemShim;
+            if (!window.chrome) window.chrome = chromeObject;
+          } catch (error) {
+            console.warn('[Browser Emulator] Could not install chrome.fileSystem workspace shim:', error);
+          }
+        }
+
+        installChromeFileSystemShim();
+
         if (pageEmulator.runtimeInterceptor) eval(pageEmulator.runtimeInterceptor);
 
         window.fetch = async function(input, data = {}, type = 'fetch') {
