@@ -16,6 +16,7 @@
       getContainer:() => pickerContainer,
       getFs:() => ctx.state.fs,
       getMime:path => ctx.mime(path),
+      showHiddenFiles:() => !!ctx.state.behavior?.showHiddenFiles,
       canWrite:() => ctx.state.projectOwner !== false,
       onWrite:path => {
         ctx.markDirty?.(path);
