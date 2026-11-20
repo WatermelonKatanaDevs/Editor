@@ -1,48 +1,16 @@
-// Isolated-world bridge between the page fetch wrapper and proxy.js.
-(() => {
-  // The generated manifest injects this bridge only on the installation host.
-
-  const CHANNEL = "editor-browser-proxy:v1";
-
-  window.addEventListener("message", event => {
-    if (event.source !== window || event.data?.channel !== CHANNEL) return;
-    const message = event.data;
-
-    if (message.type === "ABORT") {
-      chrome.runtime.sendMessage({
-        type: "EDITOR_BROWSER_PROXY_ABORT",
-        id: String(message.id || "")
-      }).catch(() => {});
-      return;
-    }
-
-    if (message.type !== "FETCH" || !message.id || !message.request) return;
-
-    chrome.runtime.sendMessage({
-      type: "EDITOR_BROWSER_PROXY_FETCH",
-      id: String(message.id),
-      ...message.request
-    }).then(
-      result => {
-        window.postMessage({
-          channel: CHANNEL,
-          type: "RESULT",
-          id: String(message.id),
-          result
-        }, "*");
-      },
-      error => {
-        window.postMessage({
-          channel: CHANNEL,
-          type: "RESULT",
-          id: String(message.id),
-          result: {
-            ok: false,
-            error: error && error.message ? error.message : String(error || "Extension request failed"),
-            name: "Error"
-          }
-        }, "*");
-      }
-    );
-  });
+// Isolated-world streaming bridge.
+(()=>{
+ const C="editor-browser-proxy:v1",ports=new Map();
+ const relay=(id,m)=>window.postMessage({channel:C,id,...m},"*");
+ window.addEventListener("message",e=>{
+  if(e.source!==window||e.data?.channel!==C)return;const m=e.data,id=String(m.id||"");
+  if(m.type==="ABORT"){const p=ports.get(id);if(p){try{p.postMessage({type:"ABORT"});p.disconnect()}catch(_){}ports.delete(id)}return}
+  if(m.type!=="FETCH"||!id||!m.request||ports.has(id))return;
+  let p;try{
+   p=chrome.runtime.connect({name:"EDITOR_BROWSER_PROXY_STREAM"});ports.set(id,p);
+   p.onMessage.addListener(result=>{relay(id,result||{});if(result?.type==="DONE"||result?.type==="ERROR"){ports.delete(id);try{p.disconnect()}catch(_){}}});
+   p.onDisconnect.addListener(()=>{if(ports.get(id)===p){ports.delete(id);relay(id,{type:"ERROR",error:"Extension proxy connection closed unexpectedly.",name:"NetworkError"})}});
+   p.postMessage({type:"REQUEST",id,request:m.request});
+  }catch(err){ports.delete(id);relay(id,{type:"ERROR",error:err?.message||String(err),name:"Error"})}
+ });
 })();
