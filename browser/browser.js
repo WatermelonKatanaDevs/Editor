@@ -448,15 +448,24 @@ function beginDownload(url,filename) {
   showDownloads();
   return item;
 }
-async function performDownload(url,filename) {
-  const item = beginDownload(url,filename);
+async function performDownload(url,filename, options = {}) {
+  const saveDirectlyToWorkspace = options.saveToWorkspace === true && shouldUseEditorWorkspacePicker();
+  if (saveDirectlyToWorkspace && !getEditorWorkspacePicker()?.saveFile) {
+    showToast('The Editor workspace picker is unavailable.','error');
+    return null;
+  }
+  const item = saveDirectlyToWorkspace ? null : beginDownload(url,filename);
   try {
     const response = await browserNetwork.request(url,undefined,{},'download');
     if (!response || !response.ok) throw new Error(`HTTP error! status: ${response?.status || 0}`);
-    item.name = getDownloadName(url,filename,response);
-    item.contentType = response.headers?.get('content-type') || '';
+    const downloadName = getDownloadName(url,filename,response);
+    const contentType = response.headers?.get('content-type') || '';
+    if (item) {
+      item.name = downloadName;
+      item.contentType = contentType;
+    }
     const total = parseInt(response.headers?.get('content-length') || '0',10) || 0;
-    item.total = total;
+    if (item) item.total = total;
     const chunks = [];
     let received = 0;
     if (response.body) {
@@ -468,19 +477,29 @@ async function performDownload(url,filename) {
           chunks.push(part.value);
           received += part.value.byteLength;
         }
-        item.received = received;
-        item.progress = total ? received / total * 100 : Math.min(99,Math.max(1,received / (1024 * 1024)));
-        renderDownloads();
+        if (item) {
+          item.received = received;
+          item.progress = total ? received / total * 100 : Math.min(99,Math.max(1,received / (1024 * 1024)));
+          renderDownloads();
+        }
       }
     } else {
       const buffer = await response.arrayBuffer();
       chunks.push(new Uint8Array(buffer));
       received = buffer.byteLength;
-      item.received = received;
-      item.progress = 100;
-      renderDownloads();
+      if (item) {
+        item.received = received;
+        item.progress = 100;
+        renderDownloads();
+      }
     }
-    const blob = new Blob(chunks,{type:response.headers?.get('content-type') || 'application/octet-stream'});
+    const blob = new Blob(chunks,{type:contentType || 'application/octet-stream'});
+    if (saveDirectlyToWorkspace) {
+      return await saveBlobToEditorWorkspace(blob,{
+        suggestedName:downloadName || 'download',
+        mimeType:contentType || blob.type || 'application/octet-stream'
+      });
+    }
     item.size = blob.size;
     item.received = blob.size;
     item.progress = 100;
@@ -496,15 +515,42 @@ async function performDownload(url,filename) {
     showDownloads();
     return blob;
   } catch(e) {
-    item.status = 'failed';
-    item.error = e?.message || String(e);
-    item.finishedAt = Date.now();
-    saveDownloadHistory();
-    renderDownloads();
-    showDownloads();
+    if (item) {
+      item.status = 'failed';
+      item.error = e?.message || String(e);
+      item.finishedAt = Date.now();
+      saveDownloadHistory();
+      renderDownloads();
+      showDownloads();
+    } else if (e?.name !== 'AbortError') {
+      showToast(e?.message || 'Unable to save the file to the Editor workspace.','error');
+    }
     throw e;
   }
 }
+
+async function saveBlobToEditorWorkspace(blob, options = {}) {
+  const picker = getEditorWorkspacePicker();
+  if (!picker?.saveFile) {
+    showToast('The Editor workspace picker is unavailable.','error');
+    return null;
+  }
+  try {
+    const saved = await picker.saveFile({
+      title:options.title || 'Save to Editor Workspace',
+      suggestedName:options.suggestedName || options.name || 'download',
+      data:blob,
+      mimeType:options.mimeType || blob?.type || 'application/octet-stream'
+    });
+    if (saved?.savedToDevice) showToast('Saved to device.','success');
+    else if (saved) showToast('Saved to Editor Workspace.','success');
+    return saved;
+  } catch (error) {
+    if (error?.name !== 'AbortError') showToast(error?.message || 'Unable to save to the Editor workspace.','error');
+    return null;
+  }
+}
+
 async function saveCachedDownload(id, options = {}) {
   const item = downloads.find(d => d.id === id);
   if (!item || item.status !== 'complete') return;
@@ -514,25 +560,10 @@ async function saveCachedDownload(id, options = {}) {
     return;
   }
   if (options.toDevice !== true && shouldUseEditorWorkspacePicker()) {
-    const picker = getEditorWorkspacePicker();
-    if (!picker?.saveFile) {
-      showToast('The Editor workspace picker is unavailable.','error');
-      return;
-    }
-    try {
-      const saved = await picker.saveFile({
-        title:'Save to Editor Workspace',
-        suggestedName:item.name || 'download',
-        data:blob,
-        mimeType:item.contentType || blob.type || 'application/octet-stream'
-      });
-      if (saved?.savedToDevice) showToast('Saved to device.','success');
-      else if (saved) showToast('Saved to Editor Workspace.','success');
-      return saved;
-    } catch (error) {
-      if (error?.name !== 'AbortError') showToast(error?.message || 'Unable to save to the Editor workspace.','error');
-      return null;
-    }
+    return await saveBlobToEditorWorkspace(blob,{
+      suggestedName:item.name || 'download',
+      mimeType:item.contentType || blob.type || 'application/octet-stream'
+    });
   }
   // Auto-downloads and the opt-out setting retain the browser's native device download.
   const blobUrl = URL.createObjectURL(blob);
@@ -1015,6 +1046,16 @@ function showContextMenu(clientX, clientY, targetInfo) {
     menuItems.push({
       label: 'Save Image As...',
       action: () => {
+        if (shouldUseEditorWorkspacePicker()) {
+          canvas.toBlob(blob => {
+            if (!blob) {
+              showToast('Unable to export this image.','error');
+              return;
+            }
+            saveBlobToEditorWorkspace(blob,{suggestedName:'canvas-image.png',mimeType:'image/png'});
+          },'image/png');
+          return;
+        }
         const fileName = prompt('Enter file name:', 'canvas-image');
         if (fileName === null) return; // User canceled the prompt
 
@@ -1071,6 +1112,12 @@ function showContextMenu(clientX, clientY, targetInfo) {
           const targetMediaUrl = targetInfo.rawMediaSrc || targetInfo.mediaSrc;
           if (!targetMediaUrl) return;
           
+          if (shouldUseEditorWorkspacePicker()) {
+            // The workspace save dialog supplies the filename and destination;
+            // do not create a browser download-history/cache entry for Save As.
+            performDownload(targetMediaUrl,undefined,{saveToWorkspace:true}).catch(() => {});
+            return;
+          }
           let defaultName = getDownloadName(targetMediaUrl,'',null) || 'downloaded-image.png';
           const fileName = prompt('Enter file name:', defaultName);
           if (fileName === null) return;
