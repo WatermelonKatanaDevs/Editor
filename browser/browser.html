@@ -238,7 +238,7 @@
       status.className = isError ? 'text-[10px] text-rose-400' : 'text-[10px] text-gray-500';
     }
     const button = document.getElementById('install-editor-browser-proxy-extension');
-    if (button) button.disabled = !!isError && message === 'Installing…';
+    if (button) button.disabled = message === 'Installing…';
   }
 
   function readProxySettings() {
