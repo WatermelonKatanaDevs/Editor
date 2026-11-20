@@ -159,6 +159,13 @@
       });
       return file;
     }
+    function readFile(path) {
+      const normalized = normalizePath(path);
+      if (!normalized || isPrivatePath(normalized) || !fs().existsSync(normalized)) {
+        throw new Error('File not found in the Editor workspace: ' + normalized);
+      }
+      return makeWorkspaceFile(normalized);
+    }
     function open(options = {}) {
       const filters = normalizeAccept(options), files = listFiles();
       const directories = listDirectories(fs(), files);
@@ -685,7 +692,7 @@
     }
 
     return {
-      open, savePath, saveFile, writeFile, listFiles,
+      open, savePath, saveFile, writeFile, readFile, listFiles,
       cancelActive:() => {
         const waiting = [];
         for (const item of dialogQueue) {
