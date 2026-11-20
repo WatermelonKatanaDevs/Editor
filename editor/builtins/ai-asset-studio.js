@@ -19,6 +19,7 @@
       '.ai-asset-studio-page{position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--editor-surface-2);color:var(--editor-text-secondary);font:12px sans-serif}',
       '.ais-main{flex:1;min-height:0;overflow:auto;padding:0;display:flex;flex-direction:column;gap:0;width:100%;box-sizing:border-box}',
       '.ais-section{min-width:0;border:0;border-bottom:1px solid var(--editor-border);background:transparent;padding:12px 10px;border-radius:0;box-sizing:border-box}',
+      '.ais-settings-section{padding:0}',
       '.ais-section-title{font-size:11px;color:#ccc;font-weight:600;margin:0 0 9px}',
       '.ais-prompt-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:9px}.ais-prompt-grid.single{grid-template-columns:minmax(0,1fr)}',
       '.ais-field{display:flex;flex-direction:column;gap:5px;min-width:0;color:#999;font-size:10px}.ais-field[hidden],.ais-config-field[hidden]{display:none!important}',
