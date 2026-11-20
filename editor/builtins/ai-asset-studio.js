@@ -78,7 +78,8 @@
       return base + (imageCount > 1 ? '-' + (index + 1) : '') + '.png';
     }
     function normalizeImageFilename(value) {
-      return cleanName(stripPng(value)) + '.png';
+      const name = cleanName(value).replace(/\\.[^.]+$/, '');
+      return (name || 'sprite') + '.png';
     }
     function closeRenameModal() {
       renameModal?._finish?.(null);
@@ -128,6 +129,14 @@
       fs.writeFileSync(entry.jsonPath, JSON.stringify(metadata, null, 2));
       Object.assign(entry, metadata, {filename});
       ctx.markDirty?.(entry.jsonPath);
+      assets.forEach((asset, index) => {
+        if (asset && savedGalleryAssets.get(asset) === entry) {
+          generatedAssetNames.set(asset, filename);
+          const card = results?.querySelector('[data-image-index="' + index + '"]');
+          const label = card?.querySelector('.ais-image-name');
+          if (label) label.textContent = filename;
+        }
+      });
       if (galleryPopover) refreshGalleryPopover();
       status.textContent = 'Renamed gallery image · ' + filename;
     }
