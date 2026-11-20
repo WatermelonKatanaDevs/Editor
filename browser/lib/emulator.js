@@ -55,21 +55,9 @@
             defaultName = getFileNameFromURL(response.source_url,'');
           }
 
-          // Keep the requested document/resource fragment when converting the
-          // response to a data URL. A synthetic filename fragment such as
-          // "#f=embed" must not replace application state stored after "#".
-          let sourceHash = "";
-          const originalUrl = response.requested_url || response.source_url;
-          if (originalUrl) {
-            try {
-              sourceHash = new URL(originalUrl).hash;
-            } catch (_) {}
-          }
+          if (defaultName) defaultName = "#f="+defaultName;
 
-          if (sourceHash) defaultName = sourceHash;
-          else if (defaultName) defaultName = "#f=" + defaultName;
-
-          resolve(reader.result + defaultName);
+          resolve(reader.result+defaultName);
         }
         reader.onerror = reject;
         reader.readAsDataURL(blob);
@@ -1518,7 +1506,25 @@
             ? __getCallerProxy(__childPage, __elemWindow)
             : __elemWindow.__windowProxy;
         }
-        var PATH_URL = new URL(__elem.getAttribute('src') || "about:srcdoc", BASE_ORIGIN);
+        // The live iframe src may be an internal data URL (with an #f= filename
+        // suffix). Page code must resolve the logical navigation URL retained in
+        // data-raw-src instead. Prefer the child PageEmulator URL only when the
+        // element has no preserved source URL.
+        const nativeGetFrameAttribute = Element.prototype.getAttribute;
+        const rawSrcdoc = nativeGetFrameAttribute.call(__elem, 'data-raw-srcdoc');
+        const nativeSrcdoc = nativeGetFrameAttribute.call(__elem, 'srcdoc');
+        const rawFrameSrc = rawSrcdoc !== null || nativeSrcdoc !== null
+          ? null
+          : nativeGetFrameAttribute.call(__elem, 'data-raw-src');
+        const nativeFrameSrc = nativeGetFrameAttribute.call(__elem, 'src');
+        const childPageUrl = __childPage?.location?.url;
+        const frameUrl = rawFrameSrc !== null
+          ? rawFrameSrc
+          : (childPageUrl && childPageUrl !== 'about:blank' && childPageUrl !== 'about:srcdoc'
+            ? childPageUrl
+            : (nativeFrameSrc || childPageUrl || 'about:srcdoc'));
+        const frameBaseUrl = __childPage?.parent?.location?.url || CURRENT_PAGE_URL || BASE_ORIGIN;
+        var PATH_URL = new URL(frameUrl, frameBaseUrl);
         var __baseUrl = PATH_URL.href;
         try {
           if (/^about:srcdoc$/i.test(PATH_URL.href) && __childPage?.parent?.location?.url) __baseUrl = __childPage.parent.location.url;
