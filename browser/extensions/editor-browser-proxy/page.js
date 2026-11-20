@@ -1,34 +1,7 @@
-// Main-world fetch replacement for the parent Editor page and Browser document.
-// It deliberately does not inspect or modify pages opened inside the Browser.
+// Main-world fetch replacement for every page and frame on the installation host.
 (() => {
-  // Only activate on the deployed Editor origins (or a local development server).
-  function isEditorHost(hostname) {
-    const host = String(hostname || "").toLowerCase();
-    return host === "watermelonkatana.onrender.com" ||
-      host === "watermelonkatanatest.onrender.com" ||
-      host === "watermelonkatanadevs.github.io" ||
-      host === "localhost" ||
-      host === "127.0.0.1" ||
-      host === "[::1]";
-  }
-
-  function isEditorBrowserDocument(url) {
-    return isEditorHost(url.hostname) && /(?:^|\/)browser\/browser\.html$/i.test(url.pathname);
-  }
-
-  function isEditorParentDocument(url) {
-    if (!isEditorHost(url.hostname)) return false;
-    const path = url.pathname.replace(/\/+$/, "") || "/";
-    if (url.hostname.toLowerCase() === "watermelonkatanadevs.github.io") {
-      return path === "/Editor" || path === "/Editor/index.html";
-    }
-    return path === "/" || path === "/index.html";
-  }
-
-  const currentUrl = new URL(window.location.href);
-  const isBrowserDocument = isEditorBrowserDocument(currentUrl);
-  const isParentDocument = isEditorParentDocument(currentUrl);
-  if (!isBrowserDocument && !isParentDocument) return;
+  // The generated manifest limits injection to the installation host.
+  // all_frames is enabled, so each matching document gets its own fetch wrapper.
 
   if (window.__editorBrowserProxyPageBootstrap) return;
   Object.defineProperty(window, "__editorBrowserProxyPageBootstrap", {
