@@ -1506,20 +1506,7 @@
             ? __getCallerProxy(__childPage, __elemWindow)
             : __elemWindow.__windowProxy;
         }
-        // The live iframe src may be an internal data URL (with an #f= filename
-        // suffix). The logical navigation URL is retained in data-raw-src and
-        // must be used when initializing the child window's virtual location.
-        const nativeGetFrameAttribute = Element.prototype.getAttribute;
-        const hasSrcdoc = nativeGetFrameAttribute.call(__elem, 'data-raw-srcdoc') !== null ||
-          nativeGetFrameAttribute.call(__elem, 'srcdoc') !== null;
-        const rawFrameSrc = hasSrcdoc
-          ? null
-          : nativeGetFrameAttribute.call(__elem, 'data-raw-src');
-        const frameSrc = rawFrameSrc !== null
-          ? rawFrameSrc
-          : nativeGetFrameAttribute.call(__elem, 'src');
-        const frameBaseUrl = __childPage?.parent?.location?.url || CURRENT_PAGE_URL || BASE_ORIGIN;
-        var PATH_URL = new URL(frameSrc !== null ? frameSrc : 'about:srcdoc', frameBaseUrl);
+        var PATH_URL = new URL(__elem.getAttribute('src') || "about:srcdoc", BASE_ORIGIN);
         var __baseUrl = PATH_URL.href;
         try {
           if (/^about:srcdoc$/i.test(PATH_URL.href) && __childPage?.parent?.location?.url) __baseUrl = __childPage.parent.location.url;
