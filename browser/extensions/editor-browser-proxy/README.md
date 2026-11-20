@@ -10,7 +10,7 @@ This is a Manifest V3 browser extension for Chromium-based browsers.
 4. Choose **Load unpacked** and select the extracted `editor-browser-proxy` folder.
 5. Open or reload the Editor Browser and browse as usual.
 
-The extension requests access to all websites because its background service worker must fetch cross-origin resources on behalf of pages. The proxy is used only for fetch calls from frames identified as Editor Browser PageEmulator pages.
+The extension requests access to all websites so its background service worker can fetch cross-origin resources. The fetch replacement is installed in the Editor Browser document itself (`browser/browser.html`); it does not patch pages opened inside the browser.
 
 ## Design
 
