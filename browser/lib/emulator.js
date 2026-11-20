@@ -3052,6 +3052,7 @@
           }
 
           function acceptedTypes(options) {
+            if (options?.acceptsAllTypes === true) return ['*'];
             const result = [];
             const add = value => {
               const normalized = String(value || '').trim().toLowerCase();
