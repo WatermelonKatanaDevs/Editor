@@ -224,10 +224,8 @@
 <script>
 async function downloadEditorBrowserProxyExtension() {
   const button = document.getElementById('install-editor-browser-proxy-extension');
-  const status = document.getElementById('editor-browser-proxy-extension-status');
   const originalLabel = button?.innerHTML || 'Install Extension';
 
-  const setStatus = message => { if (status) status.textContent = message; };
   if (button) {
     button.disabled = true;
     button.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Preparing…';
@@ -236,6 +234,13 @@ async function downloadEditorBrowserProxyExtension() {
   try {
     const Zip = window.JSZip || window.jszip || (typeof JSZip !== 'undefined' ? JSZip : null);
     if (!Zip) throw new Error('The ZIP utility is unavailable.');
+
+    const installedUrl = new URL(window.location.href);
+    if (installedUrl.protocol !== 'http:' && installedUrl.protocol !== 'https:') {
+      throw new Error('Install the extension from the hosted Editor page.');
+    }
+    const host = installedUrl.hostname;
+    const matchPattern = '*://' + host + '/*';
 
     const packagePath = 'extensions/editor-browser-proxy/';
     const files = ['manifest.json', 'proxy.js', 'bridge.js', 'page.js', 'README.md'];
@@ -246,7 +251,18 @@ async function downloadEditorBrowserProxyExtension() {
       const sourceUrl = new URL(packagePath + filename, document.baseURI);
       const response = await fetch(sourceUrl.href, {cache:'no-store'});
       if (!response.ok) throw new Error('Could not load ' + filename + ' (' + response.status + ').');
-      folder.file(filename, await response.text());
+      let content = await response.text();
+
+      if (filename === 'manifest.json') {
+        const manifest = JSON.parse(content);
+        for (const script of manifest.content_scripts || []) script.matches = [matchPattern];
+        content = JSON.stringify(manifest, null, 2) + '\n';
+      } else if (filename === 'README.md') {
+        content = content.replaceAll('{{INSTALL_ORIGIN}}', installedUrl.origin);
+        content = content.replaceAll('{{INSTALL_HOST}}', host);
+      }
+
+      folder.file(filename, content);
     }
 
     const archive = await zip.generateAsync({type:'blob'});
@@ -260,10 +276,8 @@ async function downloadEditorBrowserProxyExtension() {
     link.remove();
     setTimeout(() => URL.revokeObjectURL(downloadUrl), 30000);
 
-    setStatus('Downloaded. Unzip it, then load the folder from your browser’s extensions page.');
-    if (typeof showToast === 'function') showToast('Editor Browser Proxy downloaded', 'success');
+    if (typeof showToast === 'function') showToast('Editor Browser Proxy downloaded for ' + host, 'success');
   } catch (error) {
-    setStatus(error?.message || String(error));
     if (typeof showToast === 'function') showToast(error?.message || 'Could not download extension', 'error');
   } finally {
     if (button) {
