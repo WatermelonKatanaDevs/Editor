@@ -210,6 +210,11 @@
         const filters = options.filters, selected = new Set();
         let selectedDeviceFiles = [], currentPath = normalizePath(options.startPath);
         let showAllFiles = !!options.allFiles, closed = false;
+        let rowPreviewUrls = [];
+        const releaseRowPreviews = () => {
+          for (const url of rowPreviewUrls) URL.revokeObjectURL(url);
+          rowPreviewUrls = [];
+        };
 
         const overlay = document.createElement('div');
         const displayMode = getDisplayMode();
@@ -314,6 +319,7 @@
           if (closed) return;
           closed = true;
           document.removeEventListener('keydown', keydown, true);
+          releaseRowPreviews();
           overlay.remove();
           activeDialog = null;
           resolve(value);
@@ -359,6 +365,7 @@
           }
         };
         function draw() {
+          releaseRowPreviews();
           list.replaceChildren();
           const all = listFiles(), directories = listDirectories(fs(), all);
           const prefix = currentPath ? currentPath + '/' : '';
@@ -394,7 +401,43 @@
             if (row.kind === 'directory') button.classList.add('is-directory');
             if (row.path && selected.has(row.path)) button.classList.add('is-selected');
             const icon = document.createElement('span');
-            icon.className = 'wk-workspace-picker-row-icon'; icon.textContent = row.kind === 'directory' ? '▸' : '▧';
+            icon.className = 'wk-workspace-picker-row-icon';
+            if (row.kind === 'directory') {
+              // Match the Explorer's collapsed-folder disclosure arrow.
+              icon.classList.add('is-directory');
+              icon.textContent = '▶';
+            } else if (['mp3', 'wav'].includes(extension(row.path))) {
+              // Use the familiar album/vinyl glyph for music files.
+              icon.classList.add('is-audio');
+              icon.innerHTML = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#ef5350"/><circle cx="12" cy="12" r="6.1" fill="none" stroke="#202326" stroke-width="1.1"/><circle cx="12" cy="12" r="2.1" fill="#202326"/><circle cx="12" cy="12" r=".65" fill="#ef5350"/></svg>';
+            } else {
+              const suppliedMime = fileType(row.path);
+              const inferredMime = window.EditorInferMime?.(row.path) || '';
+              if (suppliedMime.startsWith('image/') || inferredMime.startsWith('image/')) {
+                try {
+                  const value = fs().readFileSync(row.path, 'binary');
+                  if (value == null) throw new Error('Image file is unavailable.');
+                  const mime = suppliedMime && suppliedMime !== 'application/octet-stream'
+                    ? suppliedMime : inferredMime || suppliedMime || 'application/octet-stream';
+                  const preview = document.createElement('img');
+                  preview.className = 'wk-workspace-picker-row-thumbnail';
+                  preview.alt = '';
+                  preview.draggable = false;
+                  preview.loading = 'lazy';
+                  preview.decoding = 'async';
+                  const url = URL.createObjectURL(new Blob([asBytes(value)], {type:mime}));
+                  rowPreviewUrls.push(url);
+                  preview.src = url;
+                  icon.classList.add('is-image');
+                  icon.append(preview);
+                } catch (error) {
+                  console.warn('Could not create workspace picker image thumbnail:', row.path, error);
+                  icon.textContent = '▧';
+                }
+              } else {
+                icon.textContent = '▧';
+              }
+            }
             const name = document.createElement('span');
             name.className = 'wk-workspace-picker-row-name'; name.textContent = row.name;
             const detail = document.createElement('span');
@@ -526,7 +569,10 @@
       '.wk-workspace-picker-row:hover{background:#ffffff0d!important;}',
       '.wk-workspace-picker-row.is-selected{background:#28523f!important;}',
       '.wk-workspace-picker-row.is-directory{color:#c8d9ce;}',
-      '.wk-workspace-picker-row-icon{width:18px;flex:none;color:#aebbc4;}',
+      '.wk-workspace-picker-row-icon{display:inline-flex;width:20px;height:20px;flex:none;align-items:center;justify-content:center;overflow:hidden;color:#aebbc4;font-size:12px;line-height:1;}',
+      '.wk-workspace-picker-row-icon.is-directory{width:18px;justify-content:flex-start;font-size:11px;}',
+      '.wk-workspace-picker-row-icon.is-audio svg{display:block;width:18px;height:18px;}',
+      '.wk-workspace-picker-row-thumbnail{display:block;width:20px;height:20px;object-fit:cover;border-radius:2px;}',
       '.wk-workspace-picker-row-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
       '.wk-workspace-picker-row-detail{max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:#91a0a8;}',
       '.wk-workspace-picker-empty{padding:28px 10px;text-align:center;color:#89939b;}',
