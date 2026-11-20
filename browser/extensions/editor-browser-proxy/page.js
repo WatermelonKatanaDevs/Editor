@@ -101,7 +101,7 @@
     emitState(xhr,state,0);
     emit(xhr,"abort");
     emit(xhr,"loadend");
-    if(state.hasUpload){emit(xhr.upload,"abort");emit(xhr.upload,"loadend")}
+    if(state.hasUpload&&!state.uploadFinished){emit(xhr.upload,"abort");emit(xhr.upload,"loadend")}
    }else if(state.readyState!==0){
     state.finished=true;resetResponse(state);emitState(xhr,state,0);
    }
@@ -139,7 +139,7 @@
    emitState(xhr,state,4);
    emit(xhr,"error");
    emit(xhr,"loadend");
-   if(state.hasUpload){emit(xhr.upload,"error");emit(xhr.upload,"loadend")}
+   if(state.hasUpload&&!state.uploadFinished){emit(xhr.upload,"error");emit(xhr.upload,"loadend")}
    if(error)try{console.warn("[Editor Browser Proxy] XMLHttpRequest failed:",state.url,error?.message||error)}catch(_){}
   }
   function finishTimeout(xhr,state){
@@ -149,7 +149,7 @@
    clearStateTimer(state);resetResponse(state);
    emitState(xhr,state,4);
    emit(xhr,"timeout");emit(xhr,"loadend");
-   if(state.hasUpload){emit(xhr.upload,"timeout");emit(xhr.upload,"loadend")}
+   if(state.hasUpload&&!state.uploadFinished){emit(xhr.upload,"timeout");emit(xhr.upload,"loadend")}
   }
   async function sendProxyRequest(xhr,state,body){
    state.sending=true;state.controller=new AbortController();
@@ -185,6 +185,7 @@
     if(state.hasUpload){
      const size=bodySize(body);
      emit(xhr.upload,"progress",size,size,size>0);
+     state.uploadFinished=true;
      emit(xhr.upload,"load");emit(xhr.upload,"loadend");
     }
 
@@ -227,7 +228,7 @@
    states.delete(this);
    const result=originalOpen.apply(this,arguments);
    let target=null;
-   try{target=new URL(String(url),base)}catch(_){}
+   try{target=new URL(String(url),document.baseURI||base)}catch(_){}
    const asynchronous=arguments.length<3||async!==false;
    const shouldProxy=!!target&&asynchronous&&["http:","https:"].includes(target.protocol)&&target.origin!==origin;
    states.set(this,{
@@ -236,6 +237,7 @@
     url:target?.href||String(url||""),
     headers:new Headers(),readyState:1,sending:false,finished:false,
     aborted:false,timedOut:false,timer:null,controller:null,
+    uploadFinished:false,
     status:0,statusText:"",responseURL:"",bytes:new Uint8Array(0),
     text:"",document:null,mimeType:"",mimeOverride:"",hasUpload:false
    });
