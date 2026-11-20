@@ -13,12 +13,12 @@
   }
 
   function isEditorBrowserDocument(url) {
-    return isEditorHost(url.hostname) && /(?:^|\\/)browser\\/browser\\.html$/i.test(url.pathname);
+    return isEditorHost(url.hostname) && /(?:^|\/)browser\/browser\.html$/i.test(url.pathname);
   }
 
   function isEditorParentDocument(url) {
     if (!isEditorHost(url.hostname)) return false;
-    const path = url.pathname.replace(/\\/+$/, "") || "/";
+    const path = url.pathname.replace(/\/+$/, "") || "/";
     if (url.hostname.toLowerCase() === "watermelonkatanadevs.github.io") {
       return path === "/Editor" || path === "/Editor/index.html";
     }
