@@ -354,7 +354,9 @@ function renderDownloads() {
     row.className = 'download-item';
     if (d.status === 'complete') {
       row.classList.add('cursor-pointer');
-      row.title = 'Click to save file or drag into a file upload';
+      row.title = shouldUseEditorWorkspacePicker()
+        ? 'Click to save to the Editor Workspace or drag into a file upload'
+        : 'Click to save file or drag into a file upload';
       row.draggable = true;
       row.ondragstart = (e) => {
         e.dataTransfer.effectAllowed = 'copy';
@@ -391,7 +393,15 @@ function renderDownloads() {
     top.append(name,status);
     const sub = document.createElement('div');
     sub.className = 'download-item-sub';
-    sub.textContent = d.status === 'downloading' ? `${formatDownloadSize(d.received)}${d.total ? ' / ' + formatDownloadSize(d.total) : ''}` : d.status === 'failed' ? (d.error || 'Download failed') : d.autoDownloaded ? `${formatDownloadSize(d.size)} • Downloaded` : `${formatDownloadSize(d.size)} • Click to save`;
+    sub.textContent = d.status === 'downloading'
+      ? `${formatDownloadSize(d.received)}${d.total ? ' / ' + formatDownloadSize(d.total) : ''}`
+      : d.status === 'failed'
+        ? (d.error || 'Download failed')
+        : shouldUseEditorWorkspacePicker()
+          ? `${formatDownloadSize(d.size)}${d.autoDownloaded ? ' • Downloaded' : ''} • Click to save to Editor Workspace`
+          : d.autoDownloaded
+            ? `${formatDownloadSize(d.size)} • Downloaded`
+            : `${formatDownloadSize(d.size)} • Click to save`;
     main.append(top,sub);
     if (d.status === 'downloading') {
       const track = document.createElement('div');
@@ -590,6 +600,8 @@ async function openEditorWorkspaceUploadPicker(input) {
     title:'Choose a file',
     accept:input.getAttribute('accept') || '',
     multiple:input.multiple === true,
+    capture:input.getAttribute('capture') || undefined,
+    directory:input.hasAttribute('webkitdirectory'),
     allowDevice:true
   });
   if (!files?.length) return true;
