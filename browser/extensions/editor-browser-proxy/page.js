@@ -4,7 +4,7 @@
   // This content script is declared for all URLs so it can run in the browser
   // frame regardless of the Editor deployment host. Restrict activation by
   // the browser page's own path, not by PageEmulator internals.
-  if (!/(?:^|\\/)browser\\/browser\\.html$/i.test(window.location.pathname)) return;
+  if (!/(?:^|\/)browser\/browser\.html$/i.test(window.location.pathname)) return;
 
   if (window.__editorBrowserProxyPageBootstrap) return;
   Object.defineProperty(window, "__editorBrowserProxyPageBootstrap", {
@@ -154,7 +154,7 @@
     if (original.__editorBrowserProxyWrapped) return original;
 
     const wrapped = function(input, init) {
-      if (!/(?:^|\\/)browser\\/browser\\.html$/i.test(window.location.pathname)) {
+      if (!/(?:^|\/)browser\/browser\.html$/i.test(window.location.pathname)) {
         return original.apply(this, arguments);
       }
 
@@ -190,7 +190,7 @@
   }
 
   function installFetchReplacement() {
-    if (!/(?:^|\\/)browser\\/browser\\.html$/i.test(window.location.pathname) || typeof window.fetch !== "function") return false;
+    if (!/(?:^|\/)browser\/browser\.html$/i.test(window.location.pathname) || typeof window.fetch !== "function") return false;
 
     if (!accessorInstalled) {
       rawFetch = window.fetch;
