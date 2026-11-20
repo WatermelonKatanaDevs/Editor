@@ -29,6 +29,12 @@
   function isPrivatePath(path) {
     return PRIVATE_PATHS.some(part => path === part || path.startsWith(part + '/'));
   }
+  function isHiddenEntry(path) {
+    return normalizePath(path).split('/').some(part => {
+      const name = part.toLowerCase();
+      return name.startsWith('.') || name.endsWith('.piskel');
+    });
+  }
   function normalizeAccept(options = {}) {
     const values = [];
     const add = value => {
@@ -88,15 +94,26 @@
       if (!value) throw new Error('The Editor workspace is not ready.');
       return value;
     }
+    function showHiddenFiles() {
+      try {
+        return typeof config.showHiddenFiles === 'function'
+          ? config.showHiddenFiles() === true
+          : config.showHiddenFiles === true;
+      } catch (_) {
+        return false;
+      }
+    }
     function listFiles() {
+      const includeHidden = showHiddenFiles();
       return (fs().listFilesSync?.() || []).map(normalizePath)
-        .filter(path => path && !isPrivatePath(path));
+        .filter(path => path && !isPrivatePath(path) && (includeHidden || !isHiddenEntry(path)));
     }
     function listDirectories(filesystem, files) {
       const result = new Set(['']);
+      const includeHidden = showHiddenFiles();
       for (const path of filesystem.listDirectoriesSync?.() || []) {
         const value = normalizePath(path);
-        if (value && !isPrivatePath(value)) result.add(value);
+        if (value && !isPrivatePath(value) && (includeHidden || !isHiddenEntry(value))) result.add(value);
       }
       for (const path of files) {
         let parent = dirname(path);
