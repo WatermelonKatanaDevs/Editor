@@ -4,26 +4,6 @@
 
 const activeRequests = new Map();
 
-function isTrustedEditorSender(sender) {
-  if (sender?.id !== chrome.runtime.id || !sender.url) return false;
-  try {
-    const url = new URL(sender.url);
-    const host = url.hostname.toLowerCase();
-    const editorHost = host === "watermelonkatana.onrender.com" ||
-      host === "watermelonkatanatest.onrender.com" ||
-      host === "watermelonkatanadevs.github.io" ||
-      host === "localhost" || host === "127.0.0.1" || host === "[::1]";
-    if (!editorHost) return false;
-    if (/(?:^|\/)browser\/browser\.html$/i.test(url.pathname)) return true;
-    const path = url.pathname.replace(/\/+$/, "") || "/";
-    return host === "watermelonkatanadevs.github.io"
-      ? path === "/Editor" || path === "/Editor/index.html"
-      : path === "/" || path === "/index.html";
-  } catch (_) {
-    return false;
-  }
-}
-
 function decodeBase64ToBytes(value) {
   const binary = atob(String(value || ""));
   const bytes = new Uint8Array(binary.length);
@@ -124,11 +104,6 @@ async function handleProxyRequest(message, signal) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== "object") return undefined;
-  if (
-    (message.type === "EDITOR_BROWSER_PROXY_FETCH" || message.type === "EDITOR_BROWSER_PROXY_ABORT") &&
-    !isTrustedEditorSender(sender)
-  ) return undefined;
-
   if (message.type === "EDITOR_BROWSER_PROXY_ABORT") {
     activeRequests.get(String(message.id || ""))?.abort();
     return undefined;
