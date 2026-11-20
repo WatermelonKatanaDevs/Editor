@@ -50,6 +50,37 @@
       const data=this.filesystem.readFileSync(filePath);
       return new Response(data,{status:200,statusText:'OK',headers:{'Content-Type':staticInferMime(filePath),'Content-Length':data.byteLength.toString()}});
     }
+    handleSyncRequest(request,type) {
+      if (!this.filesystem || typeof this.filesystem.existsSync !== 'function') return null;
+      const url = new URL(request.url);
+      if (url.origin !== this.domain) return null;
+      let pathname = decodeURIComponent(url.pathname || '/');
+      let relative;
+      const publicPath = this.path;
+      if (publicPath === '/') {
+        relative = pathname === '/' ? this.runfile : pathname;
+      } else if (pathname === publicPath || pathname === publicPath + '/') {
+        relative = this.runfile;
+      } else if (pathname.startsWith(publicPath + '/')) {
+        relative = pathname.slice(publicPath.length);
+      } else return null;
+
+      const clean = '/' + relative.replace(/^\/+/, '');
+      const filePath = this.rootfolder ? this.rootfolder + clean : clean.slice(1);
+      if (!this.filesystem.existsSync(filePath)) {
+        return createSyncNetworkResponse(404, 'Not Found', {'Content-Type':'text/plain'}, 'Not Found', request.url);
+      }
+
+      const data = this.filesystem.readFileSync(filePath);
+      if (data == null) {
+        return createSyncNetworkResponse(404, 'Not Found', {'Content-Type':'text/plain'}, 'Not Found', request.url);
+      }
+      const body = syncBodyToArrayBuffer(data);
+      return createSyncNetworkResponse(200, 'OK', {
+        'Content-Type': staticInferMime(filePath),
+        'Content-Length': String(body.byteLength)
+      }, body, request.url);
+    }
     async handleSocket(){return null;}
   }
   window.StaticEndpoint=StaticEndpoint;
