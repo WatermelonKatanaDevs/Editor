@@ -1,6 +1,15 @@
 // Main-world fetch replacement. It activates only inside an Editor
 // Browser PageEmulator; ordinary tabs and unrelated iframes are untouched.
 (() => {
+  // The extension is globally declared for related frames, but only an Editor
+  // Browser-created PageEmulator iframe should install a fetch wrapper.
+  try {
+    const frame = window.frameElement;
+    if (!frame || !frame.getAttribute("data-page-id")) return;
+  } catch (_) {
+    return;
+  }
+
   if (window.__editorBrowserProxyPageBootstrap) return;
   Object.defineProperty(window, "__editorBrowserProxyPageBootstrap", {
     configurable: false,
