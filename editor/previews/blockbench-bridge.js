@@ -68,6 +68,15 @@
     }
     return new TextEncoder().encode(decodeURIComponent(match[2]));
   };
+  async function exportContentBytes(value) {
+    if (value && typeof value.arrayBuffer === 'function') return new Uint8Array(await value.arrayBuffer());
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    if (typeof value === 'string' && value.startsWith('data:')) return decodeDataURL(value);
+    if (typeof value === 'string') return new TextEncoder().encode(value);
+    return new Uint8Array(value || []);
+  }
+
   const notify = message => {
     try {
       if (window.Blockbench?.showQuickMessage) Blockbench.showQuickMessage(message, 2200);
@@ -337,13 +346,37 @@
     if (expectedExt && extension(suggestedName) !== expectedExt) suggestedName += '.' + expectedExt;
 
     let path = forceSaveDialog ? '' : preferredSavePath(options);
-    if (!path) {
+    let savedByPicker = false;
+    if (!path && options.custom_writer) {
+      // Custom writers may only use the dialog to choose a path, without
+      // producing file bytes. Keep that path-only workflow unchanged.
       path = await showWorkspacePicker({
-        mode: 'save',
-        name: suggestedName,
+        mode:'save',
+        name:suggestedName,
         extensions,
-        startpath: options.startpath || ''
+        startpath:options.startpath || ''
       });
+    } else if (!path) {
+      const saved = await bridge.saveFile({
+        title:'Save from Blockbench',
+        suggestedName,
+        extensions,
+        bytes:await exportContentBytes(options.content),
+        mimeType:options.content?.type || 'application/octet-stream'
+      });
+      if (!saved) return;
+      if (saved && typeof saved === 'object' && saved.savedToDevice === true) {
+        const project = window.Project;
+        const ext = extension(suggestedName);
+        if (project && (ext === 'bbmodel' || /project/i.test(String(options.type || '')) ||
+            (window.Format?.codec && ext === String(window.Format.codec.extension || '').toLowerCase()))) {
+          project.saved = true;
+        }
+        if (typeof callback === 'function') callback();
+        return saved;
+      }
+      path = saved;
+      savedByPicker = true;
     }
     if (!path) return;
     if (options.custom_writer) {
@@ -359,24 +392,42 @@
       }
     } else {
       try {
-        await writeFile(path, options, savedPath => {
+        if (!savedByPicker) {
+          await writeFile(path, options, savedPath => {
+            const project = window.Project;
+            const ext = extension(savedPath);
+            let representsProject = false;
+            if (project) {
+              if (ext === 'bbmodel' || /project/i.test(String(options.type || ''))) {
+                project.save_path = savedPath;
+                project.name = basename(savedPath).replace(/\.[^.]+$/, '');
+                representsProject = true;
+              } else if (window.Format?.codec && ext === String(window.Format.codec.extension || '').toLowerCase()) {
+                project.export_path = savedPath;
+                project.export_codec = window.Format.codec.id;
+                representsProject = true;
+              }
+              if (representsProject) project.saved = true;
+            }
+          });
+        } else {
           const project = window.Project;
-          const ext = extension(savedPath);
+          const ext = extension(path);
           let representsProject = false;
           if (project) {
             if (ext === 'bbmodel' || /project/i.test(String(options.type || ''))) {
-              project.save_path = savedPath;
-              project.name = basename(savedPath).replace(/\.[^.]+$/, '');
+              project.save_path = path;
+              project.name = basename(path).replace(/\.[^.]+$/, '');
               representsProject = true;
             } else if (window.Format?.codec && ext === String(window.Format.codec.extension || '').toLowerCase()) {
-              project.export_path = savedPath;
+              project.export_path = path;
               project.export_codec = window.Format.codec.id;
               representsProject = true;
             }
             if (representsProject) project.saved = true;
           }
-          if (typeof callback === 'function') callback(savedPath);
-        });
+        }
+        if (typeof callback === 'function') callback(path);
       } catch (error) {
         console.error('Blockbench workspace save failed:', error);
         notify('Could not save to the Editor workspace: ' + (error?.message || error));
