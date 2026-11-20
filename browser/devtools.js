@@ -1123,6 +1123,31 @@ var DevToolsInternal = {
     function renderWarning(msg,tab) {
       return logContainer(browserConsole ? browserConsole.createWarning(msg) : (function(){ const span=document.createElement('span'); span.classList.add('log-warning','log'); span.textContent=String(msg); return span; })(),tab);
     }
+    function formatConsoleArgument(value) {
+      if (value === null) return 'null';
+      if (typeof value !== 'object') return String(value);
+
+      // Error properties such as message and stack are non-enumerable, so
+      // JSON.stringify(error) produces "{}". Detect cross-realm Errors too.
+      try {
+        const tag = Object.prototype.toString.call(value);
+        const name = typeof value.name === 'string' ? value.name : 'Error';
+        const message = typeof value.message === 'string' ? value.message : '';
+        const stack = typeof value.stack === 'string' ? value.stack : '';
+        const isError = tag === '[object Error]' ||
+          tag === '[object DOMException]' ||
+          (message !== '' && stack !== '');
+
+        if (isError) return stack || (message ? name + ': ' + message : name);
+      } catch (_) {}
+
+      try {
+        const json = JSON.stringify(value);
+        return json === undefined ? String(value) : json;
+      } catch (_) {
+        return String(value);
+      }
+    }
     function renderRecord(record,tab) {
       renderTab = tab;
       try {
@@ -1147,9 +1172,9 @@ var DevToolsInternal = {
             });
           }
         } else if (record.method === 'error') {
-          renderError(record.args.map(a => typeof a === 'object' ? (() => { try { return JSON.stringify(a); } catch(e) { return String(a); } })() : String(a)).join(' '),tab);
+          renderError(record.args.map(formatConsoleArgument).join(' '),tab);
         } else if (record.method === 'warn') {
-          renderWarning(record.args.map(a => typeof a === 'object' ? (() => { try { return JSON.stringify(a); } catch(e) { return String(a); } })() : String(a)).join(' '),tab);
+          renderWarning(record.args.map(formatConsoleArgument).join(' '),tab);
         } else {
           const sourceTab = record.frameTabId
             ? Array.from(pageRecords.values()).find(r => r?.tab?.id === record.frameTabId)?.tab
