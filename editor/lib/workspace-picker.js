@@ -171,13 +171,12 @@
         startPath, allFiles:!filters.length, maxFileBytes:options.maxFileBytes
       });
     }
-    function savePath(options = {}) {
-      if (!canWrite()) return Promise.reject(new Error('This Editor workspace is read-only.'));
+    function createSaveDialogOptions(options = {}) {
       const files = listFiles();
       const directories = listDirectories(fs(), files);
       let startPath = normalizePath(options.startPath || options.startpath || '');
       if (startPath && (files.includes(startPath) || !directories.has(startPath))) startPath = dirname(startPath);
-      return showDialog({
+      return {
         mode:'save', title:options.title || 'Save to Editor Workspace',
         files, directories, filters:normalizeAccept(options),
         multiple:false, allowDevice:false,
@@ -185,7 +184,11 @@
         suggestedName:options.suggestedName || options.name || 'untitled',
         onSaveToDevice:typeof options.onSaveToDevice === 'function' ? options.onSaveToDevice : null,
         allFiles:true
-      });
+      };
+    }
+    function savePath(options = {}) {
+      if (!canWrite()) return Promise.reject(new Error('This Editor workspace is read-only.'));
+      return showDialog(createSaveDialogOptions(options));
     }
     async function saveFile(options = {}) {
       const value = options.bytes ?? options.data ?? new Uint8Array();
@@ -199,8 +202,10 @@
         throw new Error('The exported file could not be read completely.');
       }
       const blob = new Blob([bytes], {type:String(options.mimeType || options.type || value?.type || 'application/octet-stream')});
-      const path = await savePath({
-        ...options,
+      // Use the shared save dialog directly so Save to device remains available
+      // even when the Editor workspace itself is read-only.
+      const path = await showDialog({
+        ...createSaveDialogOptions(options),
         onSaveToDevice:async suggestedName => {
           if (typeof showSaveFilePicker === 'function') {
             // Invoke the native picker directly from the button gesture.
