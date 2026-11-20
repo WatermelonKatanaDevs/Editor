@@ -4,8 +4,11 @@
   let activeDialog = null;
   let dialogQueue = [];
   const DISPLAY_MODE_KEY = 'editor.workspacePicker.displayMode';
+  const USE_IN_BROWSER_KEY = 'editor.workspacePicker.useInBrowser';
   function getDisplayMode(){try{return localStorage.getItem(DISPLAY_MODE_KEY)==='overlay'?'overlay':'contained';}catch(_){return 'contained';}}
   function setDisplayMode(value){const mode=value==='overlay'?'overlay':'contained';try{localStorage.setItem(DISPLAY_MODE_KEY,mode);}catch(_){}return mode;}
+  function getUseInBrowser(){try{const value=localStorage.getItem(USE_IN_BROWSER_KEY);return value===null?true:value==='true';}catch(_){return true;}}
+  function setUseInBrowser(value){const enabled=value!==false;try{localStorage.setItem(USE_IN_BROWSER_KEY,enabled?'true':'false');}catch(_){}return enabled;}
   const PRIVATE_PATHS = ['.editor', '.git'];
 
   function normalizePath(value) {
@@ -180,27 +183,53 @@
         multiple:false, allowDevice:false,
         startPath,
         suggestedName:options.suggestedName || options.name || 'untitled',
+        onSaveToDevice:typeof options.onSaveToDevice === 'function' ? options.onSaveToDevice : null,
         allFiles:true
       });
     }
     async function saveFile(options = {}) {
-      const path = await savePath(options);
-      if (!path) return null;
       const value = options.bytes ?? options.data ?? new Uint8Array();
 
-      // Blob and File objects may come from an iframe, so instanceof Blob is
-      // not reliable across realms. Use the Blob/File arrayBuffer interface
-      // instead, then pass bytes to the synchronous workspace writer.
+      // Blob and File objects may come from another realm, so do not rely on
+      // instanceof checks. Read their bytes once for either save destination.
       const bytes = value != null && typeof value.arrayBuffer === 'function'
         ? new Uint8Array(await value.arrayBuffer())
         : asBytes(value);
-
-      // Do not silently write a truncated/empty result if a Blob-like source
-      // advertises a different size from the bytes it returned.
       if (typeof value?.size === 'number' && bytes.byteLength !== value.size) {
         throw new Error('The exported file could not be read completely.');
       }
-
+      const blob = new Blob([bytes], {type:String(options.mimeType || options.type || value?.type || 'application/octet-stream')});
+      const path = await savePath({
+        ...options,
+        onSaveToDevice:async suggestedName => {
+          if (typeof showSaveFilePicker === 'function') {
+            // Invoke the native picker directly from the button gesture.
+            const handle = await showSaveFilePicker({suggestedName});
+            const writable = await handle.createWritable();
+            try {
+              await writable.write(blob);
+              await writable.close();
+            } catch (error) {
+              try { await writable.abort?.(); } catch (_) {}
+              throw error;
+            }
+            return true;
+          }
+          // Browsers without the File System Access API still get a normal
+          // device download rather than losing the Save to device action.
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = suggestedName;
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 30000);
+          return true;
+        }
+      });
+      if (!path) return null;
+      if (path && typeof path === 'object' && path.savedToDevice === true) return path;
       writeFile(path, bytes);
       return path;
     }
@@ -346,6 +375,14 @@
         const footerLeft = document.createElement('div');
         footerLeft.className = 'wk-workspace-picker-footer-left';
         let deviceInput = null;
+        let saveToDeviceButton = null;
+        if (mode === 'save' && typeof options.onSaveToDevice === 'function') {
+          saveToDeviceButton = document.createElement('button');
+          saveToDeviceButton.type = 'button';
+          saveToDeviceButton.className = 'wk-workspace-picker-secondary';
+          saveToDeviceButton.textContent = 'Save to device';
+          footerLeft.append(saveToDeviceButton);
+        }
         if (mode === 'open' && options.allowDevice) {
           const deviceButton = document.createElement('button');
           deviceButton.type = 'button';
@@ -569,14 +606,19 @@
             confirm.disabled = !String(filename.value || '').trim() || !canWrite();
           }
         }
-        function finishSave() {
+        function getSaveName() {
           let name = String(filename.value || '').trim();
           if (!name || name === '.' || name === '..' || /[\\/]/.test(name)) {
             status.textContent = 'Enter a valid file name.';
-            filename.focus(); return;
+            filename.focus(); return '';
           }
           const preferredExtension = filters.find(value => !value.includes('/') && value !== '*' && value !== '*/*');
           if (preferredExtension && !extension(name)) name += '.' + preferredExtension.replace(/^\./, '');
+          return name;
+        }
+        function finishSave() {
+          const name = getSaveName();
+          if (!name) return;
           const path = normalizePath((currentPath ? currentPath + '/' : '') + name);
           if (!path) return;
           if (fs().existsSync(path) && !window.confirm('"' + path + '" already exists. Replace it?')) return;
@@ -600,6 +642,23 @@
         });
         cancel.addEventListener('click', () => close(null));
         confirm.addEventListener('click', () => mode === 'save' ? finishSave() : void finishOpen());
+        saveToDeviceButton?.addEventListener('click', async () => {
+          if (closed) return;
+          const name = getSaveName();
+          if (!name) return;
+          saveToDeviceButton.disabled = true;
+          confirm.disabled = true;
+          status.textContent = 'Saving to device…';
+          try {
+            await options.onSaveToDevice(name);
+            close({savedToDevice:true});
+          } catch (error) {
+            if (error?.name !== 'AbortError') status.textContent = error?.message || String(error);
+            else status.textContent = '';
+            saveToDeviceButton.disabled = false;
+            confirm.disabled = !canWrite();
+          }
+        });
         deviceInput?.addEventListener('change', () => {
           addDeviceFiles(deviceInput.files); deviceInput.value = '';
         });
@@ -677,7 +736,7 @@
     document.head.append(style);
   }
 
-  window.EditorWorkspacePicker = {create, normalizePath, basename, dirname, extension, normalizeAccept, getDisplayMode, setDisplayMode};
+  window.EditorWorkspacePicker = {create, normalizePath, basename, dirname, extension, normalizeAccept, getDisplayMode, setDisplayMode, getUseInBrowser, setUseInBrowser};
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installStyles, {once:true});
   else installStyles();
 })();
