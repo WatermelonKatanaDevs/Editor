@@ -3085,7 +3085,7 @@
               name,
               file: file || null,
               writable: writable === true,
-              workspace: !!workspacePath,
+              workspace: !!workspacePath || (!file && !!forcedPath),
               mimeType: file?.type || 'application/octet-stream'
             };
 
