@@ -113,13 +113,6 @@
       });
 
       request.signal.addEventListener("abort", onAbort, {once: true});
-      window.postMessage({
-        channel: CHANNEL,
-        type: "FETCH",
-        id,
-        request: null
-      }, "*");
-
       // The body is serialized separately so it can cross the isolated-world
       // message bridge without relying on browser-specific ArrayBuffer cloning.
       Promise.resolve().then(async () => {
