@@ -478,7 +478,7 @@ async function performDownload(url,filename) {
     item.finishedAt = Date.now();
     await putDownloadCache(item.id,blob);
     if (appSettings.autoDownload) {
-      await saveCachedDownload(item.id);
+      await saveCachedDownload(item.id,{toDevice:true});
       item.autoDownloaded = true;
     }
     saveDownloadHistory();
@@ -495,7 +495,7 @@ async function performDownload(url,filename) {
     throw e;
   }
 }
-async function saveCachedDownload(id) {
+async function saveCachedDownload(id, options = {}) {
   const item = downloads.find(d => d.id === id);
   if (!item || item.status !== 'complete') return;
   const blob = await getDownloadCache(id);
@@ -503,6 +503,28 @@ async function saveCachedDownload(id) {
     showToast('The cached file is no longer available.','error');
     return;
   }
+  if (options.toDevice !== true && shouldUseEditorWorkspacePicker()) {
+    const picker = getEditorWorkspacePicker();
+    if (!picker?.saveFile) {
+      showToast('The Editor workspace picker is unavailable.','error');
+      return;
+    }
+    try {
+      const saved = await picker.saveFile({
+        title:'Save to Editor Workspace',
+        suggestedName:item.name || 'download',
+        data:blob,
+        mimeType:item.contentType || blob.type || 'application/octet-stream'
+      });
+      if (saved?.savedToDevice) showToast('Saved to device.','success');
+      else if (saved) showToast('Saved to Editor Workspace.','success');
+      return saved;
+    } catch (error) {
+      if (error?.name !== 'AbortError') showToast(error?.message || 'Unable to save to the Editor workspace.','error');
+      return null;
+    }
+  }
+  // Auto-downloads and the opt-out setting retain the browser's native device download.
   const blobUrl = URL.createObjectURL(blob);
   try {
     const link = document.createElement('a');
@@ -514,6 +536,7 @@ async function saveCachedDownload(id) {
   } finally {
     setTimeout(() => URL.revokeObjectURL(blobUrl),30000);
   }
+  return true;
 }
 
 let uploadModal = null;
@@ -546,6 +569,40 @@ function uploadAcceptsFile(input,file) {
     return type === token;
   });
 }
+function shouldUseEditorWorkspacePicker() {
+  try {
+    const host = window.parent;
+    return host !== window &&
+      typeof host.EditorApp?.getWorkspacePicker === 'function' &&
+      host.EditorWorkspacePicker?.getUseInBrowser?.() !== false;
+  } catch (_) { return false; }
+}
+function getEditorWorkspacePicker() {
+  try {
+    const host = window.parent;
+    return host?.EditorApp?.getWorkspacePicker?.(window.frameElement?.parentElement) || null;
+  } catch (_) { return null; }
+}
+async function openEditorWorkspaceUploadPicker(input) {
+  const picker = getEditorWorkspacePicker();
+  if (!picker?.open) return false;
+  const files = await picker.open({
+    title:'Choose a file',
+    accept:input.getAttribute('accept') || '',
+    multiple:input.multiple === true,
+    allowDevice:true
+  });
+  if (!files?.length) return true;
+  const accepted = files.filter(file => uploadAcceptsFile(input,file));
+  if (accepted.length !== files.length) {
+    showToast('One or more selected files do not match the upload type.','error');
+    return true;
+  }
+  if (!uploadInputFiles(input,input.multiple ? accepted : accepted.slice(0,1))) {
+    showToast('Unable to use the selected file.','error');
+  }
+  return true;
+}
 let wereDownloadsOpen = false;
 function closeUploadPicker() {
   if (!uploadModal) return;
@@ -556,6 +613,11 @@ function closeUploadPicker() {
 }
 async function openUploadPicker(input, openDownloads=true) {
   if (!input || input.disabled) return;
+  if (shouldUseEditorWorkspacePicker()) {
+    closeUploadPicker();
+    await openEditorWorkspaceUploadPicker(input);
+    return;
+  }
   closeUploadPicker();
   if (openDownloads) {
     wereDownloadsOpen = downloadsOpen;
