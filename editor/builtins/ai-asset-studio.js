@@ -426,13 +426,20 @@
       if (!galleryContent) return;
       const query = String(searchInput?.value ?? gallerySearchQuery).trim().toLocaleLowerCase();
       gallerySearchQuery = String(searchInput?.value ?? gallerySearchQuery);
-      const cards = [...(galleryContent.querySelector('[data-gallery-grid]')?.querySelectorAll('.ais-gallery-card') || [])];
+      const grid = galleryContent.querySelector('[data-gallery-grid]');
+      const cards = [...(grid?.querySelectorAll('.ais-gallery-card') || [])];
       let visible = 0;
-      for (const card of cards) {
-        const matches = !query || String(card.dataset.searchText || '').includes(query);
-        card.hidden = !matches;
-        if (matches) visible++;
-      }
+      const rankedCards = cards.map((card, index) => {
+        const filenameMatches = !query || String(card.dataset.filenameSearchText || '').includes(query);
+        const promptMatches = !!query && String(card.dataset.promptSearchText || '').includes(query);
+        const rank = filenameMatches ? 0 : promptMatches ? 1 : 2;
+        card.hidden = rank === 2;
+        card.dataset.searchRank = String(rank);
+        if (!card.hidden) visible++;
+        return { card, rank, order:Number(card.dataset.galleryOrder ?? index) };
+      });
+      rankedCards.sort((a, b) => a.rank - b.rank || a.order - b.order);
+      if (grid) for (const item of rankedCards) grid.append(item.card);
       const count = galleryPopover?.querySelector('[data-gallery-total]');
       if (count) count.textContent = query ? visible + ' / ' + cards.length + ' images' : cards.length + ' images';
       let empty = galleryContent.querySelector('[data-gallery-no-results]');
@@ -538,7 +545,7 @@
       const entries = readGalleryEntries();
       const searchWrap = document.createElement('label'); searchWrap.className = 'ais-gallery-search';
       const searchInput = document.createElement('input'); searchInput.type = 'search';
-      searchInput.placeholder = 'Search gallery…'; searchInput.setAttribute('aria-label','Search gallery images');
+      searchInput.placeholder = 'Search filenames & prompts…'; searchInput.setAttribute('aria-label','Search gallery filenames and prompts');
       searchInput.value = gallerySearchQuery;
       searchWrap.append(searchInput); galleryContent.append(searchWrap);
       searchInput.addEventListener('input',() => filterGalleryCards(searchInput));
@@ -551,14 +558,21 @@
         return;
       }
       const grid = document.createElement('div'); grid.className = 'ais-gallery-grid'; grid.dataset.galleryGrid = '';
+      let galleryOrder = 0;
       for (const entry of entries) {
+        const currentOrder = galleryOrder++;
         try {
           const blob = readGalleryBlob(entry);
           const url = URL.createObjectURL(blob); galleryUrls.push(url);
           const card = document.createElement('button'); card.type = 'button'; card.className = 'ais-gallery-card';
           const image = document.createElement('img'); image.src = url; image.alt = entry.filename || 'Gallery image';
           const label = document.createElement('span'); label.textContent = entry.filename || 'sprite.png';
-          card.dataset.searchText = String(entry.filename || 'sprite.png').toLocaleLowerCase();
+          card.dataset.galleryOrder = String(currentOrder);
+          card.dataset.filenameSearchText = String(entry.filename || 'sprite.png').toLocaleLowerCase();
+          card.dataset.promptSearchText = [
+            entry.prompt?.positive, entry.prompt?.negative,
+            entry.request?.prompt, entry.request?.negativePrompt
+          ].filter(value => typeof value === 'string').join('\n').toLocaleLowerCase();
           card.append(image, label);
           card.addEventListener('click', () => showGalleryDetails(entry));
           card.addEventListener('contextmenu', event => showGalleryContextMenu(event, entry));
