@@ -1,6 +1,7 @@
 
 const originalFetch = window.fetch.bind(window);
 const originalWebSocket = window.WebSocket;
+const originalXMLHttpRequest = window.XMLHttpRequest;
 window.wait = t=>new Promise(r=>setTimeout(r,t));
 
 // Network is loaded before browser.js. Keep URL encoding helpers here so the
@@ -139,6 +140,117 @@ function isHTMLResponse(response) {
   return contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
 }
 
+
+function syncBodyToArrayBuffer(body) {
+  if (body == null) return new ArrayBuffer(0);
+  if (Object.prototype.toString.call(body) === '[object ArrayBuffer]') return body.slice(0);
+  if (ArrayBuffer.isView(body)) {
+    return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength);
+  }
+  if (typeof body === 'string') return new TextEncoder().encode(body).buffer;
+  return new ArrayBuffer(0);
+}
+
+function createSyncNetworkResponse(status, statusText, headers, body, url) {
+  const normalizedHeaders = headers instanceof Headers ? new Headers(headers) : new Headers(headers || {});
+  return {
+    status: Number(status) || 0,
+    statusText: String(statusText || ''),
+    headers: normalizedHeaders,
+    body: syncBodyToArrayBuffer(body),
+    url: String(url || ''),
+    redirected: false,
+    ok: Number(status) >= 200 && Number(status) < 300
+  };
+}
+
+function parseSyncXHRHeaders(rawHeaders) {
+  const headers = new Headers();
+  for (const line of String(rawHeaders || '').split(/\r?\n/)) {
+    const separator = line.indexOf(':');
+    if (separator <= 0) continue;
+    try {
+      headers.append(line.slice(0, separator).trim(), line.slice(separator + 1).trim());
+    } catch (_) {}
+  }
+  return headers;
+}
+
+function performSynchronousNetworkRequest(request, targetUrl = request.url) {
+  if (typeof originalXMLHttpRequest !== 'function') {
+    throw new Error('Native XMLHttpRequest is unavailable for synchronous proxy requests.');
+  }
+
+  const xhr = new originalXMLHttpRequest();
+  const method = String(request.method || 'GET').toUpperCase();
+  const url = String(targetUrl || request.url || '');
+
+  try {
+    if (request.username != null || request.password != null) {
+      xhr.open(method, url, false, request.username || '', request.password || '');
+    } else {
+      xhr.open(method, url, false);
+    }
+
+    if (request.credentials === 'include') xhr.withCredentials = true;
+
+    // Window synchronous XHR cannot set responseType="arraybuffer".
+    // x-user-defined preserves each response byte in responseText instead.
+    try { xhr.overrideMimeType('text/plain; charset=x-user-defined'); } catch (_) {}
+
+    const headers = request.headers;
+    if (headers && typeof headers.forEach === 'function') {
+      headers.forEach((value, name) => {
+        try { xhr.setRequestHeader(name, value); } catch (_) {}
+      });
+    } else if (headers && typeof headers === 'object') {
+      for (const [name, value] of Object.entries(headers)) {
+        try { xhr.setRequestHeader(name, value); } catch (_) {}
+      }
+    }
+
+    const body = method === 'GET' || method === 'HEAD' ? null : (request.body == null ? null : request.body);
+    xhr.send(body);
+
+    if (!xhr.status) return null;
+
+    const rawText = xhr.responseText || '';
+    const bytes = new Uint8Array(rawText.length);
+    for (let i = 0; i < rawText.length; i++) bytes[i] = rawText.charCodeAt(i) & 0xff;
+
+    let responseUrl = url;
+    try { responseUrl = xhr.responseURL || url; } catch (_) {}
+    const response = createSyncNetworkResponse(
+      xhr.status,
+      xhr.statusText,
+      parseSyncXHRHeaders(xhr.getAllResponseHeaders()),
+      bytes,
+      responseUrl
+    );
+    response.redirected = !!(responseUrl && responseUrl !== url);
+    return response;
+  } catch (_) {
+    // A CORS rejection or unreachable endpoint should allow the next configured
+    // endpoint (typically the primary/fallback proxy) to try the request.
+    return null;
+  }
+}
+
+function buildProxyRequestURL(proxy, url, obscureURL = true) {
+  const absoluteUrl = String(url || '');
+  if (absoluteUrl.startsWith('data:') || absoluteUrl.startsWith('blob:')) return absoluteUrl;
+
+  let parameter;
+  if (obscureURL) {
+    const base64 = textToBase64(absoluteUrl);
+    const urlSafeBase64 = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    parameter = 'base64_url=' + encodeURIComponent(urlSafeBase64);
+  } else {
+    parameter = 'url=' + encodeURIComponent(absoluteUrl);
+  }
+  return String(proxy || '') + (String(proxy || '').includes('?') ? '&' : '?') + parameter;
+}
+
 class Network extends EventHandler {
   constructor() {
     super();
@@ -147,6 +259,66 @@ class Network extends EventHandler {
   async request() {
     if (arguments[0] instanceof Request) return await this._requestObject.apply(this,arguments);
     return await this._requestURL.apply(this,arguments);
+  }
+  requestSync(url, baseOrigin, data = {}, type = 'xhr', filter) {
+    const absoluteUrl = resolveNetworkURL(url, baseOrigin);
+    const headers = data.headers instanceof Headers ? new Headers(data.headers) : new Headers(data.headers || {});
+    const request = {
+      url: absoluteUrl,
+      method: String(data.method || 'GET').toUpperCase(),
+      headers,
+      body: data.body == null ? null : data.body,
+      credentials: data.credentials || 'same-origin',
+      username: data.username,
+      password: data.password,
+      request_type: type
+    };
+    this.dispatchEvent('requeststart', request, type);
+
+    // Loopback URLs in an emulated page are virtual. Only local endpoints
+    // that explicitly implement a synchronous handler may satisfy them.
+    const endpointList = isEmulatedLoopbackRequest(request)
+      ? this.endpoints.filter(endpoint =>
+          endpoint &&
+          !endpoint.__browserDefaultFallback &&
+          !endpoint.__browserProxyEndpoint
+        )
+      : this.endpoints;
+    const acceptResponse = typeof filter === 'function' ? filter : (response => response.ok);
+    let responseError = null;
+    let lastResponse = null;
+    let lastError = null;
+    let selectedResponse = null;
+
+    for (const endpoint of endpointList) {
+      if (!endpoint || endpoint.enabled === false || typeof endpoint.handleSyncRequest !== 'function') continue;
+      try {
+        endpoint.dispatchEvent('handlerequest', request, type);
+        const response = endpoint.handleSyncRequest(request, type);
+        if (!response) continue;
+        endpoint.dispatchEvent('returnresponse', response, request, type);
+
+        if (acceptResponse(response)) {
+          selectedResponse = response;
+          break;
+        }
+        if (endpoint.defaultError) responseError = response;
+        lastResponse = response;
+      } catch (error) {
+        console.log('[networkRequestSync] Endpoint error:', endpoint.constructor?.name || 'Endpoint', error && error.message || error);
+        lastError = error;
+      }
+    }
+
+    selectedResponse = selectedResponse || responseError || lastResponse || null;
+    if (selectedResponse) {
+      selectedResponse.source_url = absoluteUrl;
+      selectedResponse.requested_url = absoluteUrl;
+      selectedResponse.request_type = type;
+    }
+    this.dispatchEvent('requestend', selectedResponse, request, type);
+    if (!selectedResponse && lastError) throw lastError;
+    return selectedResponse;
   }
   async _requestURL(url,baseOrigin,data,type,filter) {
     const absoluteUrl = resolveNetworkURL(url, baseOrigin);
@@ -327,6 +499,12 @@ class NetworkEndpoint extends EventHandler {
   async handleRequest(request,type) {
     return await originalFetch(request);
   }
+  handleSyncRequest(request) {
+    // Specialized endpoints must explicitly implement sync behavior. Only the
+    // plain default endpoint should fall through to a direct native request.
+    if (this.constructor !== NetworkEndpoint) return null;
+    return performSynchronousNetworkRequest(request, request.url);
+  }
   async handleSocket(url,protocols) {
     return protocols ? new originalWebSocket(url, protocols) : new originalWebSocket(url);
   }
@@ -340,48 +518,28 @@ class ProxyNetworkEndpoint extends NetworkEndpoint {
     this.__browserProxyEndpoint = true;
   }
   async handleRequest(request,type) {
-    let targetProxyUrl = request.url;
-    
-    // 1. Check if we need to obscure the URL via Base64
-    if (!request.url.startsWith('data:') && !request.url.startsWith('blob:')) {
-      if (this.obscureURL) {
-        let b64 = textToBase64(request.url);
-        // Make it URL-safe so special characters don't break query strings
-        let urlSafeB64 = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-        targetProxyUrl = `${this.proxy}?base64_url=${encodeURIComponent(urlSafeB64)}`;
-      } else {
-        // Fall back to standard cleartext parameter
-        targetProxyUrl = `${this.proxy}?url=${encodeURIComponent(request.url)}`;
-      }
-    }
+    const targetProxyUrl = buildProxyRequestURL(this.proxy, request.url, this.obscureURL);
     try {
       const proxyRequest = new Request(targetProxyUrl, request);
       let response = await originalFetch(proxyRequest);
-      //if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+      //if (!response.ok) throw new Error(\`HTTP Error \${response.status}\`);
       if (response.url === targetProxyUrl) Object.defineProperty(response, 'url', {get:()=>targetProxyUrl});
       return response;
     } catch (err) {
       return null;
     }
   }
+  handleSyncRequest(request) {
+    const targetProxyUrl = buildProxyRequestURL(this.proxy, request.url, this.obscureURL);
+    return performSynchronousNetworkRequest(request, targetProxyUrl);
+  }
   async handleSocket(absoluteUrl, protocols) {
-    let targetProxyUrl = absoluteUrl;
-
-    // Switch the HTTP proxy URL to a WS proxy URL
-    let proxyBaseUrl = this.proxy.replace(/^http/, 'ws');
-    
-    if (this.obscureURL) {
-      let b64 = textToBase64(absoluteUrl);
-      let urlSafeB64 = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      targetProxyUrl = `${proxyBaseUrl}?base64_url=${encodeURIComponent(urlSafeB64)}`;
-    } else {
-      targetProxyUrl = `${proxyBaseUrl}?url=${encodeURIComponent(absoluteUrl)}`;
-    }
-    
-    // Create the real connection and return it.
-    // networkRequest will hand this back to our InterceptableWebSocket
-    return protocols 
-      ? new originalWebSocket(targetProxyUrl, protocols) 
+    // Switch the HTTP proxy URL to its WebSocket endpoint using the same
+    // target URL encoding as ordinary HTTP proxy requests.
+    const proxyBaseUrl = this.proxy.replace(/^http/, 'ws');
+    const targetProxyUrl = buildProxyRequestURL(proxyBaseUrl, absoluteUrl, this.obscureURL);
+    return protocols
+      ? new originalWebSocket(targetProxyUrl, protocols)
       : new originalWebSocket(targetProxyUrl);
   }
 }
