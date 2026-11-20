@@ -5023,6 +5023,7 @@
               this.response = null;
               this.responseText = '';
               this.responseXML = null;
+              this.responseURL = '';
               this.responseType = '';
               this.timeout = 0;
               this.withCredentials = false;
@@ -5074,16 +5075,13 @@
               
               this._async = !!async;
 
-              // Fail explicitly for Synchronous implementations since native fetch forces Async threads
-              if (!this._async) {
-                throw new DOMException("Synchronous XMLHttpRequest via fetch polyfill is unsupported.", "NotSupportedError");
-              }
-
               // Reset configurations on reopening
               this._requestHeaders = new Headers();
               this._responseHeaders = new Headers();
               this.responseText = '';
               this.response = null;
+              this.responseXML = null;
+              this.responseURL = '';
 
               this._changeState(XMLHttpRequestPolyfill.OPENED);
             }
@@ -5133,10 +5131,122 @@
               this._dispatchEvent('loadend');
             }
 
+            _sendSynchronously(body = null) {
+              if (this.timeout > 0) {
+                throw new DOMException("Synchronous XMLHttpRequest does not support a non-zero timeout.", "InvalidAccessError");
+              }
+
+              this._dispatchEvent('loadstart');
+              try {
+                const result = pageEmulator?.network?.requestSync(this._url, BASE_ORIGIN, {
+                  method: this._method,
+                  headers: this._requestHeaders,
+                  body: body !== null && this._method !== 'GET' && this._method !== 'HEAD' ? body : null,
+                  credentials: this.withCredentials ? 'include' : 'same-origin'
+                }, 'xhr');
+
+                if (!result) {
+                  this.status = 0;
+                  this.statusText = '';
+                  this.responseURL = '';
+                  this.response = null;
+                  this.responseText = '';
+                  this.responseXML = null;
+                  this._changeState(XMLHttpRequestPolyfill.DONE);
+                  this._dispatchEvent('error');
+                  this._dispatchEvent('loadend');
+                  return;
+                }
+
+                this.status = result.status;
+                this.statusText = result.statusText || '';
+                this.responseURL = result.url || this._url;
+                this._responseHeaders = result.headers instanceof Headers
+                  ? new Headers(result.headers)
+                  : new Headers(result.headers || {});
+
+                const bodyValue = result.body;
+                let responseBytes;
+                if (bodyValue && Object.prototype.toString.call(bodyValue) === '[object ArrayBuffer]') {
+                  responseBytes = new Uint8Array(bodyValue);
+                } else if (ArrayBuffer.isView(bodyValue)) {
+                  responseBytes = new Uint8Array(bodyValue.buffer, bodyValue.byteOffset, bodyValue.byteLength);
+                } else if (typeof bodyValue === 'string') {
+                  responseBytes = new TextEncoder().encode(bodyValue);
+                } else {
+                  responseBytes = new Uint8Array(0);
+                }
+                const mimeType = String(this._overrideMimeType || this._responseHeaders.get('content-type') || 'text/plain').toLowerCase();
+                const textBody = new TextDecoder('utf-8').decode(responseBytes);
+
+                this._changeState(XMLHttpRequestPolyfill.HEADERS_RECEIVED);
+                this._changeState(XMLHttpRequestPolyfill.LOADING);
+
+                if (this.responseType === 'arraybuffer') {
+                  this.response = responseBytes.buffer.slice(
+                    responseBytes.byteOffset,
+                    responseBytes.byteOffset + responseBytes.byteLength
+                  );
+                } else if (this.responseType === 'blob') {
+                  this.response = new Blob([responseBytes], { type: mimeType.split(';')[0].trim() });
+                } else if (this.responseType === 'json') {
+                  this.responseText = textBody;
+                  try { this.response = JSON.parse(textBody); } catch (_) { this.response = null; }
+                } else if (this.responseType === 'document' || mimeType.includes('xml') || mimeType.includes('html')) {
+                  this.responseText = textBody;
+                  if (global.DOMParser) {
+                    const parser = new DOMParser();
+                    this.responseXML = parser.parseFromString(
+                      textBody,
+                      mimeType.includes('html') ? 'text/html' : 'application/xml'
+                    );
+                    this.response = this.responseXML;
+                  } else {
+                    this.response = textBody;
+                  }
+                } else {
+                  this.responseText = textBody;
+                  this.response = textBody;
+                }
+
+                this._changeState(XMLHttpRequestPolyfill.DONE);
+                if (pageEmulator?.network?.logXMLHttpRequests) {
+                  try {
+                    console.warn("[XHR sync] LOAD", {
+                      method: this._method,
+                      url: this._url,
+                      status: this.status,
+                      responseTextLength: typeof this.responseText === "string" ? this.responseText.length : -1
+                    });
+                  } catch (_) {}
+                }
+                this._dispatchEvent('load');
+                this._dispatchEvent('loadend');
+              } catch (error) {
+                this.status = 0;
+                this.statusText = '';
+                this.responseURL = '';
+                this.response = null;
+                this.responseText = '';
+                this.responseXML = null;
+                this._changeState(XMLHttpRequestPolyfill.DONE);
+                if (pageEmulator?.network?.logXMLHttpRequests) {
+                  try { console.warn("[XHR sync] ERROR", { method: this._method, url: this._url, error: error && error.message || String(error) }); } catch (_) {}
+                }
+                this._dispatchEvent('error');
+                this._dispatchEvent('loadend');
+              }
+            }
+
             send(body = null) {
               //try { console.warn("[XHR v20] SEND", { method: this._method, url: this._url, bodyType: typeof body, bodyPreview: typeof body === "string" ? body.slice(0, 160) : body }); } catch (_) {}
               if (this.readyState !== XMLHttpRequestPolyfill.OPENED) {
                 throw new DOMException("Failed to execute 'send': The object's state must be OPENED.", "InvalidStateError");
+              }
+
+              if (!this._async) {
+                this._sendSynchronously(body);
+                return;
               }
 
               this._abortController = new AbortController();
