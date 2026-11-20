@@ -520,6 +520,9 @@
                   console.warn('Could not create workspace picker image thumbnail:', row.path, error);
                   icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.75h8l4.25 4.5v14H6z"/><path d="M14 2.75v4.5h4.25M9 12h6M9 15.5h6"/></svg>';
                 }
+              } else if (['json', 'jsonc', 'json5'].includes(extension(row.path))) {
+                // Keep the folded-page silhouette, but use JSON braces as its mark.
+                icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.75h8l4.25 4.5v14H6z"/><path d="M14 2.75v4.5h4.25"/><text x="12" y="15.8" text-anchor="middle" fill="currentColor" stroke="none" font-family="monospace" font-size="9.5" font-weight="600">{}</text></svg>';
               } else {
                 icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.75h8l4.25 4.5v14H6z"/><path d="M14 2.75v4.5h4.25M9 12h6M9 15.5h6"/></svg>';
               }
