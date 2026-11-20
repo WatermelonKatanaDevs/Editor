@@ -216,5 +216,57 @@
 })();
 </script>
     <script>window.__workersConfigReady.then(function(workers){window.WorkerConfig=workers;var script=document.createElement('script');script.src='browser.js';document.body.appendChild(script);}).catch(console.error);</script>
+<script>
+async function downloadEditorBrowserProxyExtension() {
+  const button = document.getElementById('install-editor-browser-proxy-extension');
+  const status = document.getElementById('editor-browser-proxy-extension-status');
+  const originalLabel = button?.innerHTML || 'Install Extension';
+
+  const setStatus = message => { if (status) status.textContent = message; };
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Preparing…';
+  }
+
+  try {
+    const Zip = window.JSZip || window.jszip || (typeof JSZip !== 'undefined' ? JSZip : null);
+    if (!Zip) throw new Error('The ZIP utility is unavailable.');
+
+    const packagePath = 'extensions/editor-browser-proxy/';
+    const files = ['manifest.json', 'proxy.js', 'bridge.js', 'page.js', 'README.md'];
+    const zip = new Zip();
+    const folder = zip.folder('editor-browser-proxy');
+
+    for (const filename of files) {
+      const sourceUrl = new URL(packagePath + filename, document.baseURI);
+      const response = await fetch(sourceUrl.href, {cache:'no-store'});
+      if (!response.ok) throw new Error('Could not load ' + filename + ' (' + response.status + ').');
+      folder.file(filename, await response.text());
+    }
+
+    const archive = await zip.generateAsync({type:'blob'});
+    const downloadUrl = URL.createObjectURL(archive);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = 'Editor Browser Proxy.zip';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(downloadUrl), 30000);
+
+    setStatus('Downloaded. Unzip it, then load the folder from your browser’s extensions page.');
+    if (typeof showToast === 'function') showToast('Editor Browser Proxy downloaded', 'success');
+  } catch (error) {
+    setStatus(error?.message || String(error));
+    if (typeof showToast === 'function') showToast(error?.message || 'Could not download extension', 'error');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.innerHTML = originalLabel;
+    }
+  }
+}
+</script>
   </body>
 </html>
