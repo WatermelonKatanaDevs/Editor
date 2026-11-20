@@ -31,7 +31,7 @@
         !frame ||
         page.iframe !== frame ||
         frame.getAttribute("data-page-id") !== String(page.id) ||
-        typeof page.network?.request !== "function" ||
+        window.__frameElement !== frame ||
         typeof page.location?.url !== "string" ||
         typeof page.location?.origin !== "string"
       ) return null;
