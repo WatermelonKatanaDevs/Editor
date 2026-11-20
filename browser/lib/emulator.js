@@ -5479,7 +5479,11 @@
 
               // 3. Support direct property access (e.g., storageProxy.myKey)
               if (typeof prop === 'string') {
-                return target.getItem(storagePrefix + prop);
+                // The Storage named-property getter returns undefined for a
+                // missing key, while getItem() returns null. Preserve that
+                // distinction for sites that test storage.someKey !== undefined.
+                const value = target.getItem(storagePrefix + prop);
+                return value === null ? undefined : value;
               }
 
               // Fallback for symbols or other unhandled properties
@@ -5517,7 +5521,7 @@
           enumerable: true
         });
         Object.defineProperty(window, 'sessionStorage', {
-          get: function() { return localStorageProxy; },
+          get: function() { return sessionStorageProxy; },
           set: undefined,
           configurable: true,
           enumerable: true
