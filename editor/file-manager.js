@@ -113,7 +113,12 @@
       if (refresh) this.refresh({notify:false});
     }
     isHiddenPath(path) {
-      return this.basename(path).startsWith('.');
+      // Piskel sidecars are hidden workspace metadata just like dotfiles.
+      // Check every path segment so hidden folders also hide their contents.
+      return this.normalize(path).split('/').some(part => {
+        const name = part.toLowerCase();
+        return name.startsWith('.') || name.endsWith('.piskel');
+      });
     }
     isNodeModulesPath(path) {
       return this.normalize(path).split('/').includes('node_modules');
@@ -243,7 +248,9 @@
         return node;
       };
       const addFile = (path, name, parent) => {
-        if (name.toLowerCase().endsWith('.piskel') || name.toLowerCase() === 'preview-config.json') return;
+        // Hidden-file filtering happens before tree insertion, so sidecars are
+        // omitted by default but become visible with Show Hidden Files enabled.
+        if (name.toLowerCase() === 'preview-config.json') return;
         const node = {
           id: crypto.randomUUID(),
           name,
