@@ -15,7 +15,7 @@ The extension requests access to all websites because its background service wor
 ## Design
 
 - `proxy.js` is the extension's Manifest V3 background service worker. It performs direct fetch requests with the extension's `<all_urls>` host permission.
-- `page.js` runs in the main world and replaces `window.fetch` only in Editor Browser-emulated pages.
+- `page.js` runs in the main world and replaces `window.fetch` in `browser/browser.html` itself. It does not inspect or modify the emulated pages opened inside the browser.
 - `bridge.js` runs in the isolated content-script world and relays messages between the page wrapper and the service worker.
 - The extension does not use the Editor Browser's configured proxy gateways or alter its Network endpoint chain.
 
