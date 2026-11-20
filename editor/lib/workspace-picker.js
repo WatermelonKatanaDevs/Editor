@@ -232,6 +232,60 @@
           for (const url of rowPreviewUrls) URL.revokeObjectURL(url);
           rowPreviewUrls = [];
         };
+        // Parse embedded album artwork once per audio file while this dialog is
+        // open. Keep the Blob cached across search/navigation redraws, while
+        // revoking each short-lived object URL with the other row thumbnails.
+        const audioArtworkCache = new Map();
+        function getAudioArtwork(path) {
+          if (audioArtworkCache.has(path)) return audioArtworkCache.get(path);
+          let artworkBlob = null;
+          try {
+            const parser = window.EditorAudioTags;
+            if (!parser?.parseID3) throw new Error('ID3 artwork parser is unavailable.');
+            const value = fs().readFileSync(path, 'binary');
+            if (value == null) throw new Error('Audio file is unavailable.');
+            const bytes = asBytes(value);
+            let picture = null;
+            const kind = extension(path);
+            if (kind === 'mp3') {
+              picture = parser.parseID3(bytes, 0)?.picture || null;
+            } else if (kind === 'wav' && bytes.length >= 12 &&
+              String.fromCharCode(...bytes.subarray(0, 4)) === 'RIFF' &&
+              String.fromCharCode(...bytes.subarray(8, 12)) === 'WAVE') {
+              // WAV stores ID3 metadata inside RIFF chunks. Inspect only the
+              // chunk headers and ID3 payload, not a second parsed WAV copy.
+              let offset = 12;
+              while (offset + 8 <= bytes.length) {
+                const chunkId = String.fromCharCode(...bytes.subarray(offset, offset + 4));
+                const chunkSize = (bytes[offset + 4] |
+                  (bytes[offset + 5] << 8) |
+                  (bytes[offset + 6] << 16) |
+                  (bytes[offset + 7] << 24)) >>> 0;
+                const dataStart = offset + 8;
+                const dataEnd = dataStart + chunkSize;
+                if (dataEnd > bytes.length) break;
+                if (chunkId === 'ID3 ' || chunkId === 'id3 ' || chunkId === 'id3') {
+                  picture = parser.parseID3(bytes, dataStart)?.picture || null;
+                  if (picture?.data?.length) break;
+                }
+                offset = dataEnd + (chunkSize & 1);
+              }
+            }
+            if (picture?.data?.length && picture.data.length <= 12 * 1024 * 1024) {
+              const imageBytes = asBytes(picture.data);
+              const detectedMime = parser.readImageMime?.(imageBytes) || '';
+              const declaredMime = String(picture.mime || '').split(/[;\\s]/)[0].toLowerCase();
+              const mime = detectedMime.startsWith('image/')
+                ? detectedMime
+                : declaredMime.startsWith('image/') ? declaredMime : '';
+              if (mime) artworkBlob = new Blob([imageBytes], {type:mime});
+            }
+          } catch (_) {
+            // Unsupported/malformed tags simply use the normal music icon.
+          }
+          audioArtworkCache.set(path, artworkBlob);
+          return artworkBlob;
+        }
 
         const overlay = document.createElement('div');
         const displayMode = getDisplayMode();
@@ -424,9 +478,24 @@
               icon.classList.add('is-directory');
               icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h6.1l1.6 2H19.5A1.5 1.5 0 0 1 21 6.5v12A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3.5 6.5h17" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
             } else if (['mp3', 'wav'].includes(extension(row.path))) {
-              // Use the familiar album/vinyl glyph for music files.
               icon.classList.add('is-audio');
-              icon.innerHTML = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#ef5350"/><circle cx="12" cy="12" r="6.1" fill="none" stroke="#202326" stroke-width="1.1"/><circle cx="12" cy="12" r="2.1" fill="#202326"/><circle cx="12" cy="12" r=".65" fill="#ef5350"/></svg>';
+              const artwork = getAudioArtwork(row.path);
+              if (artwork) {
+                const preview = document.createElement('img');
+                preview.className = 'wk-workspace-picker-row-thumbnail';
+                preview.alt = '';
+                preview.draggable = false;
+                preview.loading = 'lazy';
+                preview.decoding = 'async';
+                const url = URL.createObjectURL(artwork);
+                rowPreviewUrls.push(url);
+                preview.src = url;
+                icon.classList.add('is-audio-artwork');
+                icon.append(preview);
+              } else {
+                // Fall back to the album/vinyl glyph when no embedded cover exists.
+                icon.innerHTML = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#ef5350"/><circle cx="12" cy="12" r="6.1" fill="none" stroke="#202326" stroke-width="1.1"/><circle cx="12" cy="12" r="2.1" fill="#202326"/><circle cx="12" cy="12" r=".65" fill="#ef5350"/></svg>';
+              }
             } else {
               const suppliedMime = fileType(row.path);
               const inferredMime = window.EditorInferMime?.(row.path) || '';
