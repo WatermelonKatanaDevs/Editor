@@ -2992,11 +2992,9 @@
             }
           }
 
-          const initialPicker = getPicker();
-          if (!initialPicker) return;
-
+          let nativeFileSystem;
           const chromeObject = window.chrome || {};
-          const nativeFileSystem = chromeObject.fileSystem || null;
+          nativeFileSystem = chromeObject.fileSystem || null;
           if (nativeFileSystem?.__wkWorkspaceFileSystemShim) return;
 
           let activeLastError = null;
@@ -3422,10 +3420,24 @@
           });
 
           try {
-            chromeObject.fileSystem = fileSystemShim;
+            Object.defineProperty(chromeObject, 'fileSystem', {
+              configurable: true,
+              enumerable: true,
+              get() {
+                return getPicker() ? fileSystemShim : nativeFileSystem;
+              },
+              set(value) {
+                nativeFileSystem = value;
+              }
+            });
             if (!window.chrome) window.chrome = chromeObject;
           } catch (error) {
-            console.warn('[Browser Emulator] Could not install chrome.fileSystem workspace shim:', error);
+            try {
+              chromeObject.fileSystem = fileSystemShim;
+              if (!window.chrome) window.chrome = chromeObject;
+            } catch (fallbackError) {
+              console.warn('[Browser Emulator] Could not install chrome.fileSystem workspace shim:', fallbackError || error);
+            }
           }
         }
 
