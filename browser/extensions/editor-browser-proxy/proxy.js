@@ -14,8 +14,8 @@ function isTrustedEditorSender(sender) {
       host === "watermelonkatanadevs.github.io" ||
       host === "localhost" || host === "127.0.0.1" || host === "::1";
     if (!editorHost) return false;
-    if (/(?:^|\\/)browser\\/browser\\.html$/i.test(url.pathname)) return true;
-    const path = url.pathname.replace(/\\/+$/, "") || "/";
+    if (/(?:^|\/)browser\/browser\.html$/i.test(url.pathname)) return true;
+    const path = url.pathname.replace(/\/+$/, "") || "/";
     return host === "watermelonkatanadevs.github.io"
       ? path === "/Editor" || path === "/Editor/index.html"
       : path === "/" || path === "/index.html";
