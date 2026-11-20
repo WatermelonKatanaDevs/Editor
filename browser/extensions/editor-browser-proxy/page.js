@@ -257,7 +257,8 @@
    const state=states.get(this);
    if(!state?.proxied||!state.async)return originalSend.apply(this,arguments);
    if(state.sending)throw new DOMException("The object's state must be OPENED.","InvalidStateError");
-   return sendProxyRequest(this,state,body);
+   sendProxyRequest(this,state,body);
+   return undefined;
   };
   proto.abort=function(){
    const state=states.get(this);
