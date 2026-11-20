@@ -3081,9 +3081,9 @@
             const record = {
               path,
               name,
-              file: file || null,
+              file: file || (forcedPath ? new File([], name, {type: 'application/octet-stream'}) : null),
               writable: writable === true,
-              workspace: !!workspacePath || (!file && !!forcedPath),
+              workspace: !!workspacePath || !!forcedPath,
               mimeType: file?.type || 'application/octet-stream'
             };
 
@@ -3216,10 +3216,15 @@
                 data: new Blob([bytes], {type: record.mimeType || 'application/octet-stream'}),
                 mimeType: record.mimeType || 'application/octet-stream'
               });
+              if (savedPath == null) {
+                throw new DOMException('The save operation was cancelled.', 'AbortError');
+              }
               if (typeof savedPath === 'string') {
                 record.path = normalizePath(savedPath);
                 record.name = record.path.split('/').pop() || record.name;
                 record.workspace = true;
+              } else if (savedPath.savedToDevice !== true) {
+                throw new Error('The file could not be saved.');
               }
             }
             record.file = new File([bytes], record.name, {
