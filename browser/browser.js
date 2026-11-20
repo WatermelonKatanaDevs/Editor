@@ -849,22 +849,9 @@ async function createDataUri(response) {
           defaultName = getFileNameFromURL(response.source_url,'');
         }
 
-        // A URL fragment belongs to the loaded resource's page state. Keep it
-        // when the response is represented as a data URL; otherwise the
-        // synthetic filename fragment (for example "#f=embed") can overwrite
-        // application data encoded after "#" in the original URL.
-        let sourceHash = "";
-        const originalUrl = response.requested_url || response.source_url;
-        if (originalUrl) {
-          try {
-            sourceHash = new URL(originalUrl).hash;
-          } catch (_) {}
-        }
+        if (defaultName) defaultName = "#f="+defaultName;
 
-        if (sourceHash) defaultName = sourceHash;
-        else if (defaultName) defaultName = "#f=" + defaultName;
-
-        resolve(reader.result + defaultName);
+        resolve(reader.result+defaultName);
       }
       reader.onerror = reject;
       reader.readAsDataURL(blob);
