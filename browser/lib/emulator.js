@@ -3179,7 +3179,10 @@
                 readEntries(successCallback) {
                   const picker = getPicker();
                   const paths = picker?.listFiles?.() || [];
-                  const entries = paths.map(path => makeFileEntry(null, false, path));
+                  const entries = paths.map(path => {
+                    try { return makeFileEntry(picker.readFile?.(path) || null, false, path); }
+                    catch (_) { return null; }
+                  }).filter(Boolean);
                   successCallback?.(entries);
                 }
               };
@@ -3320,7 +3323,10 @@
                   suggestedName: settings.suggestedName || 'untitled',
                   accept: acceptedTypes(settings)
                 });
-                return path ? makeFileEntry(null, true, path) : undefined;
+                if (!path) return undefined;
+                let existingFile = null;
+                try { existingFile = picker.readFile?.(path) || null; } catch (_) {}
+                return makeFileEntry(existingFile, true, path);
               }
               if (!['openFile', 'openWritableFile', 'openDirectory'].includes(type)) {
                 throw new Error('Unsupported chrome.fileSystem entry type: ' + type);
