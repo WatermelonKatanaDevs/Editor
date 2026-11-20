@@ -10,6 +10,19 @@
     const GALLERY_DIR = '.editor/gallery';
     const STUDIO_SETTINGS_PATH = '.editor/ai-asset-studio.json';
     const savedGalleryAssets = new WeakMap();
+    const generatedAssetNames = new WeakMap();
+    let pickerContainer = null, renameModal = null;
+    const workspacePicker = window.EditorWorkspacePicker.create({
+      getContainer:() => pickerContainer,
+      getFs:() => ctx.state.fs,
+      getMime:path => ctx.mime(path),
+      canWrite:() => ctx.state.projectOwner !== false,
+      onWrite:path => {
+        ctx.markDirty?.(path);
+        ctx.updateStatus?.();
+        try { ctx.state.refreshExplorer?.(); ctx.state.fileManager?.refresh?.(); } catch (_) {}
+      }
+    });
     const assets = [];
     const urls = new Set();
     let imageCount = 1;
@@ -42,6 +55,7 @@
       '.ais-image-name{display:block;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#aaa;font:10px monospace}',
       '.ais-empty{padding:35px 12px;text-align:center;color:#777;border:1px dashed #383838;font-size:11px}',
       '.ais-image-menu{position:fixed;z-index:2147483000;min-width:150px;padding:3px;background:var(--editor-surface,#222);border:1px solid var(--editor-border-strong,#444);box-shadow:0 4px 14px #0009;border-radius:3px}.ais-image-menu button{display:block;width:100%;border:0;text-align:left;padding:7px 9px;background:transparent;font-size:11px}.ais-image-menu button:hover{background:var(--editor-hover)}.ais-image-menu button:disabled{opacity:.4;cursor:default}',
+      '.ais-rename-content{width:min(380px,calc(100vw - 30px));max-width:100%;padding:18px}.ais-rename-field{display:flex;flex-direction:column;gap:6px;margin:12px 0;color:#999;font-size:10px}.ais-rename-field input{width:100%;box-sizing:border-box;background:var(--editor-bg);color:var(--editor-text-secondary);border:1px solid #414141;border-radius:3px;padding:8px;font:12px sans-serif}.ais-rename-field input:focus{border-color:#5a89b5;outline:none}',
       '.ais-settings-content{width:min(650px,calc(100vw - 30px));max-height:min(720px,calc(100vh - 30px));overflow:auto}.ais-auto-gallery{display:flex;align-items:center;gap:7px;margin:8px 0 12px;color:#aaa;font-size:10px}.ais-auto-gallery input{margin:0;accent-color:#3794ff}.ais-gallery-popover{position:fixed;z-index:200001;width:min(430px,calc(100vw - 16px));max-height:min(72vh,680px);display:flex;flex-direction:column;background:var(--editor-surface,#202020);border:1px solid var(--editor-border-strong,#444);box-shadow:0 8px 28px #000a;border-radius:3px;color:var(--editor-text-secondary)}.ais-gallery-popover[hidden]{display:none}.ais-gallery-popover-head{display:flex;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--editor-border);background:var(--editor-tabs)}.ais-gallery-popover-head strong{flex:1;font-size:12px;font-weight:500;color:var(--editor-text)}.ais-gallery-popover-head span{color:#777;font:10px monospace}.ais-gallery-popover-head button{width:24px;height:23px;background:transparent;color:#999;border:0;border-radius:2px;cursor:pointer}.ais-gallery-popover-head button:hover{background:#333;color:#fff}.ais-gallery-content{padding:9px;overflow:auto;min-height:60px;flex:1;box-sizing:border-box}.ais-gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:7px}.ais-gallery-card{min-width:0;padding:5px;background:#1b1b1b;border:1px solid #333;border-radius:3px;cursor:pointer;text-align:left}.ais-gallery-card:hover{border-color:#527493;background:#222b34}.ais-gallery-card img{display:block;width:100%;aspect-ratio:1;object-fit:contain;image-rendering:pixelated;background:#292929}.ais-gallery-card span{display:block;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#aaa;font:9px monospace}.ais-gallery-empty{padding:28px 10px;text-align:center;color:#777;font-size:11px;border:1px dashed #383838}.ais-gallery-detail-title{margin:0 0 8px;color:#ddd;font-size:12px;font-weight:500}.ais-gallery-detail-field{margin:8px 0}.ais-gallery-detail-field strong{display:block;margin-bottom:4px;color:#999;font-size:10px;font-weight:500}.ais-gallery-detail-field pre{max-height:170px;overflow:auto;margin:0;padding:7px;background:#151515;border:1px solid #303030;color:#ccc;font:10px/1.45 monospace;white-space:pre-wrap;overflow-wrap:anywhere}.ais-gallery-detail-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}.ais-gallery-detail-actions button{background:#292929;color:#bbb;border:1px solid #414141;border-radius:2px;padding:6px 9px;font-size:10px;cursor:pointer}.ais-gallery-detail-actions button.primary{background:var(--editor-accent);border-color:var(--editor-accent-strong);color:#fff}.ais-gallery-detail-actions button:hover{filter:brightness(1.15)}.ais-model-list{display:flex;flex-direction:column;gap:4px}.ais-model-row{display:flex;align-items:center;gap:7px;padding:8px;background:#1c1c1c;border:1px solid #303030;border-radius:3px}.ais-model-row.active{border-color:#4a6f91;background:#222b34}.ais-model-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.ais-model-main strong{font-size:11px;font-weight:500;color:#ddd}.ais-model-main span{font:9px monospace;color:#777;overflow-wrap:anywhere}.ais-model-row button,.ais-settings-tabs button{background:#2a2a2a;color:#bbb;border:1px solid #414141;padding:5px 8px;border-radius:2px;cursor:pointer;font-size:10px}.ais-settings-tabs{display:flex;gap:4px;margin:10px 0 12px;border-bottom:1px solid var(--editor-border);padding-bottom:5px}.ais-settings-tabs button.active{background:#2b3b49;color:var(--editor-text);border-color:#527493}.ais-cache-list{display:flex;flex-direction:column;gap:5px}.ais-cache-row{padding:8px;background:#1c1c1c;border:1px solid #303030;border-radius:3px}.ais-cache-row strong{display:block;color:#ccc;font-size:10px}.ais-cache-row span{display:block;margin-top:3px;color:#777;font:9px monospace;overflow-wrap:anywhere}.ais-cache-row button{margin-top:6px;background:#292929;color:#c99;border:1px solid #493b3b;padding:4px 7px;font-size:9px;cursor:pointer}.ais-settings-note{color:#777;font-size:10px;line-height:1.45;margin:8px 0}',
       '@media(max-width:650px){.ais-main{padding:9px}.ais-prompt-grid{grid-template-columns:1fr}.ais-name-row{grid-template-columns:1fr}.ais-header-title{display:none}}'
     ].join('');
@@ -57,9 +71,83 @@
       const name = String(value || 'sprite').trim().replace(/[\\/:*?"<>|]+/g,'-').replace(/\s+/g,'-').replace(/^-+|-+$/g,'');
       return (name || 'sprite').replace(/\.png$/i,'');
     }
-    function fileName(index) {
+    function fileName(index, asset = assets[index]) {
+      const renamed = asset && generatedAssetNames.get(asset);
+      if (renamed) return renamed;
       const base = cleanName(nameInput?.value || promptState.name);
       return base + (imageCount > 1 ? '-' + (index + 1) : '') + '.png';
+    }
+    function normalizeImageFilename(value) {
+      return cleanName(stripPng(value)) + '.png';
+    }
+    function closeRenameModal() {
+      renameModal?._finish?.(null);
+    }
+    function askForRename(currentName) {
+      return new Promise(resolve => {
+        closeRenameModal();
+        const modal = document.createElement('div');
+        modal.className = 'editor-modal ai-settings-modal';
+        modal.innerHTML = '<div class="editor-modal-content ais-rename-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>Rename image</h2><label class="ais-rename-field">File name<input type="text" data-rename-name autocomplete="off" spellcheck="false"></label><div class="ais-gallery-detail-actions"><button type="button" data-rename-cancel>Cancel</button><button type="button" class="primary" data-rename-confirm>Rename</button></div></div>';
+        const input = modal.querySelector('[data-rename-name]');
+        input.value = stripPng(currentName || 'sprite');
+        let finished = false;
+        const finish = value => {
+          if (finished) return;
+          finished = true;
+          modal.remove();
+          if (renameModal === modal) renameModal = null;
+          resolve(value);
+        };
+        modal._finish = finish;
+        renameModal = modal;
+        modal.querySelector('.editor-modal-close').onclick = () => finish(null);
+        modal.querySelector('[data-rename-cancel]').onclick = () => finish(null);
+        modal.querySelector('[data-rename-confirm]').onclick = () => finish(input.value);
+        modal.onclick = event => { if (event.target === modal) finish(null); };
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Enter') { event.preventDefault(); finish(input.value); }
+          else if (event.key === 'Escape') { event.preventDefault(); finish(null); }
+        });
+        document.body.append(modal);
+        requestAnimationFrame(() => { modal.classList.add('show'); input.focus(); input.select(); });
+      });
+    }
+    function persistGalleryFilename(entry, filename) {
+      const fs = ctx.state?.fs;
+      if (!fs) throw new Error('No project filesystem is available.');
+      if (ctx.state.projectOwner === false) throw new Error('This workspace is read-only.');
+      let metadata = {};
+      if (fs.existsSync(entry.jsonPath)) metadata = JSON.parse(fs.readFileSync(entry.jsonPath, 'utf8') || '{}');
+      else {
+        metadata = { ...entry };
+        delete metadata.jsonPath;
+        delete metadata.metadataError;
+      }
+      metadata.filename = filename;
+      fs.writeFileSync(entry.jsonPath, JSON.stringify(metadata, null, 2));
+      Object.assign(entry, metadata, {filename});
+      ctx.markDirty?.(entry.jsonPath);
+      if (galleryPopover) refreshGalleryPopover();
+      status.textContent = 'Renamed gallery image · ' + filename;
+    }
+    async function renameGalleryImage(entry) {
+      const chosen = await askForRename(entry.filename);
+      if (chosen == null) return;
+      persistGalleryFilename(entry, normalizeImageFilename(chosen));
+    }
+    async function renameGeneratedImage(asset, index) {
+      if (!asset) return;
+      const chosen = await askForRename(fileName(index, asset));
+      if (chosen == null) return;
+      const filename = normalizeImageFilename(chosen);
+      const savedEntry = savedGalleryAssets.get(asset);
+      if (savedEntry) persistGalleryFilename(savedEntry, filename);
+      generatedAssetNames.set(asset, filename);
+      const card = results?.querySelector('[data-image-index="' + index + '"]');
+      const label = card?.querySelector('.ais-image-name');
+      if (label) label.textContent = filename;
+      status.textContent = 'Renamed generated image · ' + filename;
     }
     function hasPath(path) {
       const fs = ctx.state?.fs;
@@ -171,18 +259,17 @@
       if (galleryPopover) refreshGalleryPopover();
       return entry;
     }
-    function addGalleryImageToProject(entry) {
-      const fs = ctx.state?.fs;
-      if (!fs) throw new Error('No project filesystem is available.');
+    async function saveGalleryEntryAs(entry) {
       const bytes = readBinaryBytes(entry.imagePath);
-      const base = cleanName(stripPng(entry.filename || 'sprite'));
-      let destination = base + '.png', suffix = 1;
-      while (hasPath(destination)) destination = base + '-' + suffix++ + '.png';
-      fs.writeFileSync(destination, bytes);
-      ctx.markDirty?.(destination);
-      ctx.state?.refreshExplorer?.(); ctx.state?.fileManager?.refresh?.();
-      status.textContent = 'Added to project · ' + destination;
-      return destination;
+      const blob = new Blob([bytes], {type:'image/png'});
+      const savedPath = await workspacePicker.saveFile({
+        title:'Save image from AI Gallery',
+        suggestedName:entry.filename || 'sprite.png',
+        accept:{'image/png':['.png']},
+        bytes:blob
+      });
+      if (savedPath) status.textContent = 'Saved to project · ' + savedPath;
+      return savedPath;
     }
     function setProgress(info) {
       const raw = info?.progress, n = raw == null || raw === '' ? NaN : Number(raw);
@@ -300,25 +387,18 @@
       if (label) label.textContent = completed + ' image' + (completed === 1 ? '' : 's');
     }
     function createFile(asset,index) {
-      return new File([asset.blob],fileName(index),{type:'image/png',lastModified:Date.now()});
+      return new File([asset.blob],fileName(index,asset),{type:'image/png',lastModified:Date.now()});
     }
     async function saveAs(asset,index) {
-      const name = fileName(index);
-      if (typeof window.showSaveFilePicker === 'function') {
-        const handle = await window.showSaveFilePicker({
-          suggestedName:name,
-          types:[{description:'PNG image',accept:{'image/png':['.png']}}]
-        });
-        const writable = await handle.createWritable();
-        await writable.write(asset.blob);
-        await writable.close();
-        status.textContent = 'Saved ' + handle.name;
-      } else {
-        const url = URL.createObjectURL(asset.blob), a = document.createElement('a');
-        a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url),1000);
-        status.textContent = 'Saving ' + name;
-      }
+      if (!asset?.blob) throw new Error('The generated image is not available.');
+      const savedPath = await workspacePicker.saveFile({
+        title:'Save image from AI Asset Studio',
+        suggestedName:fileName(index,asset),
+        accept:{'image/png':['.png']},
+        bytes:asset.blob
+      });
+      if (savedPath) status.textContent = 'Saved to project · ' + savedPath;
+      return savedPath;
     }
     function releaseGalleryUrls() {
       for (const url of galleryUrls) { URL.revokeObjectURL(url); urls.delete(url); }
@@ -357,9 +437,11 @@
       const actions = document.createElement('div'); actions.className = 'ais-gallery-detail-actions';
       const use = document.createElement('button'); use.className = 'primary'; use.textContent = 'Use these settings';
       use.onclick = async () => { try { await applyGallerySettings(entry); closeGalleryPopover(); } catch (error) { showError(error); } };
-      const add = document.createElement('button'); add.textContent = 'Add to project';
-      add.onclick = () => { try { addGalleryImageToProject(entry); } catch (error) { showError(error); } };
-      actions.append(add, use); galleryContent.append(actions);
+      const save = document.createElement('button'); save.textContent = 'Save As…';
+      save.onclick = async () => { try { await saveGalleryEntryAs(entry); } catch (error) { showError(error); } };
+      const rename = document.createElement('button'); rename.textContent = 'Rename…';
+      rename.onclick = async () => { try { await renameGalleryImage(entry); } catch (error) { showError(error); } };
+      actions.append(save, rename, use); galleryContent.append(actions);
     }
     async function applyGallerySettings(entry) {
       const id = entry.provider?.id || providerId;
@@ -383,8 +465,10 @@
     function showGalleryContextMenu(event, entry) {
       closeContextMenu(); event.preventDefault();
       contextMenu = document.createElement('div'); contextMenu.className = 'ais-image-menu';
-      const addProject = document.createElement('button'); addProject.textContent = 'Add to project';
-      addProject.onclick = () => { closeContextMenu(); try { addGalleryImageToProject(entry); } catch (error) { showError(error); } };
+      const save = document.createElement('button'); save.textContent = 'Save As…';
+      save.onclick = async () => { closeContextMenu(); try { await saveGalleryEntryAs(entry); } catch (error) { showError(error); } };
+      const rename = document.createElement('button'); rename.textContent = 'Rename…';
+      rename.onclick = async () => { closeContextMenu(); try { await renameGalleryImage(entry); } catch (error) { showError(error); } };
       const details = document.createElement('button'); details.textContent = 'View prompt & settings';
       details.onclick = () => { closeContextMenu(); showGalleryDetails(entry); };
       const remove = document.createElement('button'); remove.textContent = 'Remove from gallery';
@@ -396,8 +480,8 @@
           ctx.markDirty?.(entry.imagePath); refreshGalleryPopover();
         } catch (error) { showError(error); }
       };
-      contextMenu.append(addProject, details, remove); document.body.append(contextMenu);
-      const x = Math.min(event.clientX,window.innerWidth - 190), y = Math.min(event.clientY,window.innerHeight - 105);
+      contextMenu.append(save, rename, details, remove); document.body.append(contextMenu);
+      const x = Math.min(event.clientX,window.innerWidth - 190), y = Math.min(event.clientY,window.innerHeight - 150);
       contextMenu.style.left = Math.max(4,x) + 'px'; contextMenu.style.top = Math.max(4,y) + 'px';
       setTimeout(() => document.addEventListener('pointerdown',closeContextMenuOutside,true),0);
       document.addEventListener('keydown',contextMenuKey);
@@ -456,13 +540,15 @@
       contextMenu = document.createElement('div'); contextMenu.className = 'ais-image-menu';
       const save = document.createElement('button'); save.textContent = 'Save As…';
       save.onclick = async () => { closeContextMenu(); try { await saveAs(asset,index); } catch (error) { if (error?.name !== 'AbortError') showError(error); } };
+      const rename = document.createElement('button'); rename.textContent = 'Rename…';
+      rename.onclick = async () => { closeContextMenu(); try { await renameGeneratedImage(asset,index); } catch (error) { showError(error); } };
       const addToGallery = document.createElement('button');
       addToGallery.textContent = savedGalleryAssets.has(asset) ? 'Already in Gallery' : 'Add to Gallery';
       addToGallery.disabled = busy || savedGalleryAssets.has(asset);
       addToGallery.onclick = async () => { closeContextMenu(); try { await saveAssetToGallery(asset,index); } catch (error) { showError(error); } };
-      contextMenu.append(save, addToGallery);
+      contextMenu.append(save, rename, addToGallery);
       document.body.append(contextMenu);
-      const x = Math.min(event.clientX,window.innerWidth - 170), y = Math.min(event.clientY,window.innerHeight - 55);
+      const x = Math.min(event.clientX,window.innerWidth - 170), y = Math.min(event.clientY,window.innerHeight - 115);
       contextMenu.style.left = Math.max(4,x) + 'px'; contextMenu.style.top = Math.max(4,y) + 'px';
       setTimeout(() => document.addEventListener('pointerdown',closeContextMenuOutside,true),0);
       document.addEventListener('keydown',contextMenuKey);
@@ -629,6 +715,7 @@
       requestAnimationFrame(() => modal.classList.add('show'));
     }
     function render(group) {
+      pickerContainer = group.viewBody;
       addStyle();
       page = document.createElement('div'); page.className = 'ai-asset-studio-page builtin-ai';
       page.innerHTML = '<div class="ai-panel-inner"><header class="ai-header"><div class="ai-header-left"><strong class="ais-header-title">AI Asset Studio</strong><select class="ai-chat-select" data-model-select title="Select image model"></select></div><div class="ai-header-right"><div class="ai-head-actions"><button data-load title="Load model">Load model</button><button data-gallery title="Image Gallery" aria-label="Image Gallery"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="13" height="13" rx="1.8"></rect><path d="m5.5 14 3.2-3.4 2.4 2.3 1.7-1.7 3.2 3.3"></path><path d="M8 20h11a2 2 0 0 0 2-2V8"></path></svg></button><button data-settings title="Studio AI Settings" aria-label="Studio AI Settings">⚙</button></div></div></header><main class="ais-main"><section class="ais-section"><div class="ais-section-title">Prompt</div><div class="ais-prompt-grid" data-prompt-grid><label class="ais-field">Positive prompt<textarea data-positive placeholder="A tiny red dragon with cream horns and a curled tail" maxlength="200"></textarea></label><label class="ais-field" data-negative-wrap>Negative prompt<textarea data-negative placeholder="Things to avoid…" maxlength="200"></textarea></label></div><div class="ais-name-row"><label class="ais-field">Image name<input data-image-name type="text" value="sprite" placeholder="sprite"></label><div class="ais-toolbar"><button class="primary" data-generate disabled>Generate</button></div></div><div class="ais-action-status"><span class="ais-load-state" data-status>Model not loaded</span></div><div class="ais-progress"><i data-progress-bar></i></div><div class="ais-progress-meta"><span data-progress-text>Load a model to begin.</span><span class="ais-progress-percent" data-progress-percent></span></div><div class="ais-error" data-error hidden></div></section><details class="ais-section ais-settings-section" open><summary class="ais-section-title">Settings</summary><div class="ais-settings-grid" data-config></div></details><section class="ais-section"><div class="ais-gallery-head"><strong>Generated images</strong><span class="ais-gallery-count" data-gallery-count>0 images</span></div><div class="ais-results" data-results><div class="ais-empty">Generated images will appear here. Drag an image into the project explorer or right-click it to Save As.</div></div></section></main></div>';
@@ -697,7 +784,7 @@
       title:'AI Studio',
       icon:'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 3l1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3zM19 16 L19.9 18.1 L22 19 L19.9 19.9 L19 22 L18.1 19.9 L16 19 L18.1 18.1 Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
       render(group) { render(group); },
-      dispose() { abortController?.abort(); releaseUrls(); releaseGalleryUrls(); closeContextMenu(); closeGalleryPopover(); provider?.dispose?.(); }
+      dispose() { abortController?.abort(); workspacePicker.cancelActive(); closeRenameModal(); pickerContainer = null; releaseUrls(); releaseGalleryUrls(); closeContextMenu(); closeGalleryPopover(); provider?.dispose?.(); }
     };
   };
 })();
