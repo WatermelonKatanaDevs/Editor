@@ -134,6 +134,11 @@ function waitForSocketOpen(socket, timeout, signal, url, endpointName) {
   });
 }
 
+function isHTMLResponse(response) {
+  const contentType = String(response && response.headers && response.headers.get('content-type') || '').toLowerCase();
+  return contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
+}
+
 class Network extends EventHandler {
   constructor() {
     super();
@@ -167,7 +172,9 @@ class Network extends EventHandler {
       if (!response) return null;
       endp.dispatchEvent('returnresponse',response,request,type);
       return response;
-    }, filter || (r => r.ok), endpointList);
+    }, filter || (r => r.ok), endpointList, response =>
+      type === 'page-load' && isHTMLResponse(response)
+    );
     if (response) {
       response.source_url = request.url;
       response.requested_url = request.__original_url || request.url;
@@ -278,9 +285,10 @@ class Network extends EventHandler {
       rootfolder: endpoint?.rootfolder || null
     }));
   }
-  async searchEndpoints(callback, filter, endpointList = this.endpoints) {
+  async searchEndpoints(callback, filter, endpointList = this.endpoints, fallbackFilter = null) {
     await wait(1);
     var responseError = null;
+    var firstFallbackResponse = null;
     var lastResponse = null;
     var lastError = null;
     for (var i = 0; i < endpointList.length; i++) {
@@ -289,15 +297,23 @@ class Network extends EventHandler {
       try {
         var response = await callback.call(this, endp);
         if (!response) continue;
+        // A later successful endpoint always wins over an earlier HTML error
+        // page. Keep only the first eligible fallback while continuing the
+        // chain so endpoint priority remains deterministic.
         if (filter(response)) return response;
-        if (endp.defaultError) responseError = response;
+        if (!firstFallbackResponse && fallbackFilter && fallbackFilter(response)) {
+          firstFallbackResponse = response;
+        }
+        if (endp.defaultError && !responseError) responseError = response;
         lastResponse = response;
       } catch (e) {
         console.log('[networkRequest] Endpoint error:', e && e.message || e);
         lastError = e;
       }
     }
-    if (responseError || lastResponse) return responseError || lastResponse;
+    if (firstFallbackResponse || responseError || lastResponse) {
+      return firstFallbackResponse || responseError || lastResponse;
+    }
     if (lastError) throw lastError;
   }
 }
