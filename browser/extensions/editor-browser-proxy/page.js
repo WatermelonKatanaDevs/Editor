@@ -14,10 +14,6 @@
 
   const CHANNEL = "editor-browser-proxy:v1";
   const pending = new Map();
-  let rawFetch = window.fetch;
-  let wrappedFetch = null;
-  let accessorInstalled = false;
-
   const browserOrigin = window.location.origin;
   const browserBaseUrl = window.location.href;
 
@@ -154,10 +150,6 @@
     if (original.__editorBrowserProxyWrapped) return original;
 
     const wrapped = function(input, init) {
-      if (!/(?:^|\/)browser\/browser\.html$/i.test(window.location.pathname)) {
-        return original.apply(this, arguments);
-      }
-
       let request;
       try {
         request = new Request(input, init);
@@ -189,50 +181,8 @@
     return wrapped;
   }
 
-  function installFetchReplacement() {
-    if (!/(?:^|\/)browser\/browser\.html$/i.test(window.location.pathname) || typeof window.fetch !== "function") return false;
-
-    if (!accessorInstalled) {
-      rawFetch = window.fetch;
-      wrappedFetch = makeFetchWrapper(rawFetch);
-      try {
-        Object.defineProperty(window, "fetch", {
-          configurable: true,
-          enumerable: true,
-          get() { return wrappedFetch || rawFetch; },
-          set(value) {
-            rawFetch = value;
-            wrappedFetch = makeFetchWrapper(value);
-          }
-        });
-        accessorInstalled = true;
-        return true;
-      } catch (_) {
-        // Some page runtimes may define fetch as non-configurable. The
-        // periodic check below still wraps it if fetch is not ready yet.
-      }
-    }
-
-    if (!accessorInstalled) {
-      const current = window.fetch;
-      if (!current?.__editorBrowserProxyWrapped) {
-        rawFetch = current;
-        wrappedFetch = makeFetchWrapper(current);
-        try { window.fetch = wrappedFetch; } catch (_) {}
-      }
-    }
-    return true;
+  // Patch the browser page's fetch once, at document_start.
+  if (typeof window.fetch === "function") {
+    window.fetch = makeFetchWrapper(window.fetch);
   }
-
-  // Install immediately at document_start; the accessor also wraps any later
-  // assignment to window.fetch made by the browser page itself.
-  let attempts = 0;
-  const timer = setInterval(() => {
-    attempts++;
-    const installed = installFetchReplacement();
-    if ((installed && accessorInstalled) || attempts >= 800) clearInterval(timer);
-  }, 25);
-
-  if (installFetchReplacement() && accessorInstalled) clearInterval(timer);
-  window.addEventListener("pagehide", () => clearInterval(timer), {once: true});
 })();
