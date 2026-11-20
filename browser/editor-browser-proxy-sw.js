@@ -108,18 +108,20 @@ self.addEventListener('message', event => {
   const task = (async () => {
     try {
       const response = await proxyRequest(data, controller.signal);
-      const body = await response.arrayBuffer();
+      const body = response.body === null ? null : await response.arrayBuffer();
       const responseHeaders = Array.from(response.headers.entries()).filter(([name]) => {
         return !['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'set-cookie'].includes(name.toLowerCase());
       });
 
-      port.postMessage({
+      const message = {
         ok: true,
         status: response.status,
         statusText: response.statusText,
         headers: responseHeaders,
         body
-      }, [body]);
+      };
+      if (body instanceof ArrayBuffer) port.postMessage(message, [body]);
+      else port.postMessage(message);
     } catch (error) {
       try {
         port.postMessage({
