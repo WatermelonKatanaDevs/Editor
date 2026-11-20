@@ -245,10 +245,13 @@
 
   // The emulator installs its own fetch during its runtime bootstrap. Wait
   // for the PageEmulator identity and wrap that final fetch implementation.
+  let attempts = 0;
   const timer = setInterval(() => {
-    installFetchReplacement();
+    attempts++;
+    const installed = installFetchReplacement();
+    if ((installed && accessorInstalled) || attempts >= 800) clearInterval(timer);
   }, 25);
 
-  installFetchReplacement();
+  if (installFetchReplacement() && accessorInstalled) clearInterval(timer);
   window.addEventListener("pagehide", () => clearInterval(timer), {once: true});
 })();
