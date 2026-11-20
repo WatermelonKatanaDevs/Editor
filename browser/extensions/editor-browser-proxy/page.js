@@ -155,7 +155,8 @@
             credentials: request.credentials,
             cache: request.cache,
             redirect: request.redirect,
-            referrerPolicy: request.referrerPolicy
+            referrerPolicy: request.referrerPolicy,
+            integrity: request.integrity
           }
         }, "*");
       }).catch(error => finish(reject, error));
