@@ -304,7 +304,7 @@ class Network extends EventHandler {
         if (!firstFallbackResponse && fallbackFilter && fallbackFilter(response)) {
           firstFallbackResponse = response;
         }
-        if (endp.defaultError && !responseError) responseError = response;
+        if (endp.defaultError) responseError = response;
         lastResponse = response;
       } catch (e) {
         console.log('[networkRequest] Endpoint error:', e && e.message || e);
