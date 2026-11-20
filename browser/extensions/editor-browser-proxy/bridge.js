@@ -6,8 +6,8 @@
     host === "watermelonkatanatest.onrender.com" ||
     host === "watermelonkatanadevs.github.io" ||
     host === "localhost" || host === "127.0.0.1" || host === "::1";
-  const path = url.pathname.replace(/\\/+$/, "") || "/";
-  const browserPage = /(?:^|\\/)browser\\/browser\\.html$/i.test(url.pathname);
+  const path = url.pathname.replace(/\/+$/, "") || "/";
+  const browserPage = /(?:^|\/)browser\/browser\.html$/i.test(url.pathname);
   const parentPage = editorHost && (
     host === "watermelonkatanadevs.github.io"
       ? path === "/Editor" || path === "/Editor/index.html"
