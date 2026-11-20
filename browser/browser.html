@@ -156,7 +156,13 @@
               <option value="https://html.duckduckgo.com/html/?q=">DuckDuckGo Lite</option>
             </select>
           </div>
-          <div class="flex justify-end pt-2">
+          <div class="flex items-center justify-between gap-3 pt-3 border-t border-gray-800">
+            <div class="flex flex-col gap-1">
+              <button id="install-editor-browser-proxy-extension" type="button" onclick="installEditorBrowserProxyExtension()" class="bg-gray-700 hover:bg-gray-600 border border-gray-600 px-3 py-2 rounded font-semibold text-white">
+                <i class="fa-solid fa-puzzle-piece mr-1"></i> Install Extension
+              </button>
+              <span id="editor-browser-proxy-extension-status" class="text-[10px] text-gray-500">Editor Browser Proxy extension</span>
+            </div>
             <button onclick="saveSettings()" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded font-semibold text-white">Save Settings</button>
           </div>
         </div>
