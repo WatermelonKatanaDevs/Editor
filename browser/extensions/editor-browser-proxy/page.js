@@ -1,10 +1,34 @@
 // Main-world fetch replacement for the Editor Browser page itself.
 // It deliberately does not inspect or modify the emulated pages inside it.
 (() => {
-  // This content script is declared for all URLs so it can run in the browser
-  // frame regardless of the Editor deployment host. Restrict activation by
-  // the browser page's own path, not by PageEmulator internals.
-  if (!/(?:^|\/)browser\/browser\.html$/i.test(window.location.pathname)) return;
+  // Only activate on the deployed Editor origins (or a local development server).
+  function isEditorHost(hostname) {
+    const host = String(hostname || "").toLowerCase();
+    return host === "watermelonkatana.onrender.com" ||
+      host === "watermelonkatanatest.onrender.com" ||
+      host === "watermelonkatanadevs.github.io" ||
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1";
+  }
+
+  function isEditorBrowserDocument(url) {
+    return isEditorHost(url.hostname) && /(?:^|\\/)browser\\/browser\\.html$/i.test(url.pathname);
+  }
+
+  function isEditorParentDocument(url) {
+    if (!isEditorHost(url.hostname)) return false;
+    const path = url.pathname.replace(/\\/+$/, "") || "/";
+    if (url.hostname.toLowerCase() === "watermelonkatanadevs.github.io") {
+      return path === "/Editor" || path === "/Editor/index.html";
+    }
+    return path === "/" || path === "/index.html";
+  }
+
+  const currentUrl = new URL(window.location.href);
+  const isBrowserDocument = isEditorBrowserDocument(currentUrl);
+  const isParentDocument = isEditorParentDocument(currentUrl);
+  if (!isBrowserDocument && !isParentDocument) return;
 
   if (window.__editorBrowserProxyPageBootstrap) return;
   Object.defineProperty(window, "__editorBrowserProxyPageBootstrap", {
@@ -181,7 +205,8 @@
     return wrapped;
   }
 
-  // Patch the browser page's fetch once, at document_start.
+  // Patch the Browser document or parent Editor page once, at document_start.
+  // The parent's network.js captures fetch as soon as its script loads.
   if (typeof window.fetch === "function") {
     window.fetch = makeFetchWrapper(window.fetch);
   }
