@@ -2053,7 +2053,7 @@ async function getDocumentContent(response, url, origin, page) {
   // Handle 7z Archives
   if (contentType.includes("application/x-7z-compressed") || ext === "7z") {
     rawHtml = await get7zGalleryDocument(response, url, origin, page);
-  } else if (contentType.includes("text/html")) {
+  } else if (contentType.includes("text/html") || contentType.includes("application/xhtml+xml")) {
     rawHtml = await response.clone().text();
   } else if (contentType.includes("image/")) {
     rawHtml = `<html>
@@ -2446,7 +2446,12 @@ async function renderTabContent(tab, url) {
     return;
   }
 
-  if (!(response instanceof Response) || !response.ok) {
+  const responseContentType = response instanceof Response
+    ? String(response.headers.get('content-type') || '').toLowerCase()
+    : '';
+  const isHTMLResponseFallback = response instanceof Response &&
+    (responseContentType.includes('text/html') || responseContentType.includes('application/xhtml+xml'));
+  if (!(response instanceof Response) || (!response.ok && !isHTMLResponseFallback)) {
     tab.iframe.removeAttribute('src');
     tab.iframe.srcdoc = `<div style="font-family: sans-serif; padding: 40px; text-align: center; color: #333;">
       <h2 style="color: #e53e3e;">Proxy Connection Failed</h2>
@@ -2461,7 +2466,9 @@ async function renderTabContent(tab, url) {
   tab.page.processedDocument = '';
   try {
     const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('text/html')) tab.page.rawDocument = await response.clone().text();
+    if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
+      tab.page.rawDocument = await response.clone().text();
+    }
   } catch(e) {}
 
   var rawHtml = await getDocumentContent(response, url, origin, tab.page);
