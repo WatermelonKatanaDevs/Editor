@@ -91,16 +91,25 @@
           const startPath = message.saveAs === true
             ? (documentPath ? documentPath.split('/').slice(0, -1).join('/') : '')
             : 'FilmCraft Exports';
-          path = await workspacePicker.savePath({
+          const saved = await workspacePicker.saveFile({
             title:message.saveAs === true ? 'Save FilmCraft Project As' : 'Save FilmCraft Export',
             suggestedName:name,
-            startPath
+            startPath,
+            data:bytes,
+            mimeType:ctx.mime(name) || 'application/octet-stream'
           });
-          if (!path) return;
+          if (!saved) return;
+          if (saved && typeof saved === 'object' && saved.savedToDevice === true) {
+            if (message.saveAs === true && isProject(name)) documentPath = null;
+            setStatus('Saved to device: ' + name, false);
+            return;
+          }
+          path = saved;
           if (message.saveAs === true && isProject(name)) documentPath = path;
-        } else {
-          path = documentPath;
+          setStatus('Saved to workspace: ' + path, false);
+          return;
         }
+        path = documentPath;
         workspacePicker.writeFile(path, bytes);
         setStatus('Saved to workspace: ' + path, false);
       } catch (error) {
