@@ -1,5 +1,5 @@
-// Main-world fetch replacement for the Editor Browser page itself.
-// It deliberately does not inspect or modify the emulated pages inside it.
+// Main-world fetch replacement for the parent Editor page and Browser document.
+// It deliberately does not inspect or modify pages opened inside the Browser.
 (() => {
   // Only activate on the deployed Editor origins (or a local development server).
   function isEditorHost(hostname) {
@@ -9,7 +9,7 @@
       host === "watermelonkatanadevs.github.io" ||
       host === "localhost" ||
       host === "127.0.0.1" ||
-      host === "::1";
+      host === "[::1]";
   }
 
   function isEditorBrowserDocument(url) {
