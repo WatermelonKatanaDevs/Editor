@@ -2295,14 +2295,35 @@
         const nativeElementGetAttribute = Element.prototype.getAttribute;
         const nativeScriptSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, "src");
 
+        // Match the browser's reflected IDL attributes for URL-valued resource
+        // properties. The page-visible attributes are kept in data-raw-* while
+        // the real attributes may be removed or replaced with data URLs.
+        function getReflectedAttributeValue(element, property, value) {
+          if (value === null) return "";
+
+          // HTML's reflected URL getters resolve against the element's node
+          // document base URL and return the serialized URL when parsing works.
+          if (property === "src" || property === "href" || property === "data") {
+            try {
+              const baseURL = element.ownerDocument?.baseURI || CURRENT_PAGE_URL;
+              return new URL(value, baseURL).href;
+            } catch (_) {
+              // The native getter falls back to the original attribute value
+              // when URL parsing fails.
+              return value;
+            }
+          }
+
+          // Other reflected string attributes (srcset, srcdoc, integrity)
+          // retain their literal value, with the missing-attribute case handled
+          // above as the empty string.
+          return value;
+        }
+
         function getOriginalScriptSrc(script) {
           const rawSrc = nativeElementGetAttribute.call(script, "data-raw-src");
-          if (rawSrc !== null && rawSrc !== "") {
-            try {
-              return new URL(rawSrc, CURRENT_PAGE_URL).href;
-            } catch (_) {
-              return rawSrc;
-            }
+          if (rawSrc !== null) {
+            return getReflectedAttributeValue(script, "src", rawSrc);
           }
           return nativeScriptSrcDescriptor.get.call(script);
         }
@@ -2376,7 +2397,7 @@
               get: function() {
                 if (tagName === "script" && linkprop === "src") return getOriginalScriptSrc(this);
                 const value = this.getAttribute(linkprop);
-                return linkprop === "integrity" && value == null ? "" : value;
+                return getReflectedAttributeValue(this, linkprop, value);
               },
               set: function(val) { return this.setAttribute(linkprop, val) },
               configurable: true,
