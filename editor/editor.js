@@ -4262,8 +4262,32 @@ window.__editorInitPromise = (async function () {
   state.saveEditorSettings = saveEditorSettings;
   state.applyEditorSettings = applyEditorSettings;
   state.applyEditorEnvironment = applyEditorEnvironment;
+  function getWorkspacePicker(container) {
+    if (typeof window.EditorWorkspacePicker?.create !== 'function') return null;
+    const target = container && typeof container.appendChild === 'function' ? container : document.body;
+    state.workspacePickerInstances ||= new WeakMap();
+    let picker = state.workspacePickerInstances.get(target);
+    if (!picker) {
+      picker = window.EditorWorkspacePicker.create({
+        getFs:() => state.fs,
+        canWrite:() => !!state.fs,
+        showHiddenFiles:() => state.behavior.showHiddenFiles === true,
+        getMime:mime,
+        getContainer:() => target.isConnected ? target : null,
+        onWrite:() => {
+          state.fileManager?.refresh?.({notify:false});
+          markDirty();
+          updateStatus();
+        }
+      });
+      state.workspacePickerInstances.set(target, picker);
+    }
+    return picker;
+  }
+
   window.EditorApp = {
     start,
+    getWorkspacePicker,
     openFile,
     openBuiltin,
     showSidebar: name => state.sidebarController?.show?.(name),
