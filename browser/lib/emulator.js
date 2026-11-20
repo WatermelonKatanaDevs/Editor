@@ -5160,7 +5160,7 @@
 
                 this.status = result.status;
                 this.statusText = result.statusText || '';
-                this.responseURL = result.url || this._url;
+                this.responseURL = result.requested_url || this._url;
                 this._responseHeaders = result.headers instanceof Headers
                   ? new Headers(result.headers)
                   : new Headers(result.headers || {});
