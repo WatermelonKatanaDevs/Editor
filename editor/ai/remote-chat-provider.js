@@ -204,7 +204,7 @@
     return unit==='ms'?n/1000:unit==='m'?n*60:n;
   }
   class AIClient {
-    constructor(registry,network,localManager){this.registry=registry;this.network=network || window.__sharedBrowserNetwork || null;this.localManager=localManager || null;this.abortController=null;}
+    constructor(registry,network){this.registry=registry;this.network=network || window.__sharedBrowserNetwork || null;this.abortController=null;}
     model(){return this.registry.active();}
     async request(url,options={}){
       const init={...options};
@@ -251,13 +251,10 @@
         await new Promise(resolve=>setTimeout(resolve,waitMs));
       }
     }
-    cancel(){this.abortController?.abort();this.abortController=null;this.localManager?.cancel?.();}
+    cancel(){this.abortController?.abort();this.abortController=null;}
     async complete(messages,options={}){
       const model=options.model||this.model();
-      if(model.protocol==='local-transformers'){
-        if(!this.localManager)throw new Error('Local AI runtime is not initialized.');
-        return await this.localManager.complete(messages,options);
-      }
+      if(model.protocol==='local-transformers')throw new Error('Local models must be handled by LocalProviderAI.');
       if(model.protocol==='gradio-space')return await this.completeGradio(messages,options,model);
       let temperature=options.temperature??.7;
       let response=null;
@@ -289,10 +286,7 @@
     async completeGradio(messages,options,model){const result={role:'assistant',content:'',reasoning_content:''};for await(const chunk of this.streamGradio(messages,options,model)){result.content=chunk.text||result.content;result.reasoning_content=chunk.reasoning||result.reasoning_content;}return result;}
     async *stream(messages,options={}){
       const model=options.model||this.model();
-      if(model.protocol==='local-transformers'){
-        if(!this.localManager)throw new Error('Local AI runtime is not initialized.');
-        yield* this.localManager.stream(messages,options);return;
-      }
+      if(model.protocol==='local-transformers')throw new Error('Local models must be handled by LocalProviderAI.');
       this.cancel();const controller=new AbortController();this.abortController=controller;
       try {
         if(model.protocol==='gradio-space')yield* this.streamGradio(messages,{...options,signal:controller.signal},model);
@@ -351,3 +345,23 @@
   }
   root.AIClient=AIClient;
 })();
+
+
+/* -------------------------------------------------------------------------- */
+/* Consolidated module */
+(function(global){
+  'use strict';
+  const root=global.EditorAI=global.EditorAI||{};
+  const Base=root.ProviderAI;
+  if(typeof Base!=='function') throw new Error('Load ai-chat.js before remote-chat-provider.js.');
+  class RemoteProviderAI extends Base {
+    constructor(options={}) { super({...options,kind:'remote'}); if(!options.client) throw new TypeError('RemoteProviderAI requires an AIClient.'); this.client=options.client; this.registry=options.registry||null; }
+    getModel(){ return this.registry?.active?.()||this.client.model?.()||null; }
+    complete(messages,options={}){ return this.client.complete(messages,{...options,model:options.model||this.getModel()}); }
+    stream(messages,options={}){ return this.client.stream(messages,{...options,model:options.model||this.getModel()}); }
+    cancel(){ this.client.cancel?.(); }
+    dispose(){ this.cancel(); }
+  }
+  root.RemoteProviderAI=RemoteProviderAI;
+  if(global.ChatAIFramework) global.ChatAIFramework.RemoteProviderAI=RemoteProviderAI;
+})(window);
