@@ -182,7 +182,7 @@
   }
     return {
       title: 'Environment Variables',
-      icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="7" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="17" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.5 8.5 15.5 15.5M15.5 8.5 8.5 15.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+      icon: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="20" height="20" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 7.2H21.5" fill="none" stroke="currentColor" stroke-width="1.4"/><g fill="currentColor" font-family="Georgia, \'Times New Roman\', serif" font-style="italic" font-weight="normal" text-anchor="middle"><text x="7" y="17.3" font-size="11.5">{</text><text x="12" y="18.1" font-size="14">x</text><text x="17" y="17.3" font-size="11.5">}</text></g></svg>',
       render: renderEnvironment,
       load: loadEnvironment,
       save: saveEnvironment,
