@@ -78,7 +78,7 @@
       return base + (imageCount > 1 ? '-' + (index + 1) : '') + '.png';
     }
     function normalizeImageFilename(value) {
-      const name = cleanName(value).replace(/\\.[^.]+$/, '');
+      const name = cleanName(value).replace(/\.[^.]+$/, '');
       return (name || 'sprite') + '.png';
     }
     function closeRenameModal() {
