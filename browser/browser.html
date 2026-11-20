@@ -222,5 +222,257 @@
 })();
 </script>
     <script>window.__workersConfigReady.then(function(workers){window.WorkerConfig=workers;var script=document.createElement('script');script.src='browser.js';document.body.appendChild(script);}).catch(console.error);</script>
+<script>
+(function () {
+  const STORAGE_KEY = 'editorBrowserProxyExtensionEnabled';
+  const SCRIPT_URL = new URL('editor-browser-proxy-sw.js', document.baseURI).href;
+  const SCOPE_URL = new URL('./', SCRIPT_URL);
+  let registration = null;
+  let scanTimer = null;
+  const hookedFrames = new WeakSet();
+
+  function setStatus(message, isError) {
+    const status = document.getElementById('editor-browser-proxy-extension-status');
+    if (status) {
+      status.textContent = message;
+      status.className = isError ? 'text-[10px] text-rose-400' : 'text-[10px] text-gray-500';
+    }
+    const button = document.getElementById('install-editor-browser-proxy-extension');
+    if (button) button.disabled = !!isError && message === 'Installing…';
+  }
+
+  function readProxySettings() {
+    let settings = {};
+    try {
+      if (typeof appSettings !== 'undefined' && appSettings && typeof appSettings === 'object') {
+        settings = appSettings;
+      }
+    } catch (_) {}
+
+    const primaryInput = document.getElementById('setting-proxy-url');
+    const fallbackInput = document.getElementById('setting-fallback-proxy-url');
+    const fallbackToggle = document.getElementById('setting-fallback-enable');
+    const obscureToggle = document.getElementById('setting-obscure-url');
+
+    return {
+      proxy: String(settings.primaryProxy || primaryInput?.value || window.WorkerConfig?.proxy || '').trim(),
+      fallbackProxy: String(settings.fallbackProxy || fallbackInput?.value || window.WorkerConfig?.fallbackProxy || '').trim(),
+      useFallback: settings.useFallback == null ? !!fallbackToggle?.checked : !!settings.useFallback,
+      obscureURL: settings.obscureURL == null ? (obscureToggle ? !!obscureToggle.checked : true) : !!settings.obscureURL
+    };
+  }
+
+  function postToWorker(worker, message, transfer, signal) {
+    return new Promise((resolve, reject) => {
+      if (!worker) {
+        reject(new Error('The Editor Browser Proxy service worker is not active.'));
+        return;
+      }
+      if (signal?.aborted) {
+        reject(new DOMException('The operation was aborted.', 'AbortError'));
+        return;
+      }
+
+      const channel = new MessageChannel();
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener('abort', onAbort);
+        try { channel.port1.close(); } catch (_) {}
+        callback(value);
+      };
+      const onAbort = () => {
+        try { worker.postMessage({type:'EDITOR_BROWSER_PROXY_ABORT', id:message.id}); } catch (_) {}
+        finish(reject, new DOMException('The operation was aborted.', 'AbortError'));
+      };
+
+      channel.port1.onmessage = event => finish(resolve, event.data || {});
+      channel.port1.onmessageerror = () => finish(reject, new Error('Could not read the proxy response.'));
+      signal?.addEventListener('abort', onAbort, {once:true});
+
+      try {
+        worker.postMessage(message, [channel.port2, ...(transfer || [])]);
+      } catch (error) {
+        finish(reject, error);
+      }
+    });
+  }
+
+  async function proxyPageFetch(page, pageWindow, input, init, originalFetch) {
+    let request;
+    try {
+      request = new pageWindow.Request(input, init);
+    } catch (_) {
+      return originalFetch(input, init);
+    }
+
+    let target;
+    try {
+      target = new URL(request.url, page.location?.url || pageWindow.location.href);
+    } catch (_) {
+      return originalFetch(input, init);
+    }
+
+    if ((target.protocol !== 'http:' && target.protocol !== 'https:') ||
+        target.origin === page.location?.origin) {
+      return originalFetch(input, init);
+    }
+
+    const config = readProxySettings();
+    if (!config.proxy && !(config.useFallback && config.fallbackProxy)) {
+      throw new pageWindow.TypeError('Set a CORS Worker Proxy Gateway URL in Proxy Configuration first.');
+    }
+
+    let body = null;
+    if (request.method !== 'GET' && request.method !== 'HEAD' && request.body) {
+      body = await request.clone().arrayBuffer();
+    }
+
+    const id = (window.crypto?.randomUUID && window.crypto.randomUUID()) ||
+      ('ebp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
+    const worker = registration?.active;
+    const result = await postToWorker(worker, {
+      type: 'EDITOR_BROWSER_PROXY_FETCH',
+      id,
+      url: target.href,
+      method: request.method,
+      headers: Array.from(request.headers.entries()),
+      body,
+      proxy: config.proxy,
+      fallbackProxy: config.fallbackProxy,
+      useFallback: config.useFallback,
+      obscureURL: config.obscureURL
+    }, body instanceof ArrayBuffer ? [body] : [], request.signal);
+
+    if (!result?.ok) throw new pageWindow.TypeError(result?.error || 'The proxy request failed.');
+    const nullBodyStatus = [204, 205, 304].includes(Number(result.status)) || request.method === 'HEAD';
+    const response = new pageWindow.Response(nullBodyStatus ? null : result.body, {
+      status: Number(result.status) || 200,
+      statusText: result.statusText || '',
+      headers: result.headers || []
+    });
+    try { Object.defineProperty(response, 'url', {configurable:true, value:target.href}); } catch (_) {}
+    return response;
+  }
+
+  function isEditorBrowserPage(page, pageWindow) {
+    try {
+      return !!page &&
+        !!page.iframe &&
+        page.iframe.pageEmulator === page &&
+        pageWindow.__pageEmulator === page &&
+        typeof pageWindow.fetch === 'function';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function patchPage(page) {
+    const frame = page?.iframe;
+    if (!frame) return;
+    if (!hookedFrames.has(frame)) {
+      hookedFrames.add(frame);
+      frame.addEventListener('load', () => {
+        // The emulator sets its own fetch during document bootstrap. Patch
+        // after that document has finished loading so this wrapper stays last.
+        setTimeout(() => patchPage(page), 0);
+      });
+    }
+
+    let pageWindow;
+    try { pageWindow = frame.contentWindow; } catch (_) { return; }
+    if (!pageWindow || !isEditorBrowserPage(page, pageWindow)) return;
+    if (pageWindow.document?.readyState !== 'complete') return;
+
+    const currentFetch = pageWindow.fetch;
+    if (currentFetch?.__editorBrowserProxyExtension) return;
+
+    const originalFetch = currentFetch.bind(pageWindow);
+    const wrappedFetch = function(input, init) {
+      return proxyPageFetch(page, pageWindow, input, init, originalFetch);
+    };
+    try {
+      Object.defineProperty(wrappedFetch, '__editorBrowserProxyExtension', {value:true});
+      Object.defineProperty(wrappedFetch, '__editorBrowserProxyOriginal', {value:currentFetch});
+      pageWindow.fetch = wrappedFetch;
+    } catch (_) {}
+  }
+
+  function scanEditorBrowserPages() {
+    const registry = window.__pageRegistry;
+    if (!registry) return;
+    for (const page of Object.values(registry)) {
+      if (page?.iframe) patchPage(page);
+    }
+  }
+
+  function startExtensionRuntime() {
+    scanEditorBrowserPages();
+    if (scanTimer == null) scanTimer = setInterval(scanEditorBrowserPages, 250);
+    setStatus('Installed — fetch proxy active in Editor Browser pages');
+  }
+
+  async function installEditorBrowserProxyExtension() {
+    const button = document.getElementById('install-editor-browser-proxy-extension');
+    if (button) button.disabled = true;
+    setStatus('Installing…');
+
+    try {
+      if (!('serviceWorker' in navigator)) {
+        throw new Error('This browser does not support service workers.');
+      }
+
+      registration = await navigator.serviceWorker.register(SCRIPT_URL, {
+        scope: SCOPE_URL.pathname,
+        updateViaCache: 'none'
+      });
+      await navigator.serviceWorker.ready;
+      registration = await navigator.serviceWorker.getRegistration(SCOPE_URL.href) || registration;
+      if (!registration.active) throw new Error('The extension service worker did not activate.');
+
+      localStorage.setItem(STORAGE_KEY, '1');
+      startExtensionRuntime();
+      if (button) {
+        button.disabled = false;
+        button.innerHTML = '<i class="fa-solid fa-check mr-1"></i> Extension Installed';
+      }
+      if (typeof showToast === 'function') showToast('Editor Browser Proxy extension installed', 'success');
+    } catch (error) {
+      if (button) button.disabled = false;
+      setStatus(error?.message || String(error), true);
+      if (typeof showToast === 'function') showToast(error?.message || 'Could not install extension', 'error');
+      throw error;
+    }
+  }
+
+  window.installEditorBrowserProxyExtension = installEditorBrowserProxyExtension;
+
+  async function restoreInstalledExtension() {
+    if (localStorage.getItem(STORAGE_KEY) !== '1') return;
+    try {
+      if (!('serviceWorker' in navigator)) throw new Error('Service workers are unavailable.');
+      registration = await navigator.serviceWorker.register(SCRIPT_URL, {
+        scope: SCOPE_URL.pathname,
+        updateViaCache: 'none'
+      });
+      await navigator.serviceWorker.ready;
+      registration = await navigator.serviceWorker.getRegistration(SCOPE_URL.href) || registration;
+      if (!registration.active) throw new Error('The extension service worker is not active.');
+      const button = document.getElementById('install-editor-browser-proxy-extension');
+      if (button) {
+        button.disabled = false;
+        button.innerHTML = '<i class="fa-solid fa-check mr-1"></i> Extension Installed';
+      }
+      startExtensionRuntime();
+    } catch (error) {
+      setStatus(error?.message || String(error), true);
+    }
+  }
+
+  restoreInstalledExtension();
+})();
+</script>
+
   </body>
 </html>
