@@ -403,9 +403,9 @@
             const icon = document.createElement('span');
             icon.className = 'wk-workspace-picker-row-icon';
             if (row.kind === 'directory') {
-              // Match the Explorer's collapsed-folder disclosure arrow.
+              // Reuse the exact folder graphic from the Explorer activity icon.
               icon.classList.add('is-directory');
-              icon.textContent = '▶';
+              icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h6.1l1.6 2H19.5A1.5 1.5 0 0 1 21 6.5v12A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3.5 6.5h17" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
             } else if (['mp3', 'wav'].includes(extension(row.path))) {
               // Use the familiar album/vinyl glyph for music files.
               icon.classList.add('is-audio');
@@ -570,7 +570,8 @@
       '.wk-workspace-picker-row.is-selected{background:#28523f!important;}',
       '.wk-workspace-picker-row.is-directory{color:#c8d9ce;}',
       '.wk-workspace-picker-row-icon{display:inline-flex;width:20px;height:20px;flex:none;align-items:center;justify-content:center;overflow:hidden;color:#aebbc4;font-size:12px;line-height:1;}',
-      '.wk-workspace-picker-row-icon.is-directory{width:18px;justify-content:flex-start;font-size:11px;}',
+      '.wk-workspace-picker-row-icon.is-directory{width:20px;height:20px;}',
+      '.wk-workspace-picker-row-icon.is-directory svg{display:block;width:18px;height:18px;}',
       '.wk-workspace-picker-row-icon.is-audio svg{display:block;width:18px;height:18px;}',
       '.wk-workspace-picker-row-thumbnail{display:block;width:20px;height:20px;object-fit:cover;border-radius:2px;}',
       '.wk-workspace-picker-row-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
