@@ -1,5 +1,20 @@
 // Isolated-world bridge between the page fetch wrapper and proxy.js.
 (() => {
+  const url = new URL(window.location.href);
+  const host = url.hostname.toLowerCase();
+  const editorHost = host === "watermelonkatana.onrender.com" ||
+    host === "watermelonkatanatest.onrender.com" ||
+    host === "watermelonkatanadevs.github.io" ||
+    host === "localhost" || host === "127.0.0.1" || host === "::1";
+  const path = url.pathname.replace(/\\/+$/, "") || "/";
+  const browserPage = /(?:^|\\/)browser\\/browser\\.html$/i.test(url.pathname);
+  const parentPage = editorHost && (
+    host === "watermelonkatanadevs.github.io"
+      ? path === "/Editor" || path === "/Editor/index.html"
+      : path === "/" || path === "/index.html"
+  );
+  if (!editorHost || (!browserPage && !parentPage)) return;
+
   const CHANNEL = "editor-browser-proxy:v1";
 
   window.addEventListener("message", event => {
