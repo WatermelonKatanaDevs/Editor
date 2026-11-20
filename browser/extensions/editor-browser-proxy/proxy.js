@@ -12,7 +12,7 @@ function isTrustedEditorSender(sender) {
     const editorHost = host === "watermelonkatana.onrender.com" ||
       host === "watermelonkatanatest.onrender.com" ||
       host === "watermelonkatanadevs.github.io" ||
-      host === "localhost" || host === "127.0.0.1" || host === "::1";
+      host === "localhost" || host === "127.0.0.1" || host === "[::1]";
     if (!editorHost) return false;
     if (/(?:^|\/)browser\/browser\.html$/i.test(url.pathname)) return true;
     const path = url.pathname.replace(/\/+$/, "") || "/";
