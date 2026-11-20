@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Editor Browser Proxy",
+  "version": "1.0.0",
+  "description": "Adds extension-powered cross-origin fetch support to pages running in the Editor Browser.",
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "proxy.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["bridge.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["page.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true,
+      "world": "MAIN"
+    }
+  ]
+}
