@@ -1,14 +1,10 @@
-// Main-world fetch replacement. It activates only inside an Editor
-// Browser PageEmulator; ordinary tabs and unrelated iframes are untouched.
+// Main-world fetch replacement for the Editor Browser page itself.
+// It deliberately does not inspect or modify the emulated pages inside it.
 (() => {
-  // The extension is globally declared for related frames, but only an Editor
-  // Browser-created PageEmulator iframe should install a fetch wrapper.
-  try {
-    const frame = window.frameElement;
-    if (!frame || !frame.getAttribute("data-page-id")) return;
-  } catch (_) {
-    return;
-  }
+  // This content script is declared for all URLs so it can run in the browser
+  // frame regardless of the Editor deployment host. Restrict activation by
+  // the browser page's own path, not by PageEmulator internals.
+  if (!/(?:^|\\/)browser\\/browser\\.html$/i.test(window.location.pathname)) return;
 
   if (window.__editorBrowserProxyPageBootstrap) return;
   Object.defineProperty(window, "__editorBrowserProxyPageBootstrap", {
@@ -22,24 +18,8 @@
   let wrappedFetch = null;
   let accessorInstalled = false;
 
-  function getEditorPage() {
-    try {
-      const page = window.__pageEmulator;
-      const frame = window.frameElement;
-      if (
-        !page ||
-        !frame ||
-        page.iframe !== frame ||
-        frame.getAttribute("data-page-id") !== String(page.id) ||
-        window.__frameElement !== frame ||
-        typeof page.location?.url !== "string" ||
-        typeof page.location?.origin !== "string"
-      ) return null;
-      return page;
-    } catch (_) {
-      return null;
-    }
-  }
+  const browserOrigin = window.location.origin;
+  const browserBaseUrl = window.location.href;
 
   function bytesToBase64(buffer) {
     const bytes = new Uint8Array(buffer);
@@ -174,8 +154,9 @@
     if (original.__editorBrowserProxyWrapped) return original;
 
     const wrapped = function(input, init) {
-      const page = getEditorPage();
-      if (!page) return original.apply(this, arguments);
+      if (!/(?:^|\\/)browser\\/browser\\.html$/i.test(window.location.pathname)) {
+        return original.apply(this, arguments);
+      }
 
       let request;
       try {
@@ -186,14 +167,14 @@
 
       let target;
       try {
-        target = new URL(request.url, page.location.url);
+        target = new URL(request.url, browserBaseUrl);
       } catch (_) {
         return original.apply(this, arguments);
       }
 
       if (
         (target.protocol !== "http:" && target.protocol !== "https:") ||
-        target.origin === page.location.origin
+        target.origin === browserOrigin
       ) {
         return original.apply(this, arguments);
       }
@@ -209,7 +190,7 @@
   }
 
   function installFetchReplacement() {
-    if (!getEditorPage() || typeof window.fetch !== "function") return false;
+    if (!/(?:^|\\/)browser\\/browser\\.html$/i.test(window.location.pathname) || typeof window.fetch !== "function") return false;
 
     if (!accessorInstalled) {
       rawFetch = window.fetch;
@@ -228,7 +209,7 @@
         return true;
       } catch (_) {
         // Some page runtimes may define fetch as non-configurable. The
-        // periodic check below still wraps later replacements.
+        // periodic check below still wraps it if fetch is not ready yet.
       }
     }
 
@@ -243,8 +224,8 @@
     return true;
   }
 
-  // The emulator installs its own fetch during its runtime bootstrap. Wait
-  // for the PageEmulator identity and wrap that final fetch implementation.
+  // Install immediately at document_start; the accessor also wraps any later
+  // assignment to window.fetch made by the browser page itself.
   let attempts = 0;
   const timer = setInterval(() => {
     attempts++;
