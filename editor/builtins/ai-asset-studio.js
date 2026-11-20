@@ -5,7 +5,7 @@
     let modelSelect, loadButton, settingsButton, promptInput, negativeInput, negativeWrap, nameInput;
     let configContainer, promptGrid, results, progressText, progressPercent, progressBar, status, errorBox, emptyState;
     let configFields = [], settingsModal = null, contextMenu = null;
-    let galleryButton, galleryPopover = null, galleryContent = null, galleryUrls = [];
+    let galleryButton, galleryPopover = null, galleryContent = null, galleryUrls = [], gallerySearchQuery = '';
     let addToGalleryByDefault = false, activeGeneration = null;
     const GALLERY_DIR = '.editor/gallery';
     const STUDIO_SETTINGS_PATH = '.editor/ai-asset-studio.json';
@@ -56,7 +56,7 @@
       '.ais-empty{padding:35px 12px;text-align:center;color:#777;border:1px dashed #383838;font-size:11px}',
       '.ais-image-menu{position:fixed;z-index:2147483000;min-width:150px;padding:3px;background:var(--editor-surface,#222);border:1px solid var(--editor-border-strong,#444);box-shadow:0 4px 14px #0009;border-radius:3px}.ais-image-menu button{display:block;width:100%;border:0;text-align:left;padding:7px 9px;background:transparent;font-size:11px}.ais-image-menu button:hover{background:var(--editor-hover)}.ais-image-menu button:disabled{opacity:.4;cursor:default}',
       '.ais-rename-content{width:min(380px,calc(100vw - 30px));max-width:100%;padding:18px}.ais-rename-field{display:flex;flex-direction:column;gap:6px;margin:12px 0;color:#999;font-size:10px}.ais-rename-field input{width:100%;box-sizing:border-box;background:var(--editor-bg);color:var(--editor-text-secondary);border:1px solid #414141;border-radius:3px;padding:8px;font:12px sans-serif}.ais-rename-field input:focus{border-color:#5a89b5;outline:none}',
-      '.ais-settings-content{width:min(650px,calc(100vw - 30px));max-height:min(720px,calc(100vh - 30px));overflow:auto}.ais-auto-gallery{display:flex;align-items:center;gap:7px;margin:8px 0 12px;color:#aaa;font-size:10px}.ais-auto-gallery input{margin:0;accent-color:#3794ff}.ais-gallery-popover{position:fixed;z-index:200001;width:min(430px,calc(100vw - 16px));max-height:min(72vh,680px);display:flex;flex-direction:column;background:var(--editor-surface,#202020);border:1px solid var(--editor-border-strong,#444);box-shadow:0 8px 28px #000a;border-radius:3px;color:var(--editor-text-secondary)}.ais-gallery-popover[hidden]{display:none}.ais-gallery-popover-head{display:flex;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--editor-border);background:var(--editor-tabs)}.ais-gallery-popover-head strong{flex:1;font-size:12px;font-weight:500;color:var(--editor-text)}.ais-gallery-popover-head span{color:#777;font:10px monospace}.ais-gallery-popover-head button{width:24px;height:23px;background:transparent;color:#999;border:0;border-radius:2px;cursor:pointer}.ais-gallery-popover-head button:hover{background:#333;color:#fff}.ais-gallery-content{padding:9px;overflow:auto;min-height:60px;flex:1;box-sizing:border-box}.ais-gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:7px}.ais-gallery-card{min-width:0;padding:5px;background:#1b1b1b;border:1px solid #333;border-radius:3px;cursor:pointer;text-align:left}.ais-gallery-card:hover{border-color:#527493;background:#222b34}.ais-gallery-card img{display:block;width:100%;aspect-ratio:1;object-fit:contain;image-rendering:pixelated;background:#292929}.ais-gallery-card span{display:block;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#aaa;font:9px monospace}.ais-gallery-empty{padding:28px 10px;text-align:center;color:#777;font-size:11px;border:1px dashed #383838}.ais-gallery-detail-title{margin:0 0 8px;color:#ddd;font-size:12px;font-weight:500}.ais-gallery-detail-field{margin:8px 0}.ais-gallery-detail-field strong{display:block;margin-bottom:4px;color:#999;font-size:10px;font-weight:500}.ais-gallery-detail-field pre{max-height:170px;overflow:auto;margin:0;padding:7px;background:#151515;border:1px solid #303030;color:#ccc;font:10px/1.45 monospace;white-space:pre-wrap;overflow-wrap:anywhere}.ais-gallery-detail-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}.ais-gallery-detail-actions button{background:#292929;color:#bbb;border:1px solid #414141;border-radius:2px;padding:6px 9px;font-size:10px;cursor:pointer}.ais-gallery-detail-actions button.primary{background:var(--editor-accent);border-color:var(--editor-accent-strong);color:#fff}.ais-gallery-detail-actions button:hover{filter:brightness(1.15)}.ais-model-list{display:flex;flex-direction:column;gap:4px}.ais-model-row{display:flex;align-items:center;gap:7px;padding:8px;background:#1c1c1c;border:1px solid #303030;border-radius:3px}.ais-model-row.active{border-color:#4a6f91;background:#222b34}.ais-model-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.ais-model-main strong{font-size:11px;font-weight:500;color:#ddd}.ais-model-main span{font:9px monospace;color:#777;overflow-wrap:anywhere}.ais-model-row button,.ais-settings-tabs button{background:#2a2a2a;color:#bbb;border:1px solid #414141;padding:5px 8px;border-radius:2px;cursor:pointer;font-size:10px}.ais-settings-tabs{display:flex;gap:4px;margin:10px 0 12px;border-bottom:1px solid var(--editor-border);padding-bottom:5px}.ais-settings-tabs button.active{background:#2b3b49;color:var(--editor-text);border-color:#527493}.ais-cache-list{display:flex;flex-direction:column;gap:5px}.ais-cache-row{padding:8px;background:#1c1c1c;border:1px solid #303030;border-radius:3px}.ais-cache-row strong{display:block;color:#ccc;font-size:10px}.ais-cache-row span{display:block;margin-top:3px;color:#777;font:9px monospace;overflow-wrap:anywhere}.ais-cache-row button{margin-top:6px;background:#292929;color:#c99;border:1px solid #493b3b;padding:4px 7px;font-size:9px;cursor:pointer}.ais-settings-note{color:#777;font-size:10px;line-height:1.45;margin:8px 0}',
+      '.ais-settings-content{width:min(650px,calc(100vw - 30px));max-height:min(720px,calc(100vh - 30px));overflow:auto}.ais-auto-gallery{display:flex;align-items:center;gap:7px;margin:8px 0 12px;color:#aaa;font-size:10px}.ais-auto-gallery input{margin:0;accent-color:#3794ff}.ais-gallery-search{position:sticky;top:0;z-index:1;padding:0 0 8px;background:var(--editor-surface,#202020)}.ais-gallery-search input{width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #3a3a3a;border-radius:3px;background:var(--editor-bg);color:var(--editor-text);font:11px sans-serif;outline:none}.ais-gallery-search input:focus{border-color:#5a89b5}.ais-gallery-search input::placeholder{color:#777}.ais-gallery-card[hidden]{display:none!important}.ais-gallery-popover{position:fixed;z-index:200001;width:min(430px,calc(100vw - 16px));max-height:min(72vh,680px);display:flex;flex-direction:column;background:var(--editor-surface,#202020);border:1px solid var(--editor-border-strong,#444);box-shadow:0 8px 28px #000a;border-radius:3px;color:var(--editor-text-secondary)}.ais-gallery-popover[hidden]{display:none}.ais-gallery-popover-head{display:flex;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--editor-border);background:var(--editor-tabs)}.ais-gallery-popover-head strong{flex:1;font-size:12px;font-weight:500;color:var(--editor-text)}.ais-gallery-popover-head span{color:#777;font:10px monospace}.ais-gallery-popover-head button{width:24px;height:23px;background:transparent;color:#999;border:0;border-radius:2px;cursor:pointer}.ais-gallery-popover-head button:hover{background:#333;color:#fff}.ais-gallery-content{padding:9px;overflow:auto;min-height:60px;flex:1;box-sizing:border-box}.ais-gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:7px}.ais-gallery-card{min-width:0;padding:5px;background:#1b1b1b;border:1px solid #333;border-radius:3px;cursor:pointer;text-align:left}.ais-gallery-card:hover{border-color:#527493;background:#222b34}.ais-gallery-card img{display:block;width:100%;aspect-ratio:1;object-fit:contain;image-rendering:pixelated;background:#292929}.ais-gallery-card span{display:block;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#aaa;font:9px monospace}.ais-gallery-empty{padding:28px 10px;text-align:center;color:#777;font-size:11px;border:1px dashed #383838}.ais-gallery-detail-title{margin:0 0 8px;color:#ddd;font-size:12px;font-weight:500}.ais-gallery-detail-field{margin:8px 0}.ais-gallery-detail-field strong{display:block;margin-bottom:4px;color:#999;font-size:10px;font-weight:500}.ais-gallery-detail-field pre{max-height:170px;overflow:auto;margin:0;padding:7px;background:#151515;border:1px solid #303030;color:#ccc;font:10px/1.45 monospace;white-space:pre-wrap;overflow-wrap:anywhere}.ais-gallery-detail-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}.ais-gallery-detail-actions button{background:#292929;color:#bbb;border:1px solid #414141;border-radius:2px;padding:6px 9px;font-size:10px;cursor:pointer}.ais-gallery-detail-actions button.primary{background:var(--editor-accent);border-color:var(--editor-accent-strong);color:#fff}.ais-gallery-detail-actions button:hover{filter:brightness(1.15)}.ais-model-list{display:flex;flex-direction:column;gap:4px}.ais-model-row{display:flex;align-items:center;gap:7px;padding:8px;background:#1c1c1c;border:1px solid #303030;border-radius:3px}.ais-model-row.active{border-color:#4a6f91;background:#222b34}.ais-model-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.ais-model-main strong{font-size:11px;font-weight:500;color:#ddd}.ais-model-main span{font:9px monospace;color:#777;overflow-wrap:anywhere}.ais-model-row button,.ais-settings-tabs button{background:#2a2a2a;color:#bbb;border:1px solid #414141;padding:5px 8px;border-radius:2px;cursor:pointer;font-size:10px}.ais-settings-tabs{display:flex;gap:4px;margin:10px 0 12px;border-bottom:1px solid var(--editor-border);padding-bottom:5px}.ais-settings-tabs button.active{background:#2b3b49;color:var(--editor-text);border-color:#527493}.ais-cache-list{display:flex;flex-direction:column;gap:5px}.ais-cache-row{padding:8px;background:#1c1c1c;border:1px solid #303030;border-radius:3px}.ais-cache-row strong{display:block;color:#ccc;font-size:10px}.ais-cache-row span{display:block;margin-top:3px;color:#777;font:9px monospace;overflow-wrap:anywhere}.ais-cache-row button{margin-top:6px;background:#292929;color:#c99;border:1px solid #493b3b;padding:4px 7px;font-size:9px;cursor:pointer}.ais-settings-note{color:#777;font-size:10px;line-height:1.45;margin:8px 0}',
       '@media(max-width:650px){.ais-main{padding:9px}.ais-prompt-grid{grid-template-columns:1fr}.ais-name-row{grid-template-columns:1fr}.ais-header-title{display:none}}'
     ].join('');
 
@@ -268,17 +268,8 @@
       if (galleryPopover) refreshGalleryPopover();
       return entry;
     }
-    async function saveGalleryEntryAs(entry) {
-      const bytes = readBinaryBytes(entry.imagePath);
-      const blob = new Blob([bytes], {type:'image/png'});
-      const savedPath = await workspacePicker.saveFile({
-        title:'Save image from AI Gallery',
-        suggestedName:entry.filename || 'sprite.png',
-        accept:{'image/png':['.png']},
-        bytes:blob
-      });
-      if (savedPath) status.textContent = 'Saved to project · ' + savedPath;
-      return savedPath;
+    function readGalleryBlob(entry) {
+      return new Blob([readBinaryBytes(entry.imagePath)], {type:'image/png'});
     }
     function setProgress(info) {
       const raw = info?.progress, n = raw == null || raw === '' ? NaN : Number(raw);
@@ -395,19 +386,65 @@
       const completed = assets.filter(Boolean).length;
       if (label) label.textContent = completed + ' image' + (completed === 1 ? '' : 's');
     }
-    function createFile(asset,index) {
-      return new File([asset.blob],fileName(index,asset),{type:'image/png',lastModified:Date.now()});
+    function createImageFile(blob, filename) {
+      return new File([blob],filename || 'sprite.png',{type:'image/png',lastModified:Date.now()});
     }
-    async function saveAs(asset,index) {
+    function createFile(asset,index) {
       if (!asset?.blob) throw new Error('The generated image is not available.');
+      return createImageFile(asset.blob,fileName(index,asset));
+    }
+    function bindImageDrag(card, getFile) {
+      card.draggable = true;
+      card.addEventListener('dragstart',event => {
+        const file = getFile();
+        if (!file) { event.preventDefault(); return; }
+        const token = window.__editorFileDropBridge?.register?.(file);
+        if (token) event.dataTransfer.setData('application/x-wk-editor-files',token);
+        event.dataTransfer.setData('text/plain',file.name);
+        event.dataTransfer.effectAllowed = 'copy';
+      });
+    }
+    async function saveImageAs(blob, filename, title) {
+      if (!blob) throw new Error('The image is not available.');
       const savedPath = await workspacePicker.saveFile({
-        title:'Save image from AI Asset Studio',
-        suggestedName:fileName(index,asset),
+        title:title || 'Save image from AI Asset Studio',
+        suggestedName:filename || 'sprite.png',
         accept:{'image/png':['.png']},
-        bytes:asset.blob
+        bytes:blob
       });
       if (savedPath) status.textContent = 'Saved to project · ' + savedPath;
       return savedPath;
+    }
+    async function saveAs(asset,index) {
+      if (!asset?.blob) throw new Error('The generated image is not available.');
+      return saveImageAs(asset.blob,fileName(index,asset),'Save image from AI Asset Studio');
+    }
+    async function saveGalleryEntryAs(entry) {
+      return saveImageAs(readGalleryBlob(entry),entry.filename || 'sprite.png','Save image from AI Gallery');
+    }
+    function filterGalleryCards(searchInput) {
+      if (!galleryContent) return;
+      const query = String(searchInput?.value ?? gallerySearchQuery).trim().toLocaleLowerCase();
+      gallerySearchQuery = String(searchInput?.value ?? gallerySearchQuery);
+      const cards = [...(galleryContent.querySelector('[data-gallery-grid]')?.querySelectorAll('.ais-gallery-card') || [])];
+      let visible = 0;
+      for (const card of cards) {
+        const matches = !query || String(card.dataset.searchText || '').includes(query);
+        card.hidden = !matches;
+        if (matches) visible++;
+      }
+      const count = galleryPopover?.querySelector('[data-gallery-total]');
+      if (count) count.textContent = query ? visible + ' / ' + cards.length + ' images' : cards.length + ' images';
+      let empty = galleryContent.querySelector('[data-gallery-no-results]');
+      if (query && cards.length && !visible) {
+        if (!empty) {
+          empty = document.createElement('div');
+          empty.className = 'ais-gallery-empty';
+          empty.dataset.galleryNoResults = '';
+          empty.textContent = 'No images match your search.';
+          galleryContent.append(empty);
+        }
+      } else empty?.remove();
     }
     function releaseGalleryUrls() {
       for (const url of galleryUrls) { URL.revokeObjectURL(url); urls.delete(url); }
@@ -498,26 +535,39 @@
     async function refreshGalleryPopover() {
       if (!galleryContent) return;
       releaseGalleryUrls(); galleryContent.replaceChildren();
-      const entries = readGalleryEntries(), count = galleryPopover?.querySelector('[data-gallery-total]');
-      if (count) count.textContent = entries.length + ' images';
+      const entries = readGalleryEntries();
+      const searchWrap = document.createElement('label'); searchWrap.className = 'ais-gallery-search';
+      const searchInput = document.createElement('input'); searchInput.type = 'search';
+      searchInput.placeholder = 'Search gallery…'; searchInput.setAttribute('aria-label','Search gallery images');
+      searchInput.value = gallerySearchQuery;
+      searchWrap.append(searchInput); galleryContent.append(searchWrap);
+      searchInput.addEventListener('input',() => filterGalleryCards(searchInput));
       if (!entries.length) {
         const empty = document.createElement('div'); empty.className = 'ais-gallery-empty';
         empty.textContent = 'Your saved images will appear here. Right-click a generated image and choose Add to Gallery.';
-        galleryContent.append(empty); return;
+        galleryContent.append(empty);
+        const count = galleryPopover?.querySelector('[data-gallery-total]');
+        if (count) count.textContent = '0 images';
+        return;
       }
-      const grid = document.createElement('div'); grid.className = 'ais-gallery-grid';
+      const grid = document.createElement('div'); grid.className = 'ais-gallery-grid'; grid.dataset.galleryGrid = '';
       for (const entry of entries) {
         try {
-          const blob = new Blob([readBinaryBytes(entry.imagePath)], {type:'image/png'});
+          const blob = readGalleryBlob(entry);
           const url = URL.createObjectURL(blob); galleryUrls.push(url);
           const card = document.createElement('button'); card.type = 'button'; card.className = 'ais-gallery-card';
           const image = document.createElement('img'); image.src = url; image.alt = entry.filename || 'Gallery image';
           const label = document.createElement('span'); label.textContent = entry.filename || 'sprite.png';
-          card.append(image, label); card.addEventListener('click', () => showGalleryDetails(entry));
-          card.addEventListener('contextmenu', event => showGalleryContextMenu(event, entry)); grid.append(card);
+          card.dataset.searchText = String(entry.filename || 'sprite.png').toLocaleLowerCase();
+          card.append(image, label);
+          card.addEventListener('click', () => showGalleryDetails(entry));
+          card.addEventListener('contextmenu', event => showGalleryContextMenu(event, entry));
+          bindImageDrag(card,() => createImageFile(blob,entry.filename || 'sprite.png'));
+          grid.append(card);
         } catch (error) { console.warn('Could not load StudioAI gallery image:', entry.imagePath, error); }
       }
       galleryContent.append(grid);
+      filterGalleryCards(searchInput);
     }
     function openGalleryPopover() {
       if (galleryPopover) { closeGalleryPopover(); return; }
@@ -577,13 +627,7 @@
           results.querySelectorAll('.ais-image-card').forEach(item => item.classList.toggle('selected',item === card));
         });
         card.addEventListener('contextmenu',event => showContextMenu(event,card._asset,index));
-        card.addEventListener('dragstart',event => {
-          const file = createFile(asset,index);
-          const token = window.__editorFileDropBridge?.register?.(file);
-          if (token) event.dataTransfer.setData('application/x-wk-editor-files',token);
-          event.dataTransfer.setData('text/plain',file.name);
-          event.dataTransfer.effectAllowed = 'copy';
-        });
+        bindImageDrag(card,() => createFile(asset,index));
         results.append(card);
       }
       card._asset = asset;
