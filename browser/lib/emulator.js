@@ -55,9 +55,21 @@
             defaultName = getFileNameFromURL(response.source_url,'');
           }
 
-          if (defaultName) defaultName = "#f="+defaultName;
+          // Keep the requested document/resource fragment when converting the
+          // response to a data URL. A synthetic filename fragment such as
+          // "#f=embed" must not replace application state stored after "#".
+          let sourceHash = "";
+          const originalUrl = response.requested_url || response.source_url;
+          if (originalUrl) {
+            try {
+              sourceHash = new URL(originalUrl).hash;
+            } catch (_) {}
+          }
 
-          resolve(reader.result+defaultName);
+          if (sourceHash) defaultName = sourceHash;
+          else if (defaultName) defaultName = "#f=" + defaultName;
+
+          resolve(reader.result + defaultName);
         }
         reader.onerror = reject;
         reader.readAsDataURL(blob);
