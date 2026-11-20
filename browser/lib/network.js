@@ -153,7 +153,7 @@ function syncBodyToArrayBuffer(body) {
 
 function createSyncNetworkResponse(status, statusText, headers, body, url) {
   const normalizedHeaders = headers instanceof Headers ? new Headers(headers) : new Headers(headers || {});
-  return {
+  const response = {
     status: Number(status) || 0,
     statusText: String(statusText || ''),
     headers: normalizedHeaders,
@@ -162,6 +162,27 @@ function createSyncNetworkResponse(status, statusText, headers, body, url) {
     redirected: false,
     ok: Number(status) >= 200 && Number(status) < 300
   };
+
+  // Keep the sync result compatible with the Fetch Response methods used by
+  // DevTools' network and Sources panels after the blocking request completes.
+  response.clone = () => {
+    const copy = createSyncNetworkResponse(
+      response.status,
+      response.statusText,
+      response.headers,
+      response.body,
+      response.url
+    );
+    copy.redirected = response.redirected;
+    return copy;
+  };
+  response.arrayBuffer = async () => response.body.slice(0);
+  response.text = async () => new TextDecoder('utf-8').decode(response.body);
+  response.blob = async () => new Blob(
+    [response.body],
+    { type: response.headers.get('content-type') || '' }
+  );
+  return response;
 }
 
 function parseSyncXHRHeaders(rawHeaders) {
