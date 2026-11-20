@@ -21,9 +21,10 @@ The background service worker does not need a list of trusted domains or sender-
 
 ## Design
 
-- `page.js` runs in the main world at `document_start` in every matching frame and replaces that frame's `window.fetch`.
+- `page.js` runs in the main world at `document_start` in every matching frame and replaces that frame's cross-origin `window.fetch` and asynchronous `XMLHttpRequest` requests.
 - `bridge.js` runs in the isolated content-script world and relays requests to the service worker.
-- `proxy.js` performs direct fetch requests using the extension's `<all_urls>` host permission, allowing cross-origin requests without the page's CORS enforcement.
-- The extension does not add or replace Network endpoints. Existing endpoint order and fallback behavior remain intact; the endpoint's captured native `fetch` is routed through the extension.
+- `proxy.js` performs direct fetch requests using the extension's `<all_urls>` host permission, allowing cross-origin requests without the page's CORS enforcement. Both fetch and asynchronous XHR share the streaming bridge.
+- The extension does not add or replace Network endpoints. Existing endpoint order and fallback behavior remain intact; the endpoint's captured native `fetch` and asynchronous XHR are routed through the extension.
+- Synchronous XHR is deliberately passed through to the browser's native implementation. MV3 service-worker messaging is asynchronous, so the extension cannot synchronously proxy an arbitrary cross-origin request. The Editor's separate synchronous Network path can still make a native synchronous request to a configured HTTP proxy endpoint, provided that endpoint permits the browser origin with CORS.
 
 The manifest's content-script scope is restricted to the installation hostname. The broader `<all_urls>` host permission is still required because requests may target other domains.
