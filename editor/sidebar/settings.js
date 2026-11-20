@@ -44,6 +44,8 @@
             <h3>File Picker</h3>
             <label>Picker display<select id="setting-picker-display-mode"><option value="contained">Contained inside the editor tab</option><option value="overlay">Overlay over the entire Editor</option></select></label>
             <p class="editor-settings-note">Choose whether file dialogs stay within the active app tab or cover the Editor interface.</p>
+            <label class="setting-check"><input id="setting-picker-use-in-browser" type="checkbox"><span>Use in Browser</span></label>
+            <p class="editor-settings-note">Use the Editor workspace picker for browser uploads and save browser downloads into the workspace. Turn this off to keep the browser’s current upload and download behavior.</p>
           </div>
           <div class="editor-settings-section">
             <h3>Browser</h3>
@@ -86,6 +88,9 @@
       const pickerDisplayMode = $('setting-picker-display-mode');
       pickerDisplayMode.value = window.EditorWorkspacePicker?.getDisplayMode?.() || 'contained';
       pickerDisplayMode.onchange = () => window.EditorWorkspacePicker?.setDisplayMode?.(pickerDisplayMode.value);
+      const pickerUseInBrowser = $('setting-picker-use-in-browser');
+      pickerUseInBrowser.checked = window.EditorWorkspacePicker?.getUseInBrowser?.() !== false;
+      pickerUseInBrowser.onchange = () => window.EditorWorkspacePicker?.setUseInBrowser?.(pickerUseInBrowser.checked);
 
       ignoreNodeModules.checked = state.behavior.ignoreNodeModules !== false;
       ignoreNodeModules.onchange = () => {
