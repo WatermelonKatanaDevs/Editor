@@ -181,3 +181,7 @@ body.browser-chrome-fullscreen.chrome-hover-reveal #bookmarks-bar { display: fle
 .bookmark-btn { user-select: none; }
 .bookmark-btn[draggable="true"] { cursor: grab; }
 .bookmark-btn.dragging { opacity: 0.45; cursor: grabbing; }
+
+/* Keep the downloads popup aligned with the visible browser chrome. */
+body.browser-chrome-fullscreen #downloads-panel { top: 12px; }
+body.browser-chrome-fullscreen.chrome-hover-reveal #downloads-panel { top: 108px; }
