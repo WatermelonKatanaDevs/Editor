@@ -895,12 +895,12 @@ export default {
     // A fetch performed inside this Worker knows the final upstream URL
     // after following HTTP redirects. Carry it back to the browser shell,
     // whose own Response.url points at this proxy endpoint instead.
-    responseHeaders.delete("x-wk-final-url");
+    responseHeaders.delete("x-final-url");
     if (finalTargetUrl) {
       try {
         const finalUrl = new URL(finalTargetUrl);
         if (finalUrl.protocol === "http:" || finalUrl.protocol === "https:") {
-          responseHeaders.set("X-WK-Final-URL", finalUrl.href);
+          responseHeaders.set("X-Final-URL", finalUrl.href);
         }
       } catch (_) {}
     }
