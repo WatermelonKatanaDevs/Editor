@@ -11,7 +11,7 @@
   const fail=e=>{if(!settled){settled=true;cleanup();try{ctl?.error(e)}catch(_){}reject(e)}else{try{ctl?.error(e)}catch(_){}cleanup()}};
   const onAbort=()=>{window.postMessage({channel:C,type:"ABORT",id},"*");fail(abortError())};
   pending.set(id,m=>{
-   if(m.type==="HEADERS"){if(settled)return;try{headersSeen=true;const noBody=req.method==="HEAD"||[204,205,304].includes(+m.status);const body=noBody?null:new ReadableStream({start(c){ctl=c},cancel(){window.postMessage({channel:C,type:"ABORT",id},"*");cleanup();settled=true}});const res=new Response(body,{status:+m.status,statusText:m.statusText||"",headers:m.headers||[]});try{Object.defineProperty(res,"url",{value:m.url||url})}catch(_){}settled=true;resolve(res);if(noBody)cleanup()}catch(e){fail(e)}return}
+   if(m.type==="HEADERS"){if(settled)return;try{headersSeen=true;const noBody=req.method==="HEAD"||[204,205,304].includes(+m.status);const body=noBody?null:new ReadableStream({start(c){ctl=c},cancel(){window.postMessage({channel:C,type:"ABORT",id},"*");cleanup();settled=true}});const res=new Response(body,{status:+m.status,statusText:m.statusText||"",headers:m.headers||[]});try{Object.defineProperty(res,"url",{value:m.url||url});Object.defineProperty(res,"redirected",{value:!!m.redirected})}catch(_){}settled=true;resolve(res);if(noBody)cleanup()}catch(e){fail(e)}return}
    if(m.type==="CHUNK"){if(headersSeen&&ctl)try{ctl.enqueue(un64(m.data))}catch(e){fail(e)}return}
    if(m.type==="DONE"){try{ctl?.close()}catch(_){}cleanup();return}
    if(m.type==="ERROR"){const e=new TypeError(m.error||"Extension proxy failed");e.name=m.name||"Error";fail(e)}
