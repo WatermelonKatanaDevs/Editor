@@ -2701,7 +2701,7 @@ window.__editorInitPromise = (async function () {
       if (directoryHandleSource) {
         let permission = await filesystemSource.queryPermission?.({mode:'readwrite'});
         if (permission !== 'granted' && typeof filesystemSource.requestPermission === 'function') permission = await filesystemSource.requestPermission({mode:'readwrite'});
-        if (permission && permission !== 'granted') throw new Error('WatermelonKatana needs read/write permission to keep this folder synchronized with your computer. Reopen the folder and allow access.');
+        if (permission && permission !== 'granted') throw new Error('The Editor needs read/write permission to keep this folder synchronized with your computer. Reopen the folder and allow access.');
       }
       const fs = await FileSystem.create(filesystemSource, {
         sync: directoryHandleSource
@@ -2914,9 +2914,9 @@ window.__editorInitPromise = (async function () {
       if (++scanned % 1024 === 0) await new Promise(resolve => setTimeout(resolve, 0));
     }
     // Keep compressed entries intact and strip a wrapper folder logically in ZipProvider.
-    if (!hasRootFile && topLevels.size === 1 && entryCount) zip.__wkRootPrefix = [...topLevels][0];
+    if (!hasRootFile && topLevels.size === 1 && entryCount) zip.__editorRootPrefix = [...topLevels][0];
     updateRemoteLoadProgress('Project archive ready…', 88, formatProgressBytes(file?.size || 0));
-    return zip.__wkRootPrefix ? zip : file;
+    return zip.__editorRootPrefix ? zip : file;
   }
   async function downloadGithubSubmoduleArchive(owner, repo, ref) {
     const github = window.GitHubService;
