@@ -2284,6 +2284,48 @@
         patchInsertionMethod(Element.prototype, 'insertAdjacentElement');
         patchInsertionMethod(Range.prototype, 'insertNode');
 
+        // insertAdjacentHTML parses and inserts nodes internally, bypassing
+        // appendChild/append hooks. Parse the contextual fragment while it is
+        // detached so frames and resources can be virtualized before insertion.
+        const nativeInsertAdjacentHTML = Element.prototype.insertAdjacentHTML;
+        if (typeof nativeInsertAdjacentHTML === 'function') {
+          const wrappedInsertAdjacentHTML = function(position, text) {
+            const normalizedPosition = String(position).toLowerCase();
+            if (!['beforebegin', 'afterbegin', 'beforeend', 'afterend'].includes(normalizedPosition)) {
+              return Reflect.apply(nativeInsertAdjacentHTML, this, [position, text]);
+            }
+
+            const parentPosition = normalizedPosition === 'beforebegin' || normalizedPosition === 'afterend';
+            const parent = this.parentNode;
+            if (parentPosition && !parent) {
+              return Reflect.apply(nativeInsertAdjacentHTML, this, [position, text]);
+            }
+
+            const range = this.ownerDocument.createRange();
+            if (parentPosition) range.selectNode(this);
+            else range.selectNodeContents(this);
+
+            const fragment = range.createContextualFragment(text);
+            prepareInsertedContent([fragment]);
+
+            if (normalizedPosition === 'beforebegin') parent.insertBefore(fragment, this);
+            else if (normalizedPosition === 'afterend') parent.insertBefore(fragment, this.nextSibling);
+            else if (normalizedPosition === 'afterbegin') this.insertBefore(fragment, this.firstChild);
+            else this.appendChild(fragment);
+          };
+
+          try {
+            Object.defineProperty(Element.prototype, 'insertAdjacentHTML', {
+              configurable: true,
+              enumerable: false,
+              writable: true,
+              value: wrappedInsertAdjacentHTML
+            });
+          } catch (error) {
+            console.warn('[Browser Emulator] Could not virtualize insertAdjacentHTML():', error);
+          }
+        }
+
         // Keep the dynamic-node processor available to the Element prototype
         // setters below without relying on a later lexical reference.
         window.__checkNodeAndChildren = checkNodeAndChildren;
