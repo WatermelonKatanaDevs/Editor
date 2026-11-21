@@ -104,7 +104,7 @@ var bookmarks = [
   // { title: "Wikipedia", url: "https://www.wikipedia.org/" },
   // { title: "Hacker News", url: "https://news.ycombinator.com" },
   // { title: "Test", url: "https://getsamplefiles.com/download/7z/sample-1.7z" },
-  // { title: "Editor", url: "https://example.com" },
+  // { title: "Remote host", url: "https://example.com" },
   // { title: "Pathtracer", url: "https://dragonfiregames.github.io/WebGPU-Pathtracer/" },
 ];
 
