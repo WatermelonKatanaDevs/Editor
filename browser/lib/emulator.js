@@ -2302,8 +2302,7 @@
             }
 
             const range = this.ownerDocument.createRange();
-            if (parentPosition) range.selectNode(this);
-            else range.selectNodeContents(this);
+            range.selectNodeContents(this);
 
             const fragment = range.createContextualFragment(text);
             prepareInsertedContent([fragment]);
