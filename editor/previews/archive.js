@@ -467,7 +467,7 @@
           // remains read-only: dropping always copies bytes into the workspace.
           const workspaceState = ctx.state;
           const workspaceTree = document.getElementById('tree');
-          const dragType = 'application/x-watermelonkatana-archive-items';
+          const dragType = 'application/x-editor-archive-items';
           let activeArchiveDrag = null;
 
           const selectedArchivePaths = node => {
