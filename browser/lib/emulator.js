@@ -6680,7 +6680,7 @@
         const processNode = window.__checkNodeAndChildren;
         if (typeof processNode !== 'function') return;
 
-        const selector = 'link[href], script[src], img[src], audio[src], video[src], source[src], object[data]';
+        const selector = 'link[href], script[src], img[src], audio[src], video[src], source[src], object[data], iframe[src], iframe[srcdoc], embed[src]';
         for (const node of nodes || []) {
           if (!node) continue;
 
