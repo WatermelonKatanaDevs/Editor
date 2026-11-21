@@ -609,7 +609,7 @@
   class ZipProvider {
     constructor(zipInstance, sync) {
       this.zip = zipInstance;
-      this.rootPrefix = String(zipInstance.__wkRootPrefix || '').replace(/^\/+|\/+$/g, '');
+      this.rootPrefix = String(zipInstance.__editorRootPrefix || '').replace(/^\/+|\/+$/g, '');
       this.canSave = false;
       this.sync = sync;
       this.cache = new Map();
