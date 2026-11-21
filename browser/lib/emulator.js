@@ -1506,7 +1506,11 @@
             ? __getCallerProxy(__childPage, __elemWindow)
             : __elemWindow.__windowProxy;
         }
-        var PATH_URL = new URL(__elem.getAttribute('src') || "about:srcdoc", BASE_ORIGIN);
+        // The browser-facing iframe src may be a synthetic data: URL used
+        // to load the rewritten document. Its original navigation URL is
+        // preserved separately and must seed the child's virtual location.
+        var __rawFrameSrc = __elem.getAttribute('data-raw-src');
+        var PATH_URL = new URL(__rawFrameSrc || __elem.getAttribute('src') || "about:srcdoc", BASE_ORIGIN);
         var __baseUrl = PATH_URL.href;
         try {
           if (/^about:srcdoc$/i.test(PATH_URL.href) && __childPage?.parent?.location?.url) __baseUrl = __childPage.parent.location.url;
