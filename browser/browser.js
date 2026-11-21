@@ -2483,6 +2483,53 @@ function applyMobileEmulationDocument(html, emulation) {
   return '<html><head>' + headInsert + '</head><body>' + html + '</body></html>';
 }
 
+function getFinalNavigationURL(response, requestedUrl) {
+  const reportedURL = response?.headers?.get('x-wk-final-url');
+  if (reportedURL) {
+    try {
+      const candidate = new URL(reportedURL, requestedUrl);
+      if (candidate.protocol === 'http:' || candidate.protocol === 'https:') return candidate.href;
+    } catch (_) {}
+  }
+
+  // A direct browser fetch exposes the final URL itself. A proxied fetch does
+  // not, so never mistake the configured proxy endpoint for the page URL.
+  if (response?.redirected && response?.url) {
+    try {
+      const candidate = new URL(response.url);
+      const proxyOrigins = new Set([appSettings.primaryProxy, appSettings.fallbackProxy]
+        .map(value => {
+          try { return value ? new URL(value).origin : ''; } catch (_) { return ''; }
+        })
+        .filter(Boolean));
+      if (!proxyOrigins.has(candidate.origin) &&
+          (candidate.protocol === 'http:' || candidate.protocol === 'https:')) {
+        return candidate.href;
+      }
+    } catch (_) {}
+  }
+
+  return requestedUrl;
+}
+
+function syncRedirectedNavigationURL(tab, requestedUrl, finalUrl) {
+  if (!tab || !finalUrl || finalUrl === requestedUrl) return false;
+  tab.url = finalUrl;
+
+  const page = tab.page;
+  if (Array.isArray(page?.history) &&
+      Number.isInteger(page.historyIndex) &&
+      page.history[page.historyIndex] === requestedUrl) {
+    page.history[page.historyIndex] = finalUrl;
+  }
+
+  // The history list is newest-first. Update the most recent matching visit
+  // rather than adding a second entry for an HTTP redirect.
+  const historyEntry = historyLog.find(entry => entry?.url === requestedUrl);
+  if (historyEntry) historyEntry.url = finalUrl;
+  return true;
+}
+
 async function renderTabContent(tab, url) {
   tab.url = url;
   let origin = "https://example.com";
@@ -2534,6 +2581,12 @@ async function renderTabContent(tab, url) {
     return;
   }
 
+  const finalUrl = getFinalNavigationURL(response, url);
+  let finalOrigin = origin;
+  try { finalOrigin = new URL(finalUrl).origin; } catch (_) {}
+  syncRedirectedNavigationURL(tab, url, finalUrl);
+  origin = finalOrigin;
+
   tab.page.rawDocument = '';
   tab.page.processedDocument = '';
   try {
@@ -2543,14 +2596,14 @@ async function renderTabContent(tab, url) {
     }
   } catch(e) {}
 
-  var rawHtml = await getDocumentContent(response, url, origin, tab.page);
+  var rawHtml = await getDocumentContent(response, finalUrl, finalOrigin, tab.page);
   if (mobileEmulation && (response.headers.get('content-type') || '').includes('text/html')) {
     rawHtml = applyMobileEmulationDocument(rawHtml, mobileEmulation);
   }
-  tab.page.setLocation(url, origin);
+  tab.page.setLocation(finalUrl, finalOrigin);
   await tab.page.setDocument(rawHtml);
   tab.page.processedDocument = rawHtml;
-  window.dispatchEvent(new CustomEvent('browser-document-ready',{detail:{tab,page:tab.page,rawDocument:tab.page.rawDocument,processedDocument:rawHtml,url}}));
+  window.dispatchEvent(new CustomEvent('browser-document-ready',{detail:{tab,page:tab.page,rawDocument:tab.page.rawDocument,processedDocument:rawHtml,url:finalUrl}}));
 }
 
 
