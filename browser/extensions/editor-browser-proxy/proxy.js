@@ -9,7 +9,7 @@ async function streamRequest(message,signal,port){
  if(message.referrerPolicy)opts.referrerPolicy=message.referrerPolicy;if(message.integrity)opts.integrity=String(message.integrity);
  const response=await fetch(target.href,opts);if(response.type==="opaqueredirect")throw new TypeError("Manual cross-origin redirects cannot be exposed by the extension proxy.");
  const headers=Array.from(response.headers.entries()).filter(([n])=>!["content-encoding","transfer-encoding","connection","set-cookie","set-cookie2"].includes(n.toLowerCase()));
- port.postMessage({type:"HEADERS",status:response.status,statusText:response.statusText,url:response.url||target.href,headers});
+ port.postMessage({type:"HEADERS",status:response.status,statusText:response.statusText,url:response.url||target.href,redirected:!!response.redirected,headers});
  if(!response.body){port.postMessage({type:"DONE"});return}
  const reader=response.body.getReader();try{while(true){if(signal.aborted)throw new DOMException("Aborted","AbortError");const part=await reader.read();if(part.done)break;if(part.value?.byteLength)port.postMessage({type:"CHUNK",data:bytesToBase64(part.value)})}port.postMessage({type:"DONE"})}finally{try{reader.releaseLock()}catch(_){}}
 }
