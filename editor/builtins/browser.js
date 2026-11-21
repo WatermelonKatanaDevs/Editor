@@ -19,19 +19,19 @@
     if (state.behavior.hideBrowserBar) browserParams.set('hideBrowserBar', '1');
     frame.src = 'browser/browser.html?' + browserParams.toString();
     const syncHostContext = () => {
-      const context = window.__wkHostContext;
+      const context = window.__editorHostContext;
       if (!context || !context.url || !context.origin || !frame.contentWindow) return;
       try {
         const targetOrigin = new URL(frame.src, window.location.href).origin;
         frame.contentWindow.postMessage({
-          type: 'watermelonkatanas:host-context',
+          type: 'editor:host-context',
           url: context.url,
           origin: context.origin
         }, targetOrigin);
       } catch (_) {}
     };
     frame.addEventListener('load', syncHostContext);
-    window.addEventListener('wk-host-context-change', syncHostContext);
+    window.addEventListener('editor-host-context-change', syncHostContext);
     const bar = document.createElement('div');
     bar.className = 'builtin-browser-toolbar';
     const status = document.createElement('span');
@@ -198,7 +198,7 @@
       const frame = info?.frame || t?._viewElement?.querySelector?.('iframe');
       if (!frame) return;
       try {
-        window.removeEventListener('wk-host-context-change', info?.syncHostContext);
+        window.removeEventListener('editor-host-context-change', info?.syncHostContext);
         if (info?.syncHostContext) frame.removeEventListener('load', info.syncHostContext);
       } catch (_) {}
       try {
