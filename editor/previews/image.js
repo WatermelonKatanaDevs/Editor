@@ -46,7 +46,7 @@
           'display:none',
           'object-fit:cover',
           'object-position:center',
-          'filter:blur(32px) brightness(.68) saturate(.9)',
+          'filter:blur(12px) brightness(.9) saturate(.9)',
           'transform:scale(1.14)',
           'pointer-events:none',
           'user-select:none',
