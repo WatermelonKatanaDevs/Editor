@@ -2173,20 +2173,17 @@
         const nativeReplaceChild = Node.prototype.replaceChild;
 
         Node.prototype.appendChild = function(node) {
-          prepareInsertedScripts(node);
-          primeAssignedResources([node]);
+          prepareInsertedContent([node]);
           return applyNodeMethod(nativeAppendChild, this, [node]);
         };
 
         Node.prototype.insertBefore = function(node, referenceNode) {
-          prepareInsertedScripts(node);
-          primeAssignedResources([node]);
+          prepareInsertedContent([node]);
           return applyNodeMethod(nativeInsertBefore, this, [node, referenceNode]);
         };
 
         Node.prototype.replaceChild = function(newNode, oldNode) {
-          prepareInsertedScripts(newNode);
-          primeAssignedResources([newNode]);
+          prepareInsertedContent([newNode]);
           return applyNodeMethod(nativeReplaceChild, this, [newNode, oldNode]);
         };
 
@@ -2234,6 +2231,58 @@
           });
           node.__editingAttribute = false;
         }
+
+        function prepareInsertedContent(nodes) {
+          const prepare = node => {
+            if (!node) return;
+            if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+              Array.from(node.childNodes).forEach(prepare);
+              return;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+            prepareInsertedScripts(node);
+            checkNodeAndChildren(node);
+          };
+
+          for (const node of nodes || []) prepare(node);
+        }
+
+        function patchInsertionMethod(prototype, methodName) {
+          if (!prototype) return;
+          const descriptor = Object.getOwnPropertyDescriptor(prototype, methodName);
+          if (!descriptor || typeof descriptor.value !== 'function') return;
+          if (descriptor.value.__emulatorInsertionPatch) return;
+
+          const nativeMethod = descriptor.value;
+          const wrappedMethod = function(...args) {
+            prepareInsertedContent(args);
+            return Reflect.apply(nativeMethod, this, args);
+          };
+          try {
+            Object.defineProperty(wrappedMethod, '__emulatorInsertionPatch', { value: true });
+            Object.defineProperty(prototype, methodName, { ...descriptor, value: wrappedMethod });
+          } catch (error) {
+            console.warn('[Browser Emulator] Could not intercept DOM insertion method:', methodName, error);
+          }
+        }
+
+        // ParentNode methods are implemented separately on each interface.
+        for (const prototype of [Element.prototype, Document.prototype, DocumentFragment.prototype]) {
+          for (const method of ['append', 'prepend', 'replaceChildren']) {
+            patchInsertionMethod(prototype, method);
+          }
+        }
+
+        // ChildNode methods also accept nodes that can carry resources/frames.
+        for (const prototype of [Element.prototype, CharacterData.prototype, DocumentType.prototype]) {
+          for (const method of ['before', 'after', 'replaceWith']) {
+            patchInsertionMethod(prototype, method);
+          }
+        }
+
+        patchInsertionMethod(Element.prototype, 'insertAdjacentElement');
+        patchInsertionMethod(Range.prototype, 'insertNode');
 
         // Keep the dynamic-node processor available to the Element prototype
         // setters below without relying on a later lexical reference.
@@ -2444,6 +2493,36 @@
             if (script.__editorScriptRequestId !== requestId) return;
             nativeElementSetAttribute.call(script, 'data-wk-resource-error', String(error?.message || error).slice(0, 300));
           }
+        }
+
+        // Catch setAttribute('src', ...) on newly-created script elements too.
+        // The per-element wrapper only exists for elements returned through
+        // selected document APIs; dynamically-created elements can otherwise
+        // reach the native loader before they are wrapped.
+        const patchedSetAttribute = function(name, value) {
+          const attributeName = String(name).toLowerCase();
+          if (
+            this instanceof HTMLScriptElement &&
+            attributeName === 'src' &&
+            isExecutableScriptElement(this)
+          ) {
+            const source = String(value);
+            if (source && !/^(?:data|blob|javascript):/i.test(source)) {
+              interceptDynamicScriptSource(this, source);
+              return;
+            }
+          }
+          return Reflect.apply(nativeElementSetAttribute, this, [name, value]);
+        };
+        try {
+          Object.defineProperty(Element.prototype, 'setAttribute', {
+            configurable: true,
+            enumerable: false,
+            writable: true,
+            value: patchedSetAttribute
+          });
+        } catch (error) {
+          console.warn('[Browser Emulator] Could not virtualize script setAttribute():', error);
         }
 
         // Match the browser's reflected IDL attributes for URL-valued resource
