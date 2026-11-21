@@ -83,7 +83,7 @@
           // A small resampled canvas keeps alpha detection inexpensive even
           // for very large source images. Smoothing preserves tiny transparent
           // details as partial alpha values when the image is downscaled.
-          const maxSampleSize = 1024;
+          const maxSampleSize = 4096;
           const sampleScale = Math.min(1, maxSampleSize / Math.max(img.naturalWidth, img.naturalHeight));
           const sampleWidth = Math.max(1, Math.round(img.naturalWidth * sampleScale));
           const sampleHeight = Math.max(1, Math.round(img.naturalHeight * sampleScale));
@@ -123,7 +123,6 @@
         };
 
         img.addEventListener('load', checkTransparency);
-        img.src = url;
 
         // Small source images are commonly pixel art. Use nearest-neighbour
         // scaling only for these; larger artwork keeps normal interpolation.
@@ -133,6 +132,7 @@
           }
         };
         img.addEventListener('load', applyImageRendering, { once: true });
+        img.src = url;
 
         if (img.complete && img.naturalWidth) {
           checkTransparency();
