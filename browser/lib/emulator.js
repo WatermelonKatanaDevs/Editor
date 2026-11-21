@@ -69,56 +69,12 @@
   };
 
   function getPageBaseUrl(page) {
-    const locationUrl = page?.location?.url;
-    if (locationUrl === "about:srcdoc" || locationUrl === "about:blank") {
+    if (page && page.location && page.location.url === "about:srcdoc") {
       try {
-        if (page.parent && page.parent !== false && page.parent.location?.url) return page.parent.location.url;
+        if (page.parent && page.parent !== false && page.parent.location && page.parent.location.url) return page.parent.location.url;
       } catch (e) {}
     }
-    return locationUrl || page?.parent?.location?.url || "http://localhost:3000/";
-  }
-
-  function ensurePageLocation(page, baseUrlOverride = null) {
-    const existing = page?.location && typeof page.location === "object" ? page.location : null;
-    const parentPage = page?.parent && page.parent !== false ? page.parent : null;
-    const parentLocation = parentPage?.location || null;
-    const iframe = page?.iframe || null;
-
-    let documentUrl = baseUrlOverride || existing?.url;
-    if (!documentUrl) {
-      let rawFrameUrl = null;
-      try {
-        rawFrameUrl = iframe?.getAttribute?.("data-raw-src") || iframe?.getAttribute?.("src") || null;
-      } catch (_) {}
-      if (rawFrameUrl) documentUrl = rawFrameUrl;
-      else if (parentPage) documentUrl = "about:srcdoc";
-      else {
-        try { documentUrl = iframe?.ownerDocument?.baseURI || null; } catch (_) {}
-      }
-    }
-    documentUrl = documentUrl || "http://localhost:3000/";
-
-    let origin = existing?.origin || null;
-    if (!origin && /^about:(?:srcdoc|blank)$/i.test(documentUrl)) {
-      origin = parentLocation?.origin || null;
-    }
-    if (!origin) {
-      try { origin = new URL(documentUrl, parentLocation?.url || "http://localhost:3000/").origin; } catch (_) {}
-    }
-    origin = origin || parentLocation?.origin || "http://localhost:3000";
-
-    const location = existing || {};
-    if (!location.url || baseUrlOverride) location.url = documentUrl;
-    if (!location.origin) location.origin = origin;
-
-    try {
-      if (page && page.location !== location) page.location = location;
-    } catch (_) {}
-
-    return {
-      url: page?.location?.url || location.url || documentUrl,
-      origin: page?.location?.origin || location.origin || origin
-    };
+    return page?.location?.url || "http://localhost:3000/";
   }
 
   const javascriptMimeTypes = new Set([
@@ -170,21 +126,12 @@
   function ensureSandBoxSameOrigin(iframe) {
     if (!iframe.hasAttribute('sandbox')) return;
 
-    const tokens = iframe.getAttribute('sandbox').split(/\s+/).filter(Boolean);
-    let changed = false;
+    var tokens = iframe.getAttribute('sandbox').split(/\s+/).filter(Boolean);
 
-    // The frame's document is rewritten into srcdoc and must execute the
-    // emulator bootstrap before page scripts can be virtualized. Without
-    // allow-scripts the browser blocks that bootstrap, leaving the frame's
-    // resources to load natively and bypassing the virtual network.
-    for (const permission of ['allow-same-origin', 'allow-scripts']) {
-      if (!tokens.includes(permission)) {
-        tokens.push(permission);
-        changed = true;
-      }
+    if (!tokens.includes('allow-same-origin')) {
+      tokens.push('allow-same-origin');
+      iframe.setAttribute('sandbox',tokens.join(' '));
     }
-
-    if (changed) iframe.setAttribute('sandbox',tokens.join(' '));
   }
 
   async function preprocessHtml(rawHtml, page, baseUrlOverride = null) {
@@ -452,18 +399,17 @@
   }
 
   async function sandboxSource(rawHtml,page,processHtml = true, baseUrlOverride = null) {
-    const pageLocation = ensurePageLocation(page, baseUrlOverride);
     let processedHtml;
 
     if (processHtml) processedHtml = await preprocessHtml(rawHtml,page,baseUrlOverride);
     else processedHtml = rawHtml;
 
-    const documentUrl = baseUrlOverride || pageLocation.url;
+    const documentUrl = baseUrlOverride || page.location.url;
     const baseUrl = baseUrlOverride || getPageBaseUrl(page);
     const hostContext = page.hostContext || null;
     const runtimeInterceptor = createRuntimeInterceptor(
       documentUrl,
-      pageLocation.origin,
+      page.location.origin,
       undefined,
       baseUrl,
       hostContext?.url,
@@ -2173,17 +2119,20 @@
         const nativeReplaceChild = Node.prototype.replaceChild;
 
         Node.prototype.appendChild = function(node) {
-          prepareInsertedContent([node]);
+          prepareInsertedScripts(node);
+          primeAssignedResources([node]);
           return applyNodeMethod(nativeAppendChild, this, [node]);
         };
 
         Node.prototype.insertBefore = function(node, referenceNode) {
-          prepareInsertedContent([node]);
+          prepareInsertedScripts(node);
+          primeAssignedResources([node]);
           return applyNodeMethod(nativeInsertBefore, this, [node, referenceNode]);
         };
 
         Node.prototype.replaceChild = function(newNode, oldNode) {
-          prepareInsertedContent([newNode]);
+          prepareInsertedScripts(newNode);
+          primeAssignedResources([newNode]);
           return applyNodeMethod(nativeReplaceChild, this, [newNode, oldNode]);
         };
 
@@ -2230,99 +2179,6 @@
             });
           });
           node.__editingAttribute = false;
-        }
-
-        function prepareInsertedContent(nodes) {
-          const prepare = node => {
-            if (!node) return;
-            if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
-              Array.from(node.childNodes).forEach(prepare);
-              return;
-            }
-            if (node.nodeType !== Node.ELEMENT_NODE) return;
-
-            prepareInsertedScripts(node);
-            checkNodeAndChildren(node);
-          };
-
-          for (const node of nodes || []) prepare(node);
-        }
-
-        function patchInsertionMethod(prototype, methodName) {
-          if (!prototype) return;
-          const descriptor = Object.getOwnPropertyDescriptor(prototype, methodName);
-          if (!descriptor || typeof descriptor.value !== 'function') return;
-          if (descriptor.value.__emulatorInsertionPatch) return;
-
-          const nativeMethod = descriptor.value;
-          const wrappedMethod = function(...args) {
-            prepareInsertedContent(args);
-            return Reflect.apply(nativeMethod, this, args);
-          };
-          try {
-            Object.defineProperty(wrappedMethod, '__emulatorInsertionPatch', { value: true });
-            Object.defineProperty(prototype, methodName, { ...descriptor, value: wrappedMethod });
-          } catch (error) {
-            console.warn('[Browser Emulator] Could not intercept DOM insertion method:', methodName, error);
-          }
-        }
-
-        // ParentNode methods are implemented separately on each interface.
-        for (const prototype of [Element.prototype, Document.prototype, DocumentFragment.prototype]) {
-          for (const method of ['append', 'prepend', 'replaceChildren']) {
-            patchInsertionMethod(prototype, method);
-          }
-        }
-
-        // ChildNode methods also accept nodes that can carry resources/frames.
-        for (const prototype of [Element.prototype, CharacterData.prototype, DocumentType.prototype]) {
-          for (const method of ['before', 'after', 'replaceWith']) {
-            patchInsertionMethod(prototype, method);
-          }
-        }
-
-        patchInsertionMethod(Element.prototype, 'insertAdjacentElement');
-        patchInsertionMethod(Range.prototype, 'insertNode');
-
-        // insertAdjacentHTML parses and inserts nodes internally, bypassing
-        // appendChild/append hooks. Parse the contextual fragment while it is
-        // detached so frames and resources can be virtualized before insertion.
-        const nativeInsertAdjacentHTML = Element.prototype.insertAdjacentHTML;
-        if (typeof nativeInsertAdjacentHTML === 'function') {
-          const wrappedInsertAdjacentHTML = function(position, text) {
-            const normalizedPosition = String(position).toLowerCase();
-            if (!['beforebegin', 'afterbegin', 'beforeend', 'afterend'].includes(normalizedPosition)) {
-              return Reflect.apply(nativeInsertAdjacentHTML, this, [position, text]);
-            }
-
-            const parentPosition = normalizedPosition === 'beforebegin' || normalizedPosition === 'afterend';
-            const parent = this.parentNode;
-            if (parentPosition && !parent) {
-              return Reflect.apply(nativeInsertAdjacentHTML, this, [position, text]);
-            }
-
-            const range = this.ownerDocument.createRange();
-            range.selectNodeContents(this);
-
-            const fragment = range.createContextualFragment(text);
-            prepareInsertedContent([fragment]);
-
-            if (normalizedPosition === 'beforebegin') parent.insertBefore(fragment, this);
-            else if (normalizedPosition === 'afterend') parent.insertBefore(fragment, this.nextSibling);
-            else if (normalizedPosition === 'afterbegin') this.insertBefore(fragment, this.firstChild);
-            else this.appendChild(fragment);
-          };
-
-          try {
-            Object.defineProperty(Element.prototype, 'insertAdjacentHTML', {
-              configurable: true,
-              enumerable: false,
-              writable: true,
-              value: wrappedInsertAdjacentHTML
-            });
-          } catch (error) {
-            console.warn('[Browser Emulator] Could not virtualize insertAdjacentHTML():', error);
-          }
         }
 
         // Keep the dynamic-node processor available to the Element prototype
@@ -2536,58 +2392,6 @@
           }
         }
 
-        // Catch setAttribute('src', ...) on newly-created script elements too.
-        // The per-element wrapper only exists for elements returned through
-        // selected document APIs; dynamically-created elements can otherwise
-        // reach the native loader before they are wrapped.
-        const patchedSetAttribute = function(name, value) {
-          const attributeName = String(name).toLowerCase();
-
-          // A newly-created iframe may have src/srcdoc assigned before any
-          // document query or MutationObserver has a chance to wrap it. Wrap
-          // it synchronously and let the instance setter route navigation
-          // through setupNestedFrame instead of the native frame loader.
-          if (
-            this instanceof HTMLIFrameElement &&
-            (attributeName === 'src' || attributeName === 'srcdoc') &&
-            !this.__processing_attr &&
-            !this.__editingAttribute
-          ) {
-            const source = String(value);
-            if (
-              attributeName === 'src' &&
-              (!source || /^(?:blob|javascript):/i.test(source))
-            ) {
-              return Reflect.apply(nativeElementSetAttribute, this, [name, value]);
-            }
-            wrapElement(this);
-            return this.setAttribute(name, value);
-          }
-
-          if (
-            this instanceof HTMLScriptElement &&
-            attributeName === 'src' &&
-            isExecutableScriptElement(this)
-          ) {
-            const source = String(value);
-            if (source && !/^(?:data|blob|javascript):/i.test(source)) {
-              interceptDynamicScriptSource(this, source);
-              return;
-            }
-          }
-          return Reflect.apply(nativeElementSetAttribute, this, [name, value]);
-        };
-        try {
-          Object.defineProperty(Element.prototype, 'setAttribute', {
-            configurable: true,
-            enumerable: false,
-            writable: true,
-            value: patchedSetAttribute
-          });
-        } catch (error) {
-          console.warn('[Browser Emulator] Could not virtualize script setAttribute():', error);
-        }
-
         // Match the browser's reflected IDL attributes for URL-valued resource
         // properties. The page-visible attributes are kept in data-raw-* while
         // the real attributes may be removed or replaced with data URLs.
@@ -2639,39 +2443,6 @@
           });
         } catch (error) {
           console.warn("[Browser Emulator] Could not virtualize HTMLScriptElement.src:", error);
-        }
-
-        // Make the iframe IDL URL setters safe even before wrapElement() has
-        // been reached through a query result or insertion hook. Setting src
-        // on a connected, unwrapped iframe otherwise starts a native
-        // navigation immediately, before the MutationObserver can intervene.
-        for (const [property, descriptor] of [
-          ['src', Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src')],
-          ['srcdoc', Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'srcdoc')]
-        ]) {
-          if (!descriptor || typeof descriptor.set !== 'function') continue;
-          try {
-            Object.defineProperty(HTMLIFrameElement.prototype, property, {
-              configurable: descriptor.configurable,
-              enumerable: descriptor.enumerable,
-              get() {
-                return descriptor.get.call(this);
-              },
-              set(value) {
-                const source = String(value);
-                if (
-                  property === 'src' &&
-                  (!source || /^(?:blob|javascript):/i.test(source))
-                ) {
-                  return descriptor.set.call(this, value);
-                }
-                wrapElement(this);
-                return this.setAttribute(property, value);
-              }
-            });
-          } catch (error) {
-            console.warn('[Browser Emulator] Could not virtualize iframe.' + property + ':', error);
-          }
         }
 
         var getOldContextWindow = (f=>f.call.bind(f))(Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get);
@@ -6177,39 +5948,6 @@
         // wrong browsing context. Wrap ancestor windows in the caller's realm
         // and invoke the matching native ancestor WindowProxy directly.
         const callerWindowProxyCache = new Map();
-
-        function dispatchVirtualPostMessage(nativeTargetWindow, targetPage, message, targetOrigin, transfer) {
-          if (!nativeTargetWindow || typeof nativeTargetWindow.postMessage !== 'function') return false;
-
-          const options = targetOrigin && typeof targetOrigin === 'object' && (
-            Object.prototype.hasOwnProperty.call(targetOrigin, 'targetOrigin') ||
-            Object.prototype.hasOwnProperty.call(targetOrigin, 'transfer')
-          ) ? targetOrigin : null;
-          let requestedOrigin = options ? options.targetOrigin : targetOrigin;
-          const transferList = options ? options.transfer : transfer;
-
-          // The native default is the sender's origin. Resolve that default
-          // against the virtual page rather than the physical srcdoc origin.
-          if (requestedOrigin == null || requestedOrigin === '' || requestedOrigin === '/') {
-            requestedOrigin = pageEmulator?.location?.origin || '';
-          }
-
-          const recipientOrigin = targetPage?.location?.origin || '';
-          if (requestedOrigin !== '*') {
-            let normalizedOrigin = requestedOrigin;
-            if (requestedOrigin !== 'null') {
-              try { normalizedOrigin = new URL(requestedOrigin).origin; } catch (_) { return false; }
-            }
-            if (!recipientOrigin || normalizedOrigin !== recipientOrigin) return false;
-          }
-
-          // Origin authorization has already been performed in the virtual
-          // origin space. Use "*" only for the native delivery because srcdoc
-          // recipients physically inherit the editor shell's origin.
-          nativeTargetWindow.postMessage(message, '*', transferList);
-          return true;
-        }
-
         function getCallerWindowProxy(targetPage, nativeTargetWindow) {
           if (!targetPage || targetPage === pageEmulator) return windowProxy;
           if (!targetPage.__windowProxy && nativeTargetWindow && targetPage.iframe && typeof window.__runSyncInterceptor === 'function') {
@@ -6237,7 +5975,12 @@
             get(target, prop) {
               if (prop === 'postMessage') {
                 return function(message, targetOrigin, transfer) {
-                  return dispatchVirtualPostMessage(nativeTargetWindow, targetPage, message, targetOrigin, transfer);
+                  try {
+                    const origin = targetOrigin || '*';
+                    nativeTargetWindow.postMessage(message, origin, transfer);
+                  } catch (error) {
+                    try { nativeTargetWindow.postMessage(message, '*'); } catch (_) {}
+                  }
                 };
               }
 
@@ -6437,7 +6180,12 @@
                 if (!targetWindow || targetWindow === receiverPage?.__windowProxy || typeof targetWindow.postMessage !== 'function') {
                   return;
                 }
-                return dispatchVirtualPostMessage(targetWindow, receiverPage, message, targetOrigin, transfer);
+                try {
+                  var origin = targetOrigin || '*';
+                  targetWindow.postMessage(message, origin, transfer);
+                } catch(e) {
+                  try { targetWindow.postMessage(message, '*'); } catch(_) {}
+                }
               };
             }
             if (typeof prop === 'string' && /^\d+$/.test(prop)) {
@@ -6776,7 +6524,7 @@
         const processNode = window.__checkNodeAndChildren;
         if (typeof processNode !== 'function') return;
 
-        const selector = 'link[href], script[src], img[src], audio[src], video[src], source[src], object[data], iframe[src], iframe[srcdoc], embed[src]';
+        const selector = 'link[href], script[src], img[src], audio[src], video[src], source[src], object[data]';
         for (const node of nodes || []) {
           if (!node) continue;
 
