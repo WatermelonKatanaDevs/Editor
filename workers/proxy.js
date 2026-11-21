@@ -694,7 +694,7 @@ export default {
 
       response =
         await fetch(target.toString(), init);
-      if (response) finalTargetUrl = response.url || target.toString();
+      if (response?.redirected) finalTargetUrl = response.url || target.toString();
 
     } catch (err) {
 
