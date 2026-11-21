@@ -6484,6 +6484,42 @@
     return pageNetwork;
   }
 
+  // Capture the storage belonging to the browser host, not the browsing
+  // context used to render an emulated page. The browser UI is commonly itself
+  // embedded in the Editor, so its parent is the durable same-origin storage
+  // context. Keep these native Storage objects outside emulated page realms.
+  function getBrowserStorageProviders() {
+    const providers = {};
+    const contexts = [];
+    try {
+      if (window.parent && window.parent !== window) contexts.push(window.parent);
+    } catch (_) {}
+    contexts.push(window);
+
+    for (const context of contexts) {
+      if (!providers.local) {
+        try {
+          const storage = context.localStorage;
+          if (storage && typeof storage.getItem === 'function') providers.local = storage;
+        } catch (_) {}
+      }
+      if (!providers.session) {
+        try {
+          const storage = context.sessionStorage;
+          if (storage && typeof storage.getItem === 'function') providers.session = storage;
+        } catch (_) {}
+      }
+      if (providers.local && providers.session) break;
+    }
+
+    if (!providers.local || !providers.session) {
+      throw new Error('[Browser Emulator] Could not access the browser host storage providers.');
+    }
+    return providers;
+  }
+
+  const browserStorageProviders = getBrowserStorageProviders();
+
   class PageEmulator {
     constructor(iframe, options = {}) {
       this.id = Math.random().toString(36).substring(2);
@@ -6495,13 +6531,9 @@
       const { network, location, history } = options;
 
       this.iframe = iframe;
-      // Capture storage from the host browsing context. The emulated document
-      // may physically live at a data: URL, where reading window.localStorage
-      // throws because that document has an opaque origin.
-      this.storageProviders = options.storageProviders || {
-        local: window.localStorage,
-        session: window.sessionStorage
-      };
+      // Always use the browser host's storage. The emulated document can be
+      // backed by a data: URL and has no usable native Storage getters.
+      this.storageProviders = options.storageProviders || browserStorageProviders;
       iframe.setAttribute('data-page-id',this.id);
       iframe.pageEmulator = this;
       iframe.usefulHelpers = usefulHelpers;
