@@ -11,7 +11,7 @@
 
       const context = Object.freeze({url: parsed.href, origin: parsed.origin});
       window.__editorHostContext = context;
-      window.dispatchEvent(new CustomEvent('wk-host-context-change', {detail: context}));
+      window.dispatchEvent(new CustomEvent('editor-host-context-change', {detail: context}));
       return true;
     } catch (_) {
       return false;
