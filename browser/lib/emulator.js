@@ -2497,7 +2497,14 @@
 
               oldSetAttribute.call(this, propObj[lowerProp], value);
 
-              if (value.startsWith("data:") || value.startsWith("blob:") || value.startsWith("javascript:")) {
+              // Keep native handling for data/blob/javascript resources, except data:
+              // iframe documents. Those must go through PageEmulator so the injected
+              // runtime can replace opaque-origin storage getters before page scripts run.
+              if (
+                (value.startsWith("data:") && !(tagName === "iframe")) ||
+                value.startsWith("blob:") ||
+                value.startsWith("javascript:")
+              ) {
                 return oldSetAttribute.call(this, prop, value);
               }
 
