@@ -1220,6 +1220,11 @@ function recordAIBrowserOutput(type, args) {
   window.__aiBrowserOutput.push({type:type, args:safe, tabId:arguments[2] || null, time:Date.now()});
   if (window.__aiBrowserOutput.length > 300) window.__aiBrowserOutput.splice(0,window.__aiBrowserOutput.length - 300);
 }
+function isRegisteredPageEmulator(candidate) {
+  const id = candidate?.id;
+  return typeof id === 'string' && id.length > 0 && window.__pageRegistry?.[id] === candidate;
+}
+
 function createNewPage(iframe,parentPage=null) {
   var page = new PageEmulator(iframe,{network:browserNetwork});
   browserDevTools?.runOnPage(page,parentPage);
@@ -1239,7 +1244,14 @@ function createNewPage(iframe,parentPage=null) {
     // its data-page-id. Reattach it to the existing PageEmulator instead of
     // creating a second, stale frame context.
     const pageId = iframe.getAttribute?.('data-page-id');
-    const existing = iframe.pageEmulator || (pageId ? window.__pageRegistry?.[pageId] : null);
+    const attachedPage = iframe.pageEmulator;
+    const pageFromId = pageId ? window.__pageRegistry?.[pageId] : null;
+    const existing = isRegisteredPageEmulator(attachedPage)
+      ? attachedPage
+      : (isRegisteredPageEmulator(pageFromId) ? pageFromId : null);
+    if (!existing && attachedPage && iframe.pageEmulator === attachedPage) {
+      delete iframe.pageEmulator;
+    }
     if (existing) {
       existing.iframe = iframe;
       iframe.pageEmulator = existing;
@@ -1295,8 +1307,12 @@ function createNewPage(iframe,parentPage=null) {
 
   page.interceptEvent('iframe-remove',function(obj){
     const iframe = obj?.iframe;
-    const child = iframe?.pageEmulator || obj?.page;
-    if (!child || (child.parent !== page && !page.children.includes(child))) return null;
+    const attachedChild = iframe?.pageEmulator;
+    if (attachedChild && !isRegisteredPageEmulator(attachedChild) && iframe.pageEmulator === attachedChild) {
+      delete iframe.pageEmulator;
+    }
+    const child = isRegisteredPageEmulator(attachedChild) ? attachedChild : obj?.page;
+    if (!isRegisteredPageEmulator(child) || (child.parent !== page && !page.children.includes(child))) return null;
 
     if (child.__browserFrameLoadElement && child.__browserFrameLoadHandler) {
       child.__browserFrameLoadElement.removeEventListener('load',child.__browserFrameLoadHandler);
@@ -1426,15 +1442,21 @@ function createNewPage(iframe,parentPage=null) {
     const registry = window.__pageRegistry;
     const pageId = iframe.getAttribute?.('data-page-id');
     const attachedPage = iframe.pageEmulator;
-    let page2 = attachedPage && (!attachedPage.id || registry?.[attachedPage.id] === attachedPage)
-      ? attachedPage
-      : null;
+    let page2 = isRegisteredPageEmulator(attachedPage) ? attachedPage : null;
 
-    if (!page2 && pageId) page2 = registry?.[pageId] || null;
-    if (!page2) page2 = page.children?.find(child => child?.iframe === iframe) || null;
+    if (!page2 && pageId) {
+      const pageFromId = registry?.[pageId] || null;
+      if (isRegisteredPageEmulator(pageFromId)) page2 = pageFromId;
+    }
+    if (!page2) {
+      const childPage = page.children?.find(child => child?.iframe === iframe) || null;
+      if (isRegisteredPageEmulator(childPage)) page2 = childPage;
+    }
 
     if (!page2) {
-      page2 = page.sendEvent('iframe-create',{iframe}) || iframe.pageEmulator || null;
+      if (attachedPage && iframe.pageEmulator === attachedPage) delete iframe.pageEmulator;
+      const createdPage = page.sendEvent('iframe-create',{iframe}) || iframe.pageEmulator || null;
+      page2 = isRegisteredPageEmulator(createdPage) ? createdPage : null;
     }
 
     if (!page2) {
