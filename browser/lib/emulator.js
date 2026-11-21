@@ -2508,8 +2508,17 @@
           // through setupNestedFrame instead of the native frame loader.
           if (
             this instanceof HTMLIFrameElement &&
-            (attributeName === 'src' || attributeName === 'srcdoc')
+            (attributeName === 'src' || attributeName === 'srcdoc') &&
+            !this.__processing_attr &&
+            !this.__editingAttribute
           ) {
+            const source = String(value);
+            if (
+              attributeName === 'src' &&
+              (!source || /^(?:blob|javascript):/i.test(source))
+            ) {
+              return Reflect.apply(nativeElementSetAttribute, this, [name, value]);
+            }
             wrapElement(this);
             return this.setAttribute(name, value);
           }
@@ -2608,6 +2617,13 @@
                 return descriptor.get.call(this);
               },
               set(value) {
+                const source = String(value);
+                if (
+                  property === 'src' &&
+                  (!source || /^(?:blob|javascript):/i.test(source))
+                ) {
+                  return descriptor.set.call(this, value);
+                }
                 wrapElement(this);
                 return this.setAttribute(property, value);
               }
