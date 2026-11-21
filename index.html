@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><script>
 (function () {
-  const MESSAGE_TYPE = 'watermelonkatanas:host-context';
+  const MESSAGE_TYPE = 'editor:host-context';
 
   function applyHostContext(payload, senderOrigin) {
     try {
@@ -10,7 +10,7 @@
       if (payload.origin && payload.origin !== parsed.origin) return false;
 
       const context = Object.freeze({url: parsed.href, origin: parsed.origin});
-      window.__wkHostContext = context;
+      window.__editorHostContext = context;
       window.dispatchEvent(new CustomEvent('wk-host-context-change', {detail: context}));
       return true;
     } catch (_) {
@@ -19,7 +19,7 @@
   }
 
   // Until the embedding page supplies a value, the Editor itself is the host.
-  window.__wkHostContext = Object.freeze({url: window.location.href, origin: window.location.origin});
+  window.__editorHostContext = Object.freeze({url: window.location.href, origin: window.location.origin});
 
   window.addEventListener('message', function (event) {
     if (window.parent === window || event.source !== window.parent) return;
@@ -28,7 +28,7 @@
     }
   });
 
-  // WatermelonKatana's remote bridge already supplies hostUrl in this config.
+  // The remote bridge already supplies hostUrl in this config.
   // Reuse it so the existing integration also initializes host context.
   window.addEventListener('editorhostready', function (event) {
     const config = event.detail && event.detail.config || window.EditorHostConfig || {};
