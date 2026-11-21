@@ -685,6 +685,7 @@ export default {
     // ========================================================
 
     let response;
+    let finalTargetUrl = null;
 
     let directFetchFailed = false;
 
@@ -693,12 +694,14 @@ export default {
 
       response =
         await fetch(target.toString(), init);
+      if (response) finalTargetUrl = response.url || target.toString();
 
     } catch (err) {
 
       directFetchFailed = true;
 
       response = null;
+      finalTargetUrl = null;
     }
 
 
@@ -801,6 +804,9 @@ export default {
         ) {
 
           response = corsfixResponse;
+          // Corsfix's response URL identifies the fallback service, not the
+          // original page's final destination. Do not expose it as a page URL.
+          finalTargetUrl = null;
         }
 
       } catch (err) {
@@ -885,6 +891,19 @@ export default {
       );
     }
 
+
+    // A fetch performed inside this Worker knows the final upstream URL
+    // after following HTTP redirects. Carry it back to the browser shell,
+    // whose own Response.url points at this proxy endpoint instead.
+    responseHeaders.delete("x-wk-final-url");
+    if (finalTargetUrl) {
+      try {
+        const finalUrl = new URL(finalTargetUrl);
+        if (finalUrl.protocol === "http:" || finalUrl.protocol === "https:") {
+          responseHeaders.set("X-WK-Final-URL", finalUrl.href);
+        }
+      } catch (_) {}
+    }
 
     // ========================================================
     // 12. ADD OUR CORS HEADERS
