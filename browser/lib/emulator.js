@@ -2501,6 +2501,19 @@
         // reach the native loader before they are wrapped.
         const patchedSetAttribute = function(name, value) {
           const attributeName = String(name).toLowerCase();
+
+          // A newly-created iframe may have src/srcdoc assigned before any
+          // document query or MutationObserver has a chance to wrap it. Wrap
+          // it synchronously and let the instance setter route navigation
+          // through setupNestedFrame instead of the native frame loader.
+          if (
+            this instanceof HTMLIFrameElement &&
+            (attributeName === 'src' || attributeName === 'srcdoc')
+          ) {
+            wrapElement(this);
+            return this.setAttribute(name, value);
+          }
+
           if (
             this instanceof HTMLScriptElement &&
             attributeName === 'src' &&
@@ -2576,6 +2589,32 @@
           });
         } catch (error) {
           console.warn("[Browser Emulator] Could not virtualize HTMLScriptElement.src:", error);
+        }
+
+        // Make the iframe IDL URL setters safe even before wrapElement() has
+        // been reached through a query result or insertion hook. Setting src
+        // on a connected, unwrapped iframe otherwise starts a native
+        // navigation immediately, before the MutationObserver can intervene.
+        for (const [property, descriptor] of [
+          ['src', Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src')],
+          ['srcdoc', Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'srcdoc')]
+        ]) {
+          if (!descriptor || typeof descriptor.set !== 'function') continue;
+          try {
+            Object.defineProperty(HTMLIFrameElement.prototype, property, {
+              configurable: descriptor.configurable,
+              enumerable: descriptor.enumerable,
+              get() {
+                return descriptor.get.call(this);
+              },
+              set(value) {
+                wrapElement(this);
+                return this.setAttribute(property, value);
+              }
+            });
+          } catch (error) {
+            console.warn('[Browser Emulator] Could not virtualize iframe.' + property + ':', error);
+          }
         }
 
         var getOldContextWindow = (f=>f.call.bind(f))(Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get);
