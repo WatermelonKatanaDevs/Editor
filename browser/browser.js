@@ -1487,7 +1487,57 @@ function createNewPage(iframe,parentPage=null) {
     page2.setLocation(targetUrl.href,targetUrl.origin);
     if (page2.tab) page2.tab.url = targetUrl.href;
 
-    const res = await page2.network.request(targetUrl.href,targetUrl.origin,{},'iframe');
+    let res;
+    if (targetUrl.protocol === 'data:') {
+      // Data URLs are local Fetch-scheme resources, not requests for a proxy
+      // endpoint. Decode them in the browser shell so their HTML can be
+      // installed with the normal PageEmulator runtime interceptor.
+      try {
+        const serialized = targetUrl.href.slice(0, targetUrl.href.length - targetUrl.hash.length);
+        const comma = serialized.indexOf(',', 5);
+        if (comma < 0) throw new TypeError('Malformed data URL');
+
+        let metadata = serialized.slice(5, comma);
+        const isBase64 = /;base64$/i.test(metadata);
+        if (isBase64) metadata = metadata.slice(0, -7);
+        if (!metadata) metadata = 'text/plain;charset=US-ASCII';
+        else if (metadata.startsWith(';')) metadata = 'text/plain' + metadata;
+
+        const payload = serialized.slice(comma + 1);
+        const encoder = new TextEncoder();
+        const decoded = [];
+        for (let i = 0; i < payload.length;) {
+          if (payload[i] === '%' && /^[0-9a-f]{2}$/i.test(payload.slice(i + 1, i + 3))) {
+            decoded.push(parseInt(payload.slice(i + 1, i + 3), 16));
+            i += 3;
+            continue;
+          }
+          const character = String.fromCodePoint(payload.codePointAt(i));
+          decoded.push(...encoder.encode(character));
+          i += character.length;
+        }
+
+        let body;
+        if (isBase64) {
+          let encoded = '';
+          for (let i = 0; i < decoded.length; i += 0x8000) {
+            encoded += String.fromCharCode(...decoded.slice(i, i + 0x8000));
+          }
+          const binary = atob(encoded.replace(/[\\t\\n\\f\\r ]/g, ''));
+          body = Uint8Array.from(binary, character => character.charCodeAt(0));
+        } else {
+          body = new Uint8Array(decoded);
+        }
+
+        res = new Response(body, { headers: { 'Content-Type': metadata } });
+        res.source_url = targetUrl.href;
+      } catch (error) {
+        console.error('Could not decode data URL iframe:', error);
+        return;
+      }
+    } else {
+      res = await page2.network.request(targetUrl.href,targetUrl.origin,{},'iframe');
+    }
 
     if (navigationId !== undefined && iframe.__iframeNavigationId !== navigationId) return;
     if (!res || !res.ok) return;
@@ -1497,7 +1547,7 @@ function createNewPage(iframe,parentPage=null) {
     if (navigationId !== undefined && iframe.__iframeNavigationId !== navigationId) return;
 
     page2.rawDocument = String(rawHtml || '');
-    await page2.setDocument(rawHtml);
+    await page2.setDocument(rawHtml, true, targetUrl.protocol === 'data:' ? targetUrl.href : null);
   });
 
   page.interceptEvent('hidecontext',async function(){
