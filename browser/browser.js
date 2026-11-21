@@ -2484,7 +2484,7 @@ function applyMobileEmulationDocument(html, emulation) {
 }
 
 function getFinalNavigationURL(response, requestedUrl) {
-  const reportedURL = response?.headers?.get('x-wk-final-url');
+  const reportedURL = response?.headers?.get('x-final-url');
   if (reportedURL) {
     try {
       const candidate = new URL(reportedURL, requestedUrl);
