@@ -104,7 +104,7 @@ var bookmarks = [
   // { title: "Wikipedia", url: "https://www.wikipedia.org/" },
   // { title: "Hacker News", url: "https://news.ycombinator.com" },
   // { title: "Test", url: "https://getsamplefiles.com/download/7z/sample-1.7z" },
-  // { title: "WatermelonKatana", url: "https://watermelonkatana.onrender.com" },
+  // { title: "Editor", url: "https://example.com" },
   // { title: "Pathtracer", url: "https://dragonfiregames.github.io/WebGPU-Pathtracer/" },
 ];
 
@@ -1924,7 +1924,7 @@ function applyDeviceEmulation(tab = getActiveTab()) {
 
     try {
       iframe.contentWindow?.postMessage({
-        __wkDeviceEmulationUpdate: true,
+        __editorDeviceEmulationUpdate: true,
         config: {
           width, height,
           deviceScaleFactor: Number(config.deviceScaleFactor) || 1,
@@ -2446,7 +2446,7 @@ function applyMobileEmulationDocument(html, emulation) {
       'if(/\\((any-)?pointer\\s*:\\s*coarse\\)/.test(q)||/\\((any-)?hover\\s*:\\s*none\\)/.test(q))forced=true;' +
       'if(/\\((any-)?pointer\\s*:\\s*fine\\)/.test(q)||/\\((any-)?hover\\s*:\\s*hover\\)/.test(q))forced=false;' +
       'if(forced===null)return result;return new Proxy(result,{get:function(target,key){if(key==="matches")return forced;var value=Reflect.get(target,key,target);return typeof value==="function"?value.bind(target):value;}});};}' +
-    'apply(state);window.addEventListener("message",function(event){if(!event.data||event.data.__wkDeviceEmulationUpdate!==true)return;' +
+    'apply(state);window.addEventListener("message",function(event){if(!event.data||event.data.__editorDeviceEmulationUpdate!==true)return;' +
       'var hostWindow=window.__pageEmulator&&window.__pageEmulator.iframe&&window.__pageEmulator.iframe.ownerDocument&&window.__pageEmulator.iframe.ownerDocument.defaultView;' +
       'if(hostWindow&&event.source!==hostWindow)return;apply(event.data.config);' +
       'try{window.dispatchEvent(new Event("resize"));window.dispatchEvent(new Event("orientationchange"));if(window.screen.orientation)window.screen.orientation.dispatchEvent(new Event("change"));}catch(e){}' +
