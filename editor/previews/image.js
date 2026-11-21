@@ -46,7 +46,7 @@
           'display:none',
           'object-fit:cover',
           'object-position:center',
-          'filter:blur(24px) brightness(.85) saturate(.95)',
+          'filter:blur(16px) brightness(.85) saturate(.95)',
           'transform:scale(1.14)',
           'pointer-events:none',
           'user-select:none',
@@ -195,7 +195,7 @@
       // This intentionally retains the previous .editor-image sizing behavior.
       id: 'image-raw',
       label: 'Raw',
-      priority: 80,
+      priority: 20,
       create(ctx) {
         const img = document.createElement('img');
         img.className = 'editor-image';
