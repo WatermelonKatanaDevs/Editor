@@ -1700,14 +1700,14 @@
             if (!iframe || !event.source) {
               return false;
             }
-            let nativeWindow = iframe.__wkNativeContentWindow || null;
+            let nativeWindow = iframe.__editorNativeContentWindow || null;
             const hadCachedWindow = !!nativeWindow;
             if (!nativeWindow) {
               try {
                 const getter = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow')?.get;
                 if (getter) nativeWindow = Reflect.apply(getter, iframe, []);
                 if (nativeWindow) {
-                  try { Object.defineProperty(iframe, '__wkNativeContentWindow', { value: nativeWindow, writable: true, configurable: true }); } catch (_) {}
+                  try { Object.defineProperty(iframe, '__editorNativeContentWindow', { value: nativeWindow, writable: true, configurable: true }); } catch (_) {}
                 }
               } catch (_) {}
             }
@@ -1751,7 +1751,7 @@
             } catch (_) {}
 
             try {
-              const targetWindow = matchedChildWindow || childPage.iframe?.__wkNativeContentWindow;
+              const targetWindow = matchedChildWindow || childPage.iframe?.__editorNativeContentWindow;
               if (targetWindow && typeof targetWindow.postMessage === 'function') {
                 targetWindow.postMessage({ turbowarp: 'init', userid: null, storage: snapshot }, '*');
               }
@@ -2420,7 +2420,7 @@
             // with the emulator proxy. Nested PageEmulators need this native handle
             // to deliver postMessage without routing back into their own proxy.
             try {
-              Object.defineProperty(elem, '__wkNativeContentWindow', {
+              Object.defineProperty(elem, '__editorNativeContentWindow', {
                 value: getOldContextWindow(elem),
                 writable: true,
                 configurable: true
@@ -2458,7 +2458,7 @@
             Object.defineProperty(elem,'contentWindow',{
               get: () => {
                 ensureFrameEmulator();
-                const contextWindow = elem.__wkNativeContentWindow || getOldContextWindow(elem);
+                const contextWindow = elem.__editorNativeContentWindow || getOldContextWindow(elem);
                 return window.__runSyncInterceptor(elem,contextWindow);
               },
               set: () => {}
@@ -2467,7 +2467,7 @@
             Object.defineProperty(elem,'contentDocument',{
               get: () => {
                 ensureFrameEmulator();
-                const contextWindow = elem.__wkNativeContentWindow || getOldContextWindow(elem);
+                const contextWindow = elem.__editorNativeContentWindow || getOldContextWindow(elem);
                 const proxyWindow = window.__runSyncInterceptor(elem,contextWindow);
                 return proxyWindow?.document;
               },
@@ -3033,7 +3033,7 @@
           let nativeFileSystem;
           const chromeObject = window.chrome || {};
           nativeFileSystem = chromeObject.fileSystem || null;
-          if (nativeFileSystem?.__wkWorkspaceFileSystemShim) return;
+          if (nativeFileSystem?.__editorWorkspaceFileSystemShim) return;
 
           let activeLastError = null;
           const runtime = chromeObject.runtime || {};
@@ -3107,13 +3107,13 @@
             return result;
           }
 
-          const fileSystemObject = {name: 'watermelonkatanas-workspace'};
+          const fileSystemObject = {name: 'editor-workspace'};
           const retainedEntries = new Map();
           const entryRecords = new WeakMap();
           let nextRetainedEntryId = 1;
 
           function makeFileEntry(file, writable, forcedPath) {
-            const workspacePath = file?.__wkWorkspacePath || null;
+            const workspacePath = file?.__editorWorkspacePath || null;
             const relativePath = forcedPath || workspacePath || file?.webkitRelativePath || file?.name || 'untitled';
             const path = normalizePath(relativePath);
             const name = path.split('/').pop() || String(file?.name || 'untitled');
@@ -3397,7 +3397,7 @@
 
           const fileSystemShim = Object.create(nativeFileSystem || null);
           Object.defineProperties(fileSystemShim, {
-            __wkWorkspaceFileSystemShim: {value: true},
+            __editorWorkspaceFileSystemShim: {value: true},
             chooseEntry: {value: chooseEntry, configurable: true, writable: true},
             getWritableEntry: {
               configurable: true, writable: true,
@@ -3528,7 +3528,7 @@
         // its network APIs back through this PageEmulator.
         (function installVirtualWorkers() {
           const NativeWorker = window.Worker;
-          if (typeof NativeWorker !== 'function' || NativeWorker.__wkVirtualized) return;
+          if (typeof NativeWorker !== 'function' || NativeWorker.__editorVirtualized) return;
 
           function workerBootstrap() {
             // Capture the worker's native WebSocket before any worker-scope
@@ -3549,7 +3549,7 @@
 
             function receiveInitialMessage(event) {
               if (replayingWorkerMessage) return;
-              if (event.data && event.data.__wkEmulatorInit === true && event.ports && event.ports[0]) {
+              if (event.data && event.data.__editorEmulatorInit === true && event.ports && event.ports[0]) {
                 bridgePort = event.ports[0];
                 bridgePort.onmessage = receiveBridgeMessage;
                 if (bridgePort.start) bridgePort.start();
@@ -4187,7 +4187,7 @@
 
           const nativeRevokeObjectURL = window.URL.revokeObjectURL.bind(window.URL);
           const retainedWorkerBlobUrls = new Map();
-          if (!window.URL.revokeObjectURL.__wkWorkerAware) {
+          if (!window.URL.revokeObjectURL.__editorWorkerAware) {
             const revokeObjectURL = function(url) {
               const key = String(url);
               const retained = retainedWorkerBlobUrls.get(key);
@@ -4197,7 +4197,7 @@
               }
               return nativeRevokeObjectURL(key);
             };
-            Object.defineProperty(revokeObjectURL, '__wkWorkerAware', { value: true });
+            Object.defineProperty(revokeObjectURL, '__editorWorkerAware', { value: true });
             window.URL.revokeObjectURL = revokeObjectURL;
           }
 
@@ -4227,9 +4227,9 @@
               super(bootstrapUrl, options || {});
               const releaseSourceUrl = retainWorkerBlobUrl(sourceUrl);
 
-              this.__wkPendingInitMessages = [];
-              this.__wkStartSent = false;
-              this.__wkReleaseSourceUrl = releaseSourceUrl;
+              this.__editorPendingInitMessages = [];
+              this.__editorStartSent = false;
+              this.__editorReleaseSourceUrl = releaseSourceUrl;
               const channel = new MessageChannel();
               const port = channel.port1;
               const abortController = new AbortController();
@@ -4260,7 +4260,7 @@
                 Object.assign(workerRecord, patch);
                 notifyWorker(action);
               };
-              this.__wkWorkerRecord = workerRecord;
+              this.__editorWorkerRecord = workerRecord;
               notifyWorker('created');
               let bootstrapRevoked = false;
               const revokeBootstrap = () => {
@@ -4284,9 +4284,9 @@
                 try { this.terminate(); } catch (_) {}
               };
 
-              this.__wkWorkerPort = port;
-              this.__wkWorkerAbortController = abortController;
-              this.__wkWorkerSockets = sockets;
+              this.__editorWorkerPort = port;
+              this.__editorWorkerAbortController = abortController;
+              this.__editorWorkerSockets = sockets;
               port.onmessage = async event => {
                 const message = event.data || {};
                 if (message.kind === 'bridge-ready') {
@@ -4302,7 +4302,7 @@
                     // Fetch those dependencies before allowing that init message
                     // to reach the worker's synchronous importScripts call.
                     const parserUrls = new Set();
-                    for (const pending of this.__wkPendingInitMessages) {
+                    for (const pending of this.__editorPendingInitMessages) {
                       const urls = pending && pending.config && pending.config.moduleParserUrls || {};
                       for (const value of Object.values(urls)) {
                         if (typeof value === 'string' && value) parserUrls.add(new URL(value, sourceUrl).href);
@@ -4325,7 +4325,7 @@
                         module: type === 'module'
                       }))
                     });
-                    this.__wkStartSent = true;
+                    this.__editorStartSent = true;
                     port.postMessage({
                       kind: 'start',
                       url: sourceUrl,
@@ -4334,7 +4334,7 @@
                       bundledAmdModuleIds
                     });
                     releaseSourceUrl();
-                    const pendingMessages = this.__wkPendingInitMessages.splice(0);
+                    const pendingMessages = this.__editorPendingInitMessages.splice(0);
                     for (const pending of pendingMessages) {
                       const transfers = (pending && pending.config && Array.isArray(pending.config.files)
                         ? pending.config.files
@@ -4366,7 +4366,7 @@
                 }
 
                 if (message.kind === 'cancel') {
-                  const controller = this.__wkWorkerRequests && this.__wkWorkerRequests.get(message.id);
+                  const controller = this.__editorWorkerRequests && this.__editorWorkerRequests.get(message.id);
                   if (controller) controller.abort();
                   return;
                 }
@@ -4479,8 +4479,8 @@
 
                 if (message.operation === 'preload-worker-module') {
                   const controller = new AbortController();
-                  this.__wkWorkerRequests = this.__wkWorkerRequests || new Map();
-                  this.__wkWorkerRequests.set(message.id, controller);
+                  this.__editorWorkerRequests = this.__editorWorkerRequests || new Map();
+                  this.__editorWorkerRequests.set(message.id, controller);
                   try {
                     const payload = message.payload || {};
                     const scripts = await fetchWorkerGraph(payload.url, 'classic', controller.signal);
@@ -4499,15 +4499,15 @@
                   } catch (error) {
                     port.postMessage({ kind: 'rpc-result', id: message.id, error: error && error.message || String(error) });
                   } finally {
-                    if (this.__wkWorkerRequests) this.__wkWorkerRequests.delete(message.id);
+                    if (this.__editorWorkerRequests) this.__editorWorkerRequests.delete(message.id);
                   }
                   return;
                 }
 
                 if (message.operation === 'fetch') {
                   const controller = new AbortController();
-                  this.__wkWorkerRequests = this.__wkWorkerRequests || new Map();
-                  this.__wkWorkerRequests.set(message.id, controller);
+                  this.__editorWorkerRequests = this.__editorWorkerRequests || new Map();
+                  this.__editorWorkerRequests.set(message.id, controller);
                   try {
                     const payload = message.payload || {};
                     const options = { ...(payload.options || {}), signal: controller.signal };
@@ -4534,13 +4534,13 @@
                   } catch (error) {
                     port.postMessage({ kind: 'rpc-result', id: message.id, error: error && error.message || String(error) });
                   } finally {
-                    if (this.__wkWorkerRequests) this.__wkWorkerRequests.delete(message.id);
+                    if (this.__editorWorkerRequests) this.__editorWorkerRequests.delete(message.id);
                   }
                 }
               };
               if (port.start) port.start();
 
-              this.postMessage({ __wkEmulatorInit: true }, [channel.port2]);
+              this.postMessage({ __editorEmulatorInit: true }, [channel.port2]);
               const originalTerminate = this.terminate.bind(this);
               this.terminate = () => {
                 if (workerRecord.status !== 'failed') {
@@ -4578,7 +4578,7 @@
               const parserUrls = message && message.type === 'init'
                 ? message.config && message.config.moduleParserUrls
                 : null;
-              if (parserUrls && !this.__wkStartSent) {
+              if (parserUrls && !this.__editorStartSent) {
                 const transferList = Array.isArray(transferOrOptions)
                   ? transferOrOptions
                   : transferOrOptions && Array.isArray(transferOrOptions.transfer)
@@ -4588,14 +4588,14 @@
                 // while holding this one init message until its runtime scripts
                 // have been fetched and registered in the worker bootstrap.
                 const cloned = structuredClone(message, transferList.length ? { transfer: transferList } : undefined);
-                this.__wkPendingInitMessages.push(cloned);
+                this.__editorPendingInitMessages.push(cloned);
                 return;
               }
               return NativeWorker.prototype.postMessage.call(this, message, transferOrOptions);
             }
           };
 
-          Object.defineProperty(VirtualWorker, '__wkVirtualized', { value: true });
+          Object.defineProperty(VirtualWorker, '__editorVirtualized', { value: true });
           window.Worker = VirtualWorker;
         })();
 
@@ -5398,7 +5398,7 @@
                 sourceProxy = getCallerWindowProxy(parentPage, nativeParentWindow);
               } else {
                 const sourcePage = (pageEmulator?.children || []).find(child =>
-                  child?.iframe?.__wkNativeContentWindow === event.source
+                  child?.iframe?.__editorNativeContentWindow === event.source
                 );
                 if (sourcePage) {
                   sourceProxy = getCallerWindowProxy(sourcePage, event.source);
@@ -6055,7 +6055,7 @@
                   }
                 }
                 var targetFrame = receiverPage?.iframe;
-                var targetWindow = targetFrame?.__wkNativeContentWindow || null;
+                var targetWindow = targetFrame?.__editorNativeContentWindow || null;
 
                 // A nested frame's public contentWindow getter returns its
                 // virtual proxy. Calling postMessage on that proxy here would
@@ -6092,13 +6092,13 @@
             if (typeof prop === 'string' && /^\d+$/.test(prop)) {
               const child = getChildPage(prop);
               if (!child) return undefined;
-              const nativeChildWindow = child.iframe?.__wkNativeContentWindow || null;
+              const nativeChildWindow = child.iframe?.__editorNativeContentWindow || null;
               return nativeChildWindow ? getCallerWindowProxy(child, nativeChildWindow) : child.__windowProxy || undefined;
             }
             if (typeof prop === 'string') {
               const child = getChildPage(prop);
               if (child?.__windowProxy) {
-                const nativeChildWindow = child.iframe?.__wkNativeContentWindow || null;
+                const nativeChildWindow = child.iframe?.__editorNativeContentWindow || null;
                 return nativeChildWindow ? getCallerWindowProxy(child, nativeChildWindow) : child.__windowProxy;
               }
             }
@@ -6555,7 +6555,7 @@
         url: 'http://localhost:3000/',
         origin: 'http://localhost:3000'
       };
-      this.hostContext = options.hostContext || window.__wkHostContext || null;
+      this.hostContext = options.hostContext || window.__editorHostContext || null;
 
       this.history = history || [];
       this.historyIndex = -1;
