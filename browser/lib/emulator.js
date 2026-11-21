@@ -1926,8 +1926,11 @@
         }
 
         async function setupNestedFrame(el) {
-          if (el.__sandboxed) return;
           if (el.tagName.toLowerCase() !== 'iframe') return;
+          if (el.__sandboxed && isLivePageEmulator(el.pageEmulator)) return;
+          // A frame can be removed (disposing its PageEmulator) and later
+          // reinserted. Do not let the old sandbox marker suppress setup.
+          if (el.__sandboxed) el.__sandboxed = false;
 
           // Frames parsed from dynamic innerHTML/outerHTML bypass the wrapped
           // document.createElement path. Wrap them before creating/navigating
@@ -6686,8 +6689,11 @@
       const iframe = this.iframe;
       if (iframe) {
         try {
+          const ownsAssociation = iframe.pageEmulator === this ||
+            (!!this.id && iframe.getAttribute?.('data-page-id') === this.id);
           if (iframe.pageEmulator === this) delete iframe.pageEmulator;
           if (iframe.getAttribute?.('data-page-id') === this.id) iframe.removeAttribute('data-page-id');
+          if (ownsAssociation) iframe.__sandboxed = false;
           if (iframe.usefulHelpers === usefulHelpers) delete iframe.usefulHelpers;
         } catch (_) {}
       }
