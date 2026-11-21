@@ -1924,6 +1924,12 @@
           if (el.__sandboxed) return;
           if (el.tagName.toLowerCase() !== 'iframe') return;
 
+          // Frames parsed from dynamic innerHTML/outerHTML bypass the wrapped
+          // document.createElement path. Wrap them before creating/navigating
+          // their PageEmulator so contentWindow/contentDocument are virtualized
+          // and the native WindowProxy is retained for the child context.
+          el = wrapElement(el);
+
           usefulHelpers.ensureSandBoxSameOrigin(el);
 
           el.__sandboxed = true;
