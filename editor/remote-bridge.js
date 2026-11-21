@@ -6,7 +6,7 @@
 (function(global) {
   'use strict';
 
-  const PROTOCOL = 'watermelonkatanadevs.editor-host-bridge.v1';
+  const PROTOCOL = 'editor-host-bridge.v1';
   const proxyMetadata = new WeakMap();
 
   function serializeError(error) {
