@@ -4557,6 +4557,7 @@ var DevToolsInternal = {
   function removeResizer(){
     if(!resizerHandlers) return;
     var r=resizerHandlers;
+    r.up();
     r.resizer.removeEventListener('pointerdown',r.down);
     window.removeEventListener('pointermove',r.move);
     window.removeEventListener('pointerup',r.up);
