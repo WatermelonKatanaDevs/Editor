@@ -144,6 +144,18 @@
           root.remove();
         });
       }
+    }, {
+      // Keep the original, unprocessed image renderer available as Raw.
+      // This intentionally retains the previous .editor-image sizing behavior.
+      id: 'image-raw',
+      label: 'Raw',
+      priority: 80,
+      create(ctx) {
+        const img = document.createElement('img');
+        img.className = 'editor-image';
+        img.src = ctx.getURL();
+        ctx.host.appendChild(img);
+      }
     }]
   });
 })();
