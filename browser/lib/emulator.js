@@ -5997,7 +5997,10 @@
         function dispatchVirtualPostMessage(nativeTargetWindow, targetPage, message, targetOrigin, transfer) {
           if (!nativeTargetWindow || typeof nativeTargetWindow.postMessage !== 'function') return false;
 
-          const options = targetOrigin && typeof targetOrigin === 'object' ? targetOrigin : null;
+          const options = targetOrigin && typeof targetOrigin === 'object' && (
+            Object.prototype.hasOwnProperty.call(targetOrigin, 'targetOrigin') ||
+            Object.prototype.hasOwnProperty.call(targetOrigin, 'transfer')
+          ) ? targetOrigin : null;
           let requestedOrigin = options ? options.targetOrigin : targetOrigin;
           const transferList = options ? options.transfer : transfer;
 
