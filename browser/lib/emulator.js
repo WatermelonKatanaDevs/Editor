@@ -6664,13 +6664,15 @@
 
       this.parent = false;
       this.children = [];
+      this.__removed = false;
 
       this.runtimeInterceptor = "";
       this.eventInterceptors = {};
     }
 
     remove() {
-      if (!this.id && !this.iframe) return;
+      if (this.__removed) return;
+      this.__removed = true;
 
       for (const workerRecord of this.workers?.values?.() || []) {
         try { workerRecord?.instance?.terminate?.(); } catch (_) {}
@@ -6699,11 +6701,19 @@
       }
 
       delete __pageRegistry[this.id];
-      for (const key of Object.keys(this)) delete this[key];
+
+      // Runtime callbacks from a removed browsing context may still hold a
+      // reference to this PageEmulator. Keep the object as an inert tombstone
+      // rather than deleting every own property: its methods can then safely
+      // ignore late events instead of failing on missing eventInterceptors.
+      this.eventInterceptors = Object.create(null);
+      this.children = [];
+      this.parent = false;
+      this.iframe = null;
     }
 
     addChild(page) {
-      if (!page || page === this) return page;
+      if (this.__removed || !page || page.__removed || page === this) return page;
       if (page.parent === this && this.children.includes(page)) return page;
       if (page.parent && page.parent !== false && Array.isArray(page.parent.children)) {
         const oldIndex = page.parent.children.indexOf(page);
@@ -6715,6 +6725,8 @@
     }
 
     async setDocument(rawHtml, processHtml = true, baseUrlOverride = null) {
+      if (this.__removed) return;
+
       // A document replacement discards every nested browsing context from
       // the previous document. Release those PageEmulators before preprocessHtml
       // creates the child frames belonging to the new document.
@@ -6728,6 +6740,7 @@
       // frames whose source was fetched after the parent page loaded.
       this.rawDocument = String(rawHtml ?? '');
       const finalHtml = await sandboxSource(rawHtml,this,processHtml,baseUrlOverride);
+      if (this.__removed || !this.iframe) return;
 
       // Use the native srcdoc setter exactly once. Assigning it twice starts
       // two separate iframe navigations and can leave a stale browsing context.
@@ -6749,6 +6762,7 @@
     }
 
     setLocation(url, origin) {
+      if (this.__removed || !this.location) return;
       this.location.url = url;
       this.location.origin = origin;
     }
@@ -6766,7 +6780,8 @@
     }
 
     sendEvent(event, ...args) {
-      var list = this.eventInterceptors[event];
+      if (this.__removed) return undefined;
+      var list = this.eventInterceptors?.[event];
       if (!list) return console.warn("No interceptor set up for: "+event);
       for (var i = 0; i < list.length; i++) {
         var ret = list[i].callback.apply(this, args);
@@ -6775,7 +6790,8 @@
     }
 
     async sendAsyncEvent(event, ...args) {
-      var list = this.eventInterceptors[event];
+      if (this.__removed) return undefined;
+      var list = this.eventInterceptors?.[event];
       if (!list) return console.warn("No interceptor set up for: "+event);
       for (var i = 0; i < list.length; i++) {
         var ret = await list[i].callback.apply(this, args);
@@ -6784,12 +6800,14 @@
     }
 
     interceptEvent(event, callback, options) {
+      if (this.__removed) return null;
+      this.eventInterceptors = this.eventInterceptors || Object.create(null);
       this.eventInterceptors[event] = this.eventInterceptors[event] || [];
       this.eventInterceptors[event].push({callback,options});
       return callback;
     }
     removeEventListener(event, callback) {
-      var list = this.eventInterceptors[event];
+      var list = this.eventInterceptors?.[event];
       if (!list) return;
       this.eventInterceptors[event] = list.filter(item => item.callback !== callback);
     }
