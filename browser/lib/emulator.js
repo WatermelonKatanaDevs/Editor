@@ -170,12 +170,21 @@
   function ensureSandBoxSameOrigin(iframe) {
     if (!iframe.hasAttribute('sandbox')) return;
 
-    var tokens = iframe.getAttribute('sandbox').split(/\s+/).filter(Boolean);
+    const tokens = iframe.getAttribute('sandbox').split(/\s+/).filter(Boolean);
+    let changed = false;
 
-    if (!tokens.includes('allow-same-origin')) {
-      tokens.push('allow-same-origin');
-      iframe.setAttribute('sandbox',tokens.join(' '));
+    // The frame's document is rewritten into srcdoc and must execute the
+    // emulator bootstrap before page scripts can be virtualized. Without
+    // allow-scripts the browser blocks that bootstrap, leaving the frame's
+    // resources to load natively and bypassing the virtual network.
+    for (const permission of ['allow-same-origin', 'allow-scripts']) {
+      if (!tokens.includes(permission)) {
+        tokens.push(permission);
+        changed = true;
+      }
     }
+
+    if (changed) iframe.setAttribute('sandbox',tokens.join(' '));
   }
 
   async function preprocessHtml(rawHtml, page, baseUrlOverride = null) {
