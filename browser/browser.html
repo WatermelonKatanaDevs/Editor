@@ -179,7 +179,7 @@
     </script>
 <script>
 (function () {
-  const MESSAGE_TYPE = 'watermelonkatanas:host-context';
+  const MESSAGE_TYPE = 'editor:host-context';
 
   function applyHostContext(payload) {
     try {
@@ -187,7 +187,7 @@
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
       if (payload.origin !== parsed.origin) return false;
       const context = Object.freeze({url: parsed.href, origin: parsed.origin});
-      window.__wkHostContext = context;
+      window.__editorHostContext = context;
 
       // Update documents that were already opened before the host context arrived.
       for (const page of Object.values(window.__pageRegistry || {})) {
@@ -214,8 +214,8 @@
 
   // The Editor may have received host context before this Browser iframe loaded.
   try {
-    if (window.parent !== window && window.parent.__wkHostContext) {
-      applyHostContext(window.parent.__wkHostContext);
+    if (window.parent !== window && window.parent.__editorHostContext) {
+      applyHostContext(window.parent.__editorHostContext);
     }
   } catch (_) {}
 })();
