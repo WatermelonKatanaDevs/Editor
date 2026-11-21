@@ -1660,6 +1660,11 @@
         const parentWindow = window.parent;
         const pageEmulator = window.__pageEmulator;
         const usefulHelpers = window.__usefulHelpers;
+        const isLivePageEmulator = candidate => {
+          const id = candidate?.id;
+          return typeof id === 'string' && id.length > 0 &&
+            pageEmulator.__pageRegistry?.[id] === candidate;
+        };
         
         const isTopLevel = !pageEmulator.parent;
         
@@ -1936,11 +1941,14 @@
           el.__iframeNavigationId = (el.__iframeNavigationId || 0) + 1;
           var navigationId = el.__iframeNavigationId;
 
-          if (!el.pageEmulator) {
+          const attachedPage = el.pageEmulator;
+          if (!isLivePageEmulator(attachedPage)) {
+            if (attachedPage && el.pageEmulator === attachedPage) delete el.pageEmulator;
+
             const pageId = el.getAttribute('data-page-id');
             const knownPage = pageId ? pageEmulator.__pageRegistry[pageId] : null;
 
-            if (knownPage) {
+            if (isLivePageEmulator(knownPage)) {
               knownPage.iframe = el;
               el.pageEmulator = knownPage;
               el.usefulHelpers = pageEmulator.__pageRegistry.__usefulHelpers;
@@ -2510,12 +2518,14 @@
 
             const ensureFrameEmulator = () => {
               usefulHelpers.ensureSandBoxSameOrigin(elem);
-              if (elem.pageEmulator) return elem.pageEmulator;
+              const attachedPage = elem.pageEmulator;
+              if (isLivePageEmulator(attachedPage)) return attachedPage;
+              if (attachedPage && elem.pageEmulator === attachedPage) delete elem.pageEmulator;
 
               const pageId = elem.getAttribute('data-page-id');
               const knownPage = pageId ? pageEmulator.__pageRegistry?.[pageId] : null;
 
-              if (knownPage) {
+              if (isLivePageEmulator(knownPage)) {
                 knownPage.iframe = elem;
                 elem.pageEmulator = knownPage;
                 elem.usefulHelpers = pageEmulator.__pageRegistry.__usefulHelpers;
