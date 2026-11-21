@@ -140,6 +140,28 @@
 
     const parser = new DOMParser();
     const doc = parser.parseFromString(rawHtml, 'text/html');
+
+    // The emulator executes rewritten page scripts through __executeCode.
+    // A remote require-trusted-types-for 'script' meta policy blocks that
+    // runtime's eval() and script URL rewriting before the virtual network
+    // can initialize. Keep the site's other CSP directives, but remove this
+    // requirement from the emulated document.
+    doc.querySelectorAll('meta[http-equiv]').forEach(meta => {
+      if ((meta.getAttribute('http-equiv') || '').trim().toLowerCase() !== 'content-security-policy') return;
+
+      const directives = (meta.getAttribute('content') || '').split(';');
+      const filtered = directives.filter(directive => {
+        const name = directive.trim().split(/\s+/, 1)[0]?.toLowerCase();
+        return name !== 'require-trusted-types-for';
+      });
+
+      if (filtered.length !== directives.length) {
+        const policy = filtered.map(directive => directive.trim()).filter(Boolean).join('; ');
+        if (policy) meta.setAttribute('content', policy);
+        else meta.remove();
+      }
+    });
+
     const codeOrgGameLab = /studio\.code\.org\/projects\/gamelab\//i.test(rawHtml) && /gamelab-api\.js/i.test(rawHtml);
     page.__codeOrgGameLab = codeOrgGameLab;
     let codeOrgChannel = null;
@@ -2100,7 +2122,9 @@
           if (isModule) node.removeAttribute('type');
 
           const execFn = isModule ? '__executeCodeModule' : '__executeCode';
-          node.textContent = `window.${execFn}(${JSON.stringify(rawScript)}, ${JSON.stringify(CURRENT_PAGE_URL)}, this);\n`;
+          const rewrittenSource = `window.${execFn}(${JSON.stringify(rawScript)}, ${JSON.stringify(CURRENT_PAGE_URL)}, this);\n`;
+          while (node.firstChild) node.removeChild(node.firstChild);
+          node.appendChild(node.ownerDocument.createTextNode(rewrittenSource));
         }
 
         function prepareInsertedScripts(node) {
@@ -6449,10 +6473,15 @@
             if (el.parentNode) el.parentNode.removeChild(el);
             continue;
           }
+          const replaceTextChildren = (element, value) => {
+            while (element.firstChild) element.removeChild(element.firstChild);
+            element.appendChild(element.ownerDocument.createTextNode(value));
+          };
+
           const rawScript = el.getAttribute('data-raw-script');
-          if (el.tagName === 'SCRIPT' && rawScript != null) el.textContent = rawScript;
+          if (el.tagName === 'SCRIPT' && rawScript != null) replaceTextChildren(el, rawScript);
           const rawStyleText = el.getAttribute('data-raw-style-text');
-          if (el.tagName === 'STYLE' && rawStyleText != null) el.textContent = rawStyleText;
+          if (el.tagName === 'STYLE' && rawStyleText != null) replaceTextChildren(el, rawStyleText);
           const rawStyle = el.getAttribute('data-raw-style');
           if (rawStyle != null) el.setAttribute('style', rawStyle);
           for (const attr of Array.from(el.attributes || [])) {
