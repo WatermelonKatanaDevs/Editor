@@ -2002,7 +2002,6 @@
         // Target rules for dynamic element checks
         const ATTRIBUTE_MAP = [
           { selector: 'img[src]', attr: 'src' },
-          { selector: 'script[src]', attr: 'src' },
           { selector: 'link:not([rel="stylesheet"])[href]', attr: 'href', rawAttr: 'data-raw-href'},
           { selector: 'link[rel="stylesheet"][href]', attr: 'href', rawAttr: 'data-raw-href', 
             filter: async function(response, absoluteUrl) {
@@ -2145,6 +2144,15 @@
           }
           node.querySelectorAll('iframe').forEach(setupNestedFrame);
           node.querySelectorAll('embed').forEach(setupEmbed);
+
+          // External scripts need the same source rewriting and sandboxed
+          // execution path as scripts found during initial document parsing.
+          if (node.tagName === 'SCRIPT' && node.hasAttribute('src')) {
+            interceptDynamicScriptSource(node, nativeElementGetAttribute.call(node, 'src'));
+          }
+          node.querySelectorAll('script[src]').forEach(script => {
+            interceptDynamicScriptSource(script, nativeElementGetAttribute.call(script, 'src'));
+          });
 
           // 4. Process srcset candidates
           if (node.matches('[srcset]')) interceptSrcSet(node);
@@ -2303,7 +2311,75 @@
         });
 
         const nativeElementGetAttribute = Element.prototype.getAttribute;
+        const nativeElementSetAttribute = Element.prototype.setAttribute;
+        const nativeElementRemoveAttribute = Element.prototype.removeAttribute;
         const nativeScriptSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, "src");
+
+        // Dynamic scripts must use the page's virtual network too. Setting a
+        // script.src property on a freshly-created element bypasses the
+        // per-element setAttribute wrapper, so intercept it at the native IDL
+        // setter before the browser can issue a direct cross-origin request.
+        async function interceptDynamicScriptSource(script, source) {
+          if (!script || source == null) return;
+          const rawSource = String(source);
+          if (!rawSource || /^(?:data|blob|javascript):/i.test(rawSource)) return;
+
+          let resolvedUrl;
+          try {
+            resolvedUrl = new URL(rawSource, script.ownerDocument?.baseURI || CURRENT_PAGE_URL).href;
+          } catch (_) {
+            nativeElementRemoveAttribute.call(script, 'src');
+            return;
+          }
+
+          const requestId = (script.__editorScriptRequestId || 0) + 1;
+          script.__editorScriptRequestId = requestId;
+          nativeElementSetAttribute.call(script, 'data-raw-src', resolvedUrl);
+          nativeElementRemoveAttribute.call(script, 'src');
+          nativeElementRemoveAttribute.call(script, 'data-wk-resource-error');
+          nativeElementRemoveAttribute.call(script, 'data-wk-integrity-error');
+
+          try {
+            const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, 'script');
+            if (script.__editorScriptRequestId !== requestId) return;
+            if (!response || !response.ok) {
+              nativeElementSetAttribute.call(script, 'data-wk-resource-error', response ? 'HTTP ' + response.status : 'unhandled');
+              return;
+            }
+
+            const integrity = nativeElementGetAttribute.call(script, 'integrity') ||
+              nativeElementGetAttribute.call(script, 'data-raw-integrity');
+            if (integrity) {
+              const verified = await verifySubresourceIntegrity(response, integrity);
+              nativeElementSetAttribute.call(script, 'data-raw-integrity', integrity);
+              nativeElementRemoveAttribute.call(script, 'integrity');
+              if (!verified) {
+                nativeElementSetAttribute.call(script, 'data-wk-integrity-error', 'verification-failed');
+                console.error('[Browser Emulator] Blocked dynamically assigned script with invalid subresource integrity:', resolvedUrl);
+                return;
+              }
+            }
+
+            const isModule = nativeElementGetAttribute.call(script, 'type') === 'module';
+            if (isModule) nativeElementRemoveAttribute.call(script, 'type');
+
+            const sourceText = await response.clone().text();
+            const executor = isModule ? '__executeCodeModule' : '__executeCode';
+            const wrappedSource = `window.${executor}(${JSON.stringify(sourceText)}, ${JSON.stringify(resolvedUrl)});`;
+            const dataUri = await createDataUri(new Response(wrappedSource, {
+              headers: { 'Content-Type': 'application/javascript' }
+            }));
+
+            if (script.__editorScriptRequestId !== requestId) return;
+            if (dataUri) {
+              nativeElementRemoveAttribute.call(script, 'data-wk-resource-error');
+              nativeElementSetAttribute.call(script, 'src', dataUri);
+            }
+          } catch (error) {
+            if (script.__editorScriptRequestId !== requestId) return;
+            nativeElementSetAttribute.call(script, 'data-wk-resource-error', String(error?.message || error).slice(0, 300));
+          }
+        }
 
         // Match the browser's reflected IDL attributes for URL-valued resource
         // properties. The page-visible attributes are kept in data-raw-* while
@@ -2346,6 +2422,11 @@
               return getOriginalScriptSrc(this);
             },
             set(value) {
+              if (isExecutableScriptElement(this) && value != null &&
+                  !/^(?:data|blob|javascript):/i.test(String(value))) {
+                interceptDynamicScriptSource(this, value);
+                return;
+              }
               return nativeScriptSrcDescriptor.set.call(this, value);
             }
           });
@@ -2494,6 +2575,11 @@
             }
 
             if (lowerProp in propObj && !this.__editingAttribute) {
+              if (tagName === 'script' && lowerProp === 'src' && isExecutableScriptElement(this)) {
+                interceptDynamicScriptSource(this, value);
+                return;
+              }
+
               // Non-JavaScript script data blocks (JSON, import maps,
               // speculation rules, etc.) must retain native resource behavior.
               if (tagName === "script" && lowerProp === "src" && !isExecutableScriptElement(this)) {
