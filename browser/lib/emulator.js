@@ -69,12 +69,56 @@
   };
 
   function getPageBaseUrl(page) {
-    if (page && page.location && page.location.url === "about:srcdoc") {
+    const locationUrl = page?.location?.url;
+    if (locationUrl === "about:srcdoc" || locationUrl === "about:blank") {
       try {
-        if (page.parent && page.parent !== false && page.parent.location && page.parent.location.url) return page.parent.location.url;
+        if (page.parent && page.parent !== false && page.parent.location?.url) return page.parent.location.url;
       } catch (e) {}
     }
-    return page?.location?.url || "http://localhost:3000/";
+    return locationUrl || page?.parent?.location?.url || "http://localhost:3000/";
+  }
+
+  function ensurePageLocation(page, baseUrlOverride = null) {
+    const existing = page?.location && typeof page.location === "object" ? page.location : null;
+    const parentPage = page?.parent && page.parent !== false ? page.parent : null;
+    const parentLocation = parentPage?.location || null;
+    const iframe = page?.iframe || null;
+
+    let documentUrl = baseUrlOverride || existing?.url;
+    if (!documentUrl) {
+      let rawFrameUrl = null;
+      try {
+        rawFrameUrl = iframe?.getAttribute?.("data-raw-src") || iframe?.getAttribute?.("src") || null;
+      } catch (_) {}
+      if (rawFrameUrl) documentUrl = rawFrameUrl;
+      else if (parentPage) documentUrl = "about:srcdoc";
+      else {
+        try { documentUrl = iframe?.ownerDocument?.baseURI || null; } catch (_) {}
+      }
+    }
+    documentUrl = documentUrl || "http://localhost:3000/";
+
+    let origin = existing?.origin || null;
+    if (!origin && /^about:(?:srcdoc|blank)$/i.test(documentUrl)) {
+      origin = parentLocation?.origin || null;
+    }
+    if (!origin) {
+      try { origin = new URL(documentUrl, parentLocation?.url || "http://localhost:3000/").origin; } catch (_) {}
+    }
+    origin = origin || parentLocation?.origin || "http://localhost:3000";
+
+    const location = existing || {};
+    if (!location.url || baseUrlOverride) location.url = documentUrl;
+    if (!location.origin) location.origin = origin;
+
+    try {
+      if (page && page.location !== location) page.location = location;
+    } catch (_) {}
+
+    return {
+      url: page?.location?.url || location.url || documentUrl,
+      origin: page?.location?.origin || location.origin || origin
+    };
   }
 
   const javascriptMimeTypes = new Set([
@@ -399,17 +443,18 @@
   }
 
   async function sandboxSource(rawHtml,page,processHtml = true, baseUrlOverride = null) {
+    const pageLocation = ensurePageLocation(page, baseUrlOverride);
     let processedHtml;
 
     if (processHtml) processedHtml = await preprocessHtml(rawHtml,page,baseUrlOverride);
     else processedHtml = rawHtml;
 
-    const documentUrl = baseUrlOverride || page.location.url;
+    const documentUrl = baseUrlOverride || pageLocation.url;
     const baseUrl = baseUrlOverride || getPageBaseUrl(page);
     const hostContext = page.hostContext || null;
     const runtimeInterceptor = createRuntimeInterceptor(
       documentUrl,
-      page.location.origin,
+      pageLocation.origin,
       undefined,
       baseUrl,
       hostContext?.url,
@@ -5948,6 +5993,36 @@
         // wrong browsing context. Wrap ancestor windows in the caller's realm
         // and invoke the matching native ancestor WindowProxy directly.
         const callerWindowProxyCache = new Map();
+
+        function dispatchVirtualPostMessage(nativeTargetWindow, targetPage, message, targetOrigin, transfer) {
+          if (!nativeTargetWindow || typeof nativeTargetWindow.postMessage !== 'function') return false;
+
+          const options = targetOrigin && typeof targetOrigin === 'object' ? targetOrigin : null;
+          let requestedOrigin = options ? options.targetOrigin : targetOrigin;
+          const transferList = options ? options.transfer : transfer;
+
+          // The native default is the sender's origin. Resolve that default
+          // against the virtual page rather than the physical srcdoc origin.
+          if (requestedOrigin == null || requestedOrigin === '' || requestedOrigin === '/') {
+            requestedOrigin = pageEmulator?.location?.origin || '';
+          }
+
+          const recipientOrigin = targetPage?.location?.origin || '';
+          if (requestedOrigin !== '*') {
+            let normalizedOrigin = requestedOrigin;
+            if (requestedOrigin !== 'null') {
+              try { normalizedOrigin = new URL(requestedOrigin).origin; } catch (_) { return false; }
+            }
+            if (!recipientOrigin || normalizedOrigin !== recipientOrigin) return false;
+          }
+
+          // Origin authorization has already been performed in the virtual
+          // origin space. Use "*" only for the native delivery because srcdoc
+          // recipients physically inherit the editor shell's origin.
+          nativeTargetWindow.postMessage(message, '*', transferList);
+          return true;
+        }
+
         function getCallerWindowProxy(targetPage, nativeTargetWindow) {
           if (!targetPage || targetPage === pageEmulator) return windowProxy;
           if (!targetPage.__windowProxy && nativeTargetWindow && targetPage.iframe && typeof window.__runSyncInterceptor === 'function') {
@@ -5975,12 +6050,7 @@
             get(target, prop) {
               if (prop === 'postMessage') {
                 return function(message, targetOrigin, transfer) {
-                  try {
-                    const origin = targetOrigin || '*';
-                    nativeTargetWindow.postMessage(message, origin, transfer);
-                  } catch (error) {
-                    try { nativeTargetWindow.postMessage(message, '*'); } catch (_) {}
-                  }
+                  return dispatchVirtualPostMessage(nativeTargetWindow, targetPage, message, targetOrigin, transfer);
                 };
               }
 
@@ -6180,12 +6250,7 @@
                 if (!targetWindow || targetWindow === receiverPage?.__windowProxy || typeof targetWindow.postMessage !== 'function') {
                   return;
                 }
-                try {
-                  var origin = targetOrigin || '*';
-                  targetWindow.postMessage(message, origin, transfer);
-                } catch(e) {
-                  try { targetWindow.postMessage(message, '*'); } catch(_) {}
-                }
+                return dispatchVirtualPostMessage(targetWindow, receiverPage, message, targetOrigin, transfer);
               };
             }
             if (typeof prop === 'string' && /^\d+$/.test(prop)) {
