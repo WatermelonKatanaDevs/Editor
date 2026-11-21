@@ -75,6 +75,49 @@
         ctx.host.appendChild(root);
 
         let checked = false;
+        let hasTransparency = false;
+
+        // For small transparent images, inset the image by 5% of its shortest
+        // fitted dimension on every side. Recalculate against the viewport so
+        // the clear border remains proportional as the preview is resized.
+        const updateTransparentPadding = () => {
+          const isSmallImage = img.naturalWidth > 0 && img.naturalHeight > 0 &&
+            img.naturalWidth < 256 && img.naturalHeight < 256;
+          if (!hasTransparency || !isSmallImage) {
+            img.style.inset = '0';
+            img.style.left = '0';
+            img.style.top = '0';
+            img.style.width = '100%';
+            img.style.height = '100%';
+            img.style.transform = 'none';
+            return;
+          }
+
+          const viewportWidth = root.clientWidth;
+          const viewportHeight = root.clientHeight;
+          if (!viewportWidth || !viewportHeight) return;
+
+          const fitScale = Math.min(
+            viewportWidth / img.naturalWidth,
+            viewportHeight / img.naturalHeight
+          );
+          const shortestFittedDimension = Math.min(img.naturalWidth, img.naturalHeight) * fitScale;
+          const padding = shortestFittedDimension * 0.05;
+
+          img.style.inset = 'auto';
+          img.style.left = '50%';
+          img.style.top = '50%';
+          img.style.width = Math.max(0, viewportWidth - padding * 2) + 'px';
+          img.style.height = Math.max(0, viewportHeight - padding * 2) + 'px';
+          img.style.transform = 'translate(-50%, -50%)';
+        };
+
+        const resizeObserver = typeof ResizeObserver === 'function'
+          ? new ResizeObserver(updateTransparentPadding)
+          : null;
+        if (resizeObserver) resizeObserver.observe(root);
+        else window.addEventListener('resize', updateTransparentPadding);
+
         const checkTransparency = () => {
           if (checked || !img.naturalWidth || !img.naturalHeight) return;
           checked = true;
@@ -99,7 +142,6 @@
             context.drawImage(img, 0, 0, sampleWidth, sampleHeight);
 
             const pixels = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
-            let hasTransparency = false;
             for (let i = 3; i < pixels.length; i += 4) {
               if (pixels[i] < 255) {
                 hasTransparency = true;
@@ -107,9 +149,11 @@
               }
             }
 
-            // Transparent images deliberately retain empty padding. For
-            // opaque images, the same source fills the unused space behind it.
-            if (!hasTransparency && ctx.isCurrent()) {
+            // Transparent images keep a clear border when small. Opaque
+            // images instead fill the unused viewport space with the blur.
+            if (hasTransparency) {
+              updateTransparentPadding();
+            } else if (ctx.isCurrent()) {
               background.src = url;
               background.style.display = 'block';
             }
@@ -141,6 +185,8 @@
 
         ctx.addCleanup(() => {
           img.removeEventListener('load', checkTransparency);
+          resizeObserver?.disconnect();
+          if (!resizeObserver) window.removeEventListener('resize', updateTransparentPadding);
           root.remove();
         });
       }
