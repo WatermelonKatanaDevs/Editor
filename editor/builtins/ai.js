@@ -629,7 +629,7 @@ const makeEditorTools = (() => {
         localModelInput.value=model?.model||'';
         localPipelineTask=String(model?.pipelineTask||'');
         localVisionInput.checked=model?.supportsVision!==undefined?!!model.supportsVision:(/gemma[-_/]?4/i.test(String(model?.model||''))&&/onnx/i.test(String(model?.model||'')))||['any-to-any','image-text-to-text'].includes(localPipelineTask);
-        localModelInput.oninput=()=>{if(/gemma[-_/]?4/i.test(localModelInput.value)&&/onnx/i.test(localModelInput.value)){localVisionInput.checked=true;localPipelineTask='any-to-any';}};
+        localModelInput.oninput=()=>{if(/gemma[-_/]?4/i.test(localModelInput.value)&&/onnx/i.test(localModelInput.value)){localVisionInput.checked=true;localPipelineTask='any-to-any';}else if(localPipelineTask==='any-to-any')localPipelineTask='';};
         localEditorStatus.textContent='';
         localEditor.hidden=false;
         localEditor.querySelector('[data-save-local]').textContent=editingLocalId?'Save changes':'Save model';
