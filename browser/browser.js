@@ -944,7 +944,7 @@ function showTabStripContextMenu(event) {
   event.preventDefault();
   event.stopPropagation();
   showSimpleContextMenu(event.clientX,event.clientY,[
-    {label:'New Tab',shortcut:'Ctrl+T',action:() => createNewTab(appSettings.defaultTab,true)},
+    {label:'New Tab',shortcut:'Ctrl+T',action:() => createNewTab(getBrowserDefaultTab(),true)},
     {label:'Reopen Closed Tab',shortcut:'Ctrl+Shift+T',disabled:closedTabsStack.length === 0,action:() => restoreClosedTab()}
   ]);
 }
@@ -1834,7 +1834,7 @@ function closeTab(tabId, event) {
 
   const tabToRemove = tabs[index];
   window.dispatchEvent(new CustomEvent('browser-tab-closed',{detail:{tab:tabToRemove,page:tabToRemove.page}}));
-  const currentUrl = tabToRemove.page.history[tabToRemove.page.historyIndex] || appSettings.defaultTab;
+  const currentUrl = tabToRemove.page.history[tabToRemove.page.historyIndex] || getBrowserDefaultTab();
 
   closedTabsStack.push({
     url: currentUrl,
@@ -3112,7 +3112,7 @@ window.getAIBrowserTabs = function() {
   }));
 };
 window.openAIBrowserTab = function(url, activate=true) {
-  return createNewTab(String(url || appSettings.defaultTab), activate !== false)?.id || null;
+  return createNewTab(String(url || getBrowserDefaultTab()), activate !== false)?.id || null;
 };
 window.switchAIBrowserTab = function(tabId) {
   const tab = tabs.find(t => t.id === tabId);
@@ -3135,7 +3135,7 @@ window.closeAIBrowserTab = function(tabId) {
 window.reloadAIBrowserTab = async function(tabId) {
   const tab = tabs.find(t => t.id === tabId) || getActiveTab();
   if (!tab) throw new Error('No browser tab is available.');
-  await navigateToInTab(tab, tab.url || appSettings.defaultTab, false, true, true);
+  await navigateToInTab(tab, tab.url || getBrowserDefaultTab(), false, true, true);
   return {id:tab.id,url:tab.url,reloaded:true};
 };
 window.getAIBrowserHTML = function(tabId, maxChars=100000) {
