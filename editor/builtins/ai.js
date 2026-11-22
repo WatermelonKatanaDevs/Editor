@@ -649,7 +649,7 @@ const makeEditorTools = (() => {
           try{
             if(!network?.request)throw new Error('Network API is unavailable.');
             const q=search.value.trim();
-            const params=new URLSearchParams({pipeline_tag:'text-generation',library:'transformers.js',sort:'downloads',direction:'-1',limit:'50'});
+            const params=new URLSearchParams({library:'transformers.js',sort:'downloads',direction:'-1',limit:'50'});
             if(q)params.set('search',q);
             const response=await network.request(new Request('https://huggingface.co/api/models?'+params.toString()),'ai');
             if(!response)throw new Error('Hugging Face returned no response.');
@@ -659,7 +659,7 @@ const makeEditorTools = (() => {
         }
         function renderList(){
           const q=search.value.trim().toLowerCase();
-          const rows=all.filter(m=>{const id=String(m?.id||'');return id&&(!q||id.toLowerCase().includes(q));}).slice(0,200);
+          const rows=all.filter(m=>{const id=String(m?.id||''),task=String(m?.pipeline_tag||'');return id&&['text-generation','any-to-any','image-text-to-text'].includes(task)&&(!q||id.toLowerCase().includes(q));}).slice(0,200);
           status.textContent=rows.length+' compatible model'+(rows.length===1?'':'s')+' found';
           list.innerHTML=rows.map(m=>'<div class="ai-hf-model-row"><div class="ai-model-main"><strong>'+escapeHtml(m.id)+'</strong><span>'+Number(m.downloads||0).toLocaleString()+' downloads · '+Number(m.likes||0).toLocaleString()+' likes</span></div><button data-local-select="'+escapeHtml(m.id)+'">Select</button></div>').join('');
           list.querySelectorAll('[data-local-select]').forEach(b=>b.onclick=()=>choose(b.dataset.localSelect));
