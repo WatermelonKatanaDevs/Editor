@@ -40,7 +40,7 @@
       supportsTools:model.supportsTools !== false, supportsAgentTools:!!model.supportsAgentTools,
       supportsReasoning:model.supportsReasoning !== false, supportsStreaming:model.supportsStreaming !== false,
       supportsDocuments:model.supportsDocuments !== false,
-      supportsVision:model.supportsVision !== undefined ? !!model.supportsVision : (/gemma[-_/]?4/i.test(String(model.model || model.remoteModel || '')) && /onnx/i.test(String(model.model || model.remoteModel || ''))),
+      supportsVision:model.supportsVision !== undefined ? !!model.supportsVision : ((['any-to-any','image-text-to-text'].includes(String(model.pipelineTask||model.task||''))) || (/gemma[-_/]?4/i.test(String(model.model || model.remoteModel || '')) && /onnx/i.test(String(model.model || model.remoteModel || '')))),
       supportsAudio:!!model.supportsAudio, supportsVideo:!!model.supportsVideo,
       pipelineTask:String(model.pipelineTask||model.task||''),
       public:!!model.public, useSharedKeys:model.useSharedKeys !== false, local, builtInLocal:!!model.builtInLocal
