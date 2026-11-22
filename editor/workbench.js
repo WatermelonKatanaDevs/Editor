@@ -98,7 +98,7 @@
         if (!root) return false;
         root.parent = null;
         this.rootNode = root;
-        this.rebuild();
+        this.rebuild({activateTabs:true});
         return true;
       } finally {
         this.restoring = false;
@@ -129,7 +129,7 @@
         group: this.createGroup()
       };
       this.setActiveGroup(this.rootNode.group);
-      this.rebuild();
+      this.rebuild({activateTabs:true});
       this.notifyLayoutChange();
     }
     ensureRoot() {
@@ -149,6 +149,7 @@
       return this.getFirstLeaf();
     }
     makeGroupElement(g) {
+      if (g.el) return g.el;
       const el = document.createElement('div');
       el.className = 'workbench-group';
       el.__workbench = this;
@@ -167,6 +168,7 @@
       content.append(viewBar, body);
       el.append(bar, content);
       g.el = el;
+      el.__workbenchGroup = g;
       g.tabBar = bar;
       g.content = content;
       g.viewBar = viewBar;
@@ -220,36 +222,155 @@
       parent.appendChild(split);
       this.applyRatio(node);
     }
-    rebuild() {
+    rebuild(options = {}) {
       this.ensureRoot();
       const preferred = this.activeGroup && this.groups.has(this.activeGroup.id)
         ? this.activeGroup
         : this.getFirstLeaf();
-      this.root.innerHTML = '';
-      this.renderNode(this.rootNode, this.root);
-      for (const g of this.groups.values()) this.renderGroup(g);
+
+      // Groups own long-lived editor/preview DOM. A layout change only updates
+      // geometry; it must never empty the root and unload their child iframes.
+      Object.assign(this.root.style, {
+        position: 'relative',
+        display: 'block',
+        flex: '1 1 auto',
+        width: '100%',
+        height: '100%',
+        minWidth: '0',
+        minHeight: '0',
+        overflow: 'hidden'
+      });
+
+      const liveGroups = new Set();
+      const liveSplits = new Set();
+      const visit = (node, bounds) => {
+        if (!node) return;
+        if (node.type === 'group') {
+          const g = node.group;
+          liveGroups.add(g);
+          g._layoutBounds = bounds;
+          const el = this.makeGroupElement(g);
+          if (el.parentNode !== this.root) this.root.appendChild(el);
+          el.style.display = '';
+          this.renderGroup(g);
+          return;
+        }
+
+        liveSplits.add(node);
+        node._layoutBounds = bounds;
+        if (!node.dividerEl) {
+          const divider = document.createElement('div');
+          divider.className = 'workbench-divider ' + node.dir;
+          divider.dataset.workbenchDivider = '1';
+          divider.__workbenchSplit = node;
+          divider.addEventListener('mousedown', e => this.startResize(node, e));
+          node.dividerEl = divider;
+        }
+        if (node.dividerEl.parentNode !== this.root) this.root.appendChild(node.dividerEl);
+
+        const ratio = Math.max(.12, Math.min(.88, Number(node.ratio) || .5));
+        if (node.dir === 'horizontal') {
+          visit(node.a, {x:bounds.x, y:bounds.y, w:bounds.w * ratio, h:bounds.h});
+          visit(node.b, {x:bounds.x + bounds.w * ratio, y:bounds.y, w:bounds.w * (1 - ratio), h:bounds.h});
+        } else {
+          visit(node.a, {x:bounds.x, y:bounds.y, w:bounds.w, h:bounds.h * ratio});
+          visit(node.b, {x:bounds.x, y:bounds.y + bounds.h * ratio, w:bounds.w, h:bounds.h * (1 - ratio)});
+        }
+      };
+      visit(this.rootNode, {x:0, y:0, w:100, h:100});
+
+      // Recently closed tabs may still own live DOM in an otherwise collapsed
+      // group. Park that group invisibly until its tab is restored or disposed.
+      for (const child of [...this.root.children]) {
+        if (child.classList?.contains('workbench-group')) {
+          const g = child.__workbenchGroup;
+          if (!liveGroups.has(g)) {
+            if (g?.keepAlive) child.style.display = 'none';
+            else child.remove();
+          }
+        } else if (child.classList?.contains('workbench-divider')) {
+          if (!liveSplits.has(child.__workbenchSplit)) child.remove();
+        }
+      }
+      this.updateLayoutGeometry();
+
       window.EditorEvents?.emit?.('workbenchRebuild', {
         workbench: this, root: this.root, groups: [...this.groups.values()], activeGroup: preferred
       }, true);
-      queueMicrotask(() => {
-        for (const g of this.groups.values()) {
-          const t = g.tabs.find(x => x.id === g.active);
-          if (t) this.onActivate(t, g, {preserveActive: g !== preferred});
-          else if (!g.tabs.length) this.onActivate(null, g, {preserveActive: g !== preferred});
+      if (options.activateTabs !== false) {
+        queueMicrotask(() => {
+          for (const g of this.groups.values()) {
+            const t = g.tabs.find(x => x.id === g.active);
+            if (t) this.onActivate(t, g, {preserveActive:g !== preferred});
+            else if (!g.tabs.length) this.onActivate(null, g, {preserveActive:g !== preferred});
+          }
+          if (preferred && this.groups.has(preferred.id)) this.setActiveGroup(preferred);
+        });
+      } else if (preferred && this.groups.has(preferred.id)) {
+        this.setActiveGroup(preferred);
+      }
+    }
+    updateLayoutGeometry() {
+      const apply = (node, bounds) => {
+        if (!node) return;
+        if (node.type === 'group') {
+          const el = node.group.el;
+          if (!el) return;
+          Object.assign(el.style, {
+            position:'absolute',
+            left:bounds.x + '%',
+            top:bounds.y + '%',
+            width:bounds.w + '%',
+            height:bounds.h + '%',
+            flex:'none',
+            minWidth:'0',
+            minHeight:'0'
+          });
+          node.group._layoutBounds = bounds;
+          return;
         }
-        if (preferred && this.groups.has(preferred.id)) this.setActiveGroup(preferred);
-      });
+
+        node._layoutBounds = bounds;
+        const ratio = Math.max(.12, Math.min(.88, Number(node.ratio) || .5));
+        if (node.dividerEl) {
+          Object.assign(node.dividerEl.style, {
+            position:'absolute',
+            flex:'none',
+            zIndex:'20',
+            width:node.dir === 'horizontal' ? '4px' : bounds.w + '%',
+            height:node.dir === 'horizontal' ? bounds.h + '%' : '4px'
+          });
+          if (node.dir === 'horizontal') {
+            node.dividerEl.style.left = `calc(${bounds.x + bounds.w * ratio}% - 2px)`;
+            node.dividerEl.style.top = bounds.y + '%';
+          } else {
+            node.dividerEl.style.left = bounds.x + '%';
+            node.dividerEl.style.top = `calc(${bounds.y + bounds.h * ratio}% - 2px)`;
+          }
+        }
+
+        if (node.dir === 'horizontal') {
+          apply(node.a, {x:bounds.x, y:bounds.y, w:bounds.w * ratio, h:bounds.h});
+          apply(node.b, {x:bounds.x + bounds.w * ratio, y:bounds.y, w:bounds.w * (1 - ratio), h:bounds.h});
+        } else {
+          apply(node.a, {x:bounds.x, y:bounds.y, w:bounds.w, h:bounds.h * ratio});
+          apply(node.b, {x:bounds.x, y:bounds.y + bounds.h * ratio, w:bounds.w, h:bounds.h * (1 - ratio)});
+        }
+      };
+      if (this.rootNode) apply(this.rootNode, {x:0, y:0, w:100, h:100});
     }
     applyRatio(node) {
-      if (!node.aWrap) return;
-      node.aWrap.style.flex = `0 0 ${(node.ratio || .5) * 100}%`;
-      node.bWrap.style.flex = '1 1 0';
+      this.updateLayoutGeometry();
     }
     startResize(node, e) {
       e.preventDefault();
+      const rootRect = this.root.getBoundingClientRect();
+      const bounds = node._layoutBounds || {x:0, y:0, w:100, h:100};
+      const total = node.dir === 'horizontal'
+        ? rootRect.width * bounds.w / 100
+        : rootRect.height * bounds.h / 100;
+      if (!total) return;
       document.body.classList.add('resizing');
-      const rect = node.el.getBoundingClientRect();
-      const total = node.dir === 'horizontal' ? rect.width : rect.height;
       const start = node.dir === 'horizontal' ? e.clientX : e.clientY;
       const initial = (node.ratio || .5) * total;
       const move = ev => {
@@ -436,7 +557,7 @@
         sibling.parent = p.parent;
       }
       this.groups.delete(g.id);
-      this.rebuild();
+      this.rebuild({activateTabs:false});
     }
     findGroupNode(id, node = this.rootNode) {
       if (!node) return null;
@@ -608,7 +729,7 @@
       if (parent) {
         if (parent.a === targetNode) parent.a = split; else parent.b = split;
       } else this.rootNode = split;
-      this.rebuild();
+      this.rebuild({activateTabs:false});
       this.notifyLayoutChange();
       return newGroup;
     }
@@ -617,15 +738,34 @@
       if (source === target) {
         source.tabs = source.tabs.filter(x => x !== tab);
         source.tabs.push(tab);
-      } else {
-        source.tabs = source.tabs.filter(x => x !== tab);
-        if (source.active === tab.id) source.active = source.tabs[source.tabs.length - 1]?.id || null;
-        target.tabs.push(tab);
         tab.group = target;
+        this.renderGroup(target);
+        this.activateTab(target, tab.id);
+        return;
       }
+
+      // Temporarily protect the tab's view while the source group activates
+      // its replacement. The destination then adopts the same live DOM node.
+      source.__movingTabs ||= new Set();
+      source.__movingTabs.add(tab);
+      const oldIndex = source.tabs.indexOf(tab);
+      const wasActive = source.active === tab.id;
+      source.tabs.splice(oldIndex, 1);
+      if (wasActive) source.active = null;
+      target.tabs.push(tab);
+      tab.group = target;
+
       sourceWorkbench?.renderGroup(source);
+      if (wasActive) {
+        const next = source.tabs[Math.min(oldIndex, source.tabs.length - 1)] || source.tabs[source.tabs.length - 1] || null;
+        if (next) sourceWorkbench.activateTab(source, next.id);
+        else sourceWorkbench.showEmpty(source);
+      }
       this.renderGroup(target);
       this.activateTab(target, tab.id);
+      source.__movingTabs.delete(tab);
+      if (!source.__movingTabs.size) delete source.__movingTabs;
+
       if (!source.tabs.length) sourceWorkbench?.collapseEmptyGroup(source);
       sourceWorkbench?.notifyLayoutChange();
       if (sourceWorkbench !== this) this.notifyLayoutChange();
