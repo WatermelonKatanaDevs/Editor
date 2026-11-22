@@ -481,14 +481,16 @@
         button.disabled = true;
         button.textContent = 'Initializing…';
         try {
-          showStatus('Checking folder write permission…');
-          const permission = await state.fs.requestPermission?.();
-          if (permission && permission !== 'granted') throw new Error('Write permission is required to create the .git directory in this folder.');
+          if (state.fs?.canSave?.()) {
+            showStatus('Checking folder write permission…');
+            const permission = await state.fs.requestPermission?.();
+            if (permission && permission !== 'granted') throw new Error('Write permission is required to create the .git directory in this folder.');
+          }
           showStatus('Creating the local Git repository…');
           localGitRepository = await getLocalGit().init('/', 'main');
           if (!localGitRepository?.isRepository) throw new Error('Git initialization returned without creating a detectable repository.');
           state.markDirty?.('.git');
-          showStatus('Saving .git metadata to the selected folder…');
+          showStatus(state.fs?.canSave?.() ? 'Saving .git metadata to the selected folder…' : 'Keeping .git metadata in this workspace…');
           await state.fs.flush?.();
           localGitStatus = {changes:[], clean:true};
           renderLocalShell();
@@ -860,8 +862,10 @@
       try {
         const service = getLocalGit();
         if (!localGitRepository?.isRepository) {
-          const permission = await state.fs.requestPermission?.();
-          if (permission && permission !== 'granted') throw new Error('Write permission is required to create the .git directory in this folder.');
+          if (state.fs?.canSave?.()) {
+            const permission = await state.fs.requestPermission?.();
+            if (permission && permission !== 'granted') throw new Error('Write permission is required to create the .git directory in this folder.');
+          }
           showStatus('Initializing local Git before creating the GitHub repository…');
           localGitRepository = await service.init('/', 'main');
           if (!localGitRepository?.isRepository) throw new Error('Git initialization returned without creating a detectable repository.');
