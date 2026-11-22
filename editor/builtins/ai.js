@@ -829,11 +829,12 @@ const makeEditorTools = (() => {
     agent.registerTools(toolset.list());
     let currentConversation=null;
     const TEXT_ATTACHMENT_EXTENSIONS=['txt','md','markdown','js','mjs','cjs','ts','tsx','jsx','json','jsonc','json5','html','htm','css','scss','less','xml','svg','yaml','yml','py','java','c','h','cpp','hpp','cc','rs','go','wgsl','glsl','vert','frag','shader','toml','ini','sh','bash','bat','ps1','vue','svelte','php','rb','swift','kt','lua','sql','csv','log','diff','patch',''];
-    const IMAGE_ATTACHMENT_EXTENSIONS=['png','jpg','jpeg','webp','gif','bmp','avif','apng','ico'];
+    const IMAGE_ATTACHMENT_EXTENSIONS=['png','jpg','jpeg','webp','gif'];
     function attachmentExtension(file){const name=String(file?.name||'').toLowerCase(),dot=name.lastIndexOf('.');return dot<0?'':name.slice(dot+1);}
     function attachmentKind(file){
       const ext=attachmentExtension(file),mime=String(file?.type||'').toLowerCase();
-      if(IMAGE_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('image/'))return 'image';
+      if(ext==='svg')return 'text';
+      if(IMAGE_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('image/')&&ext!=='svg')return 'image';
       if(TEXT_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('text/'))return 'text';
       return 'file';
     }
@@ -890,7 +891,7 @@ const makeEditorTools = (() => {
       if(!picker?.open){alert('The Editor workspace file picker is unavailable.');return;}
       const active=activeEditor(state);
       try{
-        const selected=await picker.open({title:'Add AI attachments',extensions,multiple:true,allowDevice:true,startPath:active?.path?.includes('/')?active.path.slice(0,active.path.lastIndexOf('/')):''});
+        const selected=await picker.open({title:'Add AI attachments',extensions,multiple:true,allowDevice:true,maxFileBytes:12*1024*1024,startPath:active?.path?.includes('/')?active.path.slice(0,active.path.lastIndexOf('/')):''});
         if(!Array.isArray(selected)||!selected.length)return;
         for(const file of selected){
           const path=String(file.customRelativePath||file.__wkWorkspacePath||'');
@@ -898,6 +899,7 @@ const makeEditorTools = (() => {
           if(!attachmentSupported({file})){alert(file.name+' is not supported by the selected model.');continue;}
           const key=path?'path:'+path:'device:'+file.name+':'+file.size+':'+file.lastModified;
           if(attachments.some(item=>item.key===key||(path&&item.path===path)))continue;
+          if(attachments.length>=10){alert('You can attach up to 10 files per message.');break;}
           attachments.push({key,name:file.name,path,file,active:false});
         }
         renderAttachmentRow(tree);updateComposerSendState(tree);
@@ -918,7 +920,7 @@ const makeEditorTools = (() => {
       });
     }
     async function buildAttachmentPayload(){
-      const metadata=[],images=[],textParts=[];
+      const metadata=[],images=[],textParts=[];let textChars=0;
       for(const item of attachments){
         const file=item.active?makeActiveAttachment()?.file:item.file;if(!file)continue;
         const kind=attachmentKind(file);
@@ -928,8 +930,11 @@ const makeEditorTools = (() => {
         metadata.push({name:String(file.name),path,kind,mimeType:String(file.type||''),size:Number(file.size)||0,active:!!item.active});
         if(kind==='text'){
           if(file.size>4*1024*1024)throw new Error(file.name+' is larger than the 4 MiB text attachment limit.');
-          let content=await file.text();if(content.length>60000)content=content.slice(0,60000)+'\n… [truncated]';
-          textParts.push('Attached file: '+(path||file.name)+'\n'+content+'\n[End attached file]');
+          let content=await file.text();
+          const remaining=Math.max(0,100000-textChars);
+          if(content.length>remaining)content=content.slice(0,remaining)+'\n… [truncated to fit the attachment context limit]';
+          textChars+=content.length;
+          if(content)textParts.push('Attached file: '+(path||file.name)+'\n'+content+'\n[End attached file]');
         }else if(kind==='image'){
           if(file.size>12*1024*1024)throw new Error(file.name+' is larger than the 12 MiB image attachment limit.');
           if(images.reduce((total,image)=>total+Math.floor(image.dataUrl.length*3/4),0)+file.size>24*1024*1024)throw new Error('Combined image attachments must be smaller than 24 MiB.');
