@@ -619,7 +619,7 @@ const makeEditorTools = (() => {
       const localModelInput=modal.querySelector('[data-local-model]');
       const localVisionInput=modal.querySelector('[data-local-vision]');
       const localEditorStatus=modal.querySelector('[data-local-editor-status]');
-      let editingLocalId='';
+      let editingLocalId='',localPipelineTask='';
       function openLocalModelEditor(model=null){
         form.hidden=true;
         editingId='';
@@ -627,8 +627,9 @@ const makeEditorTools = (() => {
         localEditor.querySelector('[data-local-editor-title]').textContent=editingLocalId?'Edit local model':'Add local model';
         localNameInput.value=model?.name||'';
         localModelInput.value=model?.model||'';
-        localVisionInput.checked=model?.supportsVision!==undefined?!!model.supportsVision:/gemma[-_/]?4/i.test(String(model?.model||''))&&/onnx/i.test(String(model?.model||''));
-        localModelInput.oninput=()=>{if(/gemma[-_/]?4/i.test(localModelInput.value)&&/onnx/i.test(localModelInput.value))localVisionInput.checked=true;};
+        localPipelineTask=String(model?.pipelineTask||'');
+        localVisionInput.checked=model?.supportsVision!==undefined?!!model.supportsVision:(/gemma[-_/]?4/i.test(String(model?.model||''))&&/onnx/i.test(String(model?.model||'')))||['any-to-any','image-text-to-text'].includes(localPipelineTask);
+        localModelInput.oninput=()=>{if(/gemma[-_/]?4/i.test(localModelInput.value)&&/onnx/i.test(localModelInput.value)){localVisionInput.checked=true;localPipelineTask='any-to-any';}};
         localEditorStatus.textContent='';
         localEditor.hidden=false;
         localEditor.querySelector('[data-save-local]').textContent=editingLocalId?'Save changes':'Save model';
@@ -643,7 +644,7 @@ const makeEditorTools = (() => {
         const search=browser.querySelector('[data-local-search]'),status=browser.querySelector('[data-local-status]'),list=browser.querySelector('[data-local-list]'),idInput=browser.querySelector('[data-local-model-id]');
         let all=[];
         browser.querySelector('.editor-modal-close').onclick=()=>browser.remove();browser.onclick=e=>{if(e.target===browser)browser.remove();};
-        const choose=id=>{const modelId=String(id||'').trim();if(!modelId){status.textContent='Enter a Hugging Face model ID first.';return;}onSelect?.(modelId);browser.remove();};
+        const choose=(id,modelInfo=null)=>{const modelId=String(id||'').trim();if(!modelId){status.textContent='Enter a Hugging Face model ID first.';return;}onSelect?.(modelId,modelInfo);browser.remove();};
         async function load(){
           status.textContent='Searching Hugging Face…';list.innerHTML='';
           try{
@@ -662,7 +663,7 @@ const makeEditorTools = (() => {
           const rows=all.filter(m=>{const id=String(m?.id||''),task=String(m?.pipeline_tag||'');return id&&['text-generation','any-to-any','image-text-to-text'].includes(task)&&(!q||id.toLowerCase().includes(q));}).slice(0,200);
           status.textContent=rows.length+' compatible model'+(rows.length===1?'':'s')+' found';
           list.innerHTML=rows.map(m=>'<div class="ai-hf-model-row"><div class="ai-model-main"><strong>'+escapeHtml(m.id)+'</strong><span>'+Number(m.downloads||0).toLocaleString()+' downloads · '+Number(m.likes||0).toLocaleString()+' likes</span></div><button data-local-select="'+escapeHtml(m.id)+'">Select</button></div>').join('');
-          list.querySelectorAll('[data-local-select]').forEach(b=>b.onclick=()=>choose(b.dataset.localSelect));
+          list.querySelectorAll('[data-local-select]').forEach(b=>b.onclick=()=>choose(b.dataset.localSelect,all.find(model=>model.id===b.dataset.localSelect)||null));
         }
         browser.querySelector('[data-local-search-button]').onclick=load;browser.querySelector('[data-local-search-refresh]').onclick=load;search.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();load();}};
         browser.querySelector('[data-local-use-id]').onclick=()=>choose(idInput.value);
@@ -671,15 +672,18 @@ const makeEditorTools = (() => {
       }
       modal.querySelector('[data-add-local]').onclick=()=>openLocalModelEditor();
       modal.querySelector('[data-cancel-local]').onclick=()=>{editingLocalId='';localEditor.hidden=true;};
-      modal.querySelector('[data-browse-local-models]').onclick=()=>openLocalModelBrowser(id=>{
+      modal.querySelector('[data-browse-local-models]').onclick=()=>openLocalModelBrowser((id,info)=>{
         localModelInput.value=id;
-        if(/gemma[-_/]?4/i.test(id)&&/onnx/i.test(id))localVisionInput.checked=true;
+        const task=String(info?.pipeline_tag||'');
+        localPipelineTask=['any-to-any','image-text-to-text'].includes(task)?task:'';
+        if(localPipelineTask||(/gemma[-_/]?4/i.test(id)&&/onnx/i.test(id))){localVisionInput.checked=true;if(!localPipelineTask)localPipelineTask='any-to-any';}
         if(!localNameInput.value.trim())localNameInput.value=id.split('/').pop()+' · Local';
         localEditorStatus.textContent='';
       });
       modal.querySelector('[data-save-local]').onclick=async()=>{
         const name=localNameInput.value.trim(),modelId=localModelInput.value.trim();
         if(!name||!modelId){localEditorStatus.textContent='Enter both a name and a model ID.';return;}
+        const pipelineTask=localVisionInput.checked?(localPipelineTask||(/gemma[-_/]?4/i.test(modelId)&&/onnx/i.test(modelId)?'any-to-any':'image-text-to-text')):'';
         const isLocal=m=>m.local||m.protocol==='local-transformers';
         const existing=registry.settings.models.find(m=>m.id===editingLocalId);
         if(!editingLocalId&&registry.settings.models.some(m=>isLocal(m)&&m.model===modelId)){
@@ -692,8 +696,8 @@ const makeEditorTools = (() => {
           if(registry.settings.models.some(m=>m.id===id))id+='-'+Math.random().toString(36).slice(2,7);
         }
         try{
-          if(existing&&(existing.model!==modelId||existing.supportsVision!==localVisionInput.checked)&&localManager?.isLoaded?.(id))await localManager.unload();
-          registry.add({...existing,id,name,model:modelId,remoteModel:modelId,protocol:'local-transformers',kind:'local-transformers',endpoint:'',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true,supportsVision:localVisionInput.checked,builtInLocal:!!existing?.builtInLocal});
+          if(existing&&(existing.model!==modelId||existing.supportsVision!==localVisionInput.checked||existing.pipelineTask!==pipelineTask)&&localManager?.isLoaded?.(id))await localManager.unload();
+          registry.add({...existing,id,name,model:modelId,remoteModel:modelId,protocol:'local-transformers',kind:'local-transformers',endpoint:'',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true,supportsVision:localVisionInput.checked,pipelineTask,builtInLocal:!!existing?.builtInLocal});
           registry.save();
           editingLocalId='';localEditor.hidden=true;render();onChange?.();
         }catch(e){localEditorStatus.textContent=e?.message||String(e);}
