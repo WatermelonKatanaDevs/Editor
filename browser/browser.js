@@ -20,17 +20,52 @@ const DEVICE_EMULATION_PRESETS = {
 // Configurable Proxy Settings
 const browserQuery = new URLSearchParams(window.location.search);
 
+const BROWSER_SETTINGS_KEY = 'browser.settings';
+const BROWSER_BOOKMARKS_KEY = 'browser.bookmarks';
+const BROWSER_HISTORY_KEY = 'browser.history';
+
 let appSettings = {
   primaryProxy: (window.WorkerConfig && window.WorkerConfig.proxy) || "",
   fallbackProxy: (typeof window.WorkerConfig?.fallbackProxy === 'string' ? window.WorkerConfig.fallbackProxy.trim() : ''),
   searchEngine: "https://mojeek.com/search?q=",
   useFallback: typeof window.WorkerConfig?.fallbackProxy === 'string' && window.WorkerConfig.fallbackProxy.trim().length > 0,
   obscureURL: true,
-  defaultTab: "https://example.com",
+  defaultTab: "",
   clearDevToolsOnReload: true,
   autoDownload: false,
   logXMLHttpRequests: false,
+  hideBrowserBar: false,
+  restoreTabs: true,
 };
+
+function readBrowserJSON(key) {
+  try {
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+try {
+  const saved = readBrowserJSON(BROWSER_SETTINGS_KEY);
+  if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+    appSettings = { ...appSettings, ...saved };
+  } else {
+    const oldEditor = readBrowserJSON('editor.browserSettings');
+    const oldBrowser = readBrowserJSON('appSettings');
+    const oldBehavior = readBrowserJSON('editor.behaviorSettings');
+    const migrated = { ...(oldEditor || {}), ...(oldBrowser || {}) };
+    if (oldBehavior && oldBehavior.hideBrowserBar !== undefined) {
+      migrated.hideBrowserBar = !!oldBehavior.hideBrowserBar;
+    }
+    if (migrated.defaultTab === 'https://example.com') migrated.defaultTab = '';
+    if (Object.keys(migrated).length) {
+      appSettings = { ...appSettings, ...migrated };
+      localStorage.setItem(BROWSER_SETTINGS_KEY, JSON.stringify(appSettings));
+    }
+  }
+} catch (_) {}
 
 var browserNetwork = null;
 var sharedBrowserNetwork = null;
@@ -99,138 +134,29 @@ window.addEventListener('error', function(e) {
   console.error("Uncaught Error: " + message);
 });
 
-var bookmarks = [
-  // { title: "Minecraft", url: "https://eaglercraft.q13x.com/1.8-wasm/" },
-  // { title: "Wikipedia", url: "https://www.wikipedia.org/" },
-  // { title: "Hacker News", url: "https://news.ycombinator.com" },
-  // { title: "Test", url: "https://getsamplefiles.com/download/7z/sample-1.7z" },
-  // { title: "Remote host", url: "https://example.com" },
-  // { title: "Pathtracer", url: "https://dragonfiregames.github.io/WebGPU-Pathtracer/" },
-];
+var bookmarks = [];
 
 function setStorageItem(key,value) {
-  localStorage.setItem(key,JSON.stringify(value));
+  try { localStorage.setItem(key,JSON.stringify(value)); } catch (_) {}
 }
 function getStorageItem(key) {
-  var item = localStorage.getItem(key);
-  return item ? JSON.parse(item) : null;
-}
-
-function getEditorBrowserStateBridge() {
   try {
-    if (window.parent && window.parent !== window) return window.parent.__editorBrowserStateBridge || null;
-  } catch (e) {}
-  return null;
+    var item = localStorage.getItem(key);
+    return item ? JSON.parse(item) : null;
+  } catch (_) {
+    return null;
+  }
 }
-
-function normalizeBrowserState(state) {
-  const value = state && typeof state === 'object' ? state : {};
-  const settings = value.settings && typeof value.settings === 'object' ? value.settings : {};
-  const storedBookmarks = Array.isArray(value.bookmarks) ? value.bookmarks : [];
-  const normalizedBookmarks = storedBookmarks.map(bookmark => ({
+function normalizeBookmarks(value) {
+  return (Array.isArray(value) ? value : []).map(bookmark => ({
     title: typeof bookmark?.title === 'string' ? bookmark.title : String(bookmark?.title || bookmark?.url || ''),
     url: typeof bookmark?.url === 'string' ? bookmark.url : String(bookmark?.url || ''),
     favicon: typeof bookmark?.favicon === 'string' ? bookmark.favicon : DEFAULT_FAVICON,
     faviconUrl: typeof bookmark?.faviconUrl === 'string' ? bookmark.faviconUrl : (typeof bookmark?.url === 'string' ? bookmark.url : '')
   })).filter(bookmark => bookmark.url);
-  return { settings: { ...settings }, bookmarks: normalizedBookmarks };
 }
 
-function loadEditorBrowserState() {
-  const bridge = getEditorBrowserStateBridge();
-  try {
-    const stored = bridge?.read?.();
-    if (stored) {
-      const state = normalizeBrowserState(stored);
-      appSettings = { ...appSettings, ...state.settings };
-      bookmarks = state.bookmarks;
-      return true;
-    }
-  } catch (e) {}
-  return false;
-}
-
-let editorBrowserStateUnsubscribe = null;
-function subscribeEditorBrowserState() {
-  if (editorBrowserStateUnsubscribe) return;
-  const bridge = getEditorBrowserStateBridge();
-  try {
-    editorBrowserStateUnsubscribe = bridge?.subscribe?.(state => {
-      if (!state) return;
-      const next = normalizeBrowserState(state);
-      appSettings = { ...appSettings, ...next.settings };
-      bookmarks = next.bookmarks;
-      try { updateNetworkSettings(); } catch (_) {}
-      try { updateSettings(); } catch (_) {}
-      renderBookmarks();
-      updateBookmarkStar();
-      refreshAllBookmarkIcons(false);
-    }) || null;
-  } catch (e) {
-    editorBrowserStateUnsubscribe = null;
-  }
-}
-
-window.addEventListener('pagehide', () => {
-  try { editorBrowserStateUnsubscribe?.(); } catch (_) {}
-  editorBrowserStateUnsubscribe = null;
-});
-
-// setTimeout(function(){
-//   bookmarks = getStorageItem('bookmarks') || bookmarks;
-//   appSettings = getStorageItem('history') || appSettings;
-//   updateSettings();
-//   tabs = getStorageItem('tabs') || tabs;
-//   activeTabId = getStorageItem('activeTab');
-//   var tab = getActiveTab();
-//   if (tab) navigateToInTab(tab,tab.url,true,true);
-//   updateToolbarUI();
-//   renderBookmarks();
-//   if (tabs.length == 0) {
-//   }
-// 
-// },1);
-
-try {
-  const savedAppSettings = getStorageItem('appSettings');
-  if (savedAppSettings) appSettings = { ...appSettings, ...savedAppSettings };
-  const configuredFallbackProxy = typeof window.WorkerConfig?.fallbackProxy === 'string' ? window.WorkerConfig.fallbackProxy.trim() : '';
-  if (configuredFallbackProxy && !savedAppSettings) {
-    appSettings.fallbackProxy = configuredFallbackProxy;
-    appSettings.useFallback = true;
-  }
-  const savedBookmarks = getStorageItem('bookmarks');
-  if (Array.isArray(savedBookmarks)) bookmarks = normalizeBrowserState({ bookmarks: savedBookmarks }).bookmarks;
-} catch(e) {}
-loadEditorBrowserState();
-subscribeEditorBrowserState();
-if (!appSettings.primaryProxy) appSettings.primaryProxy = String(window.WorkerConfig?.proxy || '');
-browserNetwork.logXMLHttpRequests = !!appSettings.logXMLHttpRequests;
-
-function saveBrowserState() {
-  const normalizedBookmarks = bookmarks.map(bookmark => ({
-    title: typeof bookmark?.title === 'string' ? bookmark.title : String(bookmark?.title || bookmark?.url || ''),
-    url: typeof bookmark?.url === 'string' ? bookmark.url : String(bookmark?.url || ''),
-    favicon: typeof bookmark?.favicon === 'string' ? bookmark.favicon : DEFAULT_FAVICON,
-    faviconUrl: typeof bookmark?.faviconUrl === 'string' ? bookmark.faviconUrl : (typeof bookmark?.url === 'string' ? bookmark.url : '')
-  })).filter(bookmark => bookmark.url);
-  const bridge = getEditorBrowserStateBridge();
-  try {
-    if (bridge?.write) bridge.write({ settings: { ...appSettings }, bookmarks: normalizedBookmarks });
-    else setStorageItem('bookmarks',normalizedBookmarks);
-  } catch (e) {
-    setStorageItem('bookmarks',normalizedBookmarks);
-  }
-  setStorageItem('history',history);
-  setStorageItem('tabs',tabs.map(tab => {
-    var serialized_tab = { ...tab };
-    delete serialized_tab.iframe;
-    delete serialized_tab.page;
-    return serialized_tab;
-  }));
-  setStorageItem('activeTab',activeTabId);
-}
-
+const browserSessionStorageKey = 'browser.session.' + encodeURIComponent(browserQuery.get('session') || 'standalone');
 let historyLog = [];
 let tabs = [];
 let activeTabId = null;
@@ -239,9 +165,68 @@ let contextMenuTarget = null;
 let downloads = [];
 let downloadId = 0;
 const downloadBlobCache = new Map();
+let isRestoringBrowserSession = false;
+let browserSessionRestoreAttempted = false;
+
+const savedBookmarks = getStorageItem(BROWSER_BOOKMARKS_KEY) || getStorageItem('bookmarks');
+if (Array.isArray(savedBookmarks)) {
+  bookmarks = normalizeBookmarks(savedBookmarks);
+  setStorageItem(BROWSER_BOOKMARKS_KEY, bookmarks);
+}
+const savedHistoryLog = getStorageItem(BROWSER_HISTORY_KEY) || getStorageItem('historyLog');
+if (Array.isArray(savedHistoryLog)) historyLog = savedHistoryLog.filter(item => item && typeof item.url === 'string').slice(0, 500);
+
+window.addEventListener('storage', event => {
+  if (event.key === BROWSER_SETTINGS_KEY) {
+    let next = null;
+    try { next = event.newValue ? JSON.parse(event.newValue) : null; } catch (_) {}
+    if (next && typeof next === 'object') {
+      appSettings = { ...appSettings, ...next };
+      updateNetworkSettings();
+      updateSettings();
+      setBrowserChromeHidden(!!appSettings.hideBrowserBar);
+    }
+  } else if (event.key === BROWSER_BOOKMARKS_KEY) {
+    let next = [];
+    try { next = event.newValue ? JSON.parse(event.newValue) : []; } catch (_) {}
+    bookmarks = normalizeBookmarks(next);
+    renderBookmarks();
+    updateBookmarkStar();
+  } else if (event.key === BROWSER_HISTORY_KEY) {
+    let next = [];
+    try { next = event.newValue ? JSON.parse(event.newValue) : []; } catch (_) {}
+    historyLog = Array.isArray(next) ? next : [];
+    renderHistoryLog();
+  }
+});
+
+function saveBrowserSettings() {
+  setStorageItem(BROWSER_SETTINGS_KEY, appSettings);
+}
+function saveHistoryLog() {
+  setStorageItem(BROWSER_HISTORY_KEY, historyLog.slice(0, 500));
+}
+function saveBrowserState() {
+  saveBrowserSettings();
+  setStorageItem(BROWSER_BOOKMARKS_KEY, normalizeBookmarks(bookmarks));
+  saveHistoryLog();
+  if (isRestoringBrowserSession) return;
+  setStorageItem(browserSessionStorageKey, {
+    tabs: tabs.map(tab => ({
+      id: tab.id,
+      url: tab.url,
+      title: tab.title,
+      favicon: tab.favicon,
+      deviceEmulation: tab.deviceEmulation ? { ...tab.deviceEmulation } : null,
+      history: Array.isArray(tab.page?.history) ? tab.page.history.slice(-200) : [],
+      historyIndex: Number.isInteger(tab.page?.historyIndex) ? tab.page.historyIndex : -1
+    })),
+    activeTabId
+  });
+}
 function saveDownloadHistory() {
   try {
-    setStorageItem('downloads',downloads.filter(d => d.status !== 'downloading').slice(-100).map(d => ({
+    setStorageItem('browser.downloads',downloads.filter(d => d.status !== 'downloading').slice(-100).map(d => ({
       id:d.id,url:d.url,name:d.name,status:d.status,progress:d.progress || 0,received:d.received || 0,total:d.total || 0,
       size:d.size || 0,startedAt:d.startedAt,finishedAt:d.finishedAt || 0,error:d.error || '',autoDownloaded:!!d.autoDownloaded
     })));
@@ -249,7 +234,7 @@ function saveDownloadHistory() {
 }
 function loadDownloadHistory() {
   try {
-    const saved = getStorageItem('downloads');
+    const saved = getStorageItem('browser.downloads') || getStorageItem('downloads');
     if (!Array.isArray(saved)) return;
     downloads = saved.map(d => ({...d,id:Number(d.id) || 0})).filter(d => d.url && d.id > 0);
     downloadId = downloads.reduce((max,d) => Math.max(max,d.id),0);
@@ -895,7 +880,7 @@ async function updateTabMetadata(tab) {
 
 const menuEl = document.getElementById('custom-context-menu');
 
-let browserChromeFullscreen = ['1', 'true', 'yes'].includes(String(browserQuery.get('hideBrowserBar') || '').toLowerCase());
+let browserChromeFullscreen = !!appSettings.hideBrowserBar || ['1', 'true', 'yes'].includes(String(browserQuery.get('hideBrowserBar') || '').toLowerCase());
 let browserChromeRevealTimer = null;
 
 function setBrowserChromeReveal(visible) {
@@ -904,6 +889,7 @@ function setBrowserChromeReveal(visible) {
 
 function setBrowserChromeHidden(hidden) {
   browserChromeFullscreen = !!hidden;
+  appSettings.hideBrowserBar = browserChromeFullscreen;
   document.body.classList.toggle('browser-chrome-fullscreen', browserChromeFullscreen);
   const icon = document.getElementById('btn-browser-fullscreen')?.querySelector('i');
   icon?.classList.toggle('fa-expand', !browserChromeFullscreen);
@@ -915,6 +901,7 @@ function setBrowserChromeHidden(hidden) {
 
 function toggleBrowserFullscreen() {
   setBrowserChromeHidden(!browserChromeFullscreen);
+  saveBrowserState();
   document.body.classList.toggle('browser-chrome-fullscreen', browserChromeFullscreen);
 }
 
@@ -1159,7 +1146,7 @@ function showContextMenu(clientX, clientY, targetInfo) {
   menuItems.push({ label: 'Reload', shortcut: 'Ctrl+R', action: () => reloadCurrentTab() });
   menuItems.push({ type: 'separator' });
 
-  menuItems.push({ label: 'New Tab', shortcut: 'Ctrl+T', action: () => createNewTab(appSettings.defaultTab, true) });
+  menuItems.push({ label: 'New Tab', shortcut: 'Ctrl+T', action: () => createNewTab(getBrowserDefaultTab(), true) });
   menuItems.push({ label: 'Reopen Closed Tab', shortcut: 'Ctrl+Shift+T', disabled: closedTabsStack.length === 0, action: () => restoreClosedTab() });
   menuItems.push({ label: 'Close Tab', shortcut: 'Ctrl+W', action: () => { if (activeTabId) closeTab(activeTabId); } });
   menuItems.push({ type: 'separator' });
@@ -1769,8 +1756,9 @@ document.addEventListener('click', () => {
   if (window.keepAlive) window.keepAlive.start();
 });
 
-function createNewTab(initialUrl = appSettings.defaultTab, activate = true) {
-  const tabId = 'tab-' + Math.random().toString(36).substring(2, 9);
+function createNewTab(initialUrl = getBrowserDefaultTab(), activate = true, restoredState = null) {
+  initialUrl = normalizeBrowserStartupUrl(initialUrl) || getBrowserDefaultTab();
+  const tabId = restoredState?.id || ('tab-' + Math.random().toString(36).substring(2, 9));
   
   const iframe = document.createElement('iframe');
   iframe.id = `iframe-${tabId}`;
@@ -1782,12 +1770,18 @@ function createNewTab(initialUrl = appSettings.defaultTab, activate = true) {
   const newTab = {
     id: tabId,
     url: initialUrl,
-    title: initialUrl,
-    favicon: DEFAULT_FAVICON,
+    title: restoredState?.title || initialUrl,
+    favicon: restoredState?.favicon || DEFAULT_FAVICON,
     iframe: iframe,
     page: page,
-    deviceEmulation: null,
+    deviceEmulation: restoredState?.deviceEmulation ? { ...restoredState.deviceEmulation } : null,
   };
+
+  if (restoredState) {
+    const savedHistory = Array.isArray(restoredState.history) ? restoredState.history.filter(value => typeof value === 'string' && value) : [];
+    page.history = savedHistory.length ? savedHistory : [initialUrl];
+    page.historyIndex = Math.max(0, Math.min(Number(restoredState.historyIndex) || 0, page.history.length - 1));
+  }
 
   page.tab = newTab;
 
@@ -1800,7 +1794,7 @@ function createNewTab(initialUrl = appSettings.defaultTab, activate = true) {
     renderTabStrip();
   }
   
-  navigateToInTab(newTab, initialUrl, true);
+  navigateToInTab(newTab, initialUrl, !restoredState, true, !!restoredState);
   return newTab;
 }
 
@@ -1826,6 +1820,7 @@ function switchTab(tabId) {
   updateToolbarUI();
   const active = getActiveTab();
   if (active) window.dispatchEvent(new CustomEvent('browser-tab-change',{detail:{tab:active,page:active.page}}));
+  if (!isRestoringBrowserSession) saveBrowserState();
 }
 
 function closeTab(tabId, event) {
@@ -1849,7 +1844,7 @@ function closeTab(tabId, event) {
   tabs.splice(index, 1);
 
   if (tabs.length === 0) {
-    createNewTab(appSettings.defaultTab);
+    createNewTab(getBrowserDefaultTab());
     return;
   }
 
@@ -1859,6 +1854,7 @@ function closeTab(tabId, event) {
   } else {
     renderTabStrip();
   }
+  if (!isRestoringBrowserSession) saveBrowserState();
 }
 
 function switchTabByIndex(index) {
@@ -1882,6 +1878,32 @@ function updateLoadingProgress(val) {
 
 function getActiveTab() {
   return tabs.find(t => t.id === activeTabId);
+}
+
+function restoreBrowserSession() {
+  if (browserSessionRestoreAttempted) return tabs.length > 0;
+  browserSessionRestoreAttempted = true;
+  if (appSettings.restoreTabs === false) return false;
+  const saved = getStorageItem(browserSessionStorageKey);
+  const savedTabs = Array.isArray(saved?.tabs) ? saved.tabs : [];
+  const validTabs = savedTabs.filter(tab => tab && typeof tab.url === 'string' && tab.url.trim()).slice(0, 50);
+  if (!validTabs.length) return false;
+
+  isRestoringBrowserSession = true;
+  try {
+    validTabs.forEach((savedTab, index) => {
+      const history = Array.isArray(savedTab.history) ? savedTab.history.filter(value => typeof value === 'string' && value) : [];
+      const historyIndex = Math.max(0, Math.min(Number(savedTab.historyIndex) || 0, Math.max(0, history.length - 1)));
+      const currentUrl = history[historyIndex] || savedTab.url;
+      createNewTab(currentUrl, savedTab.id === saved.activeTabId || (!saved.activeTabId && index === 0), { ...savedTab, history, historyIndex });
+    });
+    if (saved.activeTabId && tabs.some(tab => tab.id === saved.activeTabId)) switchTab(saved.activeTabId);
+    else if (tabs.length) switchTab(tabs[0].id);
+  } finally {
+    isRestoringBrowserSession = false;
+  }
+  saveBrowserState();
+  return tabs.length > 0;
 }
 
 function getDeviceEmulationUserAgent(emulation) {
@@ -2100,6 +2122,8 @@ async function navigateToInTab(tab, rawUrl, isNewNavigation = true, reloadCurren
 
     if (!isHistoryStateChange || !replaceHistory) {
       historyLog.unshift({ url: absoluteUrl, time: new Date().toLocaleTimeString() });
+      historyLog = historyLog.slice(0, 500);
+      saveHistoryLog();
     }
   }
 
@@ -2114,6 +2138,7 @@ async function navigateToInTab(tab, rawUrl, isNewNavigation = true, reloadCurren
   if (tab.id === activeTabId) {
     updateToolbarUI();
   }
+  if (!isRestoringBrowserSession) saveBrowserState();
 }
 
 async function getDocumentContent(response, url, origin, page) {
@@ -2958,6 +2983,7 @@ function renderHistoryLog() {
 
 function clearHistoryLog() {
   historyLog = [];
+  saveHistoryLog();
   renderHistoryLog();
   showToast('Browsing history cleared');
 }
@@ -2966,7 +2992,9 @@ function updateSettings() {
   const configuredFallbackProxy = typeof window.WorkerConfig?.fallbackProxy === 'string' ? window.WorkerConfig.fallbackProxy.trim() : '';
   if (configuredFallbackProxy && !appSettings.fallbackProxy) { appSettings.fallbackProxy = configuredFallbackProxy; appSettings.useFallback = true; }
   appSettings.primaryProxy = String(appSettings.primaryProxy || window.WorkerConfig?.proxy || '');
-  document.getElementById('setting-default-tab').value = appSettings.defaultTab;
+  document.getElementById('setting-default-tab').value = appSettings.defaultTab || '';
+  document.getElementById('setting-hide-browser-bar').checked = !!appSettings.hideBrowserBar;
+  document.getElementById('setting-restore-tabs').checked = appSettings.restoreTabs !== false;
   document.getElementById('setting-proxy-url').value = appSettings.primaryProxy;
   document.getElementById('setting-fallback-proxy-url').value = appSettings.fallbackProxy;
   document.getElementById('setting-search-engine').value = appSettings.searchEngine;
@@ -2979,7 +3007,9 @@ function updateSettings() {
 }
 
 function saveSettings() {
-  appSettings.defaultTab = document.getElementById('setting-default-tab').value;
+  appSettings.defaultTab = document.getElementById('setting-default-tab').value.trim();
+  appSettings.hideBrowserBar = document.getElementById('setting-hide-browser-bar').checked;
+  appSettings.restoreTabs = document.getElementById('setting-restore-tabs').checked;
   appSettings.primaryProxy = document.getElementById('setting-proxy-url').value.trim();
   appSettings.fallbackProxy = document.getElementById('setting-fallback-proxy-url').value;
   appSettings.searchEngine = document.getElementById('setting-search-engine').value;
@@ -2988,8 +3018,8 @@ function saveSettings() {
   appSettings.clearDevToolsOnReload = document.getElementById('setting-clear-devtools-reload').checked;
   appSettings.autoDownload = document.getElementById('setting-autodownload').checked;
   appSettings.logXMLHttpRequests = document.getElementById('setting-log-xhr').checked;
-  try { setStorageItem('appSettings',appSettings); } catch (_) {}
   saveBrowserState();
+  setBrowserChromeHidden(appSettings.hideBrowserBar);
   updateNetworkSettings();
   closeModal('settings-modal');
   showToast('Settings updated', 'success');
@@ -3008,33 +3038,26 @@ function normalizeBrowserStartupUrl(url) {
   return value;
 }
 
+function getBrowserDefaultTab() {
+  return normalizeBrowserStartupUrl(appSettings.defaultTab)
+    || normalizeBrowserStartupUrl(window.__browserFallbackDefaultTab)
+    || normalizeBrowserStartupUrl(browserQuery.get('default'))
+    || 'https://example.com';
+}
+
 function getStartupUrl() {
-  const configuredDefault = browserQuery.get('default');
-  const configuredStart = browserQuery.get('start');
-  if (configuredDefault) {
-    const normalizedDefault = normalizeBrowserStartupUrl(configuredDefault);
-    if (normalizedDefault) appSettings.defaultTab = normalizedDefault;
-  }
-  return normalizeBrowserStartupUrl(configuredStart) || appSettings.defaultTab;
+  return normalizeBrowserStartupUrl(browserQuery.get('start')) || getBrowserDefaultTab();
 }
 
 function setBrowserDefaultTab(url) {
-  const normalized = normalizeBrowserStartupUrl(url) || appSettings.defaultTab || 'https://example.com';
-  appSettings.defaultTab = normalized;
-  try { updateSettings(); } catch (_) {}
-  try { setStorageItem('appSettings', appSettings); } catch (_) {}
-  // Keep the editor-owned Browser settings in sync as well as this iframe's
-  // local storage, so Run Configuration can follow the previous run URL.
-  try { saveBrowserState(); } catch (_) {}
-  return normalized;
+  const normalized = normalizeBrowserStartupUrl(url) || 'https://example.com';
+  window.__browserFallbackDefaultTab = normalized;
+  return getBrowserDefaultTab();
 }
 
-function getBrowserDefaultTab() {
-  return normalizeBrowserStartupUrl(appSettings.defaultTab);
-}
-
-async function loadBrowserURL(url = appSettings.defaultTab, activate = true) {
-  const normalized = normalizeBrowserStartupUrl(url) || appSettings.defaultTab;
+async function loadBrowserURL(url = getBrowserDefaultTab(), activate = true) {
+  if (!tabs.length && restoreBrowserSession()) return getActiveTab();
+  const normalized = normalizeBrowserStartupUrl(url) || getBrowserDefaultTab();
   let tab = getActiveTab();
   if (!tab) tab = createNewTab(normalized, activate);
   else await navigateToInTab(tab, normalized, true);
@@ -3144,7 +3167,7 @@ window.addEventListener('keydown', function(e) {
   if (e.ctrlKey || e.metaKey) {
     const key = e.key.toLowerCase();
     if (e.shiftKey && key === 't') { e.preventDefault(); restoreClosedTab(); return; }
-    if (key === 't' && !e.shiftKey) { e.preventDefault(); createNewTab(appSettings.defaultTab, true); return; }
+    if (key === 't' && !e.shiftKey) { e.preventDefault(); createNewTab(getBrowserDefaultTab(), true); return; }
     if (key === 'w') { e.preventDefault(); if (activeTabId) closeTab(activeTabId); return; }
     if (key === 'r') { e.preventDefault(); reloadCurrentTab(); return; }
     if (key === 'l') { e.preventDefault(); const b = document.getElementById('url-bar'); b.focus(); b.select(); return; }
@@ -3205,13 +3228,20 @@ async function initializeDeployment() {
     window.__deploymentPeerServer = server;
     browserNetwork.prependEndpoint(peerEndpoint);
   }
-  appSettings.defaultTab = targetUrl.href;
+  window.__browserFallbackDefaultTab = targetUrl.href;
 }
 
 const startupTab = getStartupUrl();
 if (window.__deploymentConfig) {
-  (async()=>{try { await initializeDeployment(); if (!browserStartupDeferred) createNewTab(appSettings.defaultTab || startupTab); } catch(e) { console.error(e); document.title='Deployment Error'; const el=document.createElement('pre'); el.textContent=String(e?.stack||e); el.style.cssText='padding:24px;color:#ddd;background:#111;white-space:pre-wrap;font:13px monospace'; document.body.appendChild(el); }} )();
-} else if (!browserStartupDeferred) createNewTab(startupTab);
+  (async()=>{try { await initializeDeployment(); if (!browserStartupDeferred && !restoreBrowserSession()) createNewTab(startupTab || getBrowserDefaultTab()); } catch(e) { console.error(e); document.title='Deployment Error'; const el=document.createElement('pre'); el.textContent=String(e?.stack||e); el.style.cssText='padding:24px;color:#ddd;background:#111;white-space:pre-wrap;font:13px monospace'; document.body.appendChild(el); }} )();
+} else if (!browserStartupDeferred) {
+  const hasExplicitStart = !!browserQuery.get('start');
+  if (!(hasExplicitStart && !browserQuery.has('session')) && !restoreBrowserSession()) {
+    createNewTab(startupTab || getBrowserDefaultTab());
+  } else if (hasExplicitStart && !browserQuery.has('session')) {
+    createNewTab(startupTab || getBrowserDefaultTab());
+  }
+}
 renderBookmarks();
 refreshAllBookmarkIcons();
 updateToolbarUI();
