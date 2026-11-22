@@ -50,6 +50,7 @@
           <div class="editor-settings-section">
             <h3>Browser</h3>
             <label class="setting-check"><input id="setting-hide-browser-bar" type="checkbox"><span>Hide browser bar</span></label>
+            <label class="setting-check"><input id="setting-browser-restore-tabs" type="checkbox"><span>Restore open tabs</span></label>
             <label>Default tab<input id="setting-browser-default-tab" type="text" spellcheck="false"></label>
             <label>CORS proxy gateway<input id="setting-browser-primary-proxy" type="text" spellcheck="false" placeholder="Optional"></label>
             <label>Fallback proxy<input id="setting-browser-fallback-proxy" type="text" spellcheck="false" placeholder="Optional"></label>
@@ -57,6 +58,9 @@
               <option value="https://mojeek.com/search?q=">Mojeek</option>
               <option value="https://duckduckgo.com/html/?q=">DuckDuckGo HTML</option>
               <option value="https://html.duckduckgo.com/html/?q=">DuckDuckGo Lite</option>
+              <option value="https://search.brave.com/search?q=">Brave</option>
+              <option value="https://www.google.com/search?q=">Google</option>
+              <option value="https://yandex.com/search/?text=">Yandex</option>
             </select></label>
             <label class="setting-check"><input id="setting-browser-use-fallback" type="checkbox"><span>Use fallback proxy</span></label>
             <label class="setting-check"><input id="setting-browser-obscure-url" type="checkbox"><span>Obscure proxied URLs</span></label>
@@ -76,6 +80,7 @@
       const ignoreNodeModules = $('setting-ignore-node-modules');
       const piskelAutoSave = $('setting-piskel-auto-save');
       const b = $('setting-hide-browser-bar');
+      const restoreTabs = $('setting-browser-restore-tabs');
       const defaultTab = $('setting-browser-default-tab');
       const primaryProxy = $('setting-browser-primary-proxy');
       const fallbackProxy = $('setting-browser-fallback-proxy');
@@ -105,7 +110,8 @@
       h.checked = !!state.behavior.showHiddenFiles;
       hideNodeModules.checked = !!state.behavior.hideNodeModules;
       try { const stored = localStorage.getItem('node-editor.piskel.autoSave'); piskelAutoSave.checked = stored === null ? true : stored === 'true'; } catch (_) { piskelAutoSave.checked = true; }
-      b.checked = !!state.behavior.hideBrowserBar;
+      b.checked = !!state.browserSettings.hideBrowserBar;
+      restoreTabs.checked = state.browserSettings.restoreTabs !== false;
 
       a.onchange = () => { state.behavior.autoSaveOnRun = a.checked; saveBehaviorSettings(); };
       c.onchange = () => { state.behavior.autoClearTerminal = c.checked; saveBehaviorSettings(); };
@@ -124,16 +130,13 @@
       piskelAutoSave.onchange = () => {
         try { localStorage.setItem('node-editor.piskel.autoSave', piskelAutoSave.checked ? 'true' : 'false'); } catch (_) {}
       };
-      b.onchange = () => {
-        state.behavior.hideBrowserBar = b.checked;
-        for (const info of state.browserTabs.values()) {
-          try { info.frame?.contentWindow?.setBrowserChromeHidden?.(b.checked); } catch (_) {}
-        }
-        saveBehaviorSettings();
-      };
+      b.onchange = () => writeBrowserSettings({hideBrowserBar: b.checked});
+      restoreTabs.onchange = () => writeBrowserSettings({restoreTabs: restoreTabs.checked});
 
       function renderBrowserSettings(value) {
         const settings = value || getBrowserSettings?.() || {};
+        b.checked = !!settings.hideBrowserBar;
+        restoreTabs.checked = settings.restoreTabs !== false;
         defaultTab.value = settings.defaultTab || '';
         primaryProxy.value = settings.primaryProxy || '';
         fallbackProxy.value = settings.fallbackProxy || '';
