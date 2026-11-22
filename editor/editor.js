@@ -1379,7 +1379,6 @@ window.__editorInitPromise = (async function () {
     g.keepAlive = true;
     history.push(entry);
     entry.timer = setTimeout(() => destroyClosedTabEntry(entry), retentionMs);
-    while (history.length > 50) destroyClosedTabEntry(history[0]);
     return entry;
   }
   function restoreClosedWorkbenchTab() {
