@@ -251,12 +251,16 @@
   const root=window.EditorAI=window.EditorAI||{};
   function generatedText(result,fallback){
     const value=result&&result[0]&&result[0].generated_text;
-    if(Array.isArray(value)){
-      const last=value[value.length-1];
-      if(typeof last==='string')return last;
-      if(last&&typeof last.content==='string')return last.content;
-    }
-    if(typeof value==='string')return value;
+    const textOf=item=>{
+      if(typeof item==='string')return item;
+      if(!item||typeof item!=='object')return '';
+      if(typeof item.content==='string')return item.content;
+      if(Array.isArray(item.content))return item.content.filter(part=>part&&part.type!=='image'&&typeof part.text==='string').map(part=>part.text).join('');
+      if(typeof item.text==='string')return item.text;
+      return '';
+    };
+    if(Array.isArray(value)){const last=value[value.length-1];const text=textOf(last);if(text)return text;}
+    const direct=textOf(value);if(direct)return direct;
     return String(fallback||'');
   }
   function isWebGPUBufferFailure(error){
@@ -423,10 +427,15 @@
           env.allowLocalModels=true;
           const baseFetch=env.fetch||window.fetch.bind(window);
           env.fetch=async(input,options)=>{
+            const requestUrl=String(input?.url||input);
+            // Image/audio payloads use data: or blob: URLs and are user-provided
+            // request inputs, not remote model assets. They must remain readable
+            // even after model downloads are locked to the offline cache.
+            if(/^(?:data|blob):/i.test(requestUrl))return baseFetch(input,options);
             if(this.offlineOnly){
               const cached=await this.cache.match(input);
               if(cached)return cached;
-              throw new Error('Offline local AI cache miss: '+String(input?.url||input));
+              throw new Error('Offline local AI cache miss: '+requestUrl);
             }
             return baseFetch(input,options);
           };
