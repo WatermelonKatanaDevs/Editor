@@ -155,9 +155,10 @@
         try { localStorage.setItem('node-editor.piskel.autoSave', piskelAutoSave.checked ? 'true' : 'false'); } catch (_) {}
       };
       const saveClosedTabRetention = () => {
-        const amount = Number(closedTabRetention.value);
+        const rawAmount = closedTabRetention.value.trim();
+        const amount = Number(rawAmount);
         const unit = Number(closedTabRetentionUnit.value);
-        if (!Number.isFinite(amount) || amount < 0 || !Number.isFinite(unit) || unit < 1000) {
+        if (!rawAmount || !Number.isFinite(amount) || amount < 0 || !Number.isFinite(unit) || unit < 1000) {
           closedTabRetention.value = String(retentionMs / retentionUnit);
           closedTabRetentionUnit.value = String(retentionUnit);
           return;
