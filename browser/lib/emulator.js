@@ -5978,7 +5978,7 @@
         const callerWindowProxyCache = new Map();
 
         function dispatchVirtualPostMessage(nativeTargetWindow, targetPage, message, targetOrigin, transfer) {
-          if (!nativeTargetWindow || typeof nativeTargetWindow.postMessage !== 'function') return false;
+          if (!nativeTargetWindow || typeof nativeTargetWindow.postMessage !== 'function') return;
 
           const options = targetOrigin && typeof targetOrigin === 'object' && (
             Object.prototype.hasOwnProperty.call(targetOrigin, 'targetOrigin') ||
@@ -6005,13 +6005,12 @@
 
             // Match in the emulated origin space. A mismatch is a normal
             // postMessage no-op; it must not be passed to the physical frame.
-            if (!recipientOrigin || normalizedOrigin !== recipientOrigin) return false;
+            if (!recipientOrigin || normalizedOrigin !== recipientOrigin) return;
           }
 
           // All virtual documents are physically hosted by the browser shell.
           // Virtual authorization above makes wildcard native delivery safe.
           nativeTargetWindow.postMessage(message, '*', transferList);
-          return true;
         }
 
         function getCallerWindowProxy(targetPage, nativeTargetWindow) {
