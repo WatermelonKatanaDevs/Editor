@@ -66,7 +66,11 @@
       let instance = instances.get(id);
 
       if (instance?.host) {
-        if (instance.host.parentNode !== host) host.appendChild(instance.host);
+        if (instance.host.parentNode !== host) {
+          const move = window.EditorMoveNodePreservingState;
+          if (typeof move === 'function') move(host, instance.host);
+          else host.appendChild(instance.host);
+        }
         const frame = instance.host.querySelector?.('iframe');
         if (frame?.contentWindow) {
           try { frame.contentWindow.dispatchEvent(new Event('resize')); } catch (_) {}
