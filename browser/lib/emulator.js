@@ -2416,6 +2416,25 @@
           }
         }
 
+        // Catch native Element.prototype.setAttribute() calls too. Some pages
+        // retain/call the native method directly, bypassing the per-element
+        // wrappers installed by wrapElement(). Intercept executable script URLs
+        // synchronously here so the browser never starts an unvirtualized request.
+        const nativePrototypeSetAttribute = Element.prototype.setAttribute;
+        Element.prototype.setAttribute = function(name, value) {
+          if (
+            this instanceof HTMLScriptElement &&
+            String(name).toLowerCase() === 'src' &&
+            isExecutableScriptElement(this) &&
+            value != null &&
+            !/^(?:data|blob|javascript):/i.test(String(value))
+          ) {
+            interceptDynamicScriptSource(this, value);
+            return;
+          }
+          return Reflect.apply(nativePrototypeSetAttribute, this, arguments);
+        };
+
         // Match the browser's reflected IDL attributes for URL-valued resource
         // properties. The page-visible attributes are kept in data-raw-* while
         // the real attributes may be removed or replaced with data URLs.
