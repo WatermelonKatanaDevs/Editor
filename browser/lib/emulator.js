@@ -126,21 +126,12 @@
   function ensureSandBoxSameOrigin(iframe) {
     if (!iframe.hasAttribute('sandbox')) return;
 
-    const tokens = iframe.getAttribute('sandbox').split(/\s+/).filter(Boolean);
-    let changed = false;
+    var tokens = iframe.getAttribute('sandbox').split(/\s+/).filter(Boolean);
 
-    // Each nested page is loaded as srcdoc after its scripts and resources
-    // have been virtualized. The injected runtime and the emulated page both
-    // need scripts enabled; otherwise the srcdoc bootstrap is blocked before
-    // the nested page can initialize.
-    for (const permission of ['allow-same-origin', 'allow-scripts']) {
-      if (!tokens.includes(permission)) {
-        tokens.push(permission);
-        changed = true;
-      }
+    if (!tokens.includes('allow-same-origin')) {
+      tokens.push('allow-same-origin');
+      iframe.setAttribute('sandbox',tokens.join(' '));
     }
-
-    if (changed) iframe.setAttribute('sandbox',tokens.join(' '));
   }
 
   async function preprocessHtml(rawHtml, page, baseUrlOverride = null) {
