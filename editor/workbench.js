@@ -513,9 +513,18 @@
       if (idx < 0) return;
       const wasActive = g.active === id;
       g.tabs.splice(idx, 1);
+
+      // Closing an inactive tab must not change the user's active editor.
+      if (!wasActive && g.tabs.length) {
+        this.renderGroup(g);
+        this.notifyLayoutChange();
+        return;
+      }
+
       const next = g.tabs[idx] || g.tabs[idx - 1];
       g.active = null;
-      if (next) this.activateTab(g, next.id); else {
+      if (next) this.activateTab(g, next.id);
+      else {
         if (this.groups.size === 1 && !this.keepEmpty) {
           this.onBuiltin('welcome', g);
           return;
