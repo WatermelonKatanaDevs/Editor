@@ -757,6 +757,8 @@
       // its replacement. The destination then adopts the same live DOM node.
       source.__movingTabs ||= new Set();
       source.__movingTabs.add(tab);
+      const hadKeepAlive = !!source.keepAlive;
+      if (source.tabs.length === 1) source.keepAlive = true;
       const oldIndex = source.tabs.indexOf(tab);
       const wasActive = source.active === tab.id;
       source.tabs.splice(oldIndex, 1);
@@ -775,6 +777,12 @@
       source.__movingTabs.delete(tab);
       if (!source.__movingTabs.size) delete source.__movingTabs;
 
+      if (!hadKeepAlive && !source.tabs.length) {
+        source.keepAlive = false;
+        if (!sourceWorkbench?.groups?.has?.(source.id)) source.el?.remove?.();
+      } else if (!hadKeepAlive) {
+        source.keepAlive = false;
+      }
       if (!source.tabs.length) sourceWorkbench?.collapseEmptyGroup(source);
       sourceWorkbench?.notifyLayoutChange();
       if (sourceWorkbench !== this) this.notifyLayoutChange();
