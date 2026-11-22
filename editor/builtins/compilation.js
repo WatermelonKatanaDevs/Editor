@@ -45,13 +45,6 @@
           <section class="compilation-section">
             <h3>Deployment settings</h3>
             <p>Uses the same deployment configuration fields as WatermelonKatana project publishing.</p>
-            <label class="compilation-field">
-              <span>Deployment mode</span>
-              <select data-mode>
-                <option value="editor">Editor</option>
-                <option value="third-party">Third Party</option>
-              </select>
-            </label>
             <div data-editor-fields>
               <label class="compilation-field">
                 <span>Branch</span>
@@ -71,12 +64,6 @@
               </label>
               <p class="compilation-note" data-repository-note></p>
             </div>
-            <div data-third-party-fields hidden>
-              <label class="compilation-field">
-                <span>External URL</span>
-                <input data-external-url type="url" placeholder="https://example.com/">
-              </label>
-            </div>
             <p class="compilation-note">Deployment settings are saved with this project. The standalone HTML itself still embeds the current workspace.</p>
           </section>
         </div>`;
@@ -88,14 +75,10 @@
       const compression = $('[data-compression]');
       const compileButton = $('[data-compile]');
       const status = $('[data-status]');
-      const mode = $('[data-mode]');
-      const editorFields = $('[data-editor-fields]');
-      const thirdPartyFields = $('[data-third-party-fields]');
       const branch = $('[data-branch]');
       const commit = $('[data-commit]');
       const path = $('[data-path]');
       const peer = $('[data-peer]');
-      const externalUrl = $('[data-external-url]');
       const repositoryNote = $('[data-repository-note]');
 
       try {
@@ -120,37 +103,33 @@
         try { localStorage.setItem('node-editor.compile.compression', compression.value === '6' ? '6' : '9'); } catch (_) {}
       };
 
-      const settings = state.deploymentSettings = {
-        thirdParty: state.deploymentSettings?.thirdParty === true || state.deploymentSettings?.mode === 'third-party',
-        externalUrl: String(state.deploymentSettings?.externalUrl || ''),
-        branch: String(state.deploymentSettings?.branch || state.gitRemote?.branch || 'main'),
-        commit: String(state.deploymentSettings?.commit || 'latest'),
-        path: String(state.deploymentSettings?.path || '/'),
-        usePeerServer: state.deploymentSettings?.usePeerServer === true || state.runConfig?.config?.usePeerServer === true
+      // Keep the HTML compiler on the Editor deployment path without rewriting
+      // unrelated deployment metadata used by other publishing workflows.
+      const savedSettings = state.deploymentSettings || (state.deploymentSettings = {});
+      const settings = {
+        branch: String(savedSettings.branch || state.gitRemote?.branch || 'main'),
+        commit: String(savedSettings.commit || 'latest'),
+        path: String(savedSettings.path || '/'),
+        usePeerServer: savedSettings.usePeerServer === true || state.runConfig?.config?.usePeerServer === true
       };
-      mode.value = settings.thirdParty ? 'third-party' : 'editor';
       path.value = settings.path;
-      externalUrl.value = settings.externalUrl;
       peer.checked = settings.usePeerServer;
 
       function persistDeploymentSettings() {
-        settings.thirdParty = mode.value === 'third-party';
-        settings.externalUrl = externalUrl.value.trim();
         settings.branch = branch.value || settings.branch || 'main';
         settings.commit = commit.value || settings.commit || 'latest';
         settings.path = path.value.trim() || '/';
         settings.usePeerServer = peer.checked;
+        Object.assign(savedSettings, {
+          branch: settings.branch,
+          commit: settings.commit,
+          path: settings.path,
+          usePeerServer: settings.usePeerServer
+        });
         if (state.runConfig?.config) {
           state.runConfig.config.usePeerServer = peer.checked;
         }
         ctx.saveProjectMetadata?.();
-        syncMode();
-      }
-
-      function syncMode() {
-        settings.thirdParty = mode.value === 'third-party';
-        editorFields.hidden = settings.thirdParty;
-        thirdPartyFields.hidden = !settings.thirdParty;
       }
 
       async function loadCommits(preferredCommit) {
@@ -217,7 +196,6 @@
         await loadCommits(preferredCommit);
       }
 
-      mode.onchange = () => { persistDeploymentSettings(); };
       branch.onchange = async () => {
         settings.branch = branch.value;
         settings.commit = 'latest';
@@ -227,9 +205,7 @@
       commit.onchange = persistDeploymentSettings;
       path.onchange = persistDeploymentSettings;
       peer.onchange = persistDeploymentSettings;
-      externalUrl.onchange = persistDeploymentSettings;
 
-      syncMode();
       void loadBranches(settings.branch, settings.commit);
 
       compileButton.disabled = false;
