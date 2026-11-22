@@ -32,6 +32,20 @@
             <label class="setting-check"><input id="setting-hide-node-modules" type="checkbox"><span>Hide node_modules in the file explorer</span></label>
           </div>
           <div class="editor-settings-section">
+            <h3>Recently Closed Tabs</h3>
+            <label>Keep closed tabs for
+              <div class="setting-duration-control">
+                <input id="setting-closed-tab-retention" type="number" min="0" step="1">
+                <select id="setting-closed-tab-retention-unit">
+                  <option value="1000">Seconds</option>
+                  <option value="60000">Minutes</option>
+                  <option value="3600000">Hours</option>
+                </select>
+              </div>
+            </label>
+            <p class="editor-settings-note">Restore a closed tab with Ctrl+Shift+T while its original editor and preview instances are retained. Set to 0 to dispose immediately.</p>
+          </div>
+          <div class="editor-settings-section">
             <h3>Git</h3>
             <label class="setting-check"><input id="setting-ignore-node-modules" type="checkbox"><span>Exclude node_modules from Source Control</span></label>
           </div>
@@ -79,6 +93,8 @@
       const hideNodeModules = $('setting-hide-node-modules');
       const ignoreNodeModules = $('setting-ignore-node-modules');
       const piskelAutoSave = $('setting-piskel-auto-save');
+      const closedTabRetention = $('setting-closed-tab-retention');
+      const closedTabRetentionUnit = $('setting-closed-tab-retention-unit');
       const b = $('setting-hide-browser-bar');
       const restoreTabs = $('setting-browser-restore-tabs');
       const defaultTab = $('setting-browser-default-tab');
@@ -109,6 +125,12 @@
       d.checked = !!state.behavior.confirmBeforeDelete;
       h.checked = !!state.behavior.showHiddenFiles;
       hideNodeModules.checked = !!state.behavior.hideNodeModules;
+      const retentionMs = Math.max(0, Number(state.behavior.recentlyClosedRetentionMs ?? 300000) || 0);
+      const retentionUnit = retentionMs === 0 ? 60000
+        : retentionMs % 3600000 === 0 ? 3600000
+        : retentionMs % 60000 === 0 ? 60000 : 1000;
+      closedTabRetentionUnit.value = String(retentionUnit);
+      closedTabRetention.value = String(retentionMs / retentionUnit);
       try { const stored = localStorage.getItem('node-editor.piskel.autoSave'); piskelAutoSave.checked = stored === null ? true : stored === 'true'; } catch (_) { piskelAutoSave.checked = true; }
       b.checked = !!state.browserSettings.hideBrowserBar;
       restoreTabs.checked = state.browserSettings.restoreTabs !== false;
@@ -130,6 +152,14 @@
       piskelAutoSave.onchange = () => {
         try { localStorage.setItem('node-editor.piskel.autoSave', piskelAutoSave.checked ? 'true' : 'false'); } catch (_) {}
       };
+      const saveClosedTabRetention = () => {
+        const amount = Math.max(0, Number(closedTabRetention.value) || 0);
+        const unit = Math.max(1000, Number(closedTabRetentionUnit.value) || 60000);
+        state.behavior.recentlyClosedRetentionMs = Math.min(2147483647, amount * unit);
+        saveBehaviorSettings();
+      };
+      closedTabRetention.onchange = saveClosedTabRetention;
+      closedTabRetentionUnit.onchange = saveClosedTabRetention;
       b.onchange = () => writeBrowserSettings({hideBrowserBar: b.checked});
       restoreTabs.onchange = () => writeBrowserSettings({restoreTabs: restoreTabs.checked});
 
