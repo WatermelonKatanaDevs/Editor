@@ -39,6 +39,9 @@
       requiresKey:model.requiresKey !== undefined ? !!model.requiresKey : !local,
       supportsTools:model.supportsTools !== false, supportsAgentTools:!!model.supportsAgentTools,
       supportsReasoning:model.supportsReasoning !== false, supportsStreaming:model.supportsStreaming !== false,
+      supportsDocuments:model.supportsDocuments !== false,
+      supportsVision:model.supportsVision !== undefined ? !!model.supportsVision : (/gemma[-_/]?4/i.test(String(model.model || model.remoteModel || '')) && /onnx/i.test(String(model.model || model.remoteModel || ''))),
+      supportsAudio:!!model.supportsAudio, supportsVideo:!!model.supportsVideo,
       public:!!model.public, useSharedKeys:model.useSharedKeys !== false, local, builtInLocal:!!model.builtInLocal
     };
   }
@@ -229,8 +232,8 @@
       `Files: ${projectFiles.length} files`,
       tab?.kind === 'file' ? `Active file: ${tab.path}` : 'Active file: none'
     ];
-    if (activeContent && !sensitivePath(tab?.path) && activeContent.length <= (options.maxFileChars || 20000)) parts.push(`Active file contents:\n${activeContent}`);
-    else if (activeContent && sensitivePath(tab?.path)) parts.push('Active file contents are omitted from automatic context because the filename looks sensitive.');
+    if (options.includeActiveFile !== false && activeContent && !sensitivePath(tab?.path) && activeContent.length <= (options.maxFileChars || 20000)) parts.push(`Active file contents:\n${activeContent}`);
+    else if (options.includeActiveFile !== false && activeContent && sensitivePath(tab?.path)) parts.push('Active file contents are omitted from automatic context because the filename looks sensitive.');
     if (selection) parts.push(`Current selection:\n${selection}`);
     return parts.join('\n\n');
   }
@@ -604,6 +607,9 @@
         tools: !!options.capabilities?.tools,
         reasoning: !!options.capabilities?.reasoning,
         vision: !!options.capabilities?.vision,
+        documents: options.capabilities?.documents !== false,
+        audio: !!options.capabilities?.audio,
+        video: !!options.capabilities?.video,
         structuredOutput: !!options.capabilities?.structuredOutput,
         ...(options.capabilities || {})
       });
@@ -644,6 +650,9 @@
         reasoning:model.supportsReasoning === true,
         streaming:model.supportsStreaming !== false,
         vision:model.supportsVision === true,
+        documents:model.supportsDocuments !== false,
+        audio:model.supportsAudio === true,
+        video:model.supportsVideo === true,
         structuredOutput:model.supportsStructuredOutput === true
       };
     }
