@@ -6,6 +6,8 @@
       tree,
       $,
       saveBehaviorSettings,
+      getClosedTabRetentionMs,
+      setClosedTabRetentionMs,
       getBrowserSettings,
       saveBrowserSettings,
       subscribeBrowserSettings
@@ -125,7 +127,7 @@
       d.checked = !!state.behavior.confirmBeforeDelete;
       h.checked = !!state.behavior.showHiddenFiles;
       hideNodeModules.checked = !!state.behavior.hideNodeModules;
-      const retentionMs = Math.max(0, Number(state.behavior.recentlyClosedRetentionMs ?? 300000) || 0);
+      const retentionMs = Math.max(0, Number(getClosedTabRetentionMs?.() ?? state.behavior.recentlyClosedRetentionMs ?? 300000) || 0);
       const retentionUnit = retentionMs === 0 ? 60000
         : retentionMs % 3600000 === 0 ? 3600000
         : retentionMs % 60000 === 0 ? 60000 : 1000;
@@ -153,10 +155,20 @@
         try { localStorage.setItem('node-editor.piskel.autoSave', piskelAutoSave.checked ? 'true' : 'false'); } catch (_) {}
       };
       const saveClosedTabRetention = () => {
-        const amount = Math.max(0, Number(closedTabRetention.value) || 0);
-        const unit = Math.max(1000, Number(closedTabRetentionUnit.value) || 60000);
-        state.behavior.recentlyClosedRetentionMs = Math.min(2147483647, amount * unit);
-        saveBehaviorSettings();
+        const amount = Number(closedTabRetention.value);
+        const unit = Number(closedTabRetentionUnit.value);
+        if (!Number.isFinite(amount) || amount < 0 || !Number.isFinite(unit) || unit < 1000) {
+          closedTabRetention.value = String(retentionMs / retentionUnit);
+          closedTabRetentionUnit.value = String(retentionUnit);
+          return;
+        }
+        const value = Math.min(2147483647, amount * unit);
+        if (typeof setClosedTabRetentionMs === 'function') {
+          setClosedTabRetentionMs(value);
+        } else {
+          state.behavior.recentlyClosedRetentionMs = value;
+          saveBehaviorSettings();
+        }
       };
       closedTabRetention.onchange = saveClosedTabRetention;
       closedTabRetentionUnit.onchange = saveClosedTabRetention;
