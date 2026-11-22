@@ -42,6 +42,7 @@
       supportsDocuments:model.supportsDocuments !== false,
       supportsVision:model.supportsVision !== undefined ? !!model.supportsVision : (/gemma[-_/]?4/i.test(String(model.model || model.remoteModel || '')) && /onnx/i.test(String(model.model || model.remoteModel || ''))),
       supportsAudio:!!model.supportsAudio, supportsVideo:!!model.supportsVideo,
+      pipelineTask:String(model.pipelineTask||model.task||''),
       public:!!model.public, useSharedKeys:model.useSharedKeys !== false, local, builtInLocal:!!model.builtInLocal
     };
   }
