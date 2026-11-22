@@ -117,7 +117,7 @@
         <div class="p-5 flex flex-col gap-4 text-xs flex-1 min-h-0 overflow-y-auto">
           <div>
             <label class="block font-semibold mb-1 text-gray-300">Default Tab</label>
-            <input type="text" id="setting-default-tab" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white outline-none" value="https://example.com">
+            <input type="text" id="setting-default-tab" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white outline-none" value="" placeholder="Use the current project page or example.com">
           </div>
           <div>
             <label class="block font-semibold mb-1 text-gray-300">CORS Worker Proxy Gateway URL</label>
@@ -135,6 +135,14 @@
           <div class="flex items-center gap-2 pt-2 border-t border-gray-800">
             <input type="checkbox" id="setting-fallback-enable" class="rounded bg-gray-800 border-gray-700">
             <label for="setting-fallback-enable" class="text-gray-300">Auto-try fallback proxy if primary worker fails</label>
+          </div>
+          <div class="flex items-center gap-2 pt-2 border-t border-gray-800">
+            <input type="checkbox" id="setting-hide-browser-bar" class="rounded bg-gray-800 border-gray-700">
+            <label for="setting-hide-browser-bar" class="text-gray-300">Hide browser bar</label>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="checkbox" id="setting-restore-tabs" class="rounded bg-gray-800 border-gray-700" checked>
+            <label for="setting-restore-tabs" class="text-gray-300">Restore open tabs</label>
           </div>
           <div class="flex items-center gap-2 pt-2 border-t border-gray-800">
             <input type="checkbox" id="setting-clear-devtools-reload" class="rounded bg-gray-800 border-gray-700" checked onchange="appSettings.clearDevToolsOnReload=this.checked">
