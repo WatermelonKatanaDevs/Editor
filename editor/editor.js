@@ -112,10 +112,12 @@ window.__editorInitPromise = (async function () {
       searchEngine: 'https://mojeek.com/search?q=',
       useFallback: typeof workers.fallbackProxy === 'string' && workers.fallbackProxy.trim().length > 0,
       obscureURL: true,
-      defaultTab: 'https://example.com',
+      defaultTab: '',
       clearDevToolsOnReload: true,
       autoDownload: false,
-      logXMLHttpRequests: false
+      logXMLHttpRequests: false,
+      hideBrowserBar: false,
+      restoreTabs: true
     },
     behavior: {
       autoSaveOnRun: false,
@@ -124,8 +126,7 @@ window.__editorInitPromise = (async function () {
       confirmBeforeDelete: true,
       dimHiddenFolders: true,
       ignoreNodeModules: true,
-      hideNodeModules: false,
-      hideBrowserBar: true
+      hideNodeModules: false
     }
   };
   const $ = id => document.getElementById(id);
@@ -366,9 +367,10 @@ window.__editorInitPromise = (async function () {
   }
   startEditorDOMObserver();
 
-  const BROWSER_SETTINGS_KEY = 'editor.browserSettings';
+  const BROWSER_SETTINGS_KEY = 'browser.settings';
   const browserSettingSubscribers = new Set();
   const browserSettingDefaults = { ...state.browserSettings };
+  let hasPersistedBrowserSettings = false;
   const workerBrowserDefaults = {
     primaryProxy: String(workers.proxy || '').trim(),
     fallbackProxy: typeof workers.fallbackProxy === 'string' ? workers.fallbackProxy.trim() : '',
@@ -383,26 +385,40 @@ window.__editorInitPromise = (async function () {
     out.primaryProxy = String(out.primaryProxy || '');
     out.fallbackProxy = String(out.fallbackProxy || '');
     out.searchEngine = String(out.searchEngine || browserSettingDefaults.searchEngine);
-    out.defaultTab = String(out.defaultTab || browserSettingDefaults.defaultTab);
+    out.defaultTab = String(out.defaultTab ?? '');
     out.useFallback = !!out.useFallback;
     out.obscureURL = !!out.obscureURL;
     out.clearDevToolsOnReload = !!out.clearDevToolsOnReload;
     out.autoDownload = !!out.autoDownload;
     out.logXMLHttpRequests = !!out.logXMLHttpRequests;
+    out.hideBrowserBar = !!out.hideBrowserBar;
+    out.restoreTabs = out.restoreTabs !== false;
     return out;
   }
   function loadBrowserSettings() {
     try {
-      const saved = JSON.parse(localStorage.getItem(BROWSER_SETTINGS_KEY) || 'null');
-      if (saved && typeof saved === 'object') state.browserSettings = normalizeBrowserSettings(saved);
+      let raw = localStorage.getItem(BROWSER_SETTINGS_KEY);
+      let saved = raw ? JSON.parse(raw) : null;
+      if (!saved || typeof saved !== 'object' || Array.isArray(saved)) {
+        const oldEditor = JSON.parse(localStorage.getItem('editor.browserSettings') || 'null');
+        const oldBrowser = JSON.parse(localStorage.getItem('appSettings') || 'null');
+        const oldBehavior = JSON.parse(localStorage.getItem('editor.behaviorSettings') || 'null');
+        saved = { ...(oldEditor || {}), ...(oldBrowser || {}) };
+        if (oldBehavior && oldBehavior.hideBrowserBar !== undefined) saved.hideBrowserBar = !!oldBehavior.hideBrowserBar;
+        if (saved.defaultTab === 'https://example.com') saved.defaultTab = '';
+        if (Object.keys(saved).length) {
+          localStorage.setItem(BROWSER_SETTINGS_KEY, JSON.stringify(saved));
+          hasPersistedBrowserSettings = true;
+        }
+      } else {
+        hasPersistedBrowserSettings = true;
+      }
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+        state.browserSettings = normalizeBrowserSettings(saved);
+      }
     } catch (_) {}
   }
-  function saveBrowserSettings(value, notify = true) {
-    const previous = state.browserSettings;
-    const next = normalizeBrowserSettings({ ...previous, ...(value || {}) });
-    const changed = Object.keys(browserSettingDefaults).some(key => previous[key] !== next[key]);
-    state.browserSettings = next;
-    try { localStorage.setItem(BROWSER_SETTINGS_KEY, JSON.stringify(state.browserSettings)); } catch (_) {}
+  function applyBrowserSettingsRuntime() {
     try {
       const base = state.browserNetwork?.__browserBaseEndpoints;
       if (base?.primary) {
@@ -416,32 +432,37 @@ window.__editorInitPromise = (async function () {
         base.fallback.obscureURL = state.browserSettings.obscureURL;
       }
     } catch (_) {}
-    try { saveEditorSettings(); } catch (_) {}
-    if (notify && changed) {
-      for (const listener of [...browserSettingSubscribers]) {
-        try { listener({ ...state.browserSettings }); } catch (_) {}
-      }
+    for (const info of state.browserTabs.values()) {
+      try { info.frame?.contentWindow?.setBrowserChromeHidden?.(state.browserSettings.hideBrowserBar); } catch (_) {}
     }
+  }
+  function notifyBrowserSettingsSubscribers() {
+    for (const listener of [...browserSettingSubscribers]) {
+      try { listener({ ...state.browserSettings }); } catch (_) {}
+    }
+  }
+  function saveBrowserSettings(value, notify = true) {
+    const previous = state.browserSettings;
+    const next = normalizeBrowserSettings({ ...previous, ...(value || {}) });
+    const changed = Object.keys(browserSettingDefaults).some(key => previous[key] !== next[key]);
+    state.browserSettings = next;
+    try { localStorage.setItem(BROWSER_SETTINGS_KEY, JSON.stringify(state.browserSettings)); } catch (_) {}
+    hasPersistedBrowserSettings = true;
+    applyBrowserSettingsRuntime();
+    if (notify && changed) notifyBrowserSettingsSubscribers();
     return { ...state.browserSettings };
   }
-  function installBrowserStateBridge() {
-    window.__editorBrowserStateBridge = {
-      read() {
-        return { settings: { ...state.browserSettings } };
-      },
-      write(next) {
-        const settings = next?.settings && typeof next.settings === 'object' ? next.settings : next;
-        return { settings: saveBrowserSettings(settings) };
-      },
-      subscribe(listener) {
-        if (typeof listener !== 'function') return () => {};
-        browserSettingSubscribers.add(listener);
-        return () => browserSettingSubscribers.delete(listener);
-      }
-    };
-  }
+  window.addEventListener('storage', event => {
+    if (event.key !== BROWSER_SETTINGS_KEY) return;
+    let saved = null;
+    try { saved = event.newValue ? JSON.parse(event.newValue) : null; } catch (_) {}
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return;
+    state.browserSettings = normalizeBrowserSettings(saved);
+    hasPersistedBrowserSettings = true;
+    applyBrowserSettingsRuntime();
+    notifyBrowserSettingsSubscribers();
+  });
   loadBrowserSettings();
-  installBrowserStateBridge();
 
   const normalize = p => {
     const out = [];
@@ -507,10 +528,17 @@ window.__editorInitPromise = (async function () {
   }
   function applyEditorSettings(settings) {
     if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return;
-    const { browserSettings, ...behaviorSettings } = settings;
+    const { browserSettings: legacyBrowserSettings, hideBrowserBar: legacyHideBrowserBar, ...behaviorSettings } = settings;
     state.behavior = { ...state.behavior, ...behaviorSettings };
-    if (browserSettings && typeof browserSettings === 'object' && !Array.isArray(browserSettings)) {
-      state.browserSettings = normalizeBrowserSettings({ ...state.browserSettings, ...browserSettings });
+    // Older projects stored a few browser preferences in .editor/settings.json.
+    // Import them once only when the user's global browser preferences are absent.
+    if (!hasPersistedBrowserSettings && (
+      (legacyBrowserSettings && typeof legacyBrowserSettings === 'object' && !Array.isArray(legacyBrowserSettings))
+      || legacyHideBrowserBar !== undefined
+    )) {
+      const migrated = { ...(legacyBrowserSettings || {}) };
+      if (legacyHideBrowserBar !== undefined) migrated.hideBrowserBar = !!legacyHideBrowserBar;
+      saveBrowserSettings(migrated, false);
     }
   }
   function applyEditorEnvironment(environment) {
@@ -675,11 +703,8 @@ window.__editorInitPromise = (async function () {
     if (!state.fs) return;
     try {
       const data = { ...(state.behavior || {}) };
-      const browserOverrides = {};
-      for (const key of ['primaryProxy', 'fallbackProxy', 'useFallback']) {
-        if (state.browserSettings[key] !== workerBrowserDefaults[key]) browserOverrides[key] = state.browserSettings[key];
-      }
-      if (Object.keys(browserOverrides).length) data.browserSettings = browserOverrides;
+      delete data.hideBrowserBar;
+      delete data.browserSettings;
       state.fs.mkdirSync?.(EDITOR_DIR);
       state.fs.writeFileSync(EDITOR_SETTINGS_PATH, JSON.stringify(data, null, 2));
       if (!state.loading) state.markDirty?.('editor/settings.json');
