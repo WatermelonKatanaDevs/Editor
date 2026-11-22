@@ -251,7 +251,7 @@ function saveDownloadHistory() {
   try {
     setStorageItem('browser.downloads',downloads.filter(d => d.status !== 'downloading').slice(-100).map(d => ({
       id:d.id,url:d.url,name:d.name,status:d.status,progress:d.progress || 0,received:d.received || 0,total:d.total || 0,
-      size:d.size || 0,startedAt:d.startedAt,finishedAt:d.finishedAt || 0,error:d.error || '',autoDownloaded:!!d.autoDownloaded
+      size:d.size || 0,contentType:d.contentType || '',startedAt:d.startedAt,finishedAt:d.finishedAt || 0,error:d.error || '',autoDownloaded:!!d.autoDownloaded
     })));
   } catch(e) {}
 }
@@ -462,7 +462,17 @@ async function performDownload(url,filename, options = {}) {
     showToast('The Editor workspace picker is unavailable.','error');
     return null;
   }
-  const item = saveDirectlyToWorkspace ? null : beginDownload(url,filename);
+  const reusedItem = !saveDirectlyToWorkspace && options.existingItem && downloads.includes(options.existingItem);
+  const item = saveDirectlyToWorkspace ? null : (reusedItem ? options.existingItem : beginDownload(url,filename));
+  if (reusedItem) {
+    item.status = 'downloading';
+    item.progress = 0;
+    item.received = 0;
+    item.total = 0;
+    item.error = '';
+    renderDownloads();
+    showDownloads();
+  }
   try {
     const response = await browserNetwork.request(url,undefined,{},'download');
     if (!response || !response.ok) throw new Error(`HTTP error! status: ${response?.status || 0}`);
@@ -514,7 +524,7 @@ async function performDownload(url,filename, options = {}) {
     item.status = 'complete';
     item.finishedAt = Date.now();
     await putDownloadCache(item.id,blob);
-    if (appSettings.autoDownload) {
+    if (appSettings.autoDownload && options.skipAutoDownload !== true) {
       await saveCachedDownload(item.id,{toDevice:true});
       item.autoDownloaded = true;
     }
@@ -524,9 +534,18 @@ async function performDownload(url,filename, options = {}) {
     return blob;
   } catch(e) {
     if (item) {
-      item.status = 'failed';
-      item.error = e?.message || String(e);
-      item.finishedAt = Date.now();
+      if (reusedItem) {
+        // Keep the restored history entry clickable so the user can retry.
+        item.status = 'complete';
+        item.progress = 100;
+        item.received = item.size || 0;
+        item.total = item.size || 0;
+        item.error = '';
+      } else {
+        item.status = 'failed';
+        item.error = e?.message || String(e);
+        item.finishedAt = Date.now();
+      }
       saveDownloadHistory();
       renderDownloads();
       showDownloads();
@@ -535,6 +554,33 @@ async function performDownload(url,filename, options = {}) {
     }
     throw e;
   }
+}
+
+async function getOrRedownloadDownload(item) {
+  const cachedBlob = await getDownloadCache(item?.id);
+  if (cachedBlob instanceof Blob) return cachedBlob;
+
+  let sourceUrl = null;
+  try {
+    const rawUrl = String(item?.url || '').trim();
+    if (rawUrl) sourceUrl = new URL(rawUrl, window.location.href);
+  } catch (_) {}
+
+  if (!item || !sourceUrl || !['http:', 'https:', 'blob:', 'data:'].includes(sourceUrl.protocol)) {
+    throw new Error('The cached file is no longer available, and its original URL cannot be redownloaded.');
+  }
+
+  try {
+    const blob = await performDownload(sourceUrl.href, item.name || 'download', {
+      existingItem: item,
+      skipAutoDownload: true
+    });
+    if (blob instanceof Blob) return blob;
+  } catch (error) {
+    console.warn('Could not redownload browser download from its original URL:', error);
+  }
+
+  throw new Error('The cached file is no longer available, and its original URL could not be downloaded again.');
 }
 
 async function saveBlobToEditorWorkspace(blob, options = {}) {
@@ -562,9 +608,11 @@ async function saveBlobToEditorWorkspace(blob, options = {}) {
 async function saveCachedDownload(id, options = {}) {
   const item = downloads.find(d => d.id === id);
   if (!item || item.status !== 'complete') return;
-  const blob = await getDownloadCache(id);
-  if (!blob) {
-    showToast('The cached file is no longer available.','error');
+  let blob;
+  try {
+    blob = await getOrRedownloadDownload(item);
+  } catch (error) {
+    showToast(error?.message || 'Unable to restore the downloaded file.','error');
     return;
   }
   if (options.toDevice !== true && shouldUseEditorWorkspacePicker()) {
@@ -766,8 +814,7 @@ async function openUploadPicker(input, openDownloads=true) {
     const item = downloads.find(d => d.id === id && d.status === 'complete');
     if (!item) return;
     try {
-      const blob = await getDownloadCache(id);
-      if (!blob) throw new Error('The downloaded file is no longer cached.');
+      const blob = await getOrRedownloadDownload(item);
       const file = new File([blob],item.name || 'download',{type:item.contentType || blob.type || 'application/octet-stream',lastModified:item.finishedAt || Date.now()});
       if (!uploadAcceptsFile(input,file)) {
         showToast(`This file does not match the upload type.`, 'error');
