@@ -179,6 +179,23 @@ if (Array.isArray(savedBookmarks)) {
 const savedHistoryLog = getStorageItem(BROWSER_HISTORY_KEY) || getStorageItem('historyLog');
 if (Array.isArray(savedHistoryLog)) historyLog = savedHistoryLog.filter(item => item && typeof item.url === 'string').slice(0, 500);
 
+// Migrate the old single-browser tab list for standalone users. Embedded
+// browsers now keep independent sessions, so the old shared list is not
+// copied into every project/browser instance.
+if (!browserQuery.has('session') && !getStorageItem(browserSessionStorageKey)) {
+  const oldTabs = getStorageItem('tabs');
+  if (Array.isArray(oldTabs) && oldTabs.length) {
+    setStorageItem(browserSessionStorageKey, {
+      tabs: oldTabs.filter(tab => tab && typeof tab.url === 'string' && tab.url.trim()).map(tab => ({
+        ...tab,
+        history: [tab.url],
+        historyIndex: 0
+      })),
+      activeTabId: getStorageItem('activeTab')
+    });
+  }
+}
+
 window.addEventListener('storage', event => {
   if (event.key === BROWSER_SETTINGS_KEY) {
     let next = null;
