@@ -7,17 +7,15 @@
     wrap.className = 'builtin-browser';
     const frame = document.createElement('iframe');
     frame.id = 'browser-frame-' + g.id;
-    const initialBrowserUrl = state.runConfig?.publicUrl?.() || 'http://localhost:3000/';
+    const projectRunUrl = state.runConfig?.publicUrl?.() || 'http://localhost:3000/';
     const configuredBrowserDefault = String(state.browserSettings?.defaultTab || '').trim();
-    // The untouched Browser default is seeded as example.com. On first use,
-    // retain the historical project-as-default behavior; afterwards preserve
-    // an independently selected default page across Browser tab reopenings.
-    const defaultBrowserUrl = !configuredBrowserDefault || configuredBrowserDefault === 'https://example.com'
-      ? initialBrowserUrl
-      : configuredBrowserDefault;
+    // A custom homepage is the initial active tab for a fresh session.
+    // Otherwise the project run URL is the default; standalone Browser falls
+    // back to example.com when no project context exists.
+    const defaultBrowserUrl = configuredBrowserDefault || projectRunUrl;
     const browserSessionId = String(t.browserSessionId || t.id);
     const sessionKey = ['project', state.projectId || state.projectKey || 'workspace', browserSessionId].join(':');
-    const browserParams = new URLSearchParams({start: initialBrowserUrl, default: defaultBrowserUrl, defer: '1', session: sessionKey});
+    const browserParams = new URLSearchParams({start: defaultBrowserUrl, default: defaultBrowserUrl, defer: '1', session: sessionKey});
     frame.src = 'browser/browser.html?' + browserParams.toString();
     const syncHostContext = () => {
       const context = window.__editorHostContext;
@@ -78,13 +76,12 @@
         try {
           const runUrl = state.runConfig?.publicUrl?.() || state.runConfig?.config?.domain || 'http://localhost:3000/';
           const currentDefault = String(state.browserSettings?.defaultTab || '').trim();
-          const defaultUrl = !currentDefault || currentDefault === 'https://example.com' ? runUrl : currentDefault;
+          const defaultUrl = currentDefault || runUrl;
           win.setBrowserDefaultTab?.(defaultUrl);
-          // The first page remains the project run URL. The default for newly
-          // opened tabs is tracked separately and may be a user-selected page.
-          // Keep the deferred first navigation behind runtime endpoint setup.
+          // A saved session is restored first. For a fresh session, use the
+          // chosen homepage, or the project run URL when no homepage is set.
           if (state.staticEndpoint && typeof win.loadBrowserURL === 'function') {
-            void win.loadBrowserURL(runUrl, true).catch(() => {});
+            void win.loadBrowserURL(defaultUrl, true).catch(() => {});
           }
         } catch (_) {}
         state.runDebugRefresh?.();
