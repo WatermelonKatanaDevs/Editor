@@ -835,7 +835,7 @@ const makeEditorTools = (() => {
       if(TEXT_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('text/'))return 'text';
       return 'file';
     }
-    function sensitiveAttachmentPath(path){return /(^|\\/)(?:\.env(?:\..*)?|\.editor\/process\.env|.*(?:secret|credential|password|token|private[-_]?key).*)$/i.test(String(path||''));}
+    function sensitiveAttachmentPath(path){return /(^|\/)(?:\.env(?:\..*)?|\.editor\/process\.env|.*(?:secret|credential|password|token|private[-_]?key).*)$/i.test(String(path||''));}
     function attachmentCapabilities(model=registry.active()){
       const capabilities=chatAI.getCapabilities(model?.id)||{};
       return {documents:model?.supportsDocuments!==false&&capabilities.documents!==false,vision:model?.supportsVision===true&&capabilities.vision===true};
@@ -865,14 +865,14 @@ const makeEditorTools = (() => {
     }
     function renderAttachmentRow(tree){
       const strip=tree?.querySelector?.('[data-attachments]');if(!strip)return;
-      const caps=attachmentCapabilities(),visible=caps.documents||caps.vision;
+      const caps=attachmentCapabilities(),canAdd=caps.documents||caps.vision,visible=canAdd||attachments.length>0;
       strip.hidden=!visible;if(!visible)return;
       const chips=attachments.map((item,index)=>{
         const supported=attachmentSupported(item);
         const detail=item.active?'Currently open file':item.path||item.name;
         return '<span class="ai-attachment-chip '+(supported?'':'is-unsupported')+'" title="'+escapeHtml(detail+(supported?'':' · Unsupported by this model'))+'"><span class="ai-attachment-name">'+(item.active?'● ':'')+escapeHtml(item.name)+'</span><button type="button" data-attachment-remove="'+index+'" aria-label="Remove '+escapeHtml(item.name)+'" title="Remove attachment">×</button></span>';
       }).join('');
-      strip.innerHTML='<button type="button" class="ai-attachment-add" data-add-attachment title="Add attachment" aria-label="Add attachment" '+(busy?'disabled':'')+'>＋</button><div class="ai-attachment-list">'+chips+'</div>';
+      strip.innerHTML='<button type="button" class="ai-attachment-add" data-add-attachment title="Add attachment" aria-label="Add attachment" '+(!canAdd||busy?'disabled':'')+' '+(canAdd?'':'hidden')+'>＋</button><div class="ai-attachment-list">'+chips+'</div>';
       strip.querySelector('[data-add-attachment]').onclick=()=>addAttachments(tree);
       strip.querySelectorAll('[data-attachment-remove]').forEach(button=>button.onclick=()=>{
         const index=Number(button.dataset.attachmentRemove),item=attachments[index];
@@ -893,7 +893,7 @@ const makeEditorTools = (() => {
           if(path&&sensitiveAttachmentPath(path)){alert('Sensitive files cannot be attached to AI chats.');continue;}
           if(!attachmentSupported({file})){alert(file.name+' is not supported by the selected model.');continue;}
           const key=path?'path:'+path:'device:'+file.name+':'+file.size+':'+file.lastModified;
-          if(attachments.some(item=>item.key===key))continue;
+          if(attachments.some(item=>item.key===key||(path&&item.path===path)))continue;
           attachments.push({key,name:file.name,path,file,active:false});
         }
         renderAttachmentRow(tree);updateComposerSendState(tree);
