@@ -34,7 +34,7 @@
     <!-- Browser Header & Tab Strip -->
     <div id="tab-strip">
       <div id="tabs-list" class="flex gap-1"></div>
-      <button id="new-tab-btn" onclick="createNewTab(appSettings.defaultTab)" title="New Tab (Ctrl+T)">
+      <button id="new-tab-btn" onclick="createNewTab(getBrowserDefaultTab())" title="New Tab (Ctrl+T)">
         <i class="fa-solid fa-plus"></i>
       </button>
     </div>
@@ -44,7 +44,7 @@
       <button class="nav-btn" id="btn-back" onclick="goBack()" title="Back"><i class="fa-solid fa-arrow-left"></i></button>
       <button class="nav-btn" id="btn-forward" onclick="goForward()" title="Forward"><i class="fa-solid fa-arrow-right"></i></button>
       <button class="nav-btn" id="btn-reload" onclick="reloadCurrentTab()" title="Reload"><i class="fa-solid fa-rotate-right"></i></button>
-      <button class="nav-btn" id="btn-home" onclick="navigateTo(appSettings.defaultTab)" title="Home"><i class="fa-solid fa-house"></i></button>
+      <button class="nav-btn" id="btn-home" onclick="navigateTo(getBrowserDefaultTab())" title="Home"><i class="fa-solid fa-house"></i></button>
       
       <!-- Address Bar -->
       <form id="url-form" onsubmit="handleUrlSubmit(event)">
