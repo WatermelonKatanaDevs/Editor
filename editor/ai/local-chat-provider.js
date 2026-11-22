@@ -488,7 +488,7 @@
           this.statusText=(this.offlineOnly?'INDEXEDDB CACHE':'DOWNLOADING')+' · '+this.device.toUpperCase()+' · '+model.model+suffix+(p!=null?' · '+p.toFixed(1)+'%':'');
           this.emit({loading:true});
         };
-        this.generator=await lib.pipeline('text-generation',model.model,{device:this.device,dtype:this.dtype,progress_callback:progress});
+        this.generator=await lib.pipeline(model.supportsVision===true?'image-text-to-text':'text-generation',model.model,{device:this.device,dtype:this.dtype,progress_callback:progress});
         const runtimePersisted=await Promise.all(this.runtimeAssets.map(url=>this.cache.match(url).then(Boolean)));
         if(!runtimePersisted.every(Boolean))throw new Error('ONNX Runtime WASM assets could not be saved in IndexedDB. The model cannot be used offline until the runtime files are cached.');
         const manifest=await this.cache.finishModel();
@@ -518,6 +518,18 @@
       options=options||{};
       const signal=options.signal,model=this.model;
       if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
+      const hasImages=messages.some(message=>Array.isArray(message?.images)&&message.images.length>0);
+      const requestMessages=messages.map(message=>{
+        const next={...message};
+        if(Array.isArray(message?.images)&&message.images.length){
+          next.content=[
+            {type:'text',text:String(message.content||'')},
+            ...message.images.map(image=>({type:'image',image:image.dataUrl}))
+          ];
+          delete next.images;
+        }
+        return next;
+      });
       let generated='';
       const run=async()=>{
         generated='';
@@ -527,7 +539,7 @@
         try{
           const generationOptions={max_new_tokens:Math.max(64,Math.min(4096,Number(options.maxTokens)||1024)),do_sample:true,temperature:options.temperature!=null?options.temperature:.7,top_p:options.topP!=null?options.topP:.9,...(stopper?{stopping_criteria:[stopper]}:{})};
           let result=null;
-          if(this.device==='webgpu'){
+          if(this.device==='webgpu'&&!hasImages){
             const conversationId=String(options.conversationId||'');
             let cacheState=null;
             const previousState=conversationId?this.kvCaches.get(conversationId):null;
@@ -540,7 +552,7 @@
             }
             let cachedGeneration=null;
             try{
-              cachedGeneration=await generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,progress=>{
+              cachedGeneration=await generateWebGPUChunked(generator,lib,requestMessages,generationOptions,streamer,signal,progress=>{
                 const reused=progress.cached?' · reused '+progress.cached+' cached tokens':'';
                 this.emit({statusText:'WEBGPU · preparing prompt '+progress.processed+'/'+progress.total+' tokens'+reused});
               },cacheState);
@@ -571,7 +583,7 @@
             if(previousState)previousState.inUse=false;
             await this.evictKVCache(conversationId);
           }
-          if(result===null)result=await generator(messages,{...generationOptions,streamer});
+          if(result===null)result=await generator(requestMessages,{...generationOptions,streamer});
           if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
           return generatedText(result,generated)||generated;
         }finally{if(this.stopper===stopper)this.stopper=null;}
