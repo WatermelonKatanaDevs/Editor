@@ -47,6 +47,7 @@
           tabs: node.group.tabs.map(t => {
             if (t.kind === 'file') return {kind:'file', path:t.path, view:t.view};
             const out = {kind:'builtin', builtin:t.builtin};
+            if (t.builtin === 'browser') out.browserSessionId = t.browserSessionId || t.id;
             if (t.builtin === 'group') {
               out.groupName = t.groupName || 'Group';
               out.groupLayout = t._groupWorkbench?.serialize?.() || t.groupLayout || null;
