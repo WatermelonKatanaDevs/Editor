@@ -203,7 +203,7 @@ window.addEventListener('storage', event => {
     try { next = event.newValue ? JSON.parse(event.newValue) : null; } catch (_) {}
     if (next && typeof next === 'object') {
       appSettings = { ...appSettings, ...next };
-      if (appSettings.restoreTabs === false) browserSessionPersistenceEnabled = false;
+      browserSessionPersistenceEnabled = appSettings.restoreTabs !== false;
       updateNetworkSettings();
       updateSettings();
       setBrowserChromeHidden(!!appSettings.hideBrowserBar);
@@ -228,13 +228,8 @@ function saveBrowserSettings() {
 function saveHistoryLog() {
   setStorageItem(BROWSER_HISTORY_KEY, historyLog.slice(0, 500));
 }
-function saveBrowserState() {
-  saveBrowserSettings();
-  setStorageItem(BROWSER_BOOKMARKS_KEY, normalizeBookmarks(bookmarks));
-  saveHistoryLog();
-  if (appSettings.restoreTabs === false) browserSessionPersistenceEnabled = false;
-  if (isRestoringBrowserSession || !browserSessionPersistenceEnabled) return;
-  setStorageItem(browserSessionStorageKey, {
+function getBrowserSessionSnapshot() {
+  return {
     tabs: tabs.map(tab => ({
       id: tab.id,
       url: tab.url,
@@ -245,7 +240,30 @@ function saveBrowserState() {
       historyIndex: Number.isInteger(tab.page?.historyIndex) ? tab.page.historyIndex : -1
     })),
     activeTabId
-  });
+  };
+}
+
+function saveBrowserState() {
+  saveBrowserSettings();
+  setStorageItem(BROWSER_BOOKMARKS_KEY, normalizeBookmarks(bookmarks));
+  saveHistoryLog();
+  browserSessionPersistenceEnabled = appSettings.restoreTabs !== false;
+  if (isRestoringBrowserSession || !browserSessionPersistenceEnabled) return;
+
+  const session = getBrowserSessionSnapshot();
+  setStorageItem(browserSessionStorageKey, session);
+
+  // Embedded Browser sessions are also owned by the Editor workspace layout.
+  // Keep the localStorage copy for standalone use and migration compatibility.
+  if (browserQuery.has('session') && window.parent && window.parent !== window) {
+    try {
+      window.parent.postMessage({
+        type: 'editor-browser-session-save',
+        sessionId: browserQuery.get('session'),
+        session
+      }, window.location.origin);
+    } catch (_) {}
+  }
 }
 function saveDownloadHistory() {
   try {
@@ -1954,7 +1972,11 @@ function restoreBrowserSession() {
   if (browserSessionRestoreAttempted) return tabs.length > 0;
   browserSessionRestoreAttempted = true;
   if (appSettings.restoreTabs === false) return false;
-  const saved = getStorageItem(browserSessionStorageKey);
+  const projectSession = window.__editorBrowserSessionRestoreData;
+  window.__editorBrowserSessionRestoreData = null;
+  const saved = projectSession && typeof projectSession === 'object'
+    ? projectSession
+    : getStorageItem(browserSessionStorageKey);
   const savedTabs = Array.isArray(saved?.tabs) ? saved.tabs : [];
   const validTabs = savedTabs.filter(tab => tab && typeof tab.url === 'string' && tab.url.trim()).slice(0, 50);
   if (!validTabs.length) return false;
@@ -3137,6 +3159,16 @@ window.getBrowserDefaultTab = getBrowserDefaultTab;
 window.setBrowserDefaultTab = setBrowserDefaultTab;
 window.setBrowserChromeHidden = setBrowserChromeHidden;
 window.loadBrowserURL = loadBrowserURL;
+window.setBrowserSessionRestoreData = function(session) {
+  if (browserSessionRestoreAttempted || tabs.length) return false;
+  window.__editorBrowserSessionRestoreData = session && typeof session === 'object' ? session : null;
+  return true;
+};
+window.hasSavedBrowserSession = function() {
+  if (appSettings.restoreTabs === false) return false;
+  const saved = window.__editorBrowserSessionRestoreData || getStorageItem(browserSessionStorageKey);
+  return Array.isArray(saved?.tabs) && saved.tabs.some(tab => tab && typeof tab.url === 'string' && tab.url.trim());
+};
 window.getAIBrowserOutput = function(options={}) {
   var records = window.__aiBrowserOutput || [];
   var tabId = options.tabId || null;

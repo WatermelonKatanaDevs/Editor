@@ -100,6 +100,7 @@ window.__editorInitPromise = (async function () {
     previews: null,
     terminalTabs: new Map(),
     browserTabs: new Map(),
+    browserSessions: {},
     peerServers: new Map(),
     peerRuntimeEndpoint: null,
     peerSettings: {layer: '', pagePath: '/'},
@@ -998,6 +999,7 @@ window.__editorInitPromise = (async function () {
     try {
       localStorage.setItem(layoutKey(), JSON.stringify({
         workbench: state.workbench.serialize(),
+        browserSessions: state.browserSessions && typeof state.browserSessions === 'object' ? {...state.browserSessions} : {},
         sidebar: state.sidebar || 'explorer',
         explorerCollapsed: !!$('tree')?.classList.contains('activity-collapsed'),
         sidebarWidth: parseInt($('tree')?.style.flexBasis || $('tree')?.getBoundingClientRect().width || 180, 10),
@@ -2510,6 +2512,9 @@ window.__editorInitPromise = (async function () {
   }
   function restoreWorkspaceLayout(layout) {
     if (!layout?.workbench || !state.workbench.restore) return false;
+    state.browserSessions = layout.browserSessions && typeof layout.browserSessions === 'object' && !Array.isArray(layout.browserSessions)
+      ? {...layout.browserSessions}
+      : {};
     const restored = state.workbench.restore(layout.workbench, data => makeLayoutTab(data, state.runConfig?.config?.serverType));
     if (!restored) return false;
     state.sidebarController.restoreCollapsed(layout.collapsedPaths || []);
@@ -2730,6 +2735,7 @@ window.__editorInitPromise = (async function () {
     state.fs = fs;
     state.saveProjectPermission = 'denied';
     state.projectId = options.projectId || null;
+    state.browserSessions = {};
     state.projectOwner = options.projectOwner !== false;
     state.gitEnabled = options.gitEnabled !== false;
     state.gitRemote = state.gitEnabled ? (options.gitRemote || null) : null;
@@ -4414,6 +4420,7 @@ window.__editorInitPromise = (async function () {
   state.updateGitSubmodule = updateWorkspaceGitSubmodule;
   state.saveEditorConfig = saveEditorConfig;
   state.markDirty = markDirty;
+  state.scheduleWorkspaceLayoutSave = scheduleWorkspaceLayoutSave;
   state.updateStatus = updateStatus;
   state.saveEditorSettings = saveEditorSettings;
   state.applyEditorSettings = applyEditorSettings;

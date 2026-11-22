@@ -15,7 +15,30 @@
     const defaultBrowserUrl = configuredBrowserDefault || projectRunUrl;
     const browserSessionId = String(t.browserSessionId || t.id);
     const sessionKey = ['project', state.projectId || state.projectKey || 'workspace', browserSessionId].join(':');
+    const savedSession = state.browserSessions?.[sessionKey] || null;
     const browserParams = new URLSearchParams({start: defaultBrowserUrl, default: defaultBrowserUrl, defer: '1', session: sessionKey});
+    const onBrowserSessionSave = event => {
+      if (event.source !== frame.contentWindow || event.origin !== window.location.origin) return;
+      const data = event.data;
+      if (data?.type !== 'editor-browser-session-save' || data.sessionId !== sessionKey) return;
+      const session = data.session;
+      if (!Array.isArray(session?.tabs) || session.tabs.length > 50) return;
+      state.browserSessions ||= {};
+      state.browserSessions[sessionKey] = {
+        tabs: session.tabs.filter(tab => tab && typeof tab.url === 'string' && tab.url.trim()).slice(0, 50).map(tab => ({
+          id: String(tab.id || ''),
+          url: String(tab.url),
+          title: String(tab.title || tab.url),
+          favicon: typeof tab.favicon === 'string' ? tab.favicon : '',
+          deviceEmulation: tab.deviceEmulation && typeof tab.deviceEmulation === 'object' ? {...tab.deviceEmulation} : null,
+          history: Array.isArray(tab.history) ? tab.history.filter(value => typeof value === 'string' && value).slice(-200) : [],
+          historyIndex: Number.isInteger(tab.historyIndex) ? tab.historyIndex : -1
+        })),
+        activeTabId: typeof session.activeTabId === 'string' ? session.activeTabId : null
+      };
+      state.scheduleWorkspaceLayoutSave?.();
+    };
+    window.addEventListener('message', onBrowserSessionSave);
     frame.src = 'browser/browser.html?' + browserParams.toString();
     const syncHostContext = () => {
       const context = window.__editorHostContext;
@@ -78,9 +101,13 @@
           const currentDefault = String(state.browserSettings?.defaultTab || '').trim();
           const defaultUrl = currentDefault || runUrl;
           win.setBrowserDefaultTab?.(defaultUrl);
-          // A saved session is restored first. For a fresh session, use the
-          // chosen homepage, or the project run URL when no homepage is set.
-          if (state.staticEndpoint && typeof win.loadBrowserURL === 'function') {
+          // Restore Browser tabs even before the project preview server starts.
+          // A saved session can contain external pages and does not depend on
+          // the workspace's Static/Node runtime endpoint being ready.
+          win.setBrowserSessionRestoreData?.(savedSession);
+          const hasSavedTabs = typeof win.hasSavedBrowserSession === 'function'
+            && win.hasSavedBrowserSession();
+          if (typeof win.loadBrowserURL === 'function' && (hasSavedTabs || state.staticEndpoint || state.nodeEmulator?.endpoint)) {
             void win.loadBrowserURL(defaultUrl, true).catch(() => {});
           }
         } catch (_) {}
@@ -198,6 +225,7 @@
       try {
         window.removeEventListener('editor-host-context-change', info?.syncHostContext);
         if (info?.syncHostContext) frame.removeEventListener('load', info.syncHostContext);
+        window.removeEventListener('message', onBrowserSessionSave);
       } catch (_) {}
       try {
         const win = frame.contentWindow;
