@@ -126,12 +126,21 @@
   function ensureSandBoxSameOrigin(iframe) {
     if (!iframe.hasAttribute('sandbox')) return;
 
-    var tokens = iframe.getAttribute('sandbox').split(/\s+/).filter(Boolean);
+    const tokens = iframe.getAttribute('sandbox').split(/\s+/).filter(Boolean);
+    let changed = false;
 
-    if (!tokens.includes('allow-same-origin')) {
-      tokens.push('allow-same-origin');
-      iframe.setAttribute('sandbox',tokens.join(' '));
+    // Each nested page is loaded as srcdoc after its scripts and resources
+    // have been virtualized. The injected runtime and the emulated page both
+    // need scripts enabled; otherwise the srcdoc bootstrap is blocked before
+    // the nested page can initialize.
+    for (const permission of ['allow-same-origin', 'allow-scripts']) {
+      if (!tokens.includes(permission)) {
+        tokens.push(permission);
+        changed = true;
+      }
     }
+
+    if (changed) iframe.setAttribute('sandbox',tokens.join(' '));
   }
 
   async function preprocessHtml(rawHtml, page, baseUrlOverride = null) {
@@ -5508,21 +5517,21 @@
             return originalAddEventListener.call(this, type, listener, options);
           }
           const wrappedListener = function(event) {
-            // Keep message.source consistent with the virtual contentWindow
-            // exposed by this emulator, even when srcdoc inherits a non-opaque
-            // origin. Only rewrite the origin for opaque/srcdoc messages.
+            // A srcdoc document's physical origin is the Editor shell, not the
+            // page origin represented by its PageEmulator. Restore both the
+            // virtual WindowProxy and origin for emulated parent/child senders.
             let sourceProxy = null;
+            let sourcePage = null;
             try {
               const nativeParentWindow = window.parent;
               const parentPage = pageEmulator?.parent && pageEmulator.parent !== false ? pageEmulator.parent : null;
               if (parentPage && event.source === nativeParentWindow) {
-                // window.parent and MessageEvent.source must use the exact same
-                // caller-realm proxy for TurboWarp's strict source check.
+                sourcePage = parentPage;
                 sourceProxy = getCallerWindowProxy(parentPage, nativeParentWindow);
               } else {
-                const sourcePage = (pageEmulator?.children || []).find(child =>
+                sourcePage = (pageEmulator?.children || []).find(child =>
                   child?.iframe?.__editorNativeContentWindow === event.source
-                );
+                ) || null;
                 if (sourcePage) {
                   sourceProxy = getCallerWindowProxy(sourcePage, event.source);
                 } else {
@@ -5530,13 +5539,17 @@
                 }
               }
             } catch (_) {}
-            const rewriteOrigin = !event.origin || event.origin === 'null' || event.origin === 'about:srcdoc';
+
+            const virtualOrigin = sourcePage?.location?.origin || '';
+            const rewriteOrigin = !!virtualOrigin ||
+              !event.origin || event.origin === 'null' || event.origin === 'about:srcdoc';
             if (!sourceProxy && !rewriteOrigin) {
               return listener.call(this, event);
             }
 
             const proxyEvent = new Proxy(event, {
               get(target, prop) {
+                if (prop === 'origin' && virtualOrigin) return virtualOrigin;
                 if (prop === 'origin' && rewriteOrigin) return BASE_ORIGIN;
                 if (prop === 'source' && sourceProxy) return sourceProxy;
                 const val = target[prop];
@@ -5972,6 +5985,44 @@
         // wrong browsing context. Wrap ancestor windows in the caller's realm
         // and invoke the matching native ancestor WindowProxy directly.
         const callerWindowProxyCache = new Map();
+
+        function dispatchVirtualPostMessage(nativeTargetWindow, targetPage, message, targetOrigin, transfer) {
+          if (!nativeTargetWindow || typeof nativeTargetWindow.postMessage !== 'function') return false;
+
+          const options = targetOrigin && typeof targetOrigin === 'object' && (
+            Object.prototype.hasOwnProperty.call(targetOrigin, 'targetOrigin') ||
+            Object.prototype.hasOwnProperty.call(targetOrigin, 'transfer')
+          ) ? targetOrigin : null;
+          let requestedOrigin = options ? options.targetOrigin : targetOrigin;
+          const transferList = options ? options.transfer : transfer;
+
+          // The native default "/" means the sender's origin, not "*".
+          if (requestedOrigin == null || requestedOrigin === '' || requestedOrigin === '/') {
+            requestedOrigin = pageEmulator?.location?.origin || BASE_ORIGIN || '';
+          }
+
+          const recipientOrigin = targetPage?.location?.origin || '';
+          if (requestedOrigin !== '*') {
+            let normalizedOrigin = String(requestedOrigin);
+            if (normalizedOrigin !== 'null') {
+              try {
+                normalizedOrigin = new URL(normalizedOrigin).origin;
+              } catch (_) {
+                throw new DOMException('Invalid target origin: ' + normalizedOrigin, 'SyntaxError');
+              }
+            }
+
+            // Match in the emulated origin space. A mismatch is a normal
+            // postMessage no-op; it must not be passed to the physical frame.
+            if (!recipientOrigin || normalizedOrigin !== recipientOrigin) return false;
+          }
+
+          // All virtual documents are physically hosted by the browser shell.
+          // Virtual authorization above makes wildcard native delivery safe.
+          nativeTargetWindow.postMessage(message, '*', transferList);
+          return true;
+        }
+
         function getCallerWindowProxy(targetPage, nativeTargetWindow) {
           if (!targetPage || targetPage === pageEmulator) return windowProxy;
           if (!targetPage.__windowProxy && nativeTargetWindow && targetPage.iframe && typeof window.__runSyncInterceptor === 'function') {
@@ -5999,12 +6050,13 @@
             get(target, prop) {
               if (prop === 'postMessage') {
                 return function(message, targetOrigin, transfer) {
-                  try {
-                    const origin = targetOrigin || '*';
-                    nativeTargetWindow.postMessage(message, origin, transfer);
-                  } catch (error) {
-                    try { nativeTargetWindow.postMessage(message, '*'); } catch (_) {}
-                  }
+                  return dispatchVirtualPostMessage(
+                    nativeTargetWindow,
+                    targetPage,
+                    message,
+                    targetOrigin,
+                    transfer
+                  );
                 };
               }
 
@@ -6204,12 +6256,13 @@
                 if (!targetWindow || targetWindow === receiverPage?.__windowProxy || typeof targetWindow.postMessage !== 'function') {
                   return;
                 }
-                try {
-                  var origin = targetOrigin || '*';
-                  targetWindow.postMessage(message, origin, transfer);
-                } catch(e) {
-                  try { targetWindow.postMessage(message, '*'); } catch(_) {}
-                }
+                return dispatchVirtualPostMessage(
+                  targetWindow,
+                  receiverPage,
+                  message,
+                  targetOrigin,
+                  transfer
+                );
               };
             }
             if (typeof prop === 'string' && /^\d+$/.test(prop)) {
