@@ -3016,7 +3016,6 @@ function updateSettings() {
   if (configuredFallbackProxy && !appSettings.fallbackProxy) { appSettings.fallbackProxy = configuredFallbackProxy; appSettings.useFallback = true; }
   appSettings.primaryProxy = String(appSettings.primaryProxy || window.WorkerConfig?.proxy || '');
   document.getElementById('setting-default-tab').value = appSettings.defaultTab || '';
-  document.getElementById('setting-hide-browser-bar').checked = !!appSettings.hideBrowserBar;
   document.getElementById('setting-restore-tabs').checked = appSettings.restoreTabs !== false;
   document.getElementById('setting-proxy-url').value = appSettings.primaryProxy;
   document.getElementById('setting-fallback-proxy-url').value = appSettings.fallbackProxy;
@@ -3031,7 +3030,6 @@ function updateSettings() {
 
 function saveSettings() {
   appSettings.defaultTab = document.getElementById('setting-default-tab').value.trim();
-  appSettings.hideBrowserBar = document.getElementById('setting-hide-browser-bar').checked;
   appSettings.restoreTabs = document.getElementById('setting-restore-tabs').checked;
   appSettings.primaryProxy = document.getElementById('setting-proxy-url').value.trim();
   appSettings.fallbackProxy = document.getElementById('setting-fallback-proxy-url').value;
