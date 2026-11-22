@@ -1440,9 +1440,9 @@ window.__editorInitPromise = (async function () {
     openBuiltin('welcome', group);
     return group;
   }
-  function closeWorkbenchTab(t, g) {
+  function closeWorkbenchTab(t, g, options = {}) {
     if (!t || !g) return;
-    const entry = rememberClosedWorkbenchTab(t, g);
+    const entry = options.retain === false ? null : rememberClosedWorkbenchTab(t, g);
     if (!entry) disposeWorkbenchTab(t);
     const wb = g.ownerWorkbench || state.workbench;
     wb.removeTab(g, t.id);
@@ -2389,7 +2389,7 @@ window.__editorInitPromise = (async function () {
       for (const t of [...g.tabs]) {
         if (!g.ownerWorkbench?.groups?.has?.(g.id)) continue;
         if (t.kind !== 'file' || !(t.path === path || isDir && t.path.startsWith(path + '/'))) continue;
-        closeWorkbenchTab(t, g);
+        closeWorkbenchTab(t, g, {retain:false});
       }
     }
     updateStatus();
