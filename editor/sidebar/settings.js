@@ -45,7 +45,7 @@
                 </select>
               </div>
             </label>
-            <p class="editor-settings-note">Restore a closed tab with Ctrl+Shift+T while its original editor and preview instances are retained. Set to 0 to dispose immediately.</p>
+            <p class="editor-settings-note">Editor-wide preference. Ctrl+Shift+T restores a closed tab with its original editor and preview instances. Changes also apply to tabs already closed; set to 0 to dispose them immediately.</p>
           </div>
           <div class="editor-settings-section">
             <h3>Git</h3>
