@@ -837,7 +837,7 @@ const makeEditorTools = (() => {
       if(TEXT_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('text/'))return 'text';
       return 'file';
     }
-    function sensitiveAttachmentPath(path){return /(^|\/)(?:\.env(?:\..*)?|\.editor\/process\.env|.*(?:secret|credential|password|token|private[-_]?key).*)$/i.test(String(path||''));}
+    function sensitiveAttachmentPath(path){return /(^|\/)(?:\.editor(?:\/.*)?|\.git(?:\/.*)?|\.env(?:\..*)?|.*(?:secret|credential|password|token|private[-_]?key).*)$/i.test(String(path||''));}
     function attachmentCapabilities(model=registry.active()){
       const capabilities=chatAI.getCapabilities(model?.id)||{};
       const local=!!(model?.local||model?.protocol==='local-transformers');
@@ -903,10 +903,18 @@ const makeEditorTools = (() => {
         renderAttachmentRow(tree);updateComposerSendState(tree);
       }catch(error){alert(error?.message||String(error));}
     }
-    function fileAsDataUrl(file){
+    function attachmentMimeType(file,kind){
+      const supplied=String(file?.type||'').toLowerCase();
+      if(kind==='image'&&supplied.startsWith('image/'))return supplied;
+      const ext=attachmentExtension(file);
+      const imageMimes={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',bmp:'image/bmp',avif:'image/avif',apng:'image/apng',ico:'image/x-icon'};
+      return kind==='image'?(imageMimes[ext]||'image/png'):(supplied||'text/plain');
+    }
+    function fileAsDataUrl(file,mimeType){
       return new Promise((resolve,reject)=>{
-        const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||''));
-        reader.onerror=()=>reject(reader.error||new Error('Could not read '+file.name));reader.readAsDataURL(file);
+        const reader=new FileReader(),source=mimeType&&file.type!==mimeType?new Blob([file],{type:mimeType}):file;
+        reader.onload=()=>resolve(String(reader.result||''));
+        reader.onerror=()=>reject(reader.error||new Error('Could not read '+file.name));reader.readAsDataURL(source);
       });
     }
     async function buildAttachmentPayload(){
@@ -925,7 +933,8 @@ const makeEditorTools = (() => {
         }else if(kind==='image'){
           if(file.size>12*1024*1024)throw new Error(file.name+' is larger than the 12 MiB image attachment limit.');
           if(images.reduce((total,image)=>total+Math.floor(image.dataUrl.length*3/4),0)+file.size>24*1024*1024)throw new Error('Combined image attachments must be smaller than 24 MiB.');
-          images.push({mimeType:String(file.type||'image/png'),dataUrl:await fileAsDataUrl(file)});
+          const mimeType=attachmentMimeType(file,kind);
+          images.push({mimeType,dataUrl:await fileAsDataUrl(file,mimeType)});
         }
       }
       return {metadata,images,textContext:textParts.length?'\n\n'+textParts.join('\n\n'):''};
