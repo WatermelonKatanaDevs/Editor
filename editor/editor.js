@@ -514,6 +514,7 @@ window.__editorInitPromise = (async function () {
   const PROJECT_CACHE_NAME = 'node-editor-project-cache';
   const RECENT_PROJECTS_KEY = 'editor.recentProjects';
   const LAYOUT_KEY_PREFIX = 'editor.projectLayout.';
+  const CLOSED_TAB_RETENTION_KEY = 'editor.closedTabRetentionMs';
   function readEditorJson(path, fs = state.fs) {
     try {
       if (!fs?.existsSync(path)) return null;
@@ -531,10 +532,8 @@ window.__editorInitPromise = (async function () {
     if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return;
     const { browserSettings: legacyBrowserSettings, hideBrowserBar: legacyHideBrowserBar, ...behaviorSettings } = settings;
     state.behavior = { ...state.behavior, ...behaviorSettings };
-    const retention = Number(state.behavior.recentlyClosedRetentionMs);
-    state.behavior.recentlyClosedRetentionMs = Number.isFinite(retention)
-      ? Math.max(0, Math.min(2147483647, retention))
-      : 300000;
+    const retention = readClosedTabRetentionPreference(state.behavior.recentlyClosedRetentionMs);
+    state.behavior.recentlyClosedRetentionMs = retention;
     // Older projects stored a few browser preferences in .editor/settings.json.
     // Import them once only when the user's global browser preferences are absent.
     if (!hasPersistedBrowserSettings && (
@@ -710,6 +709,8 @@ window.__editorInitPromise = (async function () {
       const data = { ...(state.behavior || {}) };
       delete data.hideBrowserBar;
       delete data.browserSettings;
+      // Recently-closed history is editor-wide, not part of an individual project.
+      delete data.recentlyClosedRetentionMs;
       state.fs.mkdirSync?.(EDITOR_DIR);
       state.fs.writeFileSync(EDITOR_SETTINGS_PATH, JSON.stringify(data, null, 2));
       if (!state.loading) state.markDirty?.('editor/settings.json');
@@ -1285,9 +1286,48 @@ window.__editorInitPromise = (async function () {
   function getActiveWorkbenchGroup() {
     return Workbench.getActiveGroup?.() || state.workbench?.getActiveGroup?.() || state.workbench?.getFirstLeaf?.() || null;
   }
+  function normalizeClosedTabRetentionMs(value, fallback = 300000) {
+    const parsed = Number(value);
+    const use = Number.isFinite(parsed) ? parsed : Number(fallback);
+    return Math.max(0, Math.min(2147483647, Number.isFinite(use) ? use : 300000));
+  }
+  function readClosedTabRetentionPreference(fallback = 300000) {
+    try {
+      const stored = localStorage.getItem(CLOSED_TAB_RETENTION_KEY);
+      if (stored !== null) return normalizeClosedTabRetentionMs(stored, fallback);
+    } catch (_) {}
+    return normalizeClosedTabRetentionMs(fallback);
+  }
   function getClosedTabRetentionMs() {
-    const value = Number(state.behavior?.recentlyClosedRetentionMs ?? 300000);
-    return Number.isFinite(value) ? Math.max(0, Math.min(2147483647, value)) : 300000;
+    return readClosedTabRetentionPreference(state.behavior?.recentlyClosedRetentionMs ?? 300000);
+  }
+  function scheduleClosedTabExpiry(entry) {
+    if (!entry || entry.disposed || entry.restored) return;
+    clearTimeout(entry.timer);
+    const remaining = entry.expiresAt - Date.now();
+    if (remaining <= 0) {
+      destroyClosedTabEntry(entry);
+      return;
+    }
+    entry.timer = setTimeout(() => {
+      if (entry.expiresAt <= Date.now()) destroyClosedTabEntry(entry);
+      else scheduleClosedTabExpiry(entry);
+    }, Math.min(2147483647, remaining));
+  }
+  function setClosedTabRetentionMs(value) {
+    const retentionMs = normalizeClosedTabRetentionMs(value);
+    state.behavior.recentlyClosedRetentionMs = retentionMs;
+    try { localStorage.setItem(CLOSED_TAB_RETENTION_KEY, String(retentionMs)); } catch (_) {}
+
+    // Apply the new duration to tabs that are already closed, measured from
+    // their original close time. This makes shortening to 0 dispose them now.
+    for (const entry of [...(state.closedTabHistory || [])]) {
+      if (!entry || entry.disposed || entry.restored) continue;
+      entry.expiresAt = entry.closedAt + retentionMs;
+      if (retentionMs <= 0 || entry.expiresAt <= Date.now()) destroyClosedTabEntry(entry);
+      else scheduleClosedTabExpiry(entry);
+    }
+    return retentionMs;
   }
   function moveNodePreservingState(parent, node, before = null) {
     if (!parent || !node) return;
@@ -1369,7 +1409,7 @@ window.__editorInitPromise = (async function () {
     };
     g.keepAlive = true;
     history.push(entry);
-    entry.timer = setTimeout(() => destroyClosedTabEntry(entry), retentionMs);
+    scheduleClosedTabExpiry(entry);
     return entry;
   }
   function restoreClosedWorkbenchTab() {
@@ -1396,6 +1436,7 @@ window.__editorInitPromise = (async function () {
       if (!wb) return false;
 
       clearTimeout(entry.timer);
+      entry.timer = null;
       entry.restored = true;
       const historyIndex = history.indexOf(entry);
       if (historyIndex >= 0) history.splice(historyIndex, 1);
@@ -4149,6 +4190,8 @@ window.__editorInitPromise = (async function () {
       runConfigured,
       logError,
       saveBehaviorSettings,
+      getClosedTabRetentionMs,
+      setClosedTabRetentionMs,
       getBrowserSettings: () => ({ ...state.browserSettings }),
       saveBrowserSettings,
       subscribeBrowserSettings: listener => {
