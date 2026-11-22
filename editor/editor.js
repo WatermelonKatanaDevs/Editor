@@ -1482,6 +1482,9 @@ window.__editorInitPromise = (async function () {
   async function activate(t, g, lifecycle = {}) {
     g.active = t?.id || null;
     if (t) t._viewActivation = (t._viewActivation || 0) + 1;
+    const activation = t?._viewActivation;
+    const isCurrent = () => !!t && !t._resourcesDisposed
+      && g.active === t.id && t._viewActivation === activation;
     const wb = g?.ownerWorkbench || state.workbench;
     // Keep the global active-group pointer aligned with nested/workbench groups.
     // Explorer/search/AI file opens rely on Workbench.getActiveGroup().
@@ -1494,19 +1497,19 @@ window.__editorInitPromise = (async function () {
       return;
     }
 
-    // Preview instances are persistent per tab/view. Switching tabs, moving
-    // a tab between groups, or changing between Piskel and another view must
-    // not dispose the embedded editor.
+    // Tab and preview surfaces are long-lived. Switching visibility must not
+    // dispose their editor models, iframes, or provider instances.
     clearView(g);
     if (t.kind === 'file') {
       state.lastTextTab = t;
-      const file = { path: t.path, name: basename(t.path), mime: mime(t.path), id: t.id };
+      const file = { path:t.path, name:basename(t.path), mime:mime(t.path), id:t.id };
       const views = state.previews?.getViews(file) || [];
       if (!t.view || !views.some(v => v.id === t.view)) t.view = state.previews?.getDefaultView(file)?.id || null;
     }
     renderViewBar(g, t);
 
     const finish = (kind, element, extra = {}) => {
+      if (!isCurrent()) return;
       if (!t._tabOpenEventFired) {
         t._tabOpenEventFired = true;
         emitTabLifecycle(t, g, 'tabOpen');
@@ -1530,42 +1533,62 @@ window.__editorInitPromise = (async function () {
         finish('builtinRender', t._viewElement, { builtin:t.builtin });
         return;
       }
-      if (t._viewElement) {
-        if (t._viewElement.parentNode !== g.viewBody) moveNodePreservingState(g.viewBody, t._viewElement);
-        t._viewElement.style.display = '';
-        g.__renderedTab = t;
-        if (t.builtin === 'terminal') {
-          const terminal = state.terminalTabs.get(t.id);
-          terminal?.attach(state.nodeEmulator);
-          terminal?.updatePrompt();
+      if (!t._viewElement) {
+        let pending = t._viewCreatePromise;
+        if (!pending) {
+          const before = new Set([...g.viewBody.children]);
+          pending = (async () => {
+            const builtin = getBuiltin(t.builtin);
+            const renderResult = builtin?.render ? builtin.render(g, t) : renderWelcome(g);
+            if (renderResult && typeof renderResult.then === 'function') await renderResult;
+            const created = [...g.viewBody.children].filter(element => !before.has(element));
+            if (t._resourcesDisposed) {
+              for (const element of created) element.remove();
+              return null;
+            }
+            if (!t._viewElement) t._viewElement = created[created.length - 1] || g.viewBody.lastElementChild || null;
+            return t._viewElement;
+          })();
+          t._viewCreatePromise = pending;
         }
-        finish('builtinRender', t._viewElement, { builtin:t.builtin });
-        return;
+        try {
+          await pending;
+        } finally {
+          if (t._viewCreatePromise === pending) t._viewCreatePromise = null;
+        }
+        if (!isCurrent()) return;
       }
-      const builtin = getBuiltin(t.builtin);
-      const renderResult = builtin?.render ? builtin.render(g, t) : renderWelcome(g);
-      if (renderResult && typeof renderResult.then === 'function') await renderResult;
-      t._viewElement = g.viewBody.lastElementChild || null;
+      if (t._viewElement && t._viewElement.parentNode !== g.viewBody) {
+        moveNodePreservingState(g.viewBody, t._viewElement);
+      }
+      if (t._viewElement) t._viewElement.style.display = '';
       g.__renderedTab = t;
+      if (t.builtin === 'terminal') {
+        const terminal = state.terminalTabs.get(t.id);
+        terminal?.attach(state.nodeEmulator);
+        terminal?.updatePrompt();
+      }
       finish('builtinRender', t._viewElement, { builtin:t.builtin });
       return;
     }
 
     g.__renderedTab = t;
-    const file = { path: t.path, name: basename(t.path), mime: mime(t.path), id: t.id };
+    const file = { path:t.path, name:basename(t.path), mime:mime(t.path), id:t.id };
     if (state.previews?.getView(file, t.view)) {
       const renderResult = state.previews.render(file, t.view, g.viewBody, g);
       if (renderResult && typeof renderResult.then === 'function') await renderResult;
+      if (!isCurrent()) return;
 
-      // Reattach a preserved preview surface without rebuilding the embedded
-      // document. The surface was hidden by clearView while another tab was
-      // active.
+      // Reattach the preserved preview without rebuilding its embedded
+      // document. The manager uses moveBefore() when the browser supports
+      // state-preserving DOM moves.
       const previewElement = t._previewHost || g.viewBody.lastElementChild;
+      if (previewElement?.parentNode !== g.viewBody) moveNodePreservingState(g.viewBody, previewElement);
       if (previewElement) previewElement.style.display = '';
-
       finish('viewRender', previewElement, { path:t.path, view:t.view });
       return;
     }
+    if (!isCurrent()) return;
     const fallback = document.createElement('div');
     fallback.className = 'editor-binary';
     fallback.textContent = `No editor or preview available for ${file.name}`;
