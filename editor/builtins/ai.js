@@ -333,7 +333,16 @@ const makeEditorTools = (() => {
     return first.length > 48 ? first.slice(0, 45) + '…' : first;
   }
   function validMessages(messages) {
-    return Array.isArray(messages) ? messages.filter(m => m && ['user','assistant'].includes(m.role) && typeof m.content === 'string') : [];
+    if(!Array.isArray(messages))return [];
+    return messages.filter(m=>m&&['user','assistant'].includes(m.role)&&typeof m.content==='string').map(message=>{
+      const clean={...message};
+      delete clean.images;
+      if(Array.isArray(message.attachments))clean.attachments=message.attachments.filter(item=>item&&typeof item.name==='string').map(item=>({
+        name:String(item.name),path:String(item.path||''),kind:String(item.kind||'file'),
+        mimeType:String(item.mimeType||''),size:Math.max(0,Number(item.size)||0),active:!!item.active
+      }));
+      return clean;
+    });
   }
   function makeChatStore(state) {
     let loadedProjectId = null;
@@ -465,8 +474,8 @@ const makeEditorTools = (() => {
   return '<div class="ai-model-row '+(active?'active ':'')+(local?'local':'remote')+'"><div class="ai-model-main"><strong>'+escapeHtml(m.name)+'</strong><span title="'+escapeHtml(details)+'">'+escapeHtml(details)+'</span></div><button data-use="'+escapeHtml(m.id)+'" '+(active&&(!local||loaded)?'disabled':'')+'>'+action+'</button>'+edit+'<button data-remove="'+escapeHtml(m.id)+'" '+(models.length<=1?'disabled title="At least one model must remain"':'')+'>×</button></div>';
 }).join('')}</div>
 
-<div class="ai-model-actions"><button class="ai-settings-add" data-add>+ Add remote model</button><button class="ai-settings-add" data-add-local>+ Add local model</button></div><div class="ai-model-editor-slot"><div class="ai-local-model-editor" data-local-editor hidden><h3 data-local-editor-title>Add local model</h3><label>Name<input data-local-name placeholder="Qwen3 4B Instruct · Local"></label><label>Model ID<div class="ai-model-input-row"><input data-local-model placeholder="onnx-community/owner-model-ONNX"><button type="button" data-browse-local-models>Browse</button></div></label><div class="ai-local-editor-status" data-local-editor-status></div><div class="ai-add-actions"><button type="button" data-cancel-local>Cancel</button><button type="button" data-save-local>Save model</button></div></div>
-<div class="ai-add-model" hidden><label>Provider<select data-provider>${Object.entries(providers).filter(([id])=>id!=='local').map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>API format<select data-format>${Object.entries(aiRoot.AI_PROTOCOLS||{}).map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>Name<input data-name placeholder="My model"></label><label>Endpoint<input data-endpoint placeholder="https://api.example.com/v1"></label><label>Model ID <div class="ai-model-input-row"><input data-model placeholder="model-name"><button type="button" data-browse-models>Browse models</button></div></label><label>API key <input data-key type="password" placeholder="Enter your provider key"></label><label class="ai-check"><input data-remember type="checkbox"> Remember API key on this device</label><label class="ai-check"><input data-tools type="checkbox" checked> Supports native tool calling</label><label class="ai-check"><input data-thinking type="checkbox" checked> Supports reasoning</label><div class="ai-add-hint" data-protocol-hint>Select a provider to fill in its API format and endpoint. You can override the endpoint for compatible services.</div><div class="ai-add-actions"><button data-cancel-model>Cancel</button><button data-save-model>Save model</button></div></div></div><div class="ai-local-load-status" data-local-settings-status hidden><div data-local-settings-text></div><div class="ai-local-progress"><span data-local-settings-progress></span></div></div><div class="ai-hf-account"><div class="ai-section-title">Hugging Face</div><label>Your API key<input data-hf-global-key type="password" placeholder="hf_..."></label><label class="ai-check"><input data-hf-global-remember type="checkbox"> Remember your key on this device</label><div class="ai-add-hint">Used for Hugging Face models that do not have their own key. Add a key here or on an individual model.</div></div></section><section><div class="ai-section-title">Permissions</div><div class="ai-permission-list">${Object.entries(permissions.all()).map(([k,v])=>`<label><span>${escapeHtml(TOOL_PERMISSION_LABELS[k]||k)}</span><select data-permission="${k}"><option value="always" ${v==='always'?'selected':''}>Always allow</option><option value="ask" ${v==='ask'?'selected':''}>Ask each time</option><option value="never" ${v==='never'?'selected':''}>Never allow</option></select></label>`).join('')}</div><button data-reset-permissions class="ai-settings-reset">Reset permissions</button></section></div><div class="ai-settings-note">Providers can fill in the API format and default endpoint automatically. Providers may expose either a live model list or a fixed set of known models.</div></div><div data-settings-panel="context" hidden><div class="ai-context-panel"><h3 class="ai-section-title">Model context &amp; instructions</h3><p class="ai-settings-note-inline">These are added to the built-in coding-assistant instructions. They persist on this device and apply to your AI chats.</p><label>Additional instructions<textarea data-custom-instructions placeholder="Example: Prefer small, focused changes. Explain tradeoffs briefly."></textarea></label><label>Agent-only instructions<textarea data-agent-instructions placeholder="Example: Before editing, inspect related files and run a targeted verification after each major change."></textarea></label><label class="ai-check"><input data-show-activity type="checkbox"> Show agent activity in chat</label><h3 class="ai-section-title">Request recovery</h3><label class="ai-check"><input data-retry-429 type="checkbox"> Automatically retry HTTP 429 rate limits</label><div class="ai-retry-grid"><label>Max 429 retries<input data-max-retries type="number" min="0" max="10"></label><label>Base delay (ms)<input data-base-delay type="number" min="250" max="30000" step="250"></label></div><label class="ai-check"><input data-retry-transport type="checkbox"> Retry transport/CORS failures</label><div class="ai-retry-grid"><label>Max transport retries<input data-max-transport-retries type="number" min="0" max="10"></label><label>Transport delay (ms)<input data-transport-delay type="number" min="250" max="30000" step="250"></label></div><p class="ai-settings-note-inline">HTTP responses such as 429 are handled separately from transport failures such as CORS or connection errors.</p><h3 class="ai-section-title">Tool-call recovery</h3><label class="ai-check"><input data-tool-recovery type="checkbox"> Retry supported tool-call parse failures</label><div class="ai-retry-grid"><label>Max recovery retries<input data-tool-recovery-retries type="number" min="0" max="10"></label><span></span></div><p class="ai-settings-note-inline">Providers can opt into a recovery strategy through their API adapter. The agent itself does not special-case providers.</p></div></div><div data-settings-panel="analytics" hidden><div class="ai-analytics-panel"><div class="ai-analytics-cards" data-analytics-cards></div><h3 class="ai-section-title">By model</h3><div data-analytics-models class="ai-analytics-models"></div><button data-reset-analytics class="ai-settings-reset">Reset analytics</button></div></div><div data-settings-panel="cache" hidden><div class="ai-local-cache"><div class="ai-local-cache-heading"><strong>Persistent local AI cache</strong><button type="button" data-refresh-local-cache>Refresh</button></div><p>Model files and the Transformers.js runtime are stored in IndexedDB. Completed models can be loaded without network access.</p><div class="ai-local-cache-summary" data-local-cache-summary>Checking browser storage…</div><div class="ai-local-cache-list" data-local-cache-list></div></div></div></div>`;
+<div class="ai-model-actions"><button class="ai-settings-add" data-add>+ Add remote model</button><button class="ai-settings-add" data-add-local>+ Add local model</button></div><div class="ai-model-editor-slot"><div class="ai-local-model-editor" data-local-editor hidden><h3 data-local-editor-title>Add local model</h3><label>Name<input data-local-name placeholder="Qwen3 4B Instruct · Local"></label><label>Model ID<div class="ai-model-input-row"><input data-local-model placeholder="onnx-community/owner-model-ONNX"><button type="button" data-browse-local-models>Browse</button></div></label><label class="ai-check"><input data-local-vision type="checkbox"> Supports image input (vision)</label><div class="ai-local-editor-status" data-local-editor-status></div><div class="ai-add-actions"><button type="button" data-cancel-local>Cancel</button><button type="button" data-save-local>Save model</button></div></div>
+<div class="ai-add-model" hidden><label>Provider<select data-provider>${Object.entries(providers).filter(([id])=>id!=='local').map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>API format<select data-format>${Object.entries(aiRoot.AI_PROTOCOLS||{}).map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>Name<input data-name placeholder="My model"></label><label>Endpoint<input data-endpoint placeholder="https://api.example.com/v1"></label><label>Model ID <div class="ai-model-input-row"><input data-model placeholder="model-name"><button type="button" data-browse-models>Browse models</button></div></label><label>API key <input data-key type="password" placeholder="Enter your provider key"></label><label class="ai-check"><input data-remember type="checkbox"> Remember API key on this device</label><label class="ai-check"><input data-tools type="checkbox" checked> Supports native tool calling</label><label class="ai-check"><input data-thinking type="checkbox" checked> Supports reasoning</label><label class="ai-check"><input data-vision type="checkbox"> Supports image input (vision)</label><div class="ai-add-hint" data-protocol-hint>Select a provider to fill in its API format and endpoint. You can override the endpoint for compatible services.</div><div class="ai-add-actions"><button data-cancel-model>Cancel</button><button data-save-model>Save model</button></div></div></div><div class="ai-local-load-status" data-local-settings-status hidden><div data-local-settings-text></div><div class="ai-local-progress"><span data-local-settings-progress></span></div></div><div class="ai-hf-account"><div class="ai-section-title">Hugging Face</div><label>Your API key<input data-hf-global-key type="password" placeholder="hf_..."></label><label class="ai-check"><input data-hf-global-remember type="checkbox"> Remember your key on this device</label><div class="ai-add-hint">Used for Hugging Face models that do not have their own key. Add a key here or on an individual model.</div></div></section><section><div class="ai-section-title">Permissions</div><div class="ai-permission-list">${Object.entries(permissions.all()).map(([k,v])=>`<label><span>${escapeHtml(TOOL_PERMISSION_LABELS[k]||k)}</span><select data-permission="${k}"><option value="always" ${v==='always'?'selected':''}>Always allow</option><option value="ask" ${v==='ask'?'selected':''}>Ask each time</option><option value="never" ${v==='never'?'selected':''}>Never allow</option></select></label>`).join('')}</div><button data-reset-permissions class="ai-settings-reset">Reset permissions</button></section></div><div class="ai-settings-note">Providers can fill in the API format and default endpoint automatically. Providers may expose either a live model list or a fixed set of known models.</div></div><div data-settings-panel="context" hidden><div class="ai-context-panel"><h3 class="ai-section-title">Model context &amp; instructions</h3><p class="ai-settings-note-inline">These are added to the built-in coding-assistant instructions. They persist on this device and apply to your AI chats.</p><label>Additional instructions<textarea data-custom-instructions placeholder="Example: Prefer small, focused changes. Explain tradeoffs briefly."></textarea></label><label>Agent-only instructions<textarea data-agent-instructions placeholder="Example: Before editing, inspect related files and run a targeted verification after each major change."></textarea></label><label class="ai-check"><input data-show-activity type="checkbox"> Show agent activity in chat</label><h3 class="ai-section-title">Request recovery</h3><label class="ai-check"><input data-retry-429 type="checkbox"> Automatically retry HTTP 429 rate limits</label><div class="ai-retry-grid"><label>Max 429 retries<input data-max-retries type="number" min="0" max="10"></label><label>Base delay (ms)<input data-base-delay type="number" min="250" max="30000" step="250"></label></div><label class="ai-check"><input data-retry-transport type="checkbox"> Retry transport/CORS failures</label><div class="ai-retry-grid"><label>Max transport retries<input data-max-transport-retries type="number" min="0" max="10"></label><label>Transport delay (ms)<input data-transport-delay type="number" min="250" max="30000" step="250"></label></div><p class="ai-settings-note-inline">HTTP responses such as 429 are handled separately from transport failures such as CORS or connection errors.</p><h3 class="ai-section-title">Tool-call recovery</h3><label class="ai-check"><input data-tool-recovery type="checkbox"> Retry supported tool-call parse failures</label><div class="ai-retry-grid"><label>Max recovery retries<input data-tool-recovery-retries type="number" min="0" max="10"></label><span></span></div><p class="ai-settings-note-inline">Providers can opt into a recovery strategy through their API adapter. The agent itself does not special-case providers.</p></div></div><div data-settings-panel="analytics" hidden><div class="ai-analytics-panel"><div class="ai-analytics-cards" data-analytics-cards></div><h3 class="ai-section-title">By model</h3><div data-analytics-models class="ai-analytics-models"></div><button data-reset-analytics class="ai-settings-reset">Reset analytics</button></div></div><div data-settings-panel="cache" hidden><div class="ai-local-cache"><div class="ai-local-cache-heading"><strong>Persistent local AI cache</strong><button type="button" data-refresh-local-cache>Refresh</button></div><p>Model files and the Transformers.js runtime are stored in IndexedDB. Completed models can be loaded without network access.</p><div class="ai-local-cache-summary" data-local-cache-summary>Checking browser storage…</div><div class="ai-local-cache-list" data-local-cache-list></div></div></div></div>`;
       modal.querySelector('.editor-modal-close').onclick=()=>modal.remove(); modal.onclick=e=>{if(e.target===modal)modal.remove();};
       const cacheSummary=modal.querySelector('[data-local-cache-summary]');
       const cacheList=modal.querySelector('[data-local-cache-list]');
@@ -608,6 +617,7 @@ const makeEditorTools = (() => {
       const localEditor=modal.querySelector('[data-local-editor]');
       const localNameInput=modal.querySelector('[data-local-name]');
       const localModelInput=modal.querySelector('[data-local-model]');
+      const localVisionInput=modal.querySelector('[data-local-vision]');
       const localEditorStatus=modal.querySelector('[data-local-editor-status]');
       let editingLocalId='';
       function openLocalModelEditor(model=null){
@@ -617,6 +627,7 @@ const makeEditorTools = (() => {
         localEditor.querySelector('[data-local-editor-title]').textContent=editingLocalId?'Edit local model':'Add local model';
         localNameInput.value=model?.name||'';
         localModelInput.value=model?.model||'';
+        localVisionInput.checked=model?.supportsVision!==undefined?!!model.supportsVision:/gemma[-_/]?4/i.test(String(model?.model||''))&&/onnx/i.test(String(model?.model||''));
         localEditorStatus.textContent='';
         localEditor.hidden=false;
         localEditor.querySelector('[data-save-local]').textContent=editingLocalId?'Save changes':'Save model';
@@ -680,7 +691,7 @@ const makeEditorTools = (() => {
         }
         try{
           if(existing&&existing.model!==modelId&&localManager?.isLoaded?.(id))await localManager.unload();
-          registry.add({...existing,id,name,model:modelId,remoteModel:modelId,protocol:'local-transformers',kind:'local-transformers',endpoint:'',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true,builtInLocal:!!existing?.builtInLocal});
+          registry.add({...existing,id,name,model:modelId,remoteModel:modelId,protocol:'local-transformers',kind:'local-transformers',endpoint:'',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true,supportsVision:localVisionInput.checked,builtInLocal:!!existing?.builtInLocal});
           registry.save();
           editingLocalId='';localEditor.hidden=true;render();onChange?.();
         }catch(e){localEditorStatus.textContent=e?.message||String(e);}
@@ -690,7 +701,7 @@ const makeEditorTools = (() => {
         if(model)openLocalModelEditor(model);
       });
       const form=modal.querySelector('.ai-add-model'),add=modal.querySelector('[data-add]'),providerInput=form.querySelector('[data-provider]'),formatInput=form.querySelector('[data-format]'),endpointInput=form.querySelector('[data-endpoint]'),nameInput=form.querySelector('[data-name]'),modelInput=form.querySelector('[data-model]'),keyInput=form.querySelector('[data-key]'),hint=form.querySelector('[data-protocol-hint]');
-      const hfGlobalKey=modal.querySelector('[data-hf-global-key]'),hfGlobalRemember=modal.querySelector('[data-hf-global-remember]');
+      const hfGlobalKey=modal.querySelector('[data-hf-global-key]'),hfGlobalRemember=modal.querySelector('[data-hf-global-remember]'),visionInput=form.querySelector('[data-vision]');
       hfGlobalKey.value=registry.getHuggingFaceApiKey?.()||''; hfGlobalRemember.checked=!!registry.settings.huggingFaceRememberKey;
       function updateProviderFields(force=true){
         const id=providerInput.value, preset=registry.provider(id)||registry.provider('custom');
@@ -767,7 +778,7 @@ const makeEditorTools = (() => {
       form.querySelector('[data-browse-models]').onclick=()=>openModelBrowser(providerInput.value);
       providerInput.onchange=()=>updateProviderFields(true);
       endpointInput.oninput=()=>{if(providerInput.value==='custom')hint.textContent='Custom provider. The endpoint and API format will be used as entered.';};
-      function fill(model){editingLocalId='';localEditor.hidden=true;editingId=model?.id||'';form.hidden=false;const providerId=registry.providerForModel(model);providerInput.value=providerId;formatInput.value=model?.protocol||registry.provider(providerId)?.protocol||'openai-chat';formatInput.disabled=providerId!=='custom';nameInput.value=model?.name||'';endpointInput.value=model?.endpoint||'';modelInput.value=model?.model||'';keyInput.value=model?.apiKey||'';form.querySelector('[data-remember]').checked=!!model?.rememberKey;form.querySelector('[data-tools]').checked=model?.supportsTools!==false;form.querySelector('[data-thinking]').checked=model?.supportsReasoning!==false;form.querySelector('[data-save-model]').textContent=editingId?'Save changes':'Save model';updateProviderFields(false);}
+      function fill(model){editingLocalId='';localEditor.hidden=true;editingId=model?.id||'';form.hidden=false;const providerId=registry.providerForModel(model);providerInput.value=providerId;formatInput.value=model?.protocol||registry.provider(providerId)?.protocol||'openai-chat';formatInput.disabled=providerId!=='custom';nameInput.value=model?.name||'';endpointInput.value=model?.endpoint||'';modelInput.value=model?.model||'';keyInput.value=model?.apiKey||'';form.querySelector('[data-remember]').checked=!!model?.rememberKey;form.querySelector('[data-tools]').checked=model?.supportsTools!==false;form.querySelector('[data-thinking]').checked=model?.supportsReasoning!==false;visionInput.checked=!!model?.supportsVision;form.querySelector('[data-save-model]').textContent=editingId?'Save changes':'Save model';updateProviderFields(false);}
       add.onclick=()=>{
         const wasOpen=!form.hidden&&!editingId;
         editingLocalId='';
@@ -777,13 +788,13 @@ const makeEditorTools = (() => {
         providerInput.value='custom';formatInput.value='openai-chat';formatInput.disabled=false;
         nameInput.value='';endpointInput.value='';modelInput.value='';keyInput.value='';
         form.querySelector('[data-remember]').checked=false;
-        form.querySelector('[data-tools]').checked=true;form.querySelector('[data-thinking]').checked=true;
+        form.querySelector('[data-tools]').checked=true;form.querySelector('[data-thinking]').checked=true;visionInput.checked=false;
         hint.textContent='Select a provider to fill in its API format and endpoint.';
         form.hidden=false;
       };
       modal.querySelectorAll('[data-edit]').forEach(x=>x.onclick=()=>{const model=registry.settings.models.find(m=>m.id===x.dataset.edit);if(model)fill(model);});
       modal.querySelector('[data-cancel-model]').onclick=()=>{editingId='';form.hidden=true;};
-      modal.querySelector('[data-save-model]').onclick=()=>{const provider=providerInput.value.trim()||'custom',preset=registry.provider(provider)||registry.provider('custom'),name=nameInput.value.trim(),endpoint=endpointInput.value.trim(),modelId=modelInput.value.trim(),apiKey=keyInput.value,remember=form.querySelector('[data-remember]').checked,tools=form.querySelector('[data-tools]').checked,thinking=form.querySelector('[data-thinking]').checked,protocol=provider==='custom'?formatInput.value:preset.protocol;if(!name||!endpoint||!modelId){alert('Name, endpoint, and model ID are required.');return;}registry.setHuggingFaceApiKey(hfGlobalKey.value,hfGlobalRemember.checked);registry.save();const id=editingId||'model-'+Math.random().toString(36).slice(2);try{const clean=registry.add({id,provider,name,endpoint,model:modelId,apiKey,rememberKey:remember,supportsTools:tools,supportsReasoning:thinking,requiresKey:!!apiKey,protocol});registry.setActive(clean.id);editingId='';render();onChange?.();}catch(e){alert(e?.message||String(e));}};
+      modal.querySelector('[data-save-model]').onclick=()=>{const provider=providerInput.value.trim()||'custom',preset=registry.provider(provider)||registry.provider('custom'),name=nameInput.value.trim(),endpoint=endpointInput.value.trim(),modelId=modelInput.value.trim(),apiKey=keyInput.value,remember=form.querySelector('[data-remember]').checked,tools=form.querySelector('[data-tools]').checked,thinking=form.querySelector('[data-thinking]').checked,vision=visionInput.checked,protocol=provider==='custom'?formatInput.value:preset.protocol;if(!name||!endpoint||!modelId){alert('Name, endpoint, and model ID are required.');return;}registry.setHuggingFaceApiKey(hfGlobalKey.value,hfGlobalRemember.checked);registry.save();const id=editingId||'model-'+Math.random().toString(36).slice(2);try{const clean=registry.add({id,provider,name,endpoint,model:modelId,apiKey,rememberKey:remember,supportsTools:tools,supportsReasoning:thinking,supportsVision:vision,requiresKey:!!apiKey,protocol});registry.setActive(clean.id);editingId='';render();onChange?.();}catch(e){alert(e?.message||String(e));}};
       hfGlobalKey.onchange=()=>{registry.setHuggingFaceApiKey(hfGlobalKey.value,hfGlobalRemember.checked);registry.save();onChange?.();}; hfGlobalRemember.onchange=()=>{registry.setHuggingFaceApiKey(hfGlobalKey.value,hfGlobalRemember.checked);registry.save();onChange?.();};
       modal.querySelectorAll('[data-permission]').forEach(x=>x.onchange=()=>{permissions.set(x.dataset.permission,x.value);onChange?.();});
       modal.querySelector('[data-reset-permissions]').onclick=()=>{permissions.reset();render();onChange?.();};
@@ -806,6 +817,8 @@ const makeEditorTools = (() => {
     let chatMessages=[];
     let loadedProjectId=null;
     let busy=false, controller=null, editingIndex=-1;
+    let attachments=[];
+    let autoAttachmentPath='', dismissedAutoAttachmentPath='';
     const toolset=makeEditorTools({state,openFile:onOpen,onRefresh:()=>{state.fileManager?.refresh?.();updateStatus?.();},runConfigured,ensureNodeRuntime:()=>state.ensureNodeRuntime?.()});
     const client=new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork);
     // All editor conversations share one agent; each conversation opts in independently.
@@ -813,6 +826,115 @@ const makeEditorTools = (() => {
     const agent=chatAI.createAgent({id:'editor',name:'Editor Assistant',client,permissions,requestPermission:permissionPrompt,toolInstructions:AGENT_TOOL_INSTRUCTIONS,finalInstructions:AGENT_FINAL_INSTRUCTIONS,beforeTool:async payload=>(await editorExtensionHooks('ai.beforeTool',payload))||payload,afterTool:async payload=>(await editorExtensionHooks('ai.afterTool',payload))||payload});
     agent.registerTools(toolset.list());
     let currentConversation=null;
+    const TEXT_ATTACHMENT_EXTENSIONS=['txt','md','markdown','js','mjs','cjs','ts','tsx','jsx','json','jsonc','json5','html','htm','css','scss','less','xml','svg','yaml','yml','py','java','c','h','cpp','hpp','cc','rs','go','wgsl','glsl','vert','frag','shader','toml','ini','sh','bash','bat','ps1','vue','svelte','php','rb','swift','kt','lua','sql','csv','log','diff','patch',''];
+    const IMAGE_ATTACHMENT_EXTENSIONS=['png','jpg','jpeg','webp','gif','bmp','avif','apng','ico'];
+    function attachmentExtension(file){const name=String(file?.name||'').toLowerCase(),dot=name.lastIndexOf('.');return dot<0?'':name.slice(dot+1);}
+    function attachmentKind(file){
+      const ext=attachmentExtension(file),mime=String(file?.type||'').toLowerCase();
+      if(IMAGE_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('image/'))return 'image';
+      if(TEXT_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('text/'))return 'text';
+      return 'file';
+    }
+    function sensitiveAttachmentPath(path){return /(^|\\/)(?:\.env(?:\..*)?|\.editor\/process\.env|.*(?:secret|credential|password|token|private[-_]?key).*)$/i.test(String(path||''));}
+    function attachmentCapabilities(model=registry.active()){
+      const capabilities=chatAI.getCapabilities(model?.id)||{};
+      return {documents:model?.supportsDocuments!==false&&capabilities.documents!==false,vision:model?.supportsVision===true&&capabilities.vision===true};
+    }
+    function attachmentSupported(item,model=registry.active()){
+      const caps=attachmentCapabilities(model),kind=attachmentKind(item?.file||item);
+      return kind==='text'?caps.documents:kind==='image'?caps.vision:false;
+    }
+    function supportedAttachmentExtensions(model=registry.active()){
+      const caps=attachmentCapabilities(model);
+      return [...(caps.documents?TEXT_ATTACHMENT_EXTENSIONS:[]),...(caps.vision?IMAGE_ATTACHMENT_EXTENSIONS:[])].filter(Boolean);
+    }
+    function makeActiveAttachment(){
+      const tab=activeEditor(state),path=String(tab?.path||''),name=path.split('/').pop()||'';
+      if(!tab||!path||!attachmentCapabilities().documents||!TEXT_ATTACHMENT_EXTENSIONS.includes(attachmentExtension({name}))||sensitiveAttachmentPath(path))return null;
+      let content='';
+      try{content=String(tab.editor?.getValue?.()??state.fs?.readFileSync?.(path,'utf8')??'');}catch(_){return null;}
+      const file=new File([content],name,{type:window.EditorInferMime?.(path)||'text/plain',lastModified:Date.now()});
+      Object.defineProperties(file,{customRelativePath:{value:path},__wkWorkspacePath:{value:path}});
+      return {key:'active:'+path,name,path,file,active:true};
+    }
+    function syncActiveAttachment(){
+      const active=makeActiveAttachment(),path=active?.path||'';
+      if(path!==autoAttachmentPath){dismissedAutoAttachmentPath='';autoAttachmentPath=path;}
+      attachments=attachments.filter(item=>!item.active);
+      if(active&&path!==dismissedAutoAttachmentPath)attachments.unshift(active);
+    }
+    function renderAttachmentRow(tree){
+      const strip=tree?.querySelector?.('[data-attachments]');if(!strip)return;
+      const caps=attachmentCapabilities(),visible=caps.documents||caps.vision;
+      strip.hidden=!visible;if(!visible)return;
+      const chips=attachments.map((item,index)=>{
+        const supported=attachmentSupported(item);
+        const detail=item.active?'Currently open file':item.path||item.name;
+        return '<span class="ai-attachment-chip '+(supported?'':'is-unsupported')+'" title="'+escapeHtml(detail+(supported?'':' · Unsupported by this model'))+'"><span class="ai-attachment-name">'+(item.active?'● ':'')+escapeHtml(item.name)+'</span><button type="button" data-attachment-remove="'+index+'" aria-label="Remove '+escapeHtml(item.name)+'" title="Remove attachment">×</button></span>';
+      }).join('');
+      strip.innerHTML='<button type="button" class="ai-attachment-add" data-add-attachment title="Add attachment" aria-label="Add attachment" '+(busy?'disabled':'')+'>＋</button><div class="ai-attachment-list">'+chips+'</div>';
+      strip.querySelector('[data-add-attachment]').onclick=()=>addAttachments(tree);
+      strip.querySelectorAll('[data-attachment-remove]').forEach(button=>button.onclick=()=>{
+        const index=Number(button.dataset.attachmentRemove),item=attachments[index];
+        if(item?.active)dismissedAutoAttachmentPath=item.path;
+        attachments.splice(index,1);renderAttachmentRow(tree);updateComposerSendState(tree);
+      });
+    }
+    async function addAttachments(tree){
+      const extensions=supportedAttachmentExtensions();if(!extensions.length)return;
+      const picker=window.EditorApp?.getWorkspacePicker?.(tree);
+      if(!picker?.open){alert('The Editor workspace file picker is unavailable.');return;}
+      const active=activeEditor(state);
+      try{
+        const selected=await picker.open({title:'Add AI attachments',extensions,multiple:true,allowDevice:true,startPath:active?.path?.includes('/')?active.path.slice(0,active.path.lastIndexOf('/')):''});
+        if(!Array.isArray(selected)||!selected.length)return;
+        for(const file of selected){
+          const path=String(file.customRelativePath||file.__wkWorkspacePath||'');
+          if(path&&sensitiveAttachmentPath(path)){alert('Sensitive files cannot be attached to AI chats.');continue;}
+          if(!attachmentSupported({file})){alert(file.name+' is not supported by the selected model.');continue;}
+          const key=path?'path:'+path:'device:'+file.name+':'+file.size+':'+file.lastModified;
+          if(attachments.some(item=>item.key===key))continue;
+          attachments.push({key,name:file.name,path,file,active:false});
+        }
+        renderAttachmentRow(tree);updateComposerSendState(tree);
+      }catch(error){alert(error?.message||String(error));}
+    }
+    function fileAsDataUrl(file){
+      return new Promise((resolve,reject)=>{
+        const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||''));
+        reader.onerror=()=>reject(reader.error||new Error('Could not read '+file.name));reader.readAsDataURL(file);
+      });
+    }
+    async function buildAttachmentPayload(){
+      const metadata=[],images=[],textParts=[];
+      for(const item of attachments){
+        const file=item.active?makeActiveAttachment()?.file:item.file;if(!file)continue;
+        const kind=attachmentKind(file);
+        if(!attachmentSupported({file}))throw new Error(file.name+' is not supported by the selected model. Remove it or switch to a compatible model.');
+        const path=String(item.path||file.customRelativePath||'');
+        metadata.push({name:String(file.name),path,kind,mimeType:String(file.type||''),size:Number(file.size)||0,active:!!item.active});
+        if(kind==='text'){
+          if(file.size>1024*1024)throw new Error(file.name+' is larger than the 1 MiB text attachment limit.');
+          let content=await file.text();if(content.length>60000)content=content.slice(0,60000)+'\n… [truncated]';
+          textParts.push('Attached file: '+(path||file.name)+'\n'+content+'\n[End attached file]');
+        }else if(kind==='image'){
+          if(file.size>12*1024*1024)throw new Error(file.name+' is larger than the 12 MiB image attachment limit.');
+          images.push({mimeType:String(file.type||'image/png'),dataUrl:await fileAsDataUrl(file)});
+        }
+      }
+      return {metadata,images,textContext:textParts.length?'\n\n'+textParts.join('\n\n'):''};
+    }
+    function decorateAttachmentMessages(messages,payload){
+      const output=(messages||[]).map(message=>({...message,images:undefined}));
+      const user=[...output].reverse().find(message=>message.role==='user');
+      if(user){user.content=String(user.content||'')+String(payload?.textContext||'');if(payload?.images?.length)user.images=payload.images;delete user.attachments;}
+      return output;
+    }
+    function updateComposerSendState(tree){
+      const input=tree?.querySelector?.('[data-input]'),send=tree?.querySelector?.('[data-send]');if(!send)return;
+      const model=registry.active(),needsLoad=!!(model?.local||model?.protocol==='local-transformers')&&!localManager.isLoaded(model.id);
+      send.disabled=busy||needsLoad||(!input?.value?.trim()&&!attachments.some(item=>attachmentSupported(item,model)));
+    }
     async function activateModel(id){
       const target=registry.settings.models.find(x=>x.id===id);
       if(!target)throw new Error('AI model not found.');
@@ -841,16 +963,18 @@ const makeEditorTools = (() => {
       const model=registry.active(),local=!!model?.local||model?.protocol==='local-transformers';
       const label=tree.querySelector('.ai-model-label');if(label)label.textContent=makeModelLabel(model,registry,localManager);
       const loaded=local&&localManager.isLoaded(model.id);
-      const status=tree.querySelector('[data-local-status]'),text=tree.querySelector('[data-local-status-text]'),bar=tree.querySelector('[data-local-status-progress]'),button=tree.querySelector('[data-local-load]'),input=tree.querySelector('[data-input]'),send=tree.querySelector('[data-send]');
-      if(status){status.hidden=!local||(!info?.loading&&!loaded);}
-      if(text)text.textContent=info?.loading?(info.text||'Loading local model…'):(loaded?(info?.text||'Local model ready.'):'Local model is not loaded.');
-      if(bar)bar.style.width=(info?.loading?Math.max(0,Math.min(100,Number(info.progress)||0)):loaded?100:0)+'%';
+      const button=tree.querySelector('[data-local-load]'),input=tree.querySelector('[data-input]');
       if(button){button.disabled=!!info?.loading;button.textContent=info?.loading?'Loading…':loaded?'Loaded':'Load model';}
       const needsLoad=local&&!loaded;
       if(input){input.disabled=needsLoad||busy;input.placeholder=needsLoad?'Load the local model first…':'Ask anything about your project…';}
-      if(send)send.disabled=needsLoad||busy||!input?.value?.trim();
+      updateComposerSendState(tree);
     }
     localManager.subscribe(updateLocalStatusUI);
+    window.EditorApp?.onTabActivate?.(()=>{
+      syncActiveAttachment();
+      const view=currentTab?._viewElement;
+      if(view){renderAttachmentRow(view);updateComposerSendState(view);}
+    });
     function syncChats() {
       const pid=state.projectId || 'global';
       if (loadedProjectId===pid && currentChatId) return;
@@ -863,7 +987,7 @@ const makeEditorTools = (() => {
       currentConversation=chatAI.openConversation({id:currentChatId,messages:chatMessages,modelId:registry.active()?.id,agentId:chat.agentId||null});
     }
     function currentChat() { syncChats(); return chatStore.get(currentChatId); }
-    function activeMessages() { return (currentConversation?.getMessages?.() || chatMessages).map(m=>({role:m.role,content:m.content})); }
+    function activeMessages() { return (currentConversation?.getMessages?.() || chatMessages).map(m=>({...m,images:undefined})); }
     function persist() {
       const chat=currentChat();chat.messages=chatMessages;currentConversation?.setMessages?.(chatMessages);
       const attached=currentConversation?.getAgent?.();if(attached)chat.agentId=attached.id;else delete chat.agentId;
@@ -926,14 +1050,14 @@ const makeEditorTools = (() => {
       if (!g || !g.tabs.includes(t)) return null;
       return {g,t};
     }
-    function addMessage(chat,role,text,index,message){const row=document.createElement('div');row.className='ai-message '+(role==='user'?'ai-user':'ai-assistant');if(role==='assistant'&&message?.activity?.length){const activity=renderActivity(chat,message.activity,false);row.appendChild(activity);}const bubble=document.createElement('div');bubble.className='ai-bubble';if(role==='user')bubble.textContent=text;else renderMessage(bubble,text,code=>insertCode(code));row.appendChild(bubble);if(role==='user'&&Number.isInteger(index)){const edit=document.createElement('button');edit.className='ai-edit-message';edit.textContent='✎';edit.title='Edit and resend';edit.setAttribute('aria-label','Edit and resend prompt');edit.disabled=busy;edit.onclick=()=>beginEdit(index);row.appendChild(edit);}chat.appendChild(row);return bubble;}
+    function addMessage(chat,role,text,index,message){const row=document.createElement('div');row.className='ai-message '+(role==='user'?'ai-user':'ai-assistant');if(role==='assistant'&&message?.activity?.length){const activity=renderActivity(chat,message.activity,false);row.appendChild(activity);}const bubble=document.createElement('div');bubble.className='ai-bubble';if(role==='user')bubble.textContent=text;else renderMessage(bubble,text,code=>insertCode(code));row.appendChild(bubble);if(role==='user'&&message?.attachments?.length){const attached=document.createElement('div');attached.className='ai-message-attachments';attached.textContent=message.attachments.map(item=>item.name).join(' · ');row.appendChild(attached);}if(role==='user'&&Number.isInteger(index)){const edit=document.createElement('button');edit.className='ai-edit-message';edit.textContent='✎';edit.title='Edit and resend';edit.setAttribute('aria-label','Edit and resend prompt');edit.disabled=busy;edit.onclick=()=>beginEdit(index);row.appendChild(edit);}chat.appendChild(row);return bubble;}
     async function insertCode(code){
       const tab=activeEditor(state); if(!tab){alert('Open a text file to insert this snippet.');return;} if(!tab.editor){onOpen?.(tab.path);setTimeout(()=>insertCode(code),150);return;}
       const tool=toolset.map.get('insert_code'); if(!tool)return;
       try { await (async()=>{const policy=permissions.get(tool.permission);if(policy==='never')throw new Error('Editor modification permission is disabled.');if(policy==='ask'){const d=await permissionPrompt({tool,args:{code},preview:{path:tab.path,code:code.slice(0,4000)}});if(d==='deny')return;if(d==='always')permissions.set(tool.permission,'always');}await tool.execute({code});})(); } catch(e){alert(e?.message||String(e));}
     }
     function systemPrompt(forAgent=false) {
-      const context=aiRoot.buildContext(state,{maxFileChars:20000});
+      const context=aiRoot.buildContext(state,{maxFileChars:20000,includeActiveFile:false});
       const prefs=aiRoot.getAIPreferences?.()||{};
       const custom=String(prefs.customInstructions||'').trim();
       const agentExtra=forAgent?String(prefs.agentInstructions||'').trim():'';
@@ -995,9 +1119,10 @@ const makeEditorTools = (() => {
       }
       tree.style.display = '';
       const model=registry.active(); const localModel=!!model?.local||model?.protocol==='local-transformers'; const localLoaded=!localModel||localManager.isLoaded(model.id); const chats=chatStore.list(true); const current=currentChat();
+      syncActiveAttachment();
       if(!model.supportsTools&&!model.supportsAgentTools&&currentConversation?.getAgent?.()){currentConversation.removeAgent();delete current.agentId;persist();}
       const agentMode=!!currentConversation?.getAgent?.();
-      tree.innerHTML=`<div class="ai-panel-inner"><div class="ai-header"><div class="ai-header-left"><strong>AI Chat</strong><span class="ai-model-label">${escapeHtml(makeModelLabel(model,registry,localManager))}</span></div><div class="ai-header-right"><select class="ai-chat-select" data-chat-select ${busy?'disabled':''} title="Recent chats">${chats.map(c=>`<option value="${escapeHtml(c.id)}" ${c.id===currentChatId?'selected':''}>${escapeHtml(c.title)}</option>`).join('')}${!chats.length?'<option>No chats</option>':''}</select><div class="ai-head-actions"><button data-chat-manage ${busy?'disabled':''} title="Manage chats" aria-label="Manage chats">☰</button><button data-new ${busy?'disabled':''} title="New chat" aria-label="New chat">＋</button><button data-settings title="AI Settings" aria-label="AI Settings">⚙</button></div><div class="ai-local-head-action">${localModel&&!localLoaded?'<button data-local-load>Load model</button>':''}</div></div></div><div class="ai-chat" data-chat>${chatMessages.length ? '' : '<div class="ai-chat-disclaimer">Chats are saved inside this project. If this project is published or pushed to Git, saved chats may be visible to others.</div>'}</div><div class="ai-request-status" data-status ${busy?'':'hidden'}>${busy?'Working…':''}</div><div class="ai-local-status" data-local-status hidden><div data-local-status-text></div><div class="ai-local-progress"><span data-local-status-progress></span></div></div><div class="ai-compose"><textarea data-input placeholder="Ask anything about your project…" rows="3"></textarea><div class="ai-compose-bar"><label class="ai-agent-toggle"><input data-agent type="checkbox" ${agentMode?'checked':''} ${model.supportsTools||model.supportsAgentTools?'':'disabled'}> Agent mode${model.supportsTools||model.supportsAgentTools?'':' (not supported by this model)'}</label><label class="ai-agent-steps">Steps <input data-agent-steps type="number" min="1" max="100" step="1" value="${Math.max(1,Math.min(100,Number(agent.maxSteps)||24))}" ${model.supportsTools||model.supportsAgentTools?'':'disabled'}></label><button data-stop ${busy?'':'disabled'}>Stop</button><button class="primary" data-send ${busy?'disabled':''}>Send</button></div></div></div>`;
+      tree.innerHTML=`<div class="ai-panel-inner"><div class="ai-header"><div class="ai-header-left"><strong>AI Chat</strong><span class="ai-model-label">${escapeHtml(makeModelLabel(model,registry,localManager))}</span></div><div class="ai-header-right"><select class="ai-chat-select" data-chat-select ${busy?'disabled':''} title="Recent chats">${chats.map(c=>`<option value="${escapeHtml(c.id)}" ${c.id===currentChatId?'selected':''}>${escapeHtml(c.title)}</option>`).join('')}${!chats.length?'<option>No chats</option>':''}</select><div class="ai-head-actions"><button data-chat-manage ${busy?'disabled':''} title="Manage chats" aria-label="Manage chats">☰</button><button data-new ${busy?'disabled':''} title="New chat" aria-label="New chat">＋</button><button data-settings title="AI Settings" aria-label="AI Settings">⚙</button></div><div class="ai-local-head-action">${localModel&&!localLoaded?'<button data-local-load>Load model</button>':''}</div></div></div><div class="ai-chat" data-chat>${chatMessages.length ? '' : '<div class="ai-chat-disclaimer">Chats are saved inside this project. If this project is published or pushed to Git, saved chats may be visible to others.</div>'}</div><div class="ai-request-status" data-status ${busy?'':'hidden'}>${busy?'Working…':''}</div><div class="ai-compose"><div class="ai-attachments" data-attachments></div><textarea data-input placeholder="Ask anything about your project…" rows="3"></textarea><div class="ai-compose-bar"><label class="ai-agent-toggle"><input data-agent type="checkbox" ${agentMode?'checked':''} ${model.supportsTools||model.supportsAgentTools?'':'disabled'}> Agent mode${model.supportsTools||model.supportsAgentTools?'':' (not supported by this model)'}</label><label class="ai-agent-steps">Steps <input data-agent-steps type="number" min="1" max="100" step="1" value="${Math.max(1,Math.min(100,Number(agent.maxSteps)||24))}" ${model.supportsTools||model.supportsAgentTools?'':'disabled'}></label><button data-stop ${busy?'':'disabled'}>Stop</button><button class="primary" data-send ${busy?'disabled':''}>Send</button></div></div></div>`;
       const chat=tree.querySelector('[data-chat]');
       for(let i=0;i<chatMessages.length;i++){const m=chatMessages[i];addMessage(chat,m.role,m.content,i,m);}
       tree.querySelector('[data-agent]').onchange=e=>{if(e.target.checked)currentConversation?.setAgent(agent);else currentConversation?.removeAgent();persist();};
@@ -1008,19 +1133,20 @@ const makeEditorTools = (() => {
       tree.querySelector('[data-chat-manage]').onclick=()=>chatManageModal();
       tree.querySelector('[data-local-load]')?.addEventListener('click',async()=>{try{await activateModel(model.id);render(g,t);}catch(e){alert(e?.message||String(e));updateLocalStatusUI(localManager.status());}});
       updateLocalStatusUI(localManager.status());
+      renderAttachmentRow(tree);
       tree.querySelector('[data-new]').onclick=()=>newChat();
       tree.querySelector('[data-stop]').onclick=()=>{controller?.abort();chatAI.cancel();busy=false;render(g,t);};
       const input=tree.querySelector('[data-input]'); const send=tree.querySelector('[data-send]');
-      const submit=async()=>{const text=input.value.trim();if(!text||busy)return;if(editingIndex>=0){const index=editingIndex;input.value='';resendMessage(index,text,g,t,tree);}else{input.value='';await sendMessage(text,g,t,tree);}};
+      const submit=async()=>{const text=input.value.trim();if((!text&&!attachments.some(item=>attachmentSupported(item)))||busy)return;if(editingIndex>=0){const index=editingIndex;input.value='';resendMessage(index,text,g,t,tree);}else{let payload;try{payload=await buildAttachmentPayload();}catch(error){const status=tree.querySelector('[data-status]');if(status){status.textContent=error?.message||String(error);status.hidden=false;}return;}input.value='';await sendMessage(text,g,t,tree,payload);}};
       send.textContent=editingIndex>=0?'Resend':'Send';
-      const updateSendState=()=>{const active=registry.active();send.disabled=!input.value.trim()||busy||!!((active?.local||active?.protocol==='local-transformers')&&!localManager.isLoaded(active.id));};
+      const updateSendState=()=>updateComposerSendState(tree);
       input.addEventListener('input',updateSendState);
       send.onclick=submit; input.addEventListener('keydown',e=>{if(e.key==='Enter' && !e.shiftKey){e.preventDefault();submit();}});
       updateSendState();
       if(editingIndex>=0){const cancel=document.createElement('button');cancel.type='button';cancel.dataset.cancelEdit='';cancel.textContent='Cancel';cancel.title='Cancel prompt editing and send a new message instead';cancel.onclick=()=>cancelEdit(input,send);send.parentNode.insertBefore(cancel,send);}
       if(chatMessages.length)chat.scrollTop=chat.scrollHeight;
     }
-    async function sendMessage(text,g,t,tree){
+    async function sendMessage(text,g,t,tree,attachmentPayload={metadata:[],images:[],textContext:''}){
       if(!g?.viewBody || !t) return;
       const chatRecord=currentChat();
       busy=true; controller=new AbortController();
@@ -1037,7 +1163,7 @@ const makeEditorTools = (() => {
       const setStatus=text=>{const el=tree.querySelector('[data-status]');if(!el)return;el.replaceChildren(document.createTextNode(text||''));el.hidden=!text;};
       // Show the user's prompt immediately. ConversationAI.send() records the same
       // message in history below; the final render rebuilds the transcript from that history.
-      addMessage(chat,'user',text);
+      addMessage(chat,'user',text,undefined,{attachments:attachmentPayload.metadata||[]});
       chat.querySelector('.ai-chat-disclaimer')?.remove();
       chat.scrollTop=chat.scrollHeight;
       const activeAgent=currentConversation?.getAgent?.()||null;
@@ -1058,14 +1184,16 @@ const makeEditorTools = (() => {
             else if(event.type==='reasoning_summary'){appendActivity(liveActivity,{kind:'reasoning_summary',text:event.text});} else if(event.type==='reasoning'){appendActivity(liveActivity,{kind:'reasoning',text:event.text||'Model reasoning is active.'});}
           };
           const prompt=systemPrompt(true);
-          let hookInput={messages:[...activeMessages(),{role:'user',content:text}],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'};
+          let hookInput={messages:[...activeMessages(),{role:'user',content:text,attachments:attachmentPayload.metadata||[]}],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'};
           const response=await currentConversation.send(text,{
             systemPrompt:prompt,maxTokens:2048,retryTransport:prefs.retryTransport,maxTransportRetries:prefs.maxTransportRetries,
             transportRetryDelay:prefs.transportRetryDelay,signal:controller.signal,emit:emitAgentEvent,
             prepareMessages:async messages=>{
+              const originalUser=[...messages].reverse().find(message=>message.role==='user');
+              if(originalUser&&attachmentPayload.metadata?.length)originalUser.attachments=attachmentPayload.metadata;
               hookInput={...hookInput,messages:[...messages]};
               const prepared=await editorExtensionHooks('ai.beforeRun',hookInput);
-              return [{role:'system',content:prompt},...(prepared?.messages||messages.filter(message=>message.role!=='system'))];
+              return decorateAttachmentMessages([{role:'system',content:prompt},...(prepared?.messages||messages.filter(message=>message.role!=='system'))],attachmentPayload);
             },
             onRetry:info=>emitAgentEvent({type:info?.kind==='tool_parse_recovery'?'provider_retry':info?.kind==='transport_retry'?'transport_retry':'retry',...info})
           });
@@ -1077,9 +1205,9 @@ const makeEditorTools = (() => {
           // Unlike the agent path, plain chat streams directly from the provider.
           // Record the prompt in the conversation before building the request so
           // the final render cannot discard the temporary user bubble.
-          currentConversation.addMessage({role:'user',content:text});
+          currentConversation.addMessage({role:'user',content:text,attachments:attachmentPayload.metadata||[]});
           chatMessages=currentConversation.getMessages();
-          const messages=[{role:'system',content:systemPrompt(false)},...activeMessages()];
+          const messages=decorateAttachmentMessages([{role:'system',content:systemPrompt(false)},...activeMessages()],attachmentPayload);
           const model=chatAI.getModel();
           for await(const chunk of chatAI.stream(messages,{modelId:model?.id,conversationId:currentConversation.id,thinking:true,maxTokens:2048,temperature:.7,topP:.9,signal:controller.signal,systemPrompt:systemPrompt(false),onRetry:info=>setStatus(info?.kind==='tool_parse_recovery' ? (info.text||'Retrying tool-call generation…') : info?.kind==='transport_retry' ? `Network retry in ${Math.ceil((info.waitMs||0)/1000)}s (attempt ${info.attempt}/${info.maxRetries})` : `Rate limited — retrying in ${Math.ceil(info.waitMs/1000)}s (attempt ${info.attempt}/${info.maxRetries})`)})){
             partial=chunk.text??partial;
@@ -1096,6 +1224,7 @@ const makeEditorTools = (() => {
         // Keep the editor's persisted transcript aligned with ConversationAI, which
         // owns insertion of both the user and assistant messages.
         if(currentConversation?.getMessages)chatMessages=currentConversation.getMessages();
+        attachments=attachments.filter(item=>item.active);syncActiveAttachment();
         persist();
         busy=false; controller=null; render(g,t);
       }
