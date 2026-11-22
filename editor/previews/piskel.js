@@ -178,6 +178,13 @@
         ctx.writeText(json, ctx.file.path + '.piskel');
         ctx.markDirty(ctx.file.path);
 
+        // Keep the file list and any other open editor for this path in sync
+        // with the newly exported image, just like AudioMass exports do.
+        ctx.state.fileManager?.refresh?.();
+        window.dispatchEvent(new CustomEvent('editor-audio-file-saved', {
+          detail: { path: ctx.file.path, source: 'piskel-edit' }
+        }));
+
         settings?.closeDrawer?.();
         saveStatus.textContent = automatic ? 'Auto-saved' : 'Saved';
         window.setTimeout(() => {
