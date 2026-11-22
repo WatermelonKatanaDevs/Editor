@@ -126,7 +126,8 @@ window.__editorInitPromise = (async function () {
       confirmBeforeDelete: true,
       dimHiddenFolders: true,
       ignoreNodeModules: true,
-      hideNodeModules: false
+      hideNodeModules: false,
+      recentlyClosedRetentionMs: 300000
     }
   };
   const $ = id => document.getElementById(id);
@@ -530,6 +531,10 @@ window.__editorInitPromise = (async function () {
     if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return;
     const { browserSettings: legacyBrowserSettings, hideBrowserBar: legacyHideBrowserBar, ...behaviorSettings } = settings;
     state.behavior = { ...state.behavior, ...behaviorSettings };
+    const retention = Number(state.behavior.recentlyClosedRetentionMs);
+    state.behavior.recentlyClosedRetentionMs = Number.isFinite(retention)
+      ? Math.max(0, Math.min(2147483647, retention))
+      : 300000;
     // Older projects stored a few browser preferences in .editor/settings.json.
     // Import them once only when the user's global browser preferences are absent.
     if (!hasPersistedBrowserSettings && (
@@ -1222,31 +1227,28 @@ window.__editorInitPromise = (async function () {
     };
   }
   function clearView(g) {
+    if (!g?.viewBody) return;
     g.viewBar.innerHTML = '';
 
-    // Keep live tab views attached to the document. Removing an iframe from
-    // the DOM unloads its browsing context, which resets stateful previews
-    // such as Piskel and browser-based tools every time the user switches tabs.
-    // Persistent tab surfaces are hidden instead; temporary render elements
-    // are still removed.
+    // Keep views mounted while switching, dragging, or temporarily closing a
+    // tab. Removing an iframe unloads its browsing context and loses its state.
     const persistent = new Set();
-    for (const tab of g.tabs || []) {
-      if (tab._previewHost) persistent.add(tab._previewHost);
-      if (tab._viewElement) persistent.add(tab._viewElement);
-      // Preserve every live preview surface, not only the currently active
-      // one. Switching from Piskel to another preview must not remove the
-      // Piskel iframe from the DOM, or its browsing context will reset.
-      for (const instance of tab._previewInstances?.values?.() || []) {
+    const tabs = new Set(g.tabs || []);
+    for (const tab of g.__movingTabs || []) tabs.add(tab);
+    for (const entry of state.closedTabHistory || []) {
+      if (entry.group === g && !entry.disposed && !entry.restored) tabs.add(entry.tab);
+    }
+    for (const tab of tabs) {
+      if (tab?._previewHost) persistent.add(tab._previewHost);
+      if (tab?._viewElement) persistent.add(tab._viewElement);
+      for (const instance of tab?._previewInstances?.values?.() || []) {
         if (instance?.host) persistent.add(instance.host);
       }
     }
 
     for (const child of [...g.viewBody.children]) {
-      if (persistent.has(child)) {
-        child.style.display = 'none';
-      } else {
-        child.remove();
-      }
+      if (persistent.has(child)) child.style.display = 'none';
+      else child.remove();
     }
   }
   function renderViewBar(g, t) {
@@ -1283,7 +1285,7 @@ window.__editorInitPromise = (async function () {
     t.editor = null;
   }
   function renderGroupEmpty(g) {
-    g.viewBody.innerHTML = '';
+    clearView(g);
     const empty = document.createElement('div');
     empty.className = 'group-drag-empty';
     empty.textContent = 'drag tab here';
@@ -1292,54 +1294,134 @@ window.__editorInitPromise = (async function () {
   function getActiveWorkbenchGroup() {
     return Workbench.getActiveGroup?.() || state.workbench?.getActiveGroup?.() || state.workbench?.getFirstLeaf?.() || null;
   }
-  function rememberClosedWorkbenchTab(t, g) {
-    if (!t || !g) return;
-    let data = null;
-    if (t.kind === 'file') {
-      data = {kind:'file', path:t.path, view:t.view};
-    } else if (t.kind === 'builtin') {
-      data = {kind:'builtin', builtin:t.builtin};
-      if (t.builtin === 'group') {
-        data.groupName = t.groupName || 'Group';
-        data.groupLayout = t._groupWorkbench?.serialize?.() || t.groupLayout || null;
-      } else if (t.builtin === 'source-control-diff') {
-        data.diffData = t.diffData || null;
-      }
+  function getClosedTabRetentionMs() {
+    const value = Number(state.behavior?.recentlyClosedRetentionMs ?? 300000);
+    return Number.isFinite(value) ? Math.max(0, Math.min(2147483647, value)) : 300000;
+  }
+  function moveNodePreservingState(parent, node, before = null) {
+    if (!parent || !node) return;
+    if (node.parentNode === parent) {
+      if (before && before !== node && node.nextSibling !== before) parent.insertBefore(node, before);
+      return;
     }
-    if (!data) return;
+    // moveBefore preserves stateful descendants such as iframe browsing
+    // contexts in browsers that support the DOM state-preserving move API.
+    if (typeof parent.moveBefore === 'function') {
+      try { parent.moveBefore(node, before); return; } catch (_) {}
+    }
+    parent.insertBefore(node, before);
+  }
+  window.EditorMoveNodePreservingState = moveNodePreservingState;
+
+  function releaseRetainedTabGroup(group, workbench) {
+    if (!group || (state.closedTabHistory || []).some(entry => entry.group === group && !entry.disposed && !entry.restored)) return;
+    group.keepAlive = false;
+    if (!workbench?.groups?.has?.(group.id)) {
+      try { group.el?.remove?.(); } catch (_) {}
+    }
+  }
+  function disposeWorkbenchTab(tab) {
+    if (!tab || tab._resourcesDisposed) return;
+    tab._resourcesDisposed = true;
+    if (tab.builtin === 'peer') void getBuiltin('peer')?.stop(tab);
+    if (tab.builtin === 'group') {
+      const nested = tab._groupWorkbench;
+      for (const group of [...(nested?.groups?.values?.() || [])]) {
+        for (const childTab of [...(group.tabs || [])]) disposeWorkbenchTab(childTab);
+      }
+      try { nested?.dispose?.(); } catch (_) {}
+      tab._groupWorkbench = null;
+    }
+    if (tab.kind === 'builtin') {
+      try { getBuiltin(tab.builtin)?.dispose?.(tab); } catch (_) {}
+    }
+    if (tab.id && state.terminalTabs.has(tab.id)) {
+      try { state.terminalTabs.get(tab.id)?.dispose?.(); } catch (_) {}
+      state.terminalTabs.delete(tab.id);
+    }
+    try { state.previews?.dispose(tab); } catch (_) {}
+    try { tab.listener?.dispose?.(); } catch (_) {}
+    try { tab.editor?.dispose?.(); } catch (_) {}
+    try { tab.model?.dispose?.(); } catch (_) {}
+    try { tab._viewElement?.remove?.(); } catch (_) {}
+    tab.listener = null;
+    tab.editor = null;
+    tab.model = null;
+    tab._viewElement = null;
+  }
+  function destroyClosedTabEntry(entry) {
+    if (!entry || entry.disposed || entry.restored) return;
+    entry.disposed = true;
+    clearTimeout(entry.timer);
+    const history = state.closedTabHistory || [];
+    const index = history.indexOf(entry);
+    if (index >= 0) history.splice(index, 1);
+    disposeWorkbenchTab(entry.tab);
+    releaseRetainedTabGroup(entry.group, entry.workbench);
+  }
+  function rememberClosedWorkbenchTab(t, g) {
+    if (!t || !g) return null;
+    const retentionMs = getClosedTabRetentionMs();
+    if (retentionMs <= 0) return null;
     const history = state.closedTabHistory || (state.closedTabHistory = []);
-    history.push({
-      data,
+    const entry = {
+      tab:t,
       workbench:g.ownerWorkbench || state.workbench,
+      group:g,
       groupId:g.id,
-      index:g.tabs.indexOf(t)
-    });
-    if (history.length > 50) history.splice(0, history.length - 50);
+      index:g.tabs.indexOf(t),
+      closedAt:Date.now(),
+      expiresAt:Date.now() + retentionMs,
+      timer:null,
+      disposed:false,
+      restored:false
+    };
+    g.keepAlive = true;
+    history.push(entry);
+    entry.timer = setTimeout(() => destroyClosedTabEntry(entry), retentionMs);
+    while (history.length > 50) destroyClosedTabEntry(history[0]);
+    return entry;
   }
   function restoreClosedWorkbenchTab() {
     const history = state.closedTabHistory || [];
     while (history.length) {
-      const entry = history.pop();
-      const tab = makeLayoutTab(entry.data, state.runConfig?.config?.serverType);
-      if (!tab) continue;
+      const entry = history[history.length - 1];
+      if (!entry || entry.disposed || entry.expiresAt <= Date.now()) {
+        destroyClosedTabEntry(entry);
+        continue;
+      }
+      const tab = entry.tab;
+      if (!tab || tab._resourcesDisposed) {
+        destroyClosedTabEntry(entry);
+        continue;
+      }
       const instances = Workbench.getInstances?.() || [];
       let group = instances.includes(entry.workbench)
         ? entry.workbench.groups.get(entry.groupId) || null
         : null;
       if (!group) group = getActiveWorkbenchGroup();
-      if (!group) continue;
+      if (!group) return false;
       const wb = group.ownerWorkbench || state.workbench;
-      if (!wb) continue;
-      // Closing the final tab in the root workbench automatically creates a
-      // Welcome tab. Replace that placeholder when restoring the closed tab.
+      if (!wb) return false;
+
+      clearTimeout(entry.timer);
+      entry.restored = true;
+      const historyIndex = history.indexOf(entry);
+      if (historyIndex >= 0) history.splice(historyIndex, 1);
+
+      // Closing the final tab in the root workbench creates a Welcome tab.
+      // Replace that placeholder while restoring the original live tab object.
       const welcomePlaceholder = group.tabs.length === 1
         && group.tabs[0]?.kind === 'builtin'
         && group.tabs[0]?.builtin === 'welcome';
       if (welcomePlaceholder) {
+        const welcome = group.tabs[0];
         group.tabs.splice(0, 1);
         group.active = null;
+        disposeWorkbenchTab(welcome);
       }
       wb.addTab(tab, group, welcomePlaceholder ? 0 : entry.index);
+      releaseRetainedTabGroup(entry.group, entry.workbench);
       return true;
     }
     return false;
@@ -1360,15 +1442,8 @@ window.__editorInitPromise = (async function () {
   }
   function closeWorkbenchTab(t, g) {
     if (!t || !g) return;
-    rememberClosedWorkbenchTab(t, g);
-    if (t?.builtin === 'peer') void getBuiltin('peer')?.stop(t);
-    if (t?.builtin === 'group') t._groupWorkbench?.dispose?.();
-    if (t?.kind === 'builtin') {
-      try { getBuiltin(t.builtin)?.dispose?.(t); } catch (_) {}
-    }
-    state.previews?.dispose(t);
-    t.model?.dispose?.();
-    t.editor?.dispose?.();
+    const entry = rememberClosedWorkbenchTab(t, g);
+    if (!entry) disposeWorkbenchTab(t);
     const wb = g.ownerWorkbench || state.workbench;
     wb.removeTab(g, t.id);
     emitEditorEvent('tabClose', {
@@ -1453,7 +1528,7 @@ window.__editorInitPromise = (async function () {
     if (t.kind === 'builtin') {
       if (t.builtin === 'group') {
         if (t._viewElement) {
-          if (t._viewElement.parentNode !== g.viewBody) g.viewBody.appendChild(t._viewElement);
+          if (t._viewElement.parentNode !== g.viewBody) moveNodePreservingState(g.viewBody, t._viewElement);
           t._viewElement.style.display = '';
           g.__renderedTab = t;
           if (!t._groupWorkbench) renderGroupBuiltin(g, t);
@@ -1466,7 +1541,7 @@ window.__editorInitPromise = (async function () {
         return;
       }
       if (t._viewElement) {
-        if (t._viewElement.parentNode !== g.viewBody) g.viewBody.appendChild(t._viewElement);
+        if (t._viewElement.parentNode !== g.viewBody) moveNodePreservingState(g.viewBody, t._viewElement);
         t._viewElement.style.display = '';
         g.__renderedTab = t;
         if (t.builtin === 'terminal') {
@@ -2476,19 +2551,19 @@ window.__editorInitPromise = (async function () {
   }
   function disposeAllWorkbenchTabs() {
     const seen = new Set();
+    for (const entry of [...(state.closedTabHistory || [])]) {
+      if (entry?.tab && !seen.has(entry.tab)) {
+        seen.add(entry.tab);
+        destroyClosedTabEntry(entry);
+      }
+    }
+    state.closedTabHistory = [];
     for (const wb of Workbench.getInstances?.() || []) {
       for (const g of [...(wb.groups?.values?.() || [])]) {
-        for (const t of [...(g.tabs || [])]) {
-          if (seen.has(t)) continue;
-          seen.add(t);
-          if (t.builtin === 'group') {
-            try { t._groupWorkbench?.dispose?.(); } catch (_) {}
-          }
-          try { state.previews?.dispose?.(t); } catch (_) {}
-          try { t.editor?.dispose?.(); } catch (_) {}
-          try { t.model?.dispose?.(); } catch (_) {}
-          t.editor = null;
-          t.model = null;
+        for (const tab of [...(g.tabs || [])]) {
+          if (seen.has(tab)) continue;
+          seen.add(tab);
+          disposeWorkbenchTab(tab);
         }
       }
     }
