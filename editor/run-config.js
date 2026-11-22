@@ -161,15 +161,11 @@
       if (this.normalizeBrowserUrl(currentDefault) !== previous) return false;
 
       try {
-        if (typeof browser?.setBrowserDefaultTab === 'function') {
-          browser.setBrowserDefaultTab(nextUrl);
-        } else if (window.__editorBrowserStateBridge?.write) {
-          window.__editorBrowserStateBridge.write({
-            settings: {...(state.browserSettings || {}), defaultTab: nextUrl}
-          });
-        } else {
-          state.browserSettings = {...(state.browserSettings || {}), defaultTab: nextUrl};
-        }
+        // The iframe is same-origin, so update its runtime default directly.
+        // If it is not open yet, the next Browser instance receives the latest
+        // run URL from the editor when its URL is constructed.
+        if (typeof browser?.setBrowserDefaultTab !== 'function') return false;
+        browser.setBrowserDefaultTab(nextUrl);
         return true;
       } catch (error) {
         console.warn('Could not update the Browser default page:', error);
