@@ -1275,15 +1275,6 @@ window.__editorInitPromise = (async function () {
     // Keep the initial editor surface blank until a project or tab is opened.
     clearView(g);
   }
-  function disposeTabView(t) {
-    if (!t || t._previewHost) return;
-    if (t.editor) {
-      try {
-        t.editor.dispose();
-      } catch (_) {}
-    }
-    t.editor = null;
-  }
   function renderGroupEmpty(g) {
     clearView(g);
     const empty = document.createElement('div');
@@ -1506,7 +1497,6 @@ window.__editorInitPromise = (async function () {
     // Preview instances are persistent per tab/view. Switching tabs, moving
     // a tab between groups, or changing between Piskel and another view must
     // not dispose the embedded editor.
-    disposeTabView(t);
     clearView(g);
     if (t.kind === 'file') {
       state.lastTextTab = t;
