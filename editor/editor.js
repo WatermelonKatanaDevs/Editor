@@ -1533,7 +1533,7 @@ window.__editorInitPromise = (async function () {
         finish('builtinRender', t._viewElement, { builtin:t.builtin });
         return;
       }
-      if (!t._viewElement) {
+      if (!t._viewElement || t._viewCreatePromise) {
         let pending = t._viewCreatePromise;
         if (!pending) {
           const before = new Set([...g.viewBody.children]);
