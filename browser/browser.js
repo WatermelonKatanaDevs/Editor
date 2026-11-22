@@ -137,7 +137,10 @@ window.addEventListener('error', function(e) {
 var bookmarks = [];
 
 function setStorageItem(key,value) {
-  try { localStorage.setItem(key,JSON.stringify(value)); } catch (_) {}
+  try {
+    const serialized = JSON.stringify(value);
+    if (localStorage.getItem(key) !== serialized) localStorage.setItem(key, serialized);
+  } catch (_) {}
 }
 function getStorageItem(key) {
   try {
@@ -210,7 +213,7 @@ function saveBrowserState() {
   saveBrowserSettings();
   setStorageItem(BROWSER_BOOKMARKS_KEY, normalizeBookmarks(bookmarks));
   saveHistoryLog();
-  if (isRestoringBrowserSession) return;
+  if (isRestoringBrowserSession || appSettings.restoreTabs === false) return;
   setStorageItem(browserSessionStorageKey, {
     tabs: tabs.map(tab => ({
       id: tab.id,
