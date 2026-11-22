@@ -628,6 +628,7 @@ const makeEditorTools = (() => {
         localNameInput.value=model?.name||'';
         localModelInput.value=model?.model||'';
         localVisionInput.checked=model?.supportsVision!==undefined?!!model.supportsVision:/gemma[-_/]?4/i.test(String(model?.model||''))&&/onnx/i.test(String(model?.model||''));
+        localModelInput.oninput=()=>{if(/gemma[-_/]?4/i.test(localModelInput.value)&&/onnx/i.test(localModelInput.value))localVisionInput.checked=true;};
         localEditorStatus.textContent='';
         localEditor.hidden=false;
         localEditor.querySelector('[data-save-local]').textContent=editingLocalId?'Save changes':'Save model';
@@ -672,6 +673,7 @@ const makeEditorTools = (() => {
       modal.querySelector('[data-cancel-local]').onclick=()=>{editingLocalId='';localEditor.hidden=true;};
       modal.querySelector('[data-browse-local-models]').onclick=()=>openLocalModelBrowser(id=>{
         localModelInput.value=id;
+        if(/gemma[-_/]?4/i.test(id)&&/onnx/i.test(id))localVisionInput.checked=true;
         if(!localNameInput.value.trim())localNameInput.value=id.split('/').pop()+' · Local';
         localEditorStatus.textContent='';
       });
@@ -690,7 +692,7 @@ const makeEditorTools = (() => {
           if(registry.settings.models.some(m=>m.id===id))id+='-'+Math.random().toString(36).slice(2,7);
         }
         try{
-          if(existing&&existing.model!==modelId&&localManager?.isLoaded?.(id))await localManager.unload();
+          if(existing&&(existing.model!==modelId||existing.supportsVision!==localVisionInput.checked)&&localManager?.isLoaded?.(id))await localManager.unload();
           registry.add({...existing,id,name,model:modelId,remoteModel:modelId,protocol:'local-transformers',kind:'local-transformers',endpoint:'',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true,supportsVision:localVisionInput.checked,builtInLocal:!!existing?.builtInLocal});
           registry.save();
           editingLocalId='';localEditor.hidden=true;render();onChange?.();
@@ -838,7 +840,9 @@ const makeEditorTools = (() => {
     function sensitiveAttachmentPath(path){return /(^|\/)(?:\.env(?:\..*)?|\.editor\/process\.env|.*(?:secret|credential|password|token|private[-_]?key).*)$/i.test(String(path||''));}
     function attachmentCapabilities(model=registry.active()){
       const capabilities=chatAI.getCapabilities(model?.id)||{};
-      return {documents:model?.supportsDocuments!==false&&capabilities.documents!==false,vision:model?.supportsVision===true&&capabilities.vision===true};
+      const local=!!(model?.local||model?.protocol==='local-transformers');
+      const imageProtocol=local||['openai-chat','openai-responses','anthropic-messages','google-gemini'].includes(model?.protocol);
+      return {documents:model?.supportsDocuments!==false&&capabilities.documents!==false,vision:imageProtocol&&model?.supportsVision===true&&capabilities.vision===true};
     }
     function attachmentSupported(item,model=registry.active()){
       const caps=attachmentCapabilities(model),kind=attachmentKind(item?.file||item);
@@ -890,7 +894,7 @@ const makeEditorTools = (() => {
         if(!Array.isArray(selected)||!selected.length)return;
         for(const file of selected){
           const path=String(file.customRelativePath||file.__wkWorkspacePath||'');
-          if(path&&sensitiveAttachmentPath(path)){alert('Sensitive files cannot be attached to AI chats.');continue;}
+          if(sensitiveAttachmentPath(path||file.name)){alert('Sensitive files cannot be attached to AI chats.');continue;}
           if(!attachmentSupported({file})){alert(file.name+' is not supported by the selected model.');continue;}
           const key=path?'path:'+path:'device:'+file.name+':'+file.size+':'+file.lastModified;
           if(attachments.some(item=>item.key===key||(path&&item.path===path)))continue;
@@ -912,13 +916,15 @@ const makeEditorTools = (() => {
         const kind=attachmentKind(file);
         if(!attachmentSupported({file}))throw new Error(file.name+' is not supported by the selected model. Remove it or switch to a compatible model.');
         const path=String(item.path||file.customRelativePath||'');
+        if(sensitiveAttachmentPath(path||file.name))throw new Error('Sensitive files cannot be attached to AI chats.');
         metadata.push({name:String(file.name),path,kind,mimeType:String(file.type||''),size:Number(file.size)||0,active:!!item.active});
         if(kind==='text'){
-          if(file.size>1024*1024)throw new Error(file.name+' is larger than the 1 MiB text attachment limit.');
+          if(file.size>4*1024*1024)throw new Error(file.name+' is larger than the 4 MiB text attachment limit.');
           let content=await file.text();if(content.length>60000)content=content.slice(0,60000)+'\n… [truncated]';
           textParts.push('Attached file: '+(path||file.name)+'\n'+content+'\n[End attached file]');
         }else if(kind==='image'){
           if(file.size>12*1024*1024)throw new Error(file.name+' is larger than the 12 MiB image attachment limit.');
+          if(images.reduce((total,image)=>total+Math.floor(image.dataUrl.length*3/4),0)+file.size>24*1024*1024)throw new Error('Combined image attachments must be smaller than 24 MiB.');
           images.push({mimeType:String(file.type||'image/png'),dataUrl:await fileAsDataUrl(file)});
         }
       }
@@ -1153,7 +1159,7 @@ const makeEditorTools = (() => {
       currentConversation=currentConversation||chatAI.openConversation({id:chatRecord.id,messages:chatMessages,modelId:registry.active()?.id,agentId:chatRecord.agentId||null});
       currentConversation.modelId=registry.active()?.id||null;
       currentConversation.setMessages(chatMessages);
-      if(chatRecord.title==='New Chat') chatStore.rename(chatRecord.id,chatTitle(text));
+      if(chatRecord.title==='New Chat') chatStore.rename(chatRecord.id,chatTitle(text||attachmentPayload.metadata?.map(item=>item.name).join(' ')||'Attached files'));
       persist();
       render(g,t);
       await new Promise(resolve => requestAnimationFrame(resolve));
