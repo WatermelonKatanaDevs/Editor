@@ -170,6 +170,7 @@ let downloadId = 0;
 const downloadBlobCache = new Map();
 let isRestoringBrowserSession = false;
 let browserSessionRestoreAttempted = false;
+let browserSessionPersistenceEnabled = appSettings.restoreTabs !== false;
 
 const savedBookmarks = getStorageItem(BROWSER_BOOKMARKS_KEY) || getStorageItem('bookmarks');
 if (Array.isArray(savedBookmarks)) {
@@ -202,6 +203,7 @@ window.addEventListener('storage', event => {
     try { next = event.newValue ? JSON.parse(event.newValue) : null; } catch (_) {}
     if (next && typeof next === 'object') {
       appSettings = { ...appSettings, ...next };
+      if (appSettings.restoreTabs === false) browserSessionPersistenceEnabled = false;
       updateNetworkSettings();
       updateSettings();
       setBrowserChromeHidden(!!appSettings.hideBrowserBar);
@@ -230,7 +232,8 @@ function saveBrowserState() {
   saveBrowserSettings();
   setStorageItem(BROWSER_BOOKMARKS_KEY, normalizeBookmarks(bookmarks));
   saveHistoryLog();
-  if (isRestoringBrowserSession || appSettings.restoreTabs === false) return;
+  if (appSettings.restoreTabs === false) browserSessionPersistenceEnabled = false;
+  if (isRestoringBrowserSession || !browserSessionPersistenceEnabled) return;
   setStorageItem(browserSessionStorageKey, {
     tabs: tabs.map(tab => ({
       id: tab.id,
