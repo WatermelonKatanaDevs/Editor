@@ -1316,7 +1316,7 @@ window.__editorInitPromise = (async function () {
   function releaseRetainedTabGroup(group, workbench) {
     if (!group || (state.closedTabHistory || []).some(entry => entry.group === group && !entry.disposed && !entry.restored)) return;
     group.keepAlive = false;
-    if (!workbench?.groups?.has?.(group.id)) {
+    if (workbench?.groups?.get?.(group.id) !== group) {
       try { group.el?.remove?.(); } catch (_) {}
     }
   }
@@ -1396,7 +1396,8 @@ window.__editorInitPromise = (async function () {
       }
       const instances = Workbench.getInstances?.() || [];
       let group = instances.includes(entry.workbench)
-        ? entry.workbench.groups.get(entry.groupId) || null
+        && entry.workbench.groups.get(entry.groupId) === entry.group
+        ? entry.group
         : null;
       if (!group) group = getActiveWorkbenchGroup();
       if (!group) return false;
