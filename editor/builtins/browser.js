@@ -15,8 +15,9 @@
     const defaultBrowserUrl = !configuredBrowserDefault || configuredBrowserDefault === 'https://example.com'
       ? initialBrowserUrl
       : configuredBrowserDefault;
-    const browserParams = new URLSearchParams({start: initialBrowserUrl, default: defaultBrowserUrl, defer: '1'});
-    if (state.behavior.hideBrowserBar) browserParams.set('hideBrowserBar', '1');
+    const browserSessionId = String(t.browserSessionId || t.id);
+    const sessionKey = ['project', state.projectId || state.projectKey || 'workspace', browserSessionId].join(':');
+    const browserParams = new URLSearchParams({start: initialBrowserUrl, default: defaultBrowserUrl, defer: '1', session: sessionKey});
     frame.src = 'browser/browser.html?' + browserParams.toString();
     const syncHostContext = () => {
       const context = window.__editorHostContext;
