@@ -77,7 +77,7 @@
   function openAIToolCall(c){return {id:c?.id,type:'function',function:{name:c?.function?.name||c?.name||'',arguments:typeof c?.function?.arguments==='string'?c.function.arguments:JSON.stringify(c?.function?.arguments||{})}};}
   function imageData(image){
     const value=String(image?.dataUrl||'');
-    const match=value.match(/^data:([^;,]+);base64,([\\s\\S]+)$/i);
+    const match=value.match(/^data:([^;,]+);base64,([\s\S]+)$/i);
     return match?{mimeType:match[1],data:match[2],dataUrl:value}:null;
   }
   function openAIChatMessages(messages){return messages.map(m=>{
@@ -98,7 +98,7 @@
   function anthropicMessages(messages){
     let system='';const out=[];
     for(const m of messages){
-      if(m.role==='system'){system+=(system?'\\n\\n':'')+String(m.content||'');continue;}
+      if(m.role==='system'){system+=(system?'\n\n':'')+String(m.content||'');continue;}
       if(m.role==='tool'){
         const block={type:'tool_result',tool_use_id:m.tool_call_id||m.id,content:String(m.content||'')};
         const last=out[out.length-1];if(last?.role==='user' && Array.isArray(last.content))last.content.push(block);else out.push({role:'user',content:[block]});continue;
@@ -116,7 +116,7 @@
   function geminiMessages(messages){
     let system='';const contents=[];
     for(const m of messages){
-      if(m.role==='system'){system+=(system?'\\n\\n':'')+String(m.content||'');continue;}
+      if(m.role==='system'){system+=(system?'\n\n':'')+String(m.content||'');continue;}
       if(m.role==='tool'){
         const response={functionResponse:{name:m.name||'',response:parseJSON(m.content)}};
         if(m._geminiCallId)response.functionResponse.id=m._geminiCallId;
