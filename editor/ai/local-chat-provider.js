@@ -488,7 +488,9 @@
           this.statusText=(this.offlineOnly?'INDEXEDDB CACHE':'DOWNLOADING')+' · '+this.device.toUpperCase()+' · '+model.model+suffix+(p!=null?' · '+p.toFixed(1)+'%':'');
           this.emit({loading:true});
         };
-        this.generator=await lib.pipeline(model.supportsVision===true?'any-to-any':'text-generation',model.model,{device:this.device,dtype:this.dtype,progress_callback:progress});
+        const modelId=String(model.model||'');
+        const pipelineTask=model.supportsVision===true?(model.pipelineTask||(/gemma[-_/]?4/i.test(modelId)?'any-to-any':'image-text-to-text')):'text-generation';
+        this.generator=await lib.pipeline(pipelineTask,model.model,{device:this.device,dtype:this.dtype,progress_callback:progress});
         const runtimePersisted=await Promise.all(this.runtimeAssets.map(url=>this.cache.match(url).then(Boolean)));
         if(!runtimePersisted.every(Boolean))throw new Error('ONNX Runtime WASM assets could not be saved in IndexedDB. The model cannot be used offline until the runtime files are cached.');
         const manifest=await this.cache.finishModel();
