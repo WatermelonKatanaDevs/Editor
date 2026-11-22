@@ -1217,6 +1217,7 @@ window.__editorInitPromise = (async function () {
       icon: builtin?.icon || (kind === 'welcome' ? welcomeIcon : kind === 'group' ? groupIcon : ''),
       view: 'edit',
       ...(kind === 'group' ? { groupName, groupLayout: options.groupLayout || null } : {}),
+      ...(kind === 'browser' ? { browserSessionId: String(options.browserSessionId || crypto.randomUUID?.() || ('browser-' + Date.now() + '-' + Math.random().toString(36).slice(2))) } : {}),
       ...(kind === 'source-control-diff' ? { diffData } : {})
     };
   }
