@@ -683,12 +683,61 @@ const makeEditorTools = (() => {
       const localDocumentsInput=modal.querySelector('[data-local-documents]');
       const localEditorStatus=modal.querySelector('[data-local-editor-status]');
       let editingLocalId='',localPipelineTask='';
+      function getLocalModelSearchMetadata(model){
+        const config=model?.config&&typeof model.config==='object'?model.config:{};
+        const nestedConfigs=[config,config.text_config,config.language_config,config.llm_config,config.decoder_config].filter(value=>value&&typeof value==='object');
+        const contextFields=['max_position_embeddings','max_seq_len','max_sequence_length','max_context_length','context_length','n_positions','seq_length','model_max_length'];
+        let contextLength=null;
+        for(const nested of nestedConfigs){
+          for(const key of contextFields){
+            const value=Number(nested[key]);
+            if(Number.isFinite(value)&&value>0&&value<10000000){contextLength=Math.floor(value);break;}
+          }
+          if(contextLength)break;
+        }
+        const tags=[...(Array.isArray(model?.tags)?model.tags:[]),...(Array.isArray(model?.cardData?.tags)?model.cardData.tags:[])].map(tag=>String(tag).toLowerCase());
+        const tagText=tags.join(' ');
+        const task=String(model?.pipeline_tag||'').toLowerCase();
+        const architectures=Array.isArray(config.architectures)?config.architectures.map(String):[];
+        const architecture=architectures.join(' ');
+        const modelId=String(model?.id||'');
+        const modelHint=architecture+' '+String(config.model_type||'')+' '+modelId;
+        const supportsVision=['any-to-any','image-text-to-text','image-to-text','visual-question-answering','document-question-answering'].includes(task)
+          ||!!(config.vision_config||config.vision_tower||config.image_token_index!=null||config.vision_token_id!=null)
+          ||/(?:Gemma4|Qwen2_5Omni|Qwen3Omni|Llava|LLaVA|Vision|InternVL|Phi4Multimodal)/i.test(modelHint);
+        const supportsAudio=['any-to-any','audio-text-to-text','automatic-speech-recognition','audio-classification','zero-shot-audio-classification'].includes(task)
+          ||!!(config.audio_config||config.audio_encoder||config.audio_token_id!=null||config.audio_bos_token_id!=null)
+          ||/(?:Gemma4|Qwen2Audio|Qwen2_5Omni|Qwen3Omni|Phi4Multimodal|AudioFlamingo)/i.test(modelHint);
+        const chatTemplate=String(config.chat_template||config.tokenizer_config?.chat_template||'');
+        const supportsTools=/(?:tool[-_ ]?(?:use|calling)|function[-_ ]?calling|tools?[-_ ]?api)/i.test(tagText+' '+chatTemplate)
+          ||/(?:functionary|firefunction|openfunctions|nexus[-_ ]?raven|toolace)/i.test(modelId);
+        const supportsReasoning=/(?:^|[\\s_-])reasoning(?:$|[\\s_-])/.test(tagText)
+          ||/(?:reasoning|deepseek[-_ ]?r1|qwq|r1[-_ ]?distill)/i.test(modelId);
+        const supportsVideo=['video-text-to-text','video-to-text'].includes(task)||/(?:Qwen2_5Omni|Qwen3Omni|VideoLlava)/i.test(modelHint);
+        const sizeBytes=Number(model?.usedStorage??model?.used_storage??0);
+        return {
+          sizeBytes:Number.isFinite(sizeBytes)&&sizeBytes>0?sizeBytes:null,
+          contextLength,
+          capabilities:{vision:!!supportsVision,audio:!!supportsAudio,toolCalling:!!supportsTools,reasoning:!!supportsReasoning,video:!!supportsVideo}
+        };
+      }
+      function formatLocalModelSize(bytes){
+        const gb=Number(bytes)/1000000000;
+        return Number.isFinite(gb)&&gb>0?(gb>=10?gb.toFixed(1):gb.toFixed(2))+' GB':'';
+      }
+      function formatLocalContextLength(tokens){
+        const value=Number(tokens);
+        if(!Number.isFinite(value)||value<=0)return '';
+        if(value>=1000000)return (value/1000000).toFixed(value%1000000===0?0:1)+'M';
+        if(value>=1000)return Math.round(value/1000)+'K';
+        return value.toLocaleString();
+      }
       async function inspectHuggingFaceModel(modelId,fallbackInfo=null){
         let info=fallbackInfo&&typeof fallbackInfo==='object'?fallbackInfo:{};
         if(network?.request){
           try{
             const encoded=String(modelId||'').split('/').map(encodeURIComponent).join('/');
-            const response=await network.request(new Request('https://huggingface.co/api/models/'+encoded),'ai');
+            const response=await network.request(new Request('https://huggingface.co/api/models/'+encoded+'?expand[]=config&expand[]=usedStorage&expand[]=tags&expand[]=pipeline_tag'),'ai');
             if(response?.ok)info={...info,...await response.json()};
           }catch(error){console.warn('Could not inspect Hugging Face model metadata:',error);}
         }
@@ -725,9 +774,9 @@ const makeEditorTools = (() => {
       function openLocalModelBrowser(onSelect){
         const browser=document.createElement('div');
         browser.className='editor-modal ai-hf-browser-modal';
-        browser.innerHTML='<div class="editor-modal-content ai-hf-browser-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>Browse local models</h2><p>Choose a Hugging Face model supported by Transformers.js, or use a model ID directly.</p><div class="ai-hf-browser-toolbar"><input data-local-search placeholder="Search model IDs…"><button data-local-search-button>Search</button><button data-local-search-refresh>Refresh</button></div><div class="ai-local-add-row"><input data-local-model-id placeholder="Hugging Face model ID"><button data-local-use-id>Use ID</button></div><div class="ai-hf-browser-status" data-local-status>Loading models…</div><div class="ai-hf-browser-list" data-local-list></div></div>';
+        browser.innerHTML='<div class="editor-modal-content ai-hf-browser-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>Browse local models</h2><p>Search Hugging Face models supported by Transformers.js. Results include approximate repository size, advertised context length, and detected capabilities.</p><div class="ai-hf-browser-toolbar"><input data-local-search placeholder="Search model IDs or capabilities…"><button data-local-filter-toggle type="button" aria-expanded="false">Filters</button><button data-local-search-button>Search</button><button data-local-search-refresh>Refresh</button></div><div class="ai-local-model-filters" data-local-filters hidden><div class="ai-local-filter-group"><span>Capabilities</span><label><input type="checkbox" data-capability="vision"> Images</label><label><input type="checkbox" data-capability="audio"> Audio</label><label><input type="checkbox" data-capability="toolCalling"> Native tool calling</label><label><input type="checkbox" data-capability="reasoning"> Reasoning</label><label><input type="checkbox" data-capability="video"> Video</label></div><div class="ai-local-filter-group ai-local-range-filters"><label>Min size (GB)<input type="number" min="0" step="0.1" data-size-min placeholder="Any"></label><label>Max size (GB)<input type="number" min="0" step="0.1" data-size-max placeholder="Any"></label><label>Min context<input type="number" min="0" step="1024" data-context-min placeholder="Any"></label><label>Max context<input type="number" min="0" step="1024" data-context-max placeholder="Any"></label></div><p>Size is Hugging Face repository storage, not a RAM estimate. Context is read from model configuration when available. Tool calling is shown only when model metadata explicitly indicates support.</p></div><div class="ai-local-add-row"><input data-local-model-id placeholder="Hugging Face model ID"><button data-local-use-id>Use ID</button></div><div class="ai-hf-browser-status" data-local-status>Loading models…</div><div class="ai-hf-browser-list" data-local-list></div></div>';
         document.body.appendChild(browser);requestAnimationFrame(()=>browser.classList.add('show'));
-        const search=browser.querySelector('[data-local-search]'),status=browser.querySelector('[data-local-status]'),list=browser.querySelector('[data-local-list]'),idInput=browser.querySelector('[data-local-model-id]');
+        const search=browser.querySelector('[data-local-search]'),status=browser.querySelector('[data-local-status]'),list=browser.querySelector('[data-local-list]'),idInput=browser.querySelector('[data-local-model-id]'),filters=browser.querySelector('[data-local-filters]');
         let all=[];
         browser.querySelector('.editor-modal-close').onclick=()=>browser.remove();browser.onclick=e=>{if(e.target===browser)browser.remove();};
         const choose=(id,modelInfo=null)=>{const modelId=String(id||'').trim();if(!modelId){status.textContent='Enter a Hugging Face model ID first.';return;}onSelect?.(modelId,modelInfo);browser.remove();};
@@ -737,6 +786,7 @@ const makeEditorTools = (() => {
             if(!network?.request)throw new Error('Network API is unavailable.');
             const q=search.value.trim();
             const params=new URLSearchParams({library:'transformers.js',sort:'downloads',direction:'-1',limit:'50'});
+            params.append('expand[]','config');params.append('expand[]','usedStorage');params.append('expand[]','tags');params.append('expand[]','pipeline_tag');
             if(q)params.set('search',q);
             const response=await network.request(new Request('https://huggingface.co/api/models?'+params.toString()),'ai');
             if(!response)throw new Error('Hugging Face returned no response.');
@@ -746,12 +796,46 @@ const makeEditorTools = (() => {
         }
         function renderList(){
           const q=search.value.trim().toLowerCase();
-          const rows=all.filter(m=>{const id=String(m?.id||''),task=String(m?.pipeline_tag||'');return id&&['text-generation','any-to-any','image-text-to-text','audio-text-to-text'].includes(task)&&(!q||id.toLowerCase().includes(q));}).slice(0,200);
-          status.textContent=rows.length+' compatible model'+(rows.length===1?'':'s')+' found';
-          list.innerHTML=rows.map(m=>'<div class="ai-hf-model-row"><div class="ai-model-main"><strong>'+escapeHtml(m.id)+'</strong><span>'+Number(m.downloads||0).toLocaleString()+' downloads · '+Number(m.likes||0).toLocaleString()+' likes</span></div><button data-local-select="'+escapeHtml(m.id)+'">Select</button></div>').join('');
+          const checkedCapabilities=Array.from(filters.querySelectorAll('[data-capability]:checked')).map(input=>input.dataset.capability);
+          const minSize=Number(filters.querySelector('[data-size-min]').value),maxSize=Number(filters.querySelector('[data-size-max]').value);
+          const minContext=Number(filters.querySelector('[data-context-min]').value),maxContext=Number(filters.querySelector('[data-context-max]').value);
+          const hasMinSize=filters.querySelector('[data-size-min]').value.trim()!=='',hasMaxSize=filters.querySelector('[data-size-max]').value.trim()!=='';
+          const hasMinContext=filters.querySelector('[data-context-min]').value.trim()!=='',hasMaxContext=filters.querySelector('[data-context-max]').value.trim()!=='';
+          const rows=all.filter(m=>{
+            const id=String(m?.id||''),task=String(m?.pipeline_tag||'');
+            if(!id||!['text-generation','any-to-any','image-text-to-text','audio-text-to-text'].includes(task))return false;
+            const metadata=getLocalModelSearchMetadata(m);
+            const capabilityText=Object.entries(metadata.capabilities).filter(([,enabled])=>enabled).map(([key])=>({vision:'images vision',audio:'audio',toolCalling:'tool calling native tools function calling',reasoning:'reasoning',video:'video'}[key]||key)).join(' ');
+            const tagText=(Array.isArray(m.tags)?m.tags:[]).join(' ');
+            const searchable=(id+' '+task+' '+tagText+' '+capabilityText).toLowerCase();
+            if(q&&!searchable.includes(q))return false;
+            if(checkedCapabilities.some(key=>!metadata.capabilities[key]))return false;
+            if(hasMinSize&&(!metadata.sizeBytes||metadata.sizeBytes/1000000000<minSize))return false;
+            if(hasMaxSize&&(!metadata.sizeBytes||metadata.sizeBytes/1000000000>maxSize))return false;
+            if(hasMinContext&&(!metadata.contextLength||metadata.contextLength<minContext))return false;
+            if(hasMaxContext&&(!metadata.contextLength||metadata.contextLength>maxContext))return false;
+            return true;
+          }).slice(0,200);
+          status.textContent=rows.length+' matching model'+(rows.length===1?'':'s')+' from '+all.length+' Hugging Face result'+(all.length===1?'':'s');
+          list.innerHTML=rows.map(m=>{
+            const metadata=getLocalModelSearchMetadata(m),caps=metadata.capabilities;
+            const size=metadata.sizeBytes?('≈ '+formatLocalModelSize(metadata.sizeBytes)):'Size unavailable';
+            const context=metadata.contextLength?(formatLocalContextLength(metadata.contextLength)+' context'):'Context unknown';
+            const task=String(m.pipeline_tag||'');
+            const details=[size,context,task,Number(m.downloads||0).toLocaleString()+' downloads'].filter(Boolean).join(' · ');
+            const badges=[caps.vision?'Images':'',caps.audio?'Audio':'',caps.toolCalling?'Tools':'',caps.reasoning?'Reasoning':'',caps.video?'Video':''].filter(Boolean);
+            const capabilityMarkup=badges.length?'<div class="ai-local-model-capabilities">'+badges.map(label=>'<span>'+label+'</span>').join('')+'</div>':'';
+            const sizeTitle='Approximate total storage used by this Hugging Face repository; may include multiple formats or checkpoint files. It is not the model\'s runtime memory requirement.';
+            return '<div class="ai-hf-model-row"><div class="ai-model-main"><strong title="'+escapeHtml(m.id)+'">'+escapeHtml(m.id)+'</strong><span class="ai-local-model-metadata" title="'+escapeHtml(sizeTitle)+'">'+escapeHtml(details)+'</span>'+capabilityMarkup+'</div><button data-local-select="'+escapeHtml(m.id)+'">Select</button></div>';
+          }).join('');
           list.querySelectorAll('[data-local-select]').forEach(b=>b.onclick=()=>choose(b.dataset.localSelect,all.find(model=>model.id===b.dataset.localSelect)||null));
         }
-        browser.querySelector('[data-local-search-button]').onclick=load;browser.querySelector('[data-local-search-refresh]').onclick=load;search.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();load();}};
+        browser.querySelector('[data-local-filter-toggle]').onclick=()=>{
+          filters.hidden=!filters.hidden;
+          browser.querySelector('[data-local-filter-toggle]').setAttribute('aria-expanded',String(!filters.hidden));
+        };
+        filters.querySelectorAll('input').forEach(input=>input.addEventListener('input',renderList));
+        browser.querySelector('[data-local-search-button]').onclick=load;browser.querySelector('[data-local-search-refresh]').onclick=load;search.oninput=renderList;search.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();load();}};
         browser.querySelector('[data-local-use-id]').onclick=()=>choose(idInput.value);
         idInput.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();choose(idInput.value);}};
         load();
