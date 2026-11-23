@@ -41,11 +41,17 @@
       supportsReasoning:model.supportsReasoning !== false, supportsStreaming:model.supportsStreaming !== false,
       supportsDocuments:model.supportsDocuments !== false,
       supportsVision:model.supportsVision !== undefined ? !!model.supportsVision : ((['any-to-any','image-text-to-text'].includes(String(model.pipelineTask||model.task||''))) || (/gemma[-_/]?4/i.test(String(model.model || model.remoteModel || '')) && /onnx/i.test(String(model.model || model.remoteModel || '')))),
-      // Infer Gemma audio support even when old saved records contain a stale
-      // supportsAudio:false value. The current browser ONNX path is E2B/E4B only.
-      supportsAudio:local && /gemma[-_/ ]?4/i.test(String(model.model || model.remoteModel || ''))
-        ? /(?:e2b|e4b)(?:[-_/]|$)/i.test(String(model.model || model.remoteModel || ''))
-        : !!model.supportsAudio,
+      // Infer known hosted audio-capable model families, while allowing users
+      // to explicitly enable audio on custom models from AI Settings.
+      supportsAudio:local
+        ? (/gemma[-_/ ]?4/i.test(String(model.model || model.remoteModel || '')) &&
+          /(?:e2b|e4b)(?:[-_/]|$)/i.test(String(model.model || model.remoteModel || '')))
+        : (!!model.supportsAudio ||
+          (model.protocol==='google-gemini' &&
+            /gemini-(?:2\\.5|3(?:[.-]|$)|4(?:[.-]|$))/i.test(String(model.model || model.remoteModel || '')) &&
+            !/(?:embedding|tts|image|robotics|live)/i.test(String(model.model || model.remoteModel || ''))) ||
+          (['openai-chat','openai-responses'].includes(model.protocol) &&
+            /(?:gpt-audio|gpt-4o-(?:audio|mini-audio|transcribe|mini-transcribe))/i.test(String(model.model || model.remoteModel || '')))),
       supportsVideo:!!model.supportsVideo,
       pipelineTask:String(model.pipelineTask||model.task||''),
       public:!!model.public, useSharedKeys:model.useSharedKeys !== false, local, builtInLocal:!!model.builtInLocal
