@@ -354,11 +354,12 @@ class Network extends EventHandler {
   async _requestObject(request,type,filter) {
     const policy=MockCORS.getPolicy(request,type,request.__wkInitiatorOrigin||null);
     if(policy.crossOrigin&&policy.mode==='same-origin')throw new TypeError('Fetch mode same-origin blocked a cross-origin request.');
-    if(!policy.crossOrigin||policy.mode==='navigate')return await this._requestObjectRaw(request,type,filter);
+    const responseFilter=filter||(type==='fetch'||type==='xhr'?(()=>true):undefined);
+    if(!policy.crossOrigin||policy.mode==='navigate')return await this._requestObjectRaw(request,type,responseFilter);
     if(policy.mode==='no-cors'){
       const validity=MockCORS.validateNoCorsRequest(request);
       if(!validity.ok)throw new TypeError(validity.reason);
-      const response=await this._requestObjectRaw(request,type,filter||(()=>true));
+      const response=await this._requestObjectRaw(request,type,responseFilter||(()=>true));
       if(response&&type==='fetch')return MockCORS.createOpaqueResponse();
       return response;
     }
@@ -371,7 +372,7 @@ class Network extends EventHandler {
       MockCORS.cachePreflight(policy,request,preflightResponse);
     }
     // Fetch resolves for HTTP errors; only network or CORS failures reject it.
-    const response=await this._requestObjectRaw(request,type,filter||(()=>true));
+    const response=await this._requestObjectRaw(request,type,responseFilter||(()=>true));
     if(!response)return null;
     const result=MockCORS.evaluateActualResponse(response,policy);
     if(!result.ok)throw new TypeError('CORS request failed: '+result.reason);
@@ -581,9 +582,33 @@ class ProxyNetworkEndpoint extends NetworkEndpoint {
   async handleRequest(request,type) {
     const targetProxyUrl = buildProxyRequestURLForNetwork(this.proxy, request, type, this.obscureURL);
     try {
-      const proxyRequest = type === 'cors-preflight'
-        ? new Request(targetProxyUrl, { method: 'GET', credentials: 'omit', redirect: 'follow' })
-        : new Request(targetProxyUrl, request);
+      let proxyRequest;
+      if (type === 'cors-preflight') {
+        proxyRequest = new Request(targetProxyUrl, {
+          method: 'GET',
+          credentials: 'omit',
+          mode: 'cors',
+          redirect: 'follow'
+        });
+      } else {
+        // The emulated page's mode is evaluated by MockCORS. The physical
+        // browser-to-proxy hop must remain readable even for emulated no-cors
+        // resources, otherwise the native fetch would hide the proxy result
+        // before the simulator can inspect and filter it.
+        const init = {
+          method: request.method,
+          headers: new Headers(request.headers),
+          credentials: request.credentials,
+          mode: 'cors',
+          redirect: request.redirect,
+          signal: request.signal,
+          cache: request.cache
+        };
+        if (request.method !== 'GET' && request.method !== 'HEAD' && request.body) {
+          init.body = await request.clone().arrayBuffer();
+        }
+        proxyRequest = new Request(targetProxyUrl, init);
+      }
       let response = await originalFetch(proxyRequest);
       //if (!response.ok) throw new Error(\`HTTP Error \${response.status}\`);
       const finalUrl = response.headers.get('X-Final-URL') || request.url;
