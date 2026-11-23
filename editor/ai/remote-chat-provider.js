@@ -77,13 +77,28 @@
   function openAIToolCall(c){return {id:c?.id,type:'function',function:{name:c?.function?.name||c?.name||'',arguments:typeof c?.function?.arguments==='string'?c.function.arguments:JSON.stringify(c?.function?.arguments||{})}};}
   function imageData(image){
     const value=String(image?.dataUrl||'');
-    const match=value.match(/^data:([^;,]+);base64,([\s\S]+)$/i);
+    const match=value.match(/^data:([^;,]+);base64,([\\s\\S]+)$/i);
     return match?{mimeType:match[1],data:match[2],dataUrl:value}:null;
+  }
+  function audioData(audio){
+    const value=String(audio?.dataUrl||'');
+    const match=value.match(/^data:([^;,]+);base64,([\\s\\S]+)$/i);
+    if(!match)return null;
+    const mimeType=String(match[1]||audio?.mimeType||'').toLowerCase();
+    const name=String(audio?.name||'').toLowerCase();
+    const format=mimeType.includes('wav')||name.endsWith('.wav')?'wav':
+      mimeType.includes('mpeg')||mimeType.includes('mp3')||name.endsWith('.mp3')?'mp3':'';
+    return {mimeType,data:match[2],format,dataUrl:value,name:String(audio?.name||'Audio')};
   }
   function openAIChatMessages(messages){return messages.map(m=>{
     if(m.role==='tool')return {role:'tool',tool_call_id:m.tool_call_id||m.id,name:m.name,content:String(m.content||'')};
     const images=(m.images||[]).map(imageData).filter(Boolean);
-    const content=images.length?[{type:'text',text:String(m.content||'')},...images.map(image=>({type:'image_url',image_url:{url:image.dataUrl}}))]:String(m.content||'');
+    const audios=(m.audios||[]).map(audioData).filter(audio=>audio&&(audio.format==='wav'||audio.format==='mp3'));
+    const content=images.length||audios.length
+      ?[{type:'text',text:String(m.content||'')},
+        ...images.map(image=>({type:'image_url',image_url:{url:image.dataUrl}})),
+        ...audios.map(audio=>({type:'input_audio',input_audio:{data:audio.data,format:audio.format}}))]
+      :String(m.content||'');
     return {role:m.role,content,...(Array.isArray(m.tool_calls)&&m.tool_calls.length?{tool_calls:m.tool_calls.map(openAIToolCall)}:{})};
   });}
   function responseInput(messages){
@@ -91,7 +106,12 @@
       if(m.role==='tool')return [{type:'function_call_output',call_id:m.tool_call_id||m.id,output:String(m.content||'')}];
       const role=m.role==='assistant'?'assistant':m.role==='system'?'developer':'user';
       const images=(m.images||[]).map(imageData).filter(Boolean);
-      const content=[{type:'input_text',text:String(m.content||'')},...images.map(image=>({type:'input_image',image_url:image.dataUrl}))];
+      const audios=(m.audios||[]).map(audioData).filter(audio=>audio&&(audio.format==='wav'||audio.format==='mp3'));
+      const content=[
+        {type:'input_text',text:String(m.content||'')},
+        ...images.map(image=>({type:'input_image',image_url:image.dataUrl})),
+        ...audios.map(audio=>({type:'input_audio',input_audio:{data:audio.data,format:audio.format}}))
+      ];
       return [{type:'message',role,content}].concat((m.tool_calls||[]).map(c=>({type:'function_call',call_id:c.id,name:c.function?.name,arguments:c.function?.arguments||'{}'})));
     });
   }
@@ -128,6 +148,7 @@
       }
       const parts=[];if(m.content)parts.push({text:String(m.content)});
       for(const image of (m.images||[]).map(imageData).filter(Boolean))parts.push({inlineData:{mimeType:image.mimeType,data:image.data}});
+      for(const audio of (m.audios||[]).map(audioData).filter(Boolean))parts.push({inlineData:{mimeType:audio.mimeType,data:audio.data}});
       for(const c of m.tool_calls||[])parts.push({functionCall:{...(c._gemini?.functionCall||{}),name:c.function?.name,args:parseJSON(c.function?.arguments)}});
       contents.push({role:m.role==='assistant'?'model':'user',parts:parts.length?parts:[{text:''}]});
     }
