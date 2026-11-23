@@ -1192,7 +1192,7 @@ const makeEditorTools = (() => {
     function addMessage(chat,role,text,index,message){
       const row=document.createElement('div');
       row.className='ai-message '+(role==='user'?'ai-user':'ai-assistant');
-      if(role==='assistant'&&message?.activity?.length)row.appendChild(renderActivity(chat,message.activity,false));
+      if(role==='assistant'&&message?.activity?.length)row.appendChild(renderActivity(chat,message.activity,false,message.activityDurationMs));
       const bubble=document.createElement('div');
       bubble.className='ai-bubble';
       if(role==='user')bubble.textContent=text;
@@ -1378,6 +1378,7 @@ const makeEditorTools = (() => {
       chat.scrollTop=chat.scrollHeight;
       const activeAgent=currentConversation?.getAgent?.()||null;
       const prefs=aiRoot.getAIPreferences?.()||{}; const liveActivity=activeAgent&&prefs.showActivity!==false?beginActivity(chat,true):null;
+      let activityMessage=null;
       const bubble=addMessage(chat,'assistant',''); if(liveActivity && bubble.parentNode?.parentNode===chat) chat.insertBefore(liveActivity.host,bubble.parentNode); let partial='';
       try {
         if(activeAgent){
@@ -1409,7 +1410,7 @@ const makeEditorTools = (() => {
           });
           await editorExtensionHooks('ai.afterRun',{...hookInput,result:response.result});
           partial=response.text||partial;renderMessage(bubble,partial,code=>insertCode(code));
-          if(response.message)response.message.activity=liveActivity?.items||[];
+          if(response.message){activityMessage=response.message;activityMessage.activity=liveActivity?.items||[];}
           if(liveActivity)liveActivity.details.open=false;
         } else {
           // Unlike the agent path, plain chat streams directly from the provider.
@@ -1429,7 +1430,7 @@ const makeEditorTools = (() => {
         }
         persist();
       } catch(e) {
-        if(e?.name!=='AbortError') { partial=`**Error:** ${e?.message||String(e)}`; renderMessage(bubble,partial); if(liveActivity) appendActivity(liveActivity,{kind:'error',text:e?.message||String(e)}); const activityData=liveActivity?.items||[]; chatMessages.push({role:'assistant',content:partial,activity:activityData}); if(liveActivity) liveActivity.details.open=false; persist(); }
+        if(e?.name!=='AbortError') { partial=`**Error:** ${e?.message||String(e)}`; renderMessage(bubble,partial); if(liveActivity) appendActivity(liveActivity,{kind:'error',text:e?.message||String(e)}); const activityData=liveActivity?.items||[]; activityMessage={role:'assistant',content:partial,activity:activityData}; chatMessages.push(activityMessage); if(liveActivity) liveActivity.details.open=false; persist(); }
       } finally {
         // Keep the editor's persisted transcript aligned with ConversationAI, which
         // owns insertion of both the user and assistant messages.
@@ -1437,22 +1438,48 @@ const makeEditorTools = (() => {
         const sentUser=[...chatMessages].reverse().find(message=>message?.role==='user');
         if(sentUser&&attachmentPayload.files?.length)messageAttachmentFiles.set(sentUser,attachmentPayload.files);
         attachments=attachments.filter(item=>item.active);syncActiveAttachment();
+        if(liveActivity){
+          const durationMs=finishActivity(liveActivity);
+          if(activityMessage){activityMessage.activity=liveActivity.items||[];activityMessage.activityDurationMs=durationMs;}
+        }
         persist();
         busy=false; controller=null; render(g,t);
       }
     }
     function activityValue(value,maxChars=20000){let text;try{text=JSON.stringify(value,null,2);}catch(_){text=String(value);}text=String(text??'');return text.length<=maxChars?text:text.slice(0,maxChars)+`\n… [truncated ${text.length-maxChars} characters]`;}
-    function activitySummary(items){const list=items||[];const steps=list.filter(x=>x?.kind==='step').length;const tools=list.filter(x=>x?.kind==='tool_call').length;const retries=list.filter(x=>['retry','transport_retry','provider_retry'].includes(x?.kind)).length;const parts=['Agent activity'];if(steps)parts.push(`${steps} step${steps===1?'':'s'}`);if(tools)parts.push(`${tools} tool${tools===1?'':'s'}`);if(retries)parts.push(`${retries} retr${retries===1?'y':'ies'}`);return parts.join(' · ');}
-    function renderActivity(chat,items,open){
+    function formatActivityDuration(milliseconds){
+      const totalSeconds=Math.max(0,milliseconds)/1000;
+      if(totalSeconds<60)return totalSeconds.toFixed(1)+'s';
+      const wholeSeconds=Math.floor(totalSeconds),minutes=Math.floor(wholeSeconds/60),seconds=wholeSeconds%60;
+      if(minutes<60)return minutes+'m '+String(seconds).padStart(2,'0')+'s';
+      const hours=Math.floor(minutes/60),remainingMinutes=minutes%60;
+      return hours+'h '+String(remainingMinutes).padStart(2,'0')+'m';
+    }
+    function activitySummary(items,durationMs){
+      const list=items||[];const steps=list.filter(x=>x?.kind==='step').length;const tools=list.filter(x=>x?.kind==='tool_call').length;const retries=list.filter(x=>['retry','transport_retry','provider_retry'].includes(x?.kind)).length;const parts=['Agent activity'];if(steps)parts.push(`${steps} step${steps===1?'':'s'}`);if(tools)parts.push(`${tools} tool${tools===1?'':'s'}`);if(retries)parts.push(`${retries} retr${retries===1?'y':'ies'}`);if(Number.isFinite(Number(durationMs)))parts.push(formatActivityDuration(Number(durationMs)));return parts.join(' · ');
+    }
+    function renderActivity(chat,items,open,durationMs){
       const details=document.createElement('details'); details.className='ai-activity'; details.open=!!open;
-      const summary=document.createElement('summary'); summary.textContent=activitySummary(items); details.appendChild(summary);
+      const summary=document.createElement('summary'); summary.textContent=activitySummary(items,durationMs); details.appendChild(summary);
       const body=document.createElement('div'); body.className='ai-activity-body'; details.appendChild(body);
-      const activity={body,items:items||[],details}; for(const item of [...(items||[])]) appendActivity(activity,item,false); summary.textContent=activitySummary(activity.items);
+      const activity={body,items:items||[],details,durationMs:Number.isFinite(Number(durationMs))?Number(durationMs):null}; for(const item of [...(items||[])]) appendActivity(activity,item,false); summary.textContent=activitySummary(activity.items,activity.durationMs);
       return details;
     }
     function beginActivity(chat,open){
       const details=renderActivity(chat,[],open); const body=details.querySelector('.ai-activity-body');
-      chat.appendChild(details); return {details,body,host:details,items:[]};
+      const summary=details.querySelector('summary');
+      const activity={details,body,host:details,summary,items:[],startedAt:Date.now(),timer:null,durationMs:null};
+      const update=()=>{if(activity.summary)activity.summary.textContent=activitySummary(activity.items,Date.now()-activity.startedAt);};
+      activity.timer=setInterval(update,100);
+      update();
+      chat.appendChild(details); return activity;
+    }
+    function finishActivity(activity){
+      if(!activity)return 0;
+      if(activity.timer){clearInterval(activity.timer);activity.timer=null;}
+      activity.durationMs=Math.max(0,Date.now()-(activity.startedAt||Date.now()));
+      if(activity.summary)activity.summary.textContent=activitySummary(activity.items,activity.durationMs);
+      return activity.durationMs;
     }
     function appendActivity(activity,item,record=true){
       if(!activity?.body)return;
@@ -1470,7 +1497,7 @@ const makeEditorTools = (() => {
       else if(item.kind==='error'){row.innerHTML=`<strong>Error</strong><pre>${escapeHtml(String(item.text||''))}</pre>`;}
       else {row.innerHTML=`<strong>${escapeHtml(item.kind||'Activity')}</strong><span>${escapeHtml(String(item.text||''))}</span>`;}
       activity.body.appendChild(row);
-      if(activity.details){const summary=activity.details.querySelector('summary');if(summary)summary.textContent=activitySummary(activity.items);activity.details.scrollIntoView?.({block:'nearest'});}
+      if(activity.details){const summary=activity.details.querySelector('summary');if(summary){const elapsed=activity.startedAt?Date.now()-activity.startedAt:activity.durationMs;summary.textContent=activitySummary(activity.items,elapsed);}activity.details.scrollIntoView?.({block:'nearest'});}
     }
     return {
       title:'AI Chat',
