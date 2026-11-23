@@ -41,7 +41,10 @@
       supportsReasoning:model.supportsReasoning !== false, supportsStreaming:model.supportsStreaming !== false,
       supportsDocuments:model.supportsDocuments !== false,
       supportsVision:model.supportsVision !== undefined ? !!model.supportsVision : ((['any-to-any','image-text-to-text'].includes(String(model.pipelineTask||model.task||''))) || (/gemma[-_/]?4/i.test(String(model.model || model.remoteModel || '')) && /onnx/i.test(String(model.model || model.remoteModel || '')))),
-      supportsAudio:model.supportsAudio !== undefined ? !!model.supportsAudio :
+      // Older saved model records may already contain supportsAudio:false from
+      // before Gemma 4 audio was wired into the editor, so infer supported variants
+      // even when that legacy false value is present.
+      supportsAudio:!!model.supportsAudio ||
         (local && /gemma[-_/ ]?4/i.test(String(model.model || model.remoteModel || '')) &&
           /(?:e2b|e4b|12b)(?:[-_/]|$)/i.test(String(model.model || model.remoteModel || ''))),
       supportsVideo:!!model.supportsVideo,
