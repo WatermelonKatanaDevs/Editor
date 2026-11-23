@@ -46,7 +46,7 @@
       // even when that legacy false value is present.
       supportsAudio:!!model.supportsAudio ||
         (local && /gemma[-_/ ]?4/i.test(String(model.model || model.remoteModel || '')) &&
-          /(?:e2b|e4b|12b)(?:[-_/]|$)/i.test(String(model.model || model.remoteModel || ''))),
+          /(?:e2b|e4b)(?:[-_/]|$)/i.test(String(model.model || model.remoteModel || ''))),
       supportsVideo:!!model.supportsVideo,
       pipelineTask:String(model.pipelineTask||model.task||''),
       public:!!model.public, useSharedKeys:model.useSharedKeys !== false, local, builtInLocal:!!model.builtInLocal
