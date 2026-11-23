@@ -527,12 +527,13 @@
     }
   }
   async function createGemma4Generator(lib,modelId,device,dtype,progress){
-    if(typeof lib.AutoModelForImageTextToText?.from_pretrained!=='function'||typeof lib.AutoProcessor?.from_pretrained!=='function'){
+    const Gemma4Model=lib.Gemma4ForConditionalGeneration||lib.AutoModelForImageTextToText;
+    if(typeof Gemma4Model?.from_pretrained!=='function'||typeof lib.AutoProcessor?.from_pretrained!=='function'){
       throw new Error('This Transformers.js runtime does not expose the Gemma 4 model and processor APIs. Update the local AI runtime and reload the editor.');
     }
     const [processor,model]=await Promise.all([
       lib.AutoProcessor.from_pretrained(modelId,{progress_callback:progress}),
-      lib.AutoModelForImageTextToText.from_pretrained(modelId,{device,dtype,progress_callback:progress})
+      Gemma4Model.from_pretrained(modelId,{device,dtype,progress_callback:progress})
     ]);
     if(!processor?.tokenizer||typeof processor.apply_chat_template!=='function'){
       try{await model?.dispose?.();}catch(_){}
@@ -634,7 +635,7 @@
       if(!segments.length)throw new Error('No usable audio segments were found.');
       if(segments.length===1){
         audioProgress?.({index:1,total:1,name:segments[0].name,startSeconds:0,endSeconds:totalDuration});
-        const singleMessage={...audioMessage,content:[...imageParts,{type:'text',text:originalPrompt},{type:'audio'}]};
+        const singleMessage={...audioMessage,content:[...imageParts,{type:'audio'},{type:'text',text:originalPrompt}]};
         return [{generated_text:[{role:'assistant',content:await generateOnce([...messages.slice(0,audioMessageIndex),singleMessage],generationOptions,tools,segments[0].samples)}]}];
       }
 
@@ -652,7 +653,7 @@
           ' from "'+segment.name+'", covering '+segment.startSeconds.toFixed(1)+'–'+segment.endSeconds.toFixed(1)+
           ' seconds. Analyze this segment in relation to the original request. Give concise observations grounded only in what is audible; do not guess details that this segment cannot establish.';
         audioProgress?.({index:index+1,total:segments.length,name:segment.name,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds});
-        const segmentMessage={...audioMessage,content:[...imageParts,{type:'text',text:segmentPrompt},{type:'audio'}]};
+        const segmentMessage={...audioMessage,content:[...imageParts,{type:'audio'},{type:'text',text:segmentPrompt}]};
         const summary=await generateOnce([...workingMessages,segmentMessage],segmentOptions,null,segment.samples);
         segmentSummaries.push({name:segment.name,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds,text:summary});
         workingMessages.push({role:'user',content:segmentPrompt},{role:'assistant',content:summary});
