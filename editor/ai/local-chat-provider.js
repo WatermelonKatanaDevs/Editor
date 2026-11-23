@@ -304,10 +304,10 @@
     for(let i=0;i<length;i++)if(current[i]!==cached[i])return false;
     return true;
   }
-  async function generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,onProgress,cacheState){
+  async function generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,onProgress,cacheState,tools){
     const tokenizer=generator.tokenizer,model=generator.model;
     if(!model?.forward||!model?.generate||!tokenizer?.apply_chat_template||!lib.DynamicCache||!lib.Tensor||!lib.ones)return null;
-    const inputs=tokenizer.apply_chat_template(messages,{add_generation_prompt:true,return_dict:true});
+    const inputs=tokenizer.apply_chat_template(messages,{add_generation_prompt:true,return_dict:true,...(Array.isArray(tools)&&tools.length?{tools}:{})});
     const inputIds=inputs?.input_ids;
     const dims=inputIds?.dims||[];
     const tokenCount=Number(dims[dims.length-1]||0);
@@ -582,7 +582,7 @@
                   const reused=progress.cached?' · reused '+progress.cached+' cached tokens':'';
                   this.emit({inference:{stage:'prompt',label:'Preparing prompt',processed,total,cached:Math.max(0,Number(progress.cached)||0),progress:total?Math.min(100,processed/total*100):null,detail:processed+'/'+total+' tokens'+reused}});
                 }
-              },cacheState);
+              },cacheState,options.tools);
             }catch(error){
               if(conversationId)await this.clearKVCache(conversationId);
               throw error;
@@ -613,7 +613,7 @@
           if(result===null){
             // Keep the indeterminate status on prompt processing until the streamer
             // confirms that generated output has started.
-            result=await generator(requestMessages,{...generationOptions,...(streamer?{streamer}:{})});
+            result=await generator(requestMessages,{...generationOptions,...(streamer?{streamer}:{}),...(Array.isArray(options.tools)&&options.tools.length?{tools:options.tools}:{})});
           }
           if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
           return generatedText(result,generated)||generated;
