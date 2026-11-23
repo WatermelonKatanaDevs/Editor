@@ -507,13 +507,17 @@
         streamer
       });
       const cacheLength=Number(cache?.get_seq_length?.())||0;
-      const tokenIds=[...inputTokenIds,...streamedTokenIds];
-      if(!cache||cacheLength<=0||cacheLength>tokenIds.length){
+      const tokenIds=[...inputTokenIds,...streamedTokenIds].slice(0,cacheLength);
+      if(!cache||cacheLength<=0||tokenIds.length!==cacheLength){
         try{await cache?.dispose?.();}catch(_){}
         cache=null;
-        return {result,cache:null,cacheLength:0,tokenIds:inputTokenIds,reusedTokens};
+        return {result,cache:null,cacheLength:0,tokenIds:inputTokenIds,reusedTokens,generatedTokenIds:[]};
       }
-      return {result,cache,cacheLength,tokenIds:tokenIds.slice(0,cacheLength),reusedTokens};
+      // Only IDs actually represented by this cache are safe to replay into the
+      // next serialized assistant message. Decoding these with special tokens
+      // preserved allows Qwen's tool-call markup (and channel markers) to round-trip.
+      const generatedTokenIds=tokenIds.slice(inputTokenIds.length);
+      return {result,cache,cacheLength,tokenIds,reusedTokens,generatedTokenIds};
     }catch(error){
       try{await cache?.dispose?.();}catch(_){}
       throw error;
@@ -726,6 +730,12 @@
             }
             if(cachedGeneration!==null){
               result=cachedGeneration.result;
+              if(typeof options.onRawGeneratedText==='function'&&cachedGeneration.generatedTokenIds?.length){
+                try{
+                  const raw=tokenizer.decode(cachedGeneration.generatedTokenIds,{skip_special_tokens:false,clean_up_tokenization_spaces:false});
+                  options.onRawGeneratedText(String(raw||''));
+                }catch(error){console.warn('Could not decode the raw local assistant tokens for cache reuse:',error);}
+              }
               const nextCache=cachedGeneration.cache;
               const measuredCacheBytes=estimateDynamicCacheBytes(nextCache);
               if(measuredCacheBytes>0&&cachedGeneration.cacheLength>0){
