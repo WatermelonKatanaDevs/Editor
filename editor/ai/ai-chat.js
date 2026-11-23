@@ -40,13 +40,12 @@
       supportsTools:model.supportsTools !== false, supportsAgentTools:!!model.supportsAgentTools,
       supportsReasoning:model.supportsReasoning !== false, supportsStreaming:model.supportsStreaming !== false,
       supportsDocuments:model.supportsDocuments !== false,
-      supportsVision:model.supportsVision !== undefined ? !!model.supportsVision : ((['any-to-any','image-text-to-text'].includes(String(model.pipelineTask||model.task||''))) || (/gemma[-_/]?4/i.test(String(model.model || model.remoteModel || '')) && /onnx/i.test(String(model.model || model.remoteModel || '')))),
-      // Infer known hosted audio-capable model families, while allowing users
-      // to explicitly enable audio on custom models from AI Settings.
+      supportsVision:model.supportsVision !== undefined ? !!model.supportsVision : (model.capabilities?.vision === true || (['any-to-any','image-text-to-text'].includes(String(model.pipelineTask||model.task||''))) || (/gemma[-_/]?4/i.test(String(model.model || model.remoteModel || '')) && /onnx/i.test(String(model.model || model.remoteModel || '')))),
+      // Infer hosted audio support from model metadata or known provider model families.
       supportsAudio:local
-        ? (/gemma[-_/ ]?4/i.test(String(model.model || model.remoteModel || '')) &&
-          /(?:e2b|e4b)(?:[-_/]|$)/i.test(String(model.model || model.remoteModel || '')))
-        : (!!model.supportsAudio ||
+        ? (model.capabilities?.audio === true || (/gemma[-_/ ]?4/i.test(String(model.model || model.remoteModel || '')) &&
+          /(?:e2b|e4b)(?:[-_/]|$)/i.test(String(model.model || model.remoteModel || ''))))
+        : (model.capabilities?.audio === true ||
           (protocol==='google-gemini' &&
             /gemini-(?:2\.5|3(?:[.-]|$)|4(?:[.-]|$))/i.test(String(model.model || model.remoteModel || '')) &&
             !/(?:embedding|tts|image|robotics|live)/i.test(String(model.model || model.remoteModel || ''))) ||
@@ -54,6 +53,7 @@
             /(?:gpt-audio|gpt-4o-(?:audio|mini-audio|transcribe|mini-transcribe))/i.test(String(model.model || model.remoteModel || '')))),
       supportsVideo:!!model.supportsVideo,
       pipelineTask:String(model.pipelineTask||model.task||''),
+      capabilities:model.capabilities&&typeof model.capabilities==='object'?{...model.capabilities}:{},
       public:!!model.public, useSharedKeys:model.useSharedKeys !== false, local, builtInLocal:!!model.builtInLocal
     };
   }
