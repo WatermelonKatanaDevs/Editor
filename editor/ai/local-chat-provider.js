@@ -507,8 +507,17 @@
         ...generationOptions,
         streamer
       });
-      const cacheLength=Number(cache?.get_seq_length?.())||0;
-      const tokenIds=[...inputTokenIds,...streamedTokenIds];
+      let cacheLength=Number(cache?.get_seq_length?.())||0;
+      // Retain the processed prompt, not the generated assistant tail. Agent mode
+      // converts streamed tool-call output into structured assistant/tool messages;
+      // that normalized representation is not guaranteed to tokenize identically
+      // to the raw generated tokens. Keeping only prompt KV state lets the next
+      // tool step reuse the stable conversation prefix without depending on that tail.
+      if(cache&&tokenCount>0&&cacheLength>tokenCount){
+        cache=await cropDynamicCache(cache,tokenCount,lib);
+        cacheLength=Number(cache?.get_seq_length?.())||0;
+      }
+      const tokenIds=inputTokenIds.slice(0,Math.min(inputTokenIds.length,cacheLength));
       if(!cache||cacheLength<=0||cacheLength>tokenIds.length){
         try{await cache?.dispose?.();}catch(_){}
         cache=null;
