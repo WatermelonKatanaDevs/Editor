@@ -268,10 +268,88 @@
     for(let i=0;current&&i<4;i++,current=current.cause){
       parts.push(current.stack||current.message||String(current));
     }
-    return /Failed to download data from buffer|mapAsync.{0,180}GPUBuffer|MapAsyncStatus|Invalid Buffer/i.test(parts.join('\n'));
+    return /Failed to download data from buffer|mapAsync.{0,180}GPUBuffer|MapAsyncStatus|Invalid Buffer|out of memory|out-of-memory|failed to allocate|allocation failed|GPU device was lost|device lost/i.test(parts.join('\n'));
   }
   function cacheName(name){
     return String(name).replace('present_conv','past_conv').replace('present_ssm','past_ssm').replace('present_recurrent','past_recurrent').replace('present','past_key_values');
+  }
+  function inspectCacheHardware(){
+    const GiB=1024*1024*1024;
+    let memoryGiB=null;
+    try{
+      const reported=Number(typeof navigator!=='undefined'?navigator.deviceMemory:NaN);
+      if(Number.isFinite(reported)&&reported>0)memoryGiB=reported;
+    }catch(_){}
+    // Browsers deliberately coarsen this value. Budget 40% of reported RAM for
+    // one retained KV cache, capped to avoid reserving most of a large machine.
+    // When unavailable, use a smaller fallback; WebGPU exposes no free-VRAM API.
+    const cacheBudgetBytes=memoryGiB===null?2*GiB:Math.max(512*1024*1024,Math.min(6*GiB,memoryGiB*.4*GiB));
+    return {memoryGiB,cacheBudgetBytes,source:memoryGiB===null?'fallback':'navigator.deviceMemory'};
+  }
+  function tensorByteLength(value){
+    if(!value||typeof value!=='object')return 0;
+    const dims=Array.isArray(value.dims)?value.dims:(Array.isArray(value.shape)?value.shape:null);
+    if(!dims||!dims.length)return 0;
+    const elements=dims.reduce((total,dimension)=>{
+      const size=Number(dimension);
+      return Number.isFinite(size)&&size>=0?total*size:NaN;
+    },1);
+    if(!Number.isFinite(elements)||elements<=0)return 0;
+    const type=String(value.type||value.dtype||'').toLowerCase();
+    const bytes=/float64|double|int64|uint64/.test(type)?8:
+      /float32|single|int32|uint32/.test(type)?4:
+      /float16|half|bfloat16|int16|uint16/.test(type)?2:
+      /int8|uint8|bool/.test(type)?1:0;
+    return bytes?elements*bytes:0;
+  }
+  function estimateDynamicCacheBytes(cache){
+    let total=0;
+    const visited=new Set();
+    const visit=(value,depth)=>{
+      if(!value||typeof value!=='object'||visited.has(value)||depth>4)return;
+      visited.add(value);
+      const bytes=tensorByteLength(value);
+      if(bytes>0){total+=bytes;return;}
+      if(Array.isArray(value)){
+        for(const child of value)visit(child,depth+1);
+        return;
+      }
+      for(const [key,child] of Object.entries(value)){
+        if(key==='data'||key==='buffer'||key==='location')continue;
+        visit(child,depth+1);
+      }
+    };
+    visit(cache,0);
+    return total;
+  }
+  function modelContextLimit(generator){
+    const model=generator?.model||generator;
+    const configs=[model?.config,model?.config?.text_config,model?.config?.language_config,model?.model?.config].filter(Boolean);
+    const keys=['max_position_embeddings','max_sequence_length','max_seq_len','max_model_len','n_positions','seq_length'];
+    for(const config of configs)for(const key of keys){
+      const value=Number(config?.[key]);
+      if(Number.isFinite(value)&&value>0)return Math.floor(value);
+    }
+    return 131072;
+  }
+  function estimateModelKVBytesPerToken(generator,dtype){
+    const model=generator?.model||generator;
+    const configs=[model?.config,model?.config?.text_config,model?.config?.language_config,model?.model?.config].filter(Boolean);
+    const read=names=>{
+      for(const config of configs)for(const name of names){
+        const value=Number(config?.[name]);
+        if(Number.isFinite(value)&&value>0)return value;
+      }
+      return 0;
+    };
+    const layers=read(['num_hidden_layers','n_layer','num_layers']);
+    const attentionHeads=read(['num_attention_heads','n_head','num_heads']);
+    const kvHeads=read(['num_key_value_heads','num_kv_heads'])||attentionHeads;
+    const headDim=read(['head_dim'])||(attentionHeads?read(['hidden_size','n_embd'])/attentionHeads:0);
+    if(!layers||!kvHeads||!headDim)return 0;
+    const type=String(dtype||'').toLowerCase();
+    const bytesPerElement=/float32|fp32/.test(type)?4:/float64|fp64/.test(type)?8:2;
+    return 2*layers*kvHeads*headDim*bytesPerElement;
   }
   function flattenTokenIds(value){
     const out=[];
@@ -390,9 +468,9 @@
     }
   }
   class LocalModelManager{
-    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.downloads=new Map();this.trackingFiles=false;this.inference=null;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;this.runtimeAssets=[];this.kvCaches=new Map();this.maxReusableCacheTokens=16384;this.maxReusableCacheSessions=1;this.maxReusableCacheTotalTokens=16384;}
+    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.downloads=new Map();this.trackingFiles=false;this.inference=null;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;this.runtimeAssets=[];this.kvCaches=new Map();this.hardwareProfile=inspectCacheHardware();this.cacheBudgetBytes=this.hardwareProfile.cacheBudgetBytes;this.cacheBytesPerToken=0;this.maxReusableCacheTokens=16384;this.maxReusableCacheSessions=1;this.modelContextLimit=131072;}
     subscribe(fn){if(typeof fn!=='function')return ()=>{};this.listeners.add(fn);fn(this.status());return ()=>this.listeners.delete(fn);}
-    status(){return {loading:this.loading,loadedModelId:this.loadedModelId,loaded:!!this.generator,progress:this.progress,downloads:Array.from(this.downloads.values()),trackingFiles:this.trackingFiles,inference:this.inference,text:this.statusText,device:this.device,dtype:this.dtype,offlineOnly:this.offlineOnly,cacheHit:this.cacheHit};}
+    status(){return {loading:this.loading,loadedModelId:this.loadedModelId,loaded:!!this.generator,progress:this.progress,downloads:Array.from(this.downloads.values()),trackingFiles:this.trackingFiles,inference:this.inference,text:this.statusText,device:this.device,dtype:this.dtype,offlineOnly:this.offlineOnly,cacheHit:this.cacheHit,cacheBudgetBytes:this.cacheBudgetBytes,cacheTokenLimit:this.maxReusableCacheTokens,deviceMemoryGiB:this.hardwareProfile?.memoryGiB??null};}
     emit(patch){Object.assign(this,patch||{});const state=this.status();for(const fn of this.listeners){try{fn(state);}catch(e){console.warn('Local AI status listener failed:',e);}}}
     isLoaded(id){return !!this.generator&&(!id||this.loadedModelId===String(id));}
     async library(){
@@ -455,8 +533,8 @@
       }
     }
     async evictKVCache(preferredConversationId){
-      const totalTokens=()=>[...this.kvCaches.values()].reduce((sum,state)=>sum+(Number(state.cacheLength)||0),0);
-      while(this.kvCaches.size>this.maxReusableCacheSessions||totalTokens()>this.maxReusableCacheTotalTokens){
+      const totalBytes=()=>[...this.kvCaches.values()].reduce((sum,state)=>sum+(Number(state.cacheBytes)||0),0);
+      while(this.kvCaches.size>this.maxReusableCacheSessions||totalBytes()>this.cacheBudgetBytes){
         const candidates=[...this.kvCaches.entries()]
           .filter(([id,state])=>id!==String(preferredConversationId||'')&&!state.inUse)
           .sort((a,b)=>(a[1].lastUsed||0)-(b[1].lastUsed||0));
@@ -510,6 +588,13 @@
         const modelId=String(model.model||'');
         const pipelineTask=model.supportsVision===true?(model.pipelineTask||(/gemma[-_/]?4/i.test(modelId)?'any-to-any':'image-text-to-text')):'text-generation';
         this.generator=await lib.pipeline(pipelineTask,model.model,{device:this.device,dtype:this.dtype,progress_callback:progress});
+        if(this.device==='webgpu'){
+          this.hardwareProfile=inspectCacheHardware();
+          this.cacheBudgetBytes=this.hardwareProfile.cacheBudgetBytes;
+          this.cacheBytesPerToken=estimateModelKVBytesPerToken(this.generator,this.dtype)||256*1024;
+          this.modelContextLimit=modelContextLimit(this.generator);
+          this.maxReusableCacheTokens=Math.max(1,Math.min(this.modelContextLimit,Math.floor(this.cacheBudgetBytes/this.cacheBytesPerToken)));
+        }
         const runtimePersisted=await Promise.all(this.runtimeAssets.map(url=>this.cache.match(url).then(Boolean)));
         if(!runtimePersisted.every(Boolean))throw new Error('ONNX Runtime WASM assets could not be saved in IndexedDB. The model cannot be used offline until the runtime files are cached.');
         const manifest=await this.cache.finishModel();
@@ -590,12 +675,19 @@
             if(cachedGeneration!==null){
               result=cachedGeneration.result;
               const nextCache=cachedGeneration.cache;
-              const canRetain=!!conversationId&&!!nextCache&&cachedGeneration.cacheLength<=this.maxReusableCacheTokens;
+              const measuredCacheBytes=estimateDynamicCacheBytes(nextCache);
+              if(measuredCacheBytes>0&&cachedGeneration.cacheLength>0){
+                this.cacheBytesPerToken=measuredCacheBytes/cachedGeneration.cacheLength;
+                this.maxReusableCacheTokens=Math.max(1,Math.min(this.modelContextLimit,Math.floor(this.cacheBudgetBytes/this.cacheBytesPerToken)));
+              }
+              const cacheBytes=measuredCacheBytes||(this.cacheBytesPerToken*cachedGeneration.cacheLength);
+              const canRetain=!!conversationId&&!!nextCache&&cacheBytes>0&&cacheBytes<=this.cacheBudgetBytes&&cachedGeneration.cacheLength<=this.maxReusableCacheTokens;
               if(canRetain){
                 this.kvCaches.set(conversationId,{
                   cache:nextCache,
                   tokenIds:cachedGeneration.tokenIds,
                   cacheLength:cachedGeneration.cacheLength,
+                  cacheBytes,
                   modelId:String(model?.id||''),
                   inUse:false,
                   lastUsed:Date.now()
