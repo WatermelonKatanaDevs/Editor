@@ -613,6 +613,9 @@
         if(!source)throw new Error('An audio attachment is missing its file data.');
         audioProgress?.({stage:'decoding',index:partIndex+1,total:audioParts.length,name:String(part.name||part.filename||'Audio')});
         const waveform=await loadAudio(source);
+        if(typeof processor._compute_audio_num_tokens==='function'&&processor._compute_audio_num_tokens(waveform.length,16000)<=0){
+          throw new Error('The audio in "'+String(part.name||part.filename||'attachment')+'" is too short to process. Use a clip at least 0.05 seconds long.');
+        }
         const segmentCount=Math.max(1,Math.ceil(waveform.length/maxSamples));
         const segmentSamples=Math.ceil(waveform.length/segmentCount);
         totalDuration+=waveform.length/16000;
@@ -650,7 +653,7 @@
           ' seconds. Analyze this segment in relation to the original request. Give concise observations grounded only in what is audible; do not guess details that this segment cannot establish.';
         audioProgress?.({index:index+1,total:segments.length,name:segment.name,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds});
         const segmentMessage={...audioMessage,content:[...imageParts,{type:'text',text:segmentPrompt},{type:'audio'}]};
-        const summary=await generateOnce([...workingMessages,segmentMessage],segmentOptions,tools,segment.samples);
+        const summary=await generateOnce([...workingMessages,segmentMessage],segmentOptions,null,segment.samples);
         segmentSummaries.push({name:segment.name,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds,text:summary});
         workingMessages.push({role:'user',content:segmentPrompt},{role:'assistant',content:summary});
       }
@@ -936,8 +939,10 @@
               ...(hasAudio?{audioProgress:info=>{
                 const label=info?.stage==='synthesizing'
                   ?'Combining audio segment analyses…'
-                  :'Analyzing audio segment '+String(info?.index||1)+'/'+String(info?.total||1)+' · '+String(info?.name||'Audio');
-                this.emit({inference:{stage:'prompt',label,progress:info?.total?Math.max(0,Math.min(100,(Number(info.index)||0)/Number(info.total)*100)):null}});
+                  :info?.stage==='decoding'
+                    ?'Decoding audio file '+String(info?.index||1)+'/'+String(info?.total||1)+' · '+String(info?.name||'Audio')
+                    :'Analyzing audio segment '+String(info?.index||1)+'/'+String(info?.total||1)+' · '+String(info?.name||'Audio');
+                this.emit({inference:{stage:'prompt',label,progress:info?.stage==='decoding'?null:info?.total?Math.max(0,Math.min(100,(Number(info.index)||0)/Number(info.total)*100)):null}});
               }}:{})
             });
           }
