@@ -604,8 +604,10 @@
       if(!audioParts.length)return [{generated_text:[{role:'assistant',content:await generateOnce(messages,generationOptions,tools,null)}]}];
       const audioMessage=messages[audioMessageIndex];
       const allContent=audioMessage.content||[];
-      const originalPrompt=allContent.filter(part=>part?.type==='text').map(part=>String(part.text||'')).join('\n').trim()||'Please analyze this audio.';
-      const imageParts=allContent.filter(part=>part?.type==='image');
+      const originalPrompt=allContent.filter(part=>part?.type==='text'&&part.videoFrameContext!==true).map(part=>String(part.text||'')).join('\n').trim()||'Please analyze this audio.';
+      // Retain the frame labels in their original order beside each image when
+      // audio segmentation rebuilds the multimodal user message.
+      const visualParts=allContent.filter(part=>part?.type==='image'||part?.videoFrameContext===true);
       const maxSamples=30*16000;
       const segments=[];
       let totalDuration=0;
@@ -636,7 +638,7 @@
       if(!segments.length)throw new Error('No usable audio segments were found.');
       if(segments.length===1){
         audioProgress?.({index:1,total:1,name:segments[0].name,startSeconds:0,endSeconds:totalDuration});
-        const singleMessage={...audioMessage,content:[...imageParts,{type:'audio'},{type:'text',text:originalPrompt}]};
+        const singleMessage={...audioMessage,content:[...visualParts,{type:'audio'},{type:'text',text:originalPrompt}]};
         return [{generated_text:[{role:'assistant',content:await generateOnce([...messages.slice(0,audioMessageIndex),singleMessage],generationOptions,tools,segments[0].samples)}]}];
       }
 
@@ -654,7 +656,7 @@
           ' from "'+segment.name+'", covering '+segment.startSeconds.toFixed(1)+'–'+segment.endSeconds.toFixed(1)+
           ' seconds. Analyze this segment in relation to the original request. Give concise observations grounded only in what is audible; do not guess details that this segment cannot establish.';
         audioProgress?.({index:index+1,total:segments.length,name:segment.name,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds});
-        const segmentMessage={...audioMessage,content:[...imageParts,{type:'audio'},{type:'text',text:segmentPrompt}]};
+        const segmentMessage={...audioMessage,content:[...visualParts,{type:'audio'},{type:'text',text:segmentPrompt}]};
         const summary=await generateOnce([...workingMessages,segmentMessage],segmentOptions,null,segment.samples);
         segmentSummaries.push({name:segment.name,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds,text:summary});
         workingMessages.push({role:'user',content:segmentPrompt},{role:'assistant',content:summary});
@@ -994,12 +996,12 @@
               :Array.from({length:remainingFrameBudget},(_,index)=>Math.round(index*(frames.length-1)/Math.max(1,remainingFrameBudget-1)));
             const selected=[...new Set(indexes)].map(index=>frames[index]).filter(Boolean);
             totalSampledFrames+=selected.length;
-            content.push({type:'text',text:'Video attachment "'+String(part.name||'Video')+'" · '+duration.toFixed(1)+' seconds. The following sampled frames are in chronological order; each has its original timestamp. Treat them as a sequence, not unrelated images.'});
+            content.push({type:'text',videoFrameContext:true,text:'Video attachment "'+String(part.name||'Video')+'" · '+duration.toFixed(1)+' seconds. The following sampled frames are in chronological order; each has its original timestamp. Treat them as a sequence, not unrelated images.'});
             for(let index=0;index<selected.length;index++){
               const frame=selected[index],image=frame?.image||frame;
               if(!image)continue;
               const timestamp=Number.isFinite(Number(frame?.timestamp))?Number(frame.timestamp):(duration*index/Math.max(1,selected.length));
-              content.push({type:'text',text:'Video frame '+(index+1)+'/'+selected.length+' at '+formatTimestamp(timestamp)+':'});
+              content.push({type:'text',videoFrameContext:true,text:'Video frame '+(index+1)+'/'+selected.length+' at '+formatTimestamp(timestamp)+':'});
               content.push({type:'image',image});
             }
             if(model?.supportsAudio===true){
@@ -1096,7 +1098,7 @@
               ...generationOptions,
               ...(streamer?{streamer}:{}),
               ...(Array.isArray(options.tools)&&options.tools.length?{tools:options.tools}:{}),
-              ...(hasAudio?{audioProgress:info=>{
+              ...((hasAudio||hasVideos&&model?.supportsAudio===true)?{audioProgress:info=>{
                 const label=info?.stage==='synthesizing'
                   ?'Combining audio segment analyses…'
                   :info?.stage==='decoding'
