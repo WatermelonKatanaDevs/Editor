@@ -389,9 +389,9 @@
     }
   }
   class LocalModelManager{
-    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;this.runtimeAssets=[];this.kvCaches=new Map();this.maxReusableCacheTokens=4096;this.maxReusableCacheSessions=2;this.maxReusableCacheTotalTokens=4096;}
+    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.downloads=new Map();this.trackingFiles=false;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;this.runtimeAssets=[];this.kvCaches=new Map();this.maxReusableCacheTokens=4096;this.maxReusableCacheSessions=2;this.maxReusableCacheTotalTokens=4096;}
     subscribe(fn){if(typeof fn!=='function')return ()=>{};this.listeners.add(fn);fn(this.status());return ()=>this.listeners.delete(fn);}
-    status(){return {loading:this.loading,loadedModelId:this.loadedModelId,loaded:!!this.generator,progress:this.progress,text:this.statusText,device:this.device,dtype:this.dtype,offlineOnly:this.offlineOnly,cacheHit:this.cacheHit};}
+    status(){return {loading:this.loading,loadedModelId:this.loadedModelId,loaded:!!this.generator,progress:this.progress,downloads:Array.from(this.downloads.values()),trackingFiles:this.trackingFiles,text:this.statusText,device:this.device,dtype:this.dtype,offlineOnly:this.offlineOnly,cacheHit:this.cacheHit};}
     emit(patch){Object.assign(this,patch||{});const state=this.status();for(const fn of this.listeners){try{fn(state);}catch(e){console.warn('Local AI status listener failed:',e);}}}
     isLoaded(id){return !!this.generator&&(!id||this.loadedModelId===String(id));}
     async library(){
@@ -463,7 +463,7 @@
         await this.clearKVCache(candidates[0][0]);
       }
     }
-    async unload(notify=true){await this.clearKVCache();const old=this.generator;this.generator=null;this.model=null;this.loadedModelId='';this.stopper=null;if(old&&old.dispose){try{await old.dispose();}catch(e){console.warn('Local AI model disposal failed:',e);}}if(notify)this.emit({loading:false,progress:0,statusText:'Model unloaded.'});}
+    async unload(notify=true){this.downloads.clear();this.trackingFiles=false;await this.clearKVCache();const old=this.generator;this.generator=null;this.model=null;this.loadedModelId='';this.stopper=null;if(old&&old.dispose){try{await old.dispose();}catch(e){console.warn('Local AI model disposal failed:',e);}}if(notify)this.emit({loading:false,progress:0,statusText:'Model unloaded.'});}
     async load(model,options={}){
       if(!model||model.protocol!=='local-transformers')throw new Error('Not a local browser model.');
       if(this.loading)throw new Error('A local model is already loading.');
@@ -473,7 +473,7 @@
       this.dtype=(this.device==='webgpu'?'q4f16':'q4');
       const variant=this.device+':'+this.dtype;
       const strictOffline=options.offlineOnly===true;
-      this.loading=true;this.progress=0;this.cacheHit=false;this.offlineOnly=strictOffline;
+      this.loading=true;this.progress=0;this.downloads.clear();this.trackingFiles=false;this.cacheHit=false;this.offlineOnly=strictOffline;
       this.statusText='Preparing '+model.model+'…';this.emit({loading:true,progress:0,statusText:this.statusText});
       // Request persistent browser storage while the user is explicitly loading a model.
       try{this.cache.requestPersistence();}catch(_){}
@@ -493,8 +493,17 @@
           let p=Number(info&&info.progress);if(!Number.isFinite(p))p=null;if(info&&info.status==='ready')p=100;
           if(p!=null)this.progress=Math.max(0,Math.min(100,p));
           const file=String((info&&((info.file||info.name)))||'').trim();
-          const suffix=file?' · '+file.split('/').pop():'';
-          this.statusText=(this.offlineOnly?'INDEXEDDB CACHE':'DOWNLOADING')+' · '+this.device.toUpperCase()+' · '+model.model+suffix+(p!=null?' · '+p.toFixed(1)+'%':'');
+          const eventStatus=String(info&&info.status||'').toLowerCase();
+          if(file){
+            this.trackingFiles=true;
+            if(eventStatus==='done')this.downloads.delete(file);
+            else{
+              const previous=this.downloads.get(file);
+              const fileProgress=p!=null?Math.max(0,Math.min(100,p)):Number(previous?.progress)||0;
+              this.downloads.set(file,{file,name:file.split('/').slice(-2).join('/'),progress:fileProgress,status:eventStatus});
+            }
+          }
+          this.statusText=(this.offlineOnly?'INDEXEDDB CACHE':'DOWNLOADING')+' · '+this.device.toUpperCase()+' · '+model.model;
           this.emit({loading:true});
         };
         const modelId=String(model.model||'');
@@ -505,7 +514,7 @@
         const manifest=await this.cache.finishModel();
         const persisted=manifest?.complete&&await this.cache.isModelCached(model.id,model.model,variant);
         if(!persisted)throw new Error('The model loaded, but one or more files could not be persisted in IndexedDB. Check available browser storage and try again.');
-        this.model=model;this.loadedModelId=model.id;this.loading=false;this.progress=100;
+        this.model=model;this.loadedModelId=model.id;this.loading=false;this.progress=100;this.downloads.clear();
         // Lock subsequent model/runtime reads to the persistent cache. Inference must not
         // silently fall back to downloading a missing asset.
         this.offlineOnly=true;
@@ -515,7 +524,7 @@
       }catch(e){
         this.cache.cancelModel();
         const failedGenerator=this.generator;
-        this.generator=null;this.loadedModelId='';this.loading=false;
+        this.generator=null;this.loadedModelId='';this.loading=false;this.downloads.clear();
         try{await failedGenerator?.dispose?.();}catch(_){}
         const detail=e&&e.message||String(e);
         const message=this.offlineOnly?'Offline cache could not fully load this model: '+detail:'Model load failed: '+detail;

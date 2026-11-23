@@ -1072,3 +1072,13 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .editor-settings-section .setting-duration-control>input[type=number]{flex:1;min-width:0;width:70px;box-sizing:border-box;background:var(--editor-bg);color:var(--editor-text-secondary);border:1px solid #3b3b3b;padding:7px 8px;outline:none}
 .editor-settings-section .setting-duration-control>select{flex:0 0 auto;max-width:125px;box-sizing:border-box;background:var(--editor-bg);color:var(--editor-text-secondary);border:1px solid #3b3b3b;padding:7px 8px;outline:none}
 .editor-settings-section .setting-duration-control>input:focus,.editor-settings-section .setting-duration-control>select:focus{border-color:#5a89b5}
+
+
+/* Per-file local model downloads. Each active artifact gets its own progress row. */
+.ai-local-files{display:flex;flex-direction:column;gap:7px;margin-top:7px;max-height:160px;overflow:auto;padding-right:2px}
+.ai-local-files[hidden],.ai-local-status-fallback[hidden]{display:none}
+.ai-local-file-row{display:flex;flex-direction:column;gap:3px;min-width:0}
+.ai-local-file-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.ai-local-file-heading span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--editor-muted-2,#bbb)}
+.ai-local-file-heading strong{flex:none;color:var(--editor-muted,#999);font:9px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:400}
+.ai-local-file-row .ai-local-progress{height:3px;margin-top:0}
