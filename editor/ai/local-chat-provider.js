@@ -393,15 +393,18 @@
     // dimension to preserve the matching prefix without copying the entire prompt
     // through the CPU or throwing away the reusable KV state.
     const entries={};
+    let tensorCount=0;
     for(const [name,tensor] of Object.entries(cache||{})){
-      if(!tensor||!Array.isArray(tensor.dims)||tensor.dims.length<3||typeof tensor.slice!=='function')continue;
+      if(!tensor||typeof tensor!=='object'||!Array.isArray(tensor.dims))continue;
+      tensorCount++;
+      if(tensor.dims.length<3||typeof tensor.slice!=='function')throw new Error('The local model KV cache contains a state that cannot be cropped safely.');
       const sequenceAxis=tensor.dims.length-2;
-      if(Number(tensor.dims[sequenceAxis])!==currentLength)continue;
+      if(Number(tensor.dims[sequenceAxis])!==currentLength)throw new Error('The local model KV cache contains an unaligned state that cannot be cropped safely.');
       const slices=new Array(tensor.dims.length).fill(null);
       slices[sequenceAxis]=[0,targetLength];
       entries[name]=tensor.slice(...slices);
     }
-    if(!Object.keys(entries).length)throw new Error('The local model KV cache cannot be cropped safely.');
+    if(!tensorCount||Object.keys(entries).length!==tensorCount)throw new Error('The local model KV cache cannot be cropped safely.');
     let cropped;
     try{
       cropped=new lib.DynamicCache(entries);
