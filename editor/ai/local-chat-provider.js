@@ -557,13 +557,19 @@
         ? await Promise.all(imageSources.map(image=>image instanceof lib.RawImage?image:lib.load_image(image)))
         : null;
       const inputs=await processor(prompt,images,null,{add_special_tokens:false});
-      const output=await model.generate({...inputs,...generationOptions});
-      const sequences=output?.sequences||output;
-      const allTokenIds=await tensorTokenIds(sequences);
-      const promptLength=Number(inputs?.input_ids?.dims?.at(-1))||0;
-      const generatedIds=allTokenIds.slice(promptLength);
-      const generated=processor.tokenizer.decode(generatedIds,{skip_special_tokens:true});
-      return [{generated_text:[{role:'assistant',content:String(generated||'')}]}];
+      let output=null;
+      try{
+        output=await model.generate({...inputs,...generationOptions});
+        const sequences=output?.sequences||output;
+        const allTokenIds=await tensorTokenIds(sequences);
+        const promptLength=Number(inputs?.input_ids?.dims?.at(-1))||0;
+        const generatedIds=allTokenIds.slice(promptLength);
+        const generated=processor.tokenizer.decode(generatedIds,{skip_special_tokens:true});
+        return [{generated_text:[{role:'assistant',content:String(generated||'')}]}];
+      }finally{
+        const tensors=new Set([...Object.values(inputs||{}),output?.sequences||output].filter(value=>value&&typeof value.dispose==='function'));
+        for(const tensor of tensors){try{await tensor.dispose();}catch(_){}}
+      }
     };
     generate.model=model;
     generate.processor=processor;
