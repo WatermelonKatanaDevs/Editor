@@ -1440,8 +1440,25 @@ window.__editorInitPromise = (async function () {
       mediaElements: new Set(),
       frames: new WeakSet(),
       observers: [],
+      observedTargets: new WeakSet(),
       frameListeners: []
     });
+
+    const observeMutations = (target, win) => {
+      if (!target || tracker.observedTargets.has(target)) return;
+      const Observer = win?.MutationObserver || window.MutationObserver;
+      if (!Observer) return;
+      try {
+        const observer = new Observer(records => {
+          for (const record of records) {
+            for (const added of record.addedNodes || []) visit(added);
+          }
+        });
+        observer.observe(target, {childList:true, subtree:true});
+        tracker.observedTargets.add(target);
+        tracker.observers.push(observer);
+      } catch (_) {}
+    };
 
     const visit = node => {
       if (!node || tab._resourcesDisposed) return;
@@ -1461,18 +1478,7 @@ window.__editorInitPromise = (async function () {
           addMediaPauseStateToWindow(win, closedState);
           ensureMediaDocumentGuard(doc, closedState);
         }
-        const Observer = win?.MutationObserver || window.MutationObserver;
-        try {
-          if (Observer && (doc.documentElement || doc)) {
-            const observer = new Observer(records => {
-              for (const record of records) {
-                for (const added of record.addedNodes || []) visit(added);
-              }
-            });
-            observer.observe(doc.documentElement || doc, {childList:true, subtree:true});
-            tracker.observers.push(observer);
-          }
-        } catch (_) {}
+        observeMutations(doc.documentElement || doc, win);
         for (const child of doc.childNodes || []) visit(child);
         return;
       }
@@ -1509,13 +1515,21 @@ window.__editorInitPromise = (async function () {
           }
         }
 
-        try { if (node.shadowRoot) visit(node.shadowRoot); } catch (_) {}
+        try {
+          if (node.shadowRoot) {
+            observeMutations(node.shadowRoot, node.ownerDocument?.defaultView);
+            if (tab._closedMediaState) ensureMediaDocumentGuard(node.shadowRoot, tab._closedMediaState);
+            visit(node.shadowRoot);
+          }
+        } catch (_) {}
       }
       for (const child of node.childNodes || []) visit(child);
     };
 
     for (const root of [tab._viewElement, tab._previewHost, ...[...(tab._previewInstances?.values?.() || [])].map(instance => instance?.host)]) {
-      if (root) visit(root);
+      if (!root) continue;
+      observeMutations(root, root.ownerDocument?.defaultView);
+      visit(root);
     }
   }
   function pauseTabMedia(tab) {
