@@ -1109,3 +1109,12 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .ai-attachment-chip:has(.ai-audio-attachment-control){max-width:none;gap:5px}
 .ai-audio-attachment-preview{display:flex;align-items:center;gap:7px;max-width:min(360px,100%);padding:3px;border:1px solid #354b40;border-radius:5px;background:#171f1b}
 .ai-audio-attachment-preview audio{width:220px;max-width:58vw;height:28px;flex:0 1 auto}
+
+/* AI chat media previews are positioned above the corresponding user prompt. */
+.ai-user .ai-message-content{display:flex;flex-direction:column;align-items:flex-end;gap:0;min-width:0;max-width:94%}
+.ai-user .ai-message-attachments{order:0;display:flex;flex-direction:column;align-items:flex-end;gap:6px;align-self:flex-end;width:fit-content;max-width:100%;margin:0 0 5px;padding:1px 0;justify-content:flex-end;flex-wrap:wrap;overflow:visible}
+.ai-user .ai-bubble{order:1}
+.ai-image-attachment-preview{display:flex;flex-direction:column;align-items:flex-end;gap:5px;max-width:min(360px,100%);padding:4px;border:1px solid #354b40;border-radius:5px;background:#171f1b}
+.ai-image-attachment{display:block;max-width:min(320px,62vw);max-height:220px;width:auto;height:auto;object-fit:contain;border-radius:3px}
+.ai-image-attachment-control{display:block;width:32px;height:24px;flex:0 0 32px;object-fit:cover;border-radius:3px}
+.ai-attachment-chip:has(.ai-image-attachment-control){max-width:none;gap:5px}
