@@ -607,9 +607,11 @@
       const maxSamples=30*16000;
       const segments=[];
       let totalDuration=0;
-      for(const part of audioParts){
+      for(let partIndex=0;partIndex<audioParts.length;partIndex++){
+        const part=audioParts[partIndex];
         const source=part.url||part.data||part.src;
         if(!source)throw new Error('An audio attachment is missing its file data.');
+        audioProgress?.({stage:'decoding',index:partIndex+1,total:audioParts.length,name:String(part.name||part.filename||'Audio')});
         const waveform=await loadAudio(source);
         const segmentCount=Math.max(1,Math.ceil(waveform.length/maxSamples));
         const segmentSamples=Math.ceil(waveform.length/segmentCount);
@@ -629,7 +631,7 @@
       if(!segments.length)throw new Error('No usable audio segments were found.');
       if(segments.length===1){
         audioProgress?.({index:1,total:1,name:segments[0].name,startSeconds:0,endSeconds:totalDuration});
-        const singleMessage={...audioMessage,content:[...imageParts,{type:'audio'},{type:'text',text:originalPrompt}]};
+        const singleMessage={...audioMessage,content:[...imageParts,{type:'text',text:originalPrompt},{type:'audio'}]};
         return [{generated_text:[{role:'assistant',content:await generateOnce([...messages.slice(0,audioMessageIndex),singleMessage],generationOptions,tools,segments[0].samples)}]}];
       }
 
@@ -647,7 +649,7 @@
           ' from "'+segment.name+'", covering '+segment.startSeconds.toFixed(1)+'–'+segment.endSeconds.toFixed(1)+
           ' seconds. Analyze this segment in relation to the original request. Give concise observations grounded only in what is audible; do not guess details that this segment cannot establish.';
         audioProgress?.({index:index+1,total:segments.length,name:segment.name,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds});
-        const segmentMessage={...audioMessage,content:[...imageParts,{type:'audio'},{type:'text',text:segmentPrompt}]};
+        const segmentMessage={...audioMessage,content:[...imageParts,{type:'text',text:segmentPrompt},{type:'audio'}]};
         const summary=await generateOnce([...workingMessages,segmentMessage],segmentOptions,tools,segment.samples);
         segmentSummaries.push({name:segment.name,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds,text:summary});
         workingMessages.push({role:'user',content:segmentPrompt},{role:'assistant',content:summary});
