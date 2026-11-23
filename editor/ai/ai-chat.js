@@ -578,9 +578,12 @@
           if(!calls.length){finalText=stripToolProtocol(text,registeredTools);sendEvent({type:'assistant',text:finalText});sendEvent({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
           const clean=stripToolProtocol(text,registeredTools);if(clean)sendEvent({type:'assistant_activity',text:clean});
           if(canTemplateTools){
-            // Qwen-style templates serialize assistant tool_calls and tool-role
-            // messages into their native tool-call and tool-response format.
-            working.push({role:'assistant',content:clean,tool_calls:calls.map(call=>({id:call.id,type:'function',function:{name:call.name,arguments:call.arguments}}))});
+            // Preserve the exact generated tool-call text. Qwen chat templates
+            // serialize it as assistant content verbatim, so the next prompt begins
+            // with the same token sequence already represented by the KV cache.
+            // Rebuilding this from parsed JSON changes whitespace/formatting and
+            // breaks prefix equality, forcing a full prefill on every tool step.
+            working.push({role:'assistant',content:text});
           }else{
             working.push({role:'assistant',content:clean});
           }
