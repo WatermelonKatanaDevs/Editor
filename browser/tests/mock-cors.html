@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Mock CORS tests</title>
+<style>body{font:14px/1.5 system-ui,sans-serif;margin:24px;background:#111;color:#eee}.pass{color:#7ee787}.fail{color:#ff7b72}pre{white-space:pre-wrap}</style>
+<h1>Mock CORS policy tests</h1><pre id="results">Running…</pre>
+<script src="../lib/mock-cors.js"></script>
+<script>
+(function(){
+ const out=[];
+ const test=(name,fn)=>{try{fn();out.push('PASS  '+name)}catch(e){out.push('FAIL  '+name+'\\n      '+(e.stack||e))}};
+ const res=(status,headers)=>new Response(null,{status,headers});
+ const policy={origin:'https://app.example',targetOrigin:'https://api.example',credentialed:false};
+ const credentialed={...policy,credentialed:true};
+ test('wildcard permits non-credentialed response',()=>{if(!MockCORS.evaluateActualResponse(res(200,{'Access-Control-Allow-Origin':'*'}),policy).ok)throw Error('Expected allow')});
+ test('wildcard rejects credentialed response',()=>{if(MockCORS.evaluateActualResponse(res(200,{'Access-Control-Allow-Origin':'*'}),credentialed).ok)throw Error('Expected rejection')});
+ test('credentials require exact origin and ACAC',()=>{const r=MockCORS.evaluateActualResponse(res(200,{'Access-Control-Allow-Origin':'https://app.example','Access-Control-Allow-Credentials':'true'}),credentialed);if(!r.ok)throw Error(r.reason)});
+ test('PATCH requires preflight',()=>{if(!MockCORS.needsPreflight({method:'PATCH',headers:new Headers()}))throw Error('Expected preflight')});
+ test('custom header requires preflight',()=>{if(!MockCORS.needsPreflight({method:'GET',headers:new Headers({'X-Api-Key':'x'})}))throw Error('Expected preflight')});
+ test('safelisted GET avoids preflight',()=>{if(MockCORS.needsPreflight({method:'GET',headers:new Headers({'Accept':'application/json'})}))throw Error('Unexpected preflight')});
+ test('preflight accepts allowed method and header',()=>{const q={method:'PATCH',headers:new Headers({'X-Api-Key':'x'})};const r=MockCORS.evaluatePreflight(res(204,{'Access-Control-Allow-Origin':'https://app.example','Access-Control-Allow-Methods':'PATCH','Access-Control-Allow-Headers':'x-api-key'}),q,policy);if(!r.ok)throw Error(r.reason)});
+ test('preflight rejects unapproved header',()=>{const q={method:'PATCH',headers:new Headers({'X-Api-Key':'x'})};const r=MockCORS.evaluatePreflight(res(204,{'Access-Control-Allow-Origin':'https://app.example','Access-Control-Allow-Methods':'PATCH','Access-Control-Allow-Headers':'content-type'}),q,policy);if(r.ok)throw Error('Expected rejection')});
+ test('upstream policy overrides proxy wildcard',()=>{const r=res(200,{'Access-Control-Allow-Origin':'*','X-WK-CORS-Metadata':'upstream','X-WK-Upstream-Access-Control-Allow-Origin':'https://elsewhere.example'});if(MockCORS.evaluateActualResponse(r,policy).ok)throw Error('Expected rejection')});
+ test('no-cors fetch response is opaque',()=>{const r=MockCORS.createOpaqueResponse();if(r.type!=='opaque'||r.status!==0||r.body!==null)throw Error('Invalid opaque response')});
+ const pass=out.filter(v=>v.startsWith('PASS')).length;const el=document.getElementById('results');el.textContent=out.join('\\n')+'\\n\\n'+pass+'/'+out.length+' passed';el.className=pass===out.length?'pass':'fail';
+})();
+</script>

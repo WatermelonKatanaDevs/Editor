@@ -403,13 +403,17 @@ export default {
     // CORS HEADERS
     // ========================================================
 
+    const physicalOrigin = request.headers.get("Origin");
+    const physicalRequestedHeaders = request.headers.get("Access-Control-Request-Headers");
+    const physicalRequestedMethod = request.headers.get("Access-Control-Request-Method");
     const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods":
-        "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
-      "Access-Control-Allow-Headers": "*",
-      "Access-Control-Expose-Headers": "*",
-      "Access-Control-Max-Age": "86400"
+      "Access-Control-Allow-Origin": physicalOrigin || "*",
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Methods": physicalRequestedMethod || "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
+      "Access-Control-Allow-Headers": physicalRequestedHeaders || "*",
+      "Access-Control-Expose-Headers": "X-Final-URL, X-WK-CORS-Metadata, X-WK-Upstream-Access-Control-Allow-Origin, X-WK-Upstream-Access-Control-Allow-Credentials, X-WK-Upstream-Access-Control-Allow-Methods, X-WK-Upstream-Access-Control-Allow-Headers, X-WK-Upstream-Access-Control-Expose-Headers, X-WK-Upstream-Access-Control-Max-Age",
+      "Access-Control-Max-Age": "86400",
+      "Vary": "Origin"
     };
 
 
@@ -430,6 +434,11 @@ export default {
     // ========================================================
 
     const url = new URL(request.url);
+    const mockCorsPreflight = url.searchParams.get("wk_cors_preflight") === "1";
+    const emulatedOrigin = url.searchParams.get("wk_origin");
+    const emulatedRequestMethod = url.searchParams.get("wk_cors_request_method");
+    const emulatedRequestHeaders = url.searchParams.get("wk_cors_request_headers");
+    const upstreamMethod = mockCorsPreflight ? "OPTIONS" : request.method;
 
     let targetUrl = url.searchParams.get("url");
 
@@ -565,6 +574,16 @@ export default {
       "x-real-ip"
     ].forEach(h => newHeaders.delete(h));
 
+    // Apply the emulated document's Origin to the upstream request. The
+    // browser's Origin belongs to the editor-to-proxy request.
+    if (emulatedOrigin === "null" || (emulatedOrigin && /^https?:\/\//i.test(emulatedOrigin))) {
+      newHeaders.set("Origin", emulatedOrigin);
+    }
+    if (mockCorsPreflight) {
+      newHeaders.set("Access-Control-Request-Method", emulatedRequestMethod || "GET");
+      if (emulatedRequestHeaders) newHeaders.set("Access-Control-Request-Headers", emulatedRequestHeaders);
+    }
+
     // A page cannot reliably set the forbidden User-Agent header in Fetch.
     // The editor carries its selected identity in this ordinary header.
     // Apply it here before making the upstream request.
@@ -658,7 +677,7 @@ export default {
 
     const init = {
 
-      method: request.method,
+      method: upstreamMethod,
 
       headers: newHeaders,
 
@@ -671,8 +690,9 @@ export default {
     // --------------------------------------------------------
 
     if (
-      request.method !== "GET" &&
-      request.method !== "HEAD"
+      upstreamMethod !== "GET" &&
+      upstreamMethod !== "HEAD" &&
+      upstreamMethod !== "OPTIONS"
     ) {
 
       init.body =
@@ -710,6 +730,7 @@ export default {
     // ========================================================
 
     const shouldUseCorsfix =
+      upstreamMethod !== "OPTIONS" &&
       USE_CORSFIX_FALLBACK &&
       (
         directFetchFailed ||
@@ -858,37 +879,14 @@ export default {
         key.toLowerCase();
 
 
-      // Remove upstream CORS headers.
-      // We provide our own below.
-
-      if (
-        lower ===
-          "access-control-allow-origin" ||
-
-        lower ===
-          "access-control-allow-credentials" ||
-
-        lower ===
-          "access-control-allow-methods" ||
-
-        lower ===
-          "access-control-allow-headers" ||
-
-        lower ===
-          "access-control-expose-headers" ||
-
-        lower ===
-          "access-control-max-age"
-      ) {
-
+      // Preserve upstream CORS separately from the headers used by the
+      // editor's own browser request to this proxy.
+      if (lower.startsWith("access-control-")) {
+        responseHeaders.set("X-WK-Upstream-" + key, value);
         continue;
       }
 
-
-      responseHeaders.set(
-        key,
-        value
-      );
+      responseHeaders.set(key, value);
     }
 
 
@@ -905,8 +903,11 @@ export default {
       } catch (_) {}
     }
 
+    // Mark policy availability even when upstream omitted all CORS headers.
+    responseHeaders.set("X-WK-CORS-Metadata", "upstream");
+
     // ========================================================
-    // 12. ADD OUR CORS HEADERS
+    // 12. ADD OUR CORS HEADERS (editor-to-proxy hop only)
     // ========================================================
 
     for (

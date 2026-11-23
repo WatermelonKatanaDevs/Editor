@@ -282,100 +282,117 @@ class Network extends EventHandler {
     return await this._requestURL.apply(this,arguments);
   }
   requestSync(url, baseOrigin, data = {}, type = 'xhr', filter) {
-    const absoluteUrl = resolveNetworkURL(url, baseOrigin);
-    const headers = data.headers instanceof Headers ? new Headers(data.headers) : new Headers(data.headers || {});
-    const request = {
-      url: absoluteUrl,
-      method: String(data.method || 'GET').toUpperCase(),
-      headers,
-      body: data.body == null ? null : data.body,
-      credentials: data.credentials || 'same-origin',
-      username: data.username,
-      password: data.password,
-      request_type: type
+    const absoluteUrl=resolveNetworkURL(url,baseOrigin);
+    const request={
+      url:absoluteUrl,method:String(data.method||'GET').toUpperCase(),
+      headers:data.headers instanceof Headers?new Headers(data.headers):new Headers(data.headers||{}),
+      body:data.body==null?null:data.body,credentials:data.credentials||'same-origin',
+      username:data.username,password:data.password,request_type:type,
+      __wkInitiatorOrigin:MockCORS.originOf(baseOrigin),__wkCorsMode:data.mode||MockCORS.inferMode(type,data)
     };
-    this.dispatchEvent('requeststart', request, type);
-
-    // Loopback URLs in an emulated page are virtual. Only local endpoints
-    // that explicitly implement a synchronous handler may satisfy them.
-    const endpointList = isEmulatedLoopbackRequest(request)
-      ? this.endpoints.filter(endpoint =>
-          endpoint &&
-          !endpoint.__browserDefaultFallback &&
-          !endpoint.__browserProxyEndpoint
-        )
-      : this.endpoints;
-    const acceptResponse = typeof filter === 'function' ? filter : (response => response.ok);
-    let responseError = null;
-    let lastResponse = null;
-    let lastError = null;
-    let selectedResponse = null;
-
-    for (const endpoint of endpointList) {
-      if (!endpoint || endpoint.enabled === false || typeof endpoint.handleSyncRequest !== 'function') continue;
-      try {
-        endpoint.dispatchEvent('handlerequest', request, type);
-        const response = endpoint.handleSyncRequest(request, type);
-        if (!response) continue;
-        endpoint.dispatchEvent('returnresponse', response, request, type);
-
-        if (acceptResponse(response)) {
-          selectedResponse = response;
-          break;
+    const sendSync=(currentRequest,currentType,responseFilter)=>{
+      this.dispatchEvent('requeststart',currentRequest,currentType);
+      const endpoints=isEmulatedLoopbackRequest(currentRequest)
+        ?this.endpoints.filter(endpoint=>endpoint&&!endpoint.__browserDefaultFallback&&!endpoint.__browserProxyEndpoint)
+        :this.endpoints;
+      const accept=typeof responseFilter==='function'?responseFilter:response=>response.ok;
+      let selected=null,fallbackError=null,last=null,lastError=null;
+      for(const endpoint of endpoints){
+        if(!endpoint||endpoint.enabled===false||typeof endpoint.handleSyncRequest!=='function')continue;
+        try{
+          endpoint.dispatchEvent('handlerequest',currentRequest,currentType);
+          const endpointRequest={...currentRequest,headers:new Headers(currentRequest.headers)};
+          const response=endpoint.handleSyncRequest(endpointRequest,currentType);
+          if(!response)continue;
+          endpoint.dispatchEvent('returnresponse',response,currentRequest,currentType);
+          if(accept(response)){selected=response;break;}
+          if(endpoint.defaultError)fallbackError=response;
+          last=response;
+        }catch(error){
+          console.log('[networkRequestSync] Endpoint error:',endpoint.constructor?.name||'Endpoint',error&&error.message||error);
+          lastError=error;
         }
-        if (endpoint.defaultError) responseError = response;
-        lastResponse = response;
-      } catch (error) {
-        console.log('[networkRequestSync] Endpoint error:', endpoint.constructor?.name || 'Endpoint', error && error.message || error);
-        lastError = error;
       }
+      selected=selected||fallbackError||last||null;
+      if(selected){selected.source_url=currentRequest.url;selected.requested_url=currentRequest.url;selected.request_type=currentType;}
+      this.dispatchEvent('requestend',selected,currentRequest,currentType);
+      if(!selected&&lastError)throw lastError;
+      return selected;
+    };
+    const policy=MockCORS.getPolicy(request,type,request.__wkInitiatorOrigin);
+    if(policy.crossOrigin&&policy.mode==='same-origin')throw new TypeError('Fetch mode same-origin blocked a cross-origin request.');
+    if(!policy.crossOrigin||policy.mode==='navigate'||policy.mode==='no-cors'){
+      const response=sendSync(request,type,filter);
+      if(response&&policy.crossOrigin&&policy.mode==='no-cors'&&type==='fetch')return MockCORS.createOpaqueResponse();
+      return response;
     }
-
-    selectedResponse = selectedResponse || responseError || lastResponse || null;
-    if (selectedResponse) {
-      selectedResponse.source_url = absoluteUrl;
-      selectedResponse.requested_url = absoluteUrl;
-      selectedResponse.request_type = type;
+    if(policy.mode!=='cors')return sendSync(request,type,filter);
+    if(MockCORS.needsPreflight(request)&&!MockCORS.isCached(policy,request)){
+      const preflight=MockCORS.createPreflightRequest(request,policy);
+      const preflightResponse=sendSync(preflight,'cors-preflight',()=>true);
+      const result=MockCORS.evaluatePreflight(preflightResponse,request,policy);
+      if(!result.ok)throw new TypeError('CORS preflight failed: '+result.reason);
+      MockCORS.cachePreflight(policy,request,preflightResponse);
     }
-    this.dispatchEvent('requestend', selectedResponse, request, type);
-    if (!selectedResponse && lastError) throw lastError;
-    return selectedResponse;
+    const response=sendSync(request,type,filter||(()=>true));
+    if(!response)return null;
+    const result=MockCORS.evaluateActualResponse(response,policy);
+    if(!result.ok)throw new TypeError('CORS request failed: '+result.reason);
+    response.headers=MockCORS.filterHeaders(response.headers,policy);
+    return response;
   }
   async _requestURL(url,baseOrigin,data,type,filter) {
-    const absoluteUrl = resolveNetworkURL(url, baseOrigin);
-    const request = new Request(absoluteUrl, data);
+    const absoluteUrl=resolveNetworkURL(url,baseOrigin);
+    const request=new Request(absoluteUrl,data);
+    request.__wkInitiatorOrigin=MockCORS.originOf(baseOrigin);
+    request.__wkCorsMode=data&&data.mode||MockCORS.inferMode(type,data||{});
     return await this._requestObject(request,type,filter);
   }
   async _requestObject(request,type,filter) {
-    request.__original_url = request.url;
-    request.request_type = type;
-    this.dispatchEvent('requeststart',request,type);
-    // localhost is the emulated page origin, not a real server that the
-    // browser should contact. Only in-process virtual endpoints may handle it.
-    const endpointList = isEmulatedLoopbackRequest(request)
-      ? this.endpoints.filter(endpoint =>
-          endpoint &&
-          !endpoint.__browserDefaultFallback &&
-          !endpoint.__browserProxyEndpoint
-        )
-      : this.endpoints;
-    const response = await this.searchEndpoints(async function(endp) {
-      endp.dispatchEvent('handlerequest',request,type);
-      var response = await endp.handleRequest(request.clone(), type);
-      if (!response) return null;
-      endp.dispatchEvent('returnresponse',response,request,type);
+    const policy=MockCORS.getPolicy(request,type,request.__wkInitiatorOrigin||null);
+    if(policy.crossOrigin&&policy.mode==='same-origin')throw new TypeError('Fetch mode same-origin blocked a cross-origin request.');
+    if(!policy.crossOrigin||policy.mode==='navigate')return await this._requestObjectRaw(request,type,filter);
+    if(policy.mode==='no-cors'){
+      const validity=MockCORS.validateNoCorsRequest(request);
+      if(!validity.ok)throw new TypeError(validity.reason);
+      const response=await this._requestObjectRaw(request,type,filter||(()=>true));
+      if(response&&type==='fetch')return MockCORS.createOpaqueResponse();
       return response;
-    }, filter || (r => r.ok), endpointList, response =>
-      type === 'page-load' && isHTMLResponse(response)
-    );
-    if (response) {
-      response.source_url = request.url;
-      response.requested_url = request.__original_url || request.url;
-      response.request_type = type;
-      if (type === 'import' || type === 'script[src]' || type === 'link[rel=stylesheet]' || type === 'link[rel="stylesheet"]') {
-        try {
-          Object.defineProperty(response,'__devtoolsSourceTextPromise',{value:response.clone().text().catch(()=>null),configurable:true});
-        } catch(e) {}
+    }
+    if(policy.mode!=='cors')return await this._requestObjectRaw(request,type,filter);
+    if(MockCORS.needsPreflight(request)&&!MockCORS.isCached(policy,request)){
+      const preflight=MockCORS.createPreflightRequest(request,policy);
+      const preflightResponse=await this._requestObjectRaw(preflight,'cors-preflight',()=>true);
+      const preflightResult=MockCORS.evaluatePreflight(preflightResponse,request,policy);
+      if(!preflightResult.ok)throw new TypeError('CORS preflight failed: '+preflightResult.reason);
+      MockCORS.cachePreflight(policy,request,preflightResponse);
+    }
+    // Fetch resolves for HTTP errors; only network or CORS failures reject it.
+    const response=await this._requestObjectRaw(request,type,filter||(()=>true));
+    if(!response)return null;
+    const result=MockCORS.evaluateActualResponse(response,policy);
+    if(!result.ok)throw new TypeError('CORS request failed: '+result.reason);
+    return MockCORS.filterResponse(response,policy);
+  }
+  async _requestObjectRaw(request,type,filter) {
+    request.__original_url=request.url;request.request_type=type;
+    this.dispatchEvent('requeststart',request,type);
+    const endpoints=isEmulatedLoopbackRequest(request)
+      ?this.endpoints.filter(endpoint=>endpoint&&!endpoint.__browserDefaultFallback&&!endpoint.__browserProxyEndpoint)
+      :this.endpoints;
+    const response=await this.searchEndpoints(async function(endpoint){
+      endpoint.dispatchEvent('handlerequest',request,type);
+      const endpointRequest=request.clone();
+      if(request.__wkInitiatorOrigin)endpointRequest.__wkInitiatorOrigin=request.__wkInitiatorOrigin;
+      const endpointResponse=await endpoint.handleRequest(endpointRequest,type);
+      if(!endpointResponse)return null;
+      endpoint.dispatchEvent('returnresponse',endpointResponse,request,type);
+      return endpointResponse;
+    },filter||(r=>r.ok),endpoints,response=>type==='page-load'&&isHTMLResponse(response));
+    if(response){
+      response.source_url=request.url;response.requested_url=request.__original_url||request.url;response.request_type=type;
+      if(type==='import'||type==='script[src]'||type==='link[rel=stylesheet]'||type==='link[rel="stylesheet"]'){
+        try{Object.defineProperty(response,'__devtoolsSourceTextPromise',{value:response.clone().text().catch(()=>null),configurable:true});}catch(e){}
       }
     }
     this.dispatchEvent('requestend',response,request,type);
@@ -531,6 +548,18 @@ class NetworkEndpoint extends EventHandler {
   }
 }
 
+function buildProxyRequestURLForNetwork(proxy,request,type,obscureURL=true){
+  const url=new URL(buildProxyRequestURL(proxy,request.url,obscureURL));
+  if(request.__wkInitiatorOrigin)url.searchParams.set('wk_origin',request.__wkInitiatorOrigin);
+  if(type==='cors-preflight'){
+    url.searchParams.set('wk_cors_preflight','1');
+    url.searchParams.set('wk_cors_request_method',request.headers?.get?.('Access-Control-Request-Method')||'GET');
+    const requestedHeaders=request.headers?.get?.('Access-Control-Request-Headers');
+    if(requestedHeaders)url.searchParams.set('wk_cors_request_headers',requestedHeaders);
+  }
+  return url.href;
+}
+
 class ProxyNetworkEndpoint extends NetworkEndpoint {
   constructor(proxy, obscureURL = true, enabled) {
     super(enabled);
@@ -539,20 +568,27 @@ class ProxyNetworkEndpoint extends NetworkEndpoint {
     this.__browserProxyEndpoint = true;
   }
   async handleRequest(request,type) {
-    const targetProxyUrl = buildProxyRequestURL(this.proxy, request.url, this.obscureURL);
+    const targetProxyUrl = buildProxyRequestURLForNetwork(this.proxy, request, type, this.obscureURL);
     try {
-      const proxyRequest = new Request(targetProxyUrl, request);
+      const proxyRequest = type === 'cors-preflight'
+        ? new Request(targetProxyUrl, { method: 'GET', credentials: 'omit', redirect: 'follow' })
+        : new Request(targetProxyUrl, request);
       let response = await originalFetch(proxyRequest);
       //if (!response.ok) throw new Error(\`HTTP Error \${response.status}\`);
-      if (response.url === targetProxyUrl) Object.defineProperty(response, 'url', {get:()=>targetProxyUrl});
+      const finalUrl = response.headers.get('X-Final-URL') || request.url;
+      try { Object.defineProperty(response, 'url', { configurable: true, get: () => finalUrl }); } catch (_) {}
+      try { Object.defineProperty(response, 'redirected', { configurable: true, value: finalUrl !== request.url }); } catch (_) {}
       return response;
     } catch (err) {
       return null;
     }
   }
-  handleSyncRequest(request) {
-    const targetProxyUrl = buildProxyRequestURL(this.proxy, request.url, this.obscureURL);
-    return performSynchronousNetworkRequest(request, targetProxyUrl);
+  handleSyncRequest(request, type) {
+    const targetProxyUrl = buildProxyRequestURLForNetwork(this.proxy, request, type, this.obscureURL);
+    const proxyRequest = type === 'cors-preflight'
+      ? { url: request.url, method: 'GET', headers: new Headers(), body: null, credentials: 'omit' }
+      : { ...request, headers: new Headers(request.headers || {}) };
+    return performSynchronousNetworkRequest(proxyRequest, targetProxyUrl);
   }
   async handleSocket(absoluteUrl, protocols) {
     // Switch the HTTP proxy URL to its WebSocket endpoint using the same

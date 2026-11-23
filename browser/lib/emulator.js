@@ -86,6 +86,25 @@
     "text/jscript", "text/livescript", "text/x-ecmascript", "text/x-javascript"
   ]);
 
+  function getElementCorsRequestOptions(element) {
+    const tag=String(element?.tagName||'').toUpperCase();
+    const rel=String(element?.getAttribute?.('rel')||'').toLowerCase();
+    const as=String(element?.getAttribute?.('as')||'').toLowerCase();
+    const crossOrigin=element?.getAttribute?.('crossorigin');
+    const parentMedia=element?.parentElement&&/^(AUDIO|VIDEO)$/.test(element.parentElement.tagName)?element.parentElement:null;
+    const inheritedCrossOrigin=parentMedia?.getAttribute?.('crossorigin');
+    const moduleScript=tag==='SCRIPT'&&String(element?.getAttribute?.('type')||'').toLowerCase()==='module';
+    const modulePreload=tag==='LINK'&&rel==='modulepreload';
+    const fontPreload=tag==='LINK'&&rel==='preload'&&as==='font';
+    const corsEnabled=moduleScript||modulePreload||fontPreload||crossOrigin!==null||inheritedCrossOrigin!==null;
+    const value=crossOrigin!==null?crossOrigin:inheritedCrossOrigin;
+    return {mode:corsEnabled?'cors':'no-cors',credentials:String(value||'').toLowerCase()==='use-credentials'?'include':'same-origin'};
+  }
+  function isFontResourceURL(value) {
+    try{return /\.(?:woff2?|ttf|otf|eot)$/i.test(new URL(value,'https://example.invalid/').pathname);}
+    catch(_){return /\.(?:woff2?|ttf|otf|eot)(?:[?#]|$)/i.test(String(value||''));}
+  }
+
   function isExecutableScriptElement(script) {
     const rawType = script?.getAttribute?.("type");
     if (rawType == null || !String(rawType).trim()) return true;
@@ -267,7 +286,13 @@
         el.setAttribute(rawAttr, requestUrl);
         el.removeAttribute(attr);
 
-        const response = await page.network.request(absoluteUrl, dynamicBaseOrigin, {}, selector);
+        let response;
+        try {
+          response = await page.network.request(absoluteUrl, dynamicBaseOrigin, getElementCorsRequestOptions(el), selector);
+        } catch (error) {
+          el.setAttribute('data-wk-resource-error', String(error?.message || error).slice(0, 300));
+          return;
+        }
         if (!response || !response.ok) return;
 
         const integrity = el.getAttribute("integrity");
@@ -1319,7 +1344,8 @@
           }
         }
         const resolvedUrl = resolved.href;
-        const response = await networkRequest(resolvedUrl, baseOrigin, {}, 'css-url');
+        const cssRequestOptions = isFontResourceURL(resolvedUrl) ? { mode: 'cors', credentials: 'same-origin' } : { mode: 'no-cors' };
+        const response = await networkRequest(resolvedUrl, baseOrigin, cssRequestOptions, 'css-url');
         if (!response || !response.ok) return;
 
         const contentType = response.headers.get('content-type') || '';
@@ -2068,7 +2094,7 @@
 
             let response;
             try {
-              response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, el.tagName);
+              response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, getElementCorsRequestOptions(el), el.tagName);
             } catch (error) {
               el.setAttribute('data-wk-resource-error', String(error?.message || error).slice(0, 300));
               return;
@@ -2375,7 +2401,7 @@
           nativeElementRemoveAttribute.call(script, 'data-wk-integrity-error');
 
           try {
-            const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, 'script');
+            const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, getElementCorsRequestOptions(script), 'script');
             if (script.__editorScriptRequestId !== requestId) return;
             if (!response || !response.ok) {
               nativeElementSetAttribute.call(script, 'data-wk-resource-error', response ? 'HTTP ' + response.status : 'unhandled');
@@ -3645,6 +3671,11 @@
             // Extract properties from the Request object into your data object
             requestOptions.method = clonedRequest.method;
             requestOptions.headers = Object.fromEntries(clonedRequest.headers.entries());
+            requestOptions.mode = clonedRequest.mode;
+            requestOptions.credentials = clonedRequest.credentials;
+            requestOptions.redirect = clonedRequest.redirect;
+            requestOptions.referrer = clonedRequest.referrer;
+            requestOptions.referrerPolicy = clonedRequest.referrerPolicy;
             
             // Safely extract the body text if a body exists
             if (clonedRequest.body) {
@@ -3657,7 +3688,8 @@
           }
 
           const resolvedUrl = new URL(typeof fetchUrl === 'string' ? fetchUrl : fetchUrl.url, CURRENT_PAGE_URL).href;
-          
+          if (!requestOptions.mode) requestOptions.mode = 'cors';
+
           // Pass the enriched requestOptions into your network handler
           const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, requestOptions, type);
           if (response) return response;
