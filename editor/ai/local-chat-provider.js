@@ -846,33 +846,88 @@
       if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
       const hasImages=messages.some(message=>Array.isArray(message?.images)&&message.images.length>0);
       const hasAudio=messages.some(message=>Array.isArray(message?.audios)&&message.audios.length>0);
+      const hasVideos=messages.some(message=>Array.isArray(message?.videos)&&message.videos.length>0);
       const requestMessages=messages.map(message=>{
         const next={...message};
         const images=Array.isArray(message?.images)?message.images:[];
         const audios=Array.isArray(message?.audios)?message.audios:[];
-        if(images.length||audios.length){
+        const videos=Array.isArray(message?.videos)?message.videos:[];
+        if(images.length||audios.length||videos.length){
           next.content=[
             ...images.map(image=>({type:'image',url:image.dataUrl})),
             ...audios.map(audio=>({type:'audio',url:audio.dataUrl,name:audio.name})),
+            ...videos.map(video=>({type:'video',source:video.file||video.blob||video.source,name:video.name||'Video'})),
             {type:'text',text:String(message.content||'')}
           ];
           delete next.images;
           delete next.audios;
+          delete next.videos;
         }
         return next;
       });
+      const prepareVideoFrames=async(lib,sourceMessages)=>{
+        if(typeof lib.load_video!=='function')throw new Error('This Transformers.js runtime does not include browser video decoding. Reload the editor to update its local AI runtime.');
+        const videoCount=sourceMessages.reduce((count,message)=>count+(Array.isArray(message?.content)?message.content.filter(part=>part?.type==='video').length:0),0);
+        if(!videoCount)return sourceMessages;
+        const perVideoFrameBudget=Math.max(1,Math.floor(32/videoCount));
+        let decoded=0;
+        const prepared=[];
+        const formatTimestamp=value=>{
+          const seconds=Math.max(0,Number(value)||0),minutes=Math.floor(seconds/60),whole=Math.floor(seconds%60),tenths=Math.floor((seconds-Math.floor(seconds))*10);
+          return String(minutes).padStart(2,'0')+':'+String(whole).padStart(2,'0')+'.'+tenths;
+        };
+        for(const message of sourceMessages){
+          if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
+          if(message.role!=='user'||!Array.isArray(message.content)||!message.content.some(part=>part?.type==='video')){
+            prepared.push(message);continue;
+          }
+          const content=[];
+          for(const part of message.content){
+            if(part?.type!=='video'){content.push(part);continue;}
+            const source=part.source||part.blob||part.file;
+            if(!source)throw new Error('The video attachment "'+String(part.name||'Video')+'" is missing its file data.');
+            this.emit({inference:{stage:'prompt',label:'Decoding video '+String(decoded+1)+'/'+String(videoCount)+' · '+String(part.name||'Video'),progress:Math.round(decoded/videoCount*100)}});
+            let video;
+            try{video=await lib.load_video(source,{fps:1});}
+            catch(error){throw new Error('Could not decode video "'+String(part.name||'Video')+'". Try MP4 (H.264) or WebM (VP9). '+(error?.message||String(error)));}
+            const duration=Number(video?.duration)||0;
+            if(!Number.isFinite(duration)||duration<=0)throw new Error('The video "'+String(part.name||'Video')+'" has no readable duration.');
+            if(duration>60)throw new Error('Video attachments are limited to 60 seconds. Trim "'+String(part.name||'Video')+'" and try again.');
+            const frames=Array.isArray(video?.frames)?video.frames:[];
+            if(!frames.length)throw new Error('No frames could be decoded from "'+String(part.name||'Video')+'".');
+            const indexes=frames.length<=perVideoFrameBudget
+              ?frames.map((_,index)=>index)
+              :Array.from({length:perVideoFrameBudget},(_,index)=>Math.round(index*(frames.length-1)/Math.max(1,perVideoFrameBudget-1)));
+            const selected=[...new Set(indexes)].map(index=>frames[index]).filter(Boolean);
+            content.push({type:'text',text:'Video attachment "'+String(part.name||'Video')+'" · '+duration.toFixed(1)+' seconds. The following sampled frames are in chronological order; each has its original timestamp. Treat them as a sequence, not unrelated images.'});
+            for(let index=0;index<selected.length;index++){
+              const frame=selected[index],image=frame?.image||frame;
+              if(!image)continue;
+              const timestamp=Number.isFinite(Number(frame?.timestamp))?Number(frame.timestamp):(duration*index/Math.max(1,selected.length));
+              content.push({type:'text',text:'Video frame '+(index+1)+'/'+selected.length+' at '+formatTimestamp(timestamp)+':'});
+              content.push({type:'image',image});
+            }
+            decoded++;
+            this.emit({inference:{stage:'prompt',label:'Sampled video '+decoded+'/'+videoCount+' · '+selected.length+' frames',progress:Math.round(decoded/videoCount*100)}});
+          }
+          prepared.push({...message,content});
+        }
+        return prepared;
+      };
       let generated='';
       const run=async()=>{
         generated='';
         this.emit({inference:{stage:'preparing',label:'Processing prompt',progress:null}});
         const generator=this.requireGenerator();
-        const lib=await this.library();const Stopper=lib.InterruptableStoppingCriteria;const stopper=Stopper?new Stopper():null;this.stopper=stopper;
+        const lib=await this.library();
+        const preparedMessages=hasVideos?await prepareVideoFrames(lib,requestMessages):requestMessages;
+        const Stopper=lib.InterruptableStoppingCriteria;const stopper=Stopper?new Stopper():null;this.stopper=stopper;
         const tokenizer=generator.tokenizer||generator.processor?.tokenizer;
         const streamer=lib.TextStreamer&&tokenizer?new lib.TextStreamer(tokenizer,{skip_prompt:true,skip_special_tokens:true,callback_function:piece=>{if(this.inference?.stage!=='generating')this.emit({inference:{stage:'generating',label:'Generating response',progress:null}});generated+=String(piece||'');if(onText)onText(generated,String(piece||''));}}):null;
         try{
           const generationOptions={max_new_tokens:Math.max(64,Math.min(4096,Number(options.maxTokens)||1024)),do_sample:true,temperature:options.temperature!=null?options.temperature:.7,top_p:options.topP!=null?options.topP:.9,...(stopper?{stopping_criteria:[stopper]}:{})};
           let result=null;
-          if(this.device==='webgpu'&&!hasImages&&!hasAudio&&model?.supportsVision!==true){
+          if(this.device==='webgpu'&&!hasImages&&!hasAudio&&!hasVideos&&model?.supportsVision!==true){
             const conversationId=String(options.conversationId||'');
             let cacheState=null;
             const previousState=conversationId?this.kvCaches.get(conversationId):null;
@@ -885,7 +940,7 @@
             }
             let cachedGeneration=null;
             try{
-              cachedGeneration=await generateWebGPUChunked(generator,lib,requestMessages,generationOptions,streamer,signal,progress=>{
+              cachedGeneration=await generateWebGPUChunked(generator,lib,preparedMessages,generationOptions,streamer,signal,progress=>{
                 if(progress.stage==='generating')this.emit({inference:{stage:'generating',label:'Generating response',progress:null}});
                 else{
                   const total=Math.max(0,Number(progress.total)||0),processed=Math.max(0,Number(progress.processed)||0);
@@ -936,7 +991,7 @@
           if(result===null){
             // Keep the indeterminate status on prompt processing until the streamer
             // confirms that generated output has started.
-            result=await generator(requestMessages,{
+            result=await generator(preparedMessages,{
               ...generationOptions,
               ...(streamer?{streamer}:{}),
               ...(Array.isArray(options.tools)&&options.tools.length?{tools:options.tools}:{}),
