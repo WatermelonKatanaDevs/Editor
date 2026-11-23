@@ -392,30 +392,31 @@
     // Transformers.js exposes cache tensors as named entries. Slice their sequence
     // dimension to preserve the matching prefix without copying the entire prompt
     // through the CPU or throwing away the reusable KV state.
-    const entries={};
-    let tensorCount=0;
-    for(const [name,tensor] of Object.entries(cache||{})){
-      if(!tensor||typeof tensor!=='object'||!Array.isArray(tensor.dims))continue;
-      tensorCount++;
-      if(tensor.dims.length<3||typeof tensor.slice!=='function')throw new Error('The local model KV cache contains a state that cannot be cropped safely.');
+    const tensorEntries=Object.entries(cache||{}).filter(([,tensor])=>tensor&&typeof tensor==='object'&&Array.isArray(tensor.dims));
+    if(!tensorEntries.length)throw new Error('The local model KV cache cannot be cropped safely.');
+    for(const [,tensor] of tensorEntries){
       const sequenceAxis=tensor.dims.length-2;
-      if(Number(tensor.dims[sequenceAxis])!==currentLength)throw new Error('The local model KV cache contains an unaligned state that cannot be cropped safely.');
-      const slices=new Array(tensor.dims.length).fill(null);
-      slices[sequenceAxis]=[0,targetLength];
-      entries[name]=tensor.slice(...slices);
+      if(tensor.dims.length<3||typeof tensor.slice!=='function'||Number(tensor.dims[sequenceAxis])!==currentLength){
+        throw new Error('The local model KV cache contains a state that cannot be cropped safely.');
+      }
     }
-    if(!tensorCount||Object.keys(entries).length!==tensorCount)throw new Error('The local model KV cache cannot be cropped safely.');
-    let cropped;
+    const entries={};
     try{
-      cropped=new lib.DynamicCache(entries);
+      // Slice and release one tensor at a time to avoid holding two full KV caches
+      // in memory while preserving the common prefix.
+      for(const [name,tensor] of tensorEntries){
+        const slices=new Array(tensor.dims.length).fill(null);
+        slices[tensor.dims.length-2]=[0,targetLength];
+        entries[name]=tensor.slice(...slices);
+        await tensor.dispose?.();
+      }
+      const cropped=new lib.DynamicCache(entries);
       if((Number(cropped.get_seq_length?.())||0)!==targetLength)throw new Error('The cropped KV cache has an unexpected sequence length.');
+      return cropped;
     }catch(error){
-      try{await cropped?.dispose?.();}catch(_){}
       for(const tensor of Object.values(entries)){try{await tensor?.dispose?.();}catch(_){}}
       throw error;
     }
-    await cache?.dispose?.();
-    return cropped;
   }
   async function generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,onProgress,cacheState,tools){
     const tokenizer=generator.tokenizer,model=generator.model;
