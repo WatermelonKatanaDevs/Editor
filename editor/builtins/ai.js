@@ -536,7 +536,7 @@ const makeEditorTools = (() => {
   return '<div class="ai-model-row '+(active?'active ':'')+(local?'local':'remote')+'"><div class="ai-model-main"><strong>'+escapeHtml(m.name)+'</strong><span title="'+escapeHtml(details)+'">'+escapeHtml(details)+'</span></div><button data-use="'+escapeHtml(m.id)+'" '+(active&&(!local||loaded)?'disabled':'')+'>'+action+'</button>'+edit+'<button data-remove="'+escapeHtml(m.id)+'" '+(models.length<=1?'disabled title="At least one model must remain"':'')+'>×</button></div>';
 }).join('')}</div>
 
-<div class="ai-model-actions"><button class="ai-settings-add" data-add>+ Add remote model</button><button class="ai-settings-add" data-add-local>+ Add local model</button></div><div class="ai-model-editor-slot"><div class="ai-local-model-editor" data-local-editor hidden><h3 data-local-editor-title>Add local model</h3><label>Name<input data-local-name placeholder="Qwen3 4B Instruct · Local"></label><label>Model ID<div class="ai-model-input-row"><input data-local-model placeholder="onnx-community/owner-model-ONNX"><button type="button" data-browse-local-models>Browse</button></div></label><label class="ai-check"><input data-local-documents type="checkbox" checked> Supports text/document attachments</label><label class="ai-check"><input data-local-vision type="checkbox"> Supports image input (vision)</label><div class="ai-local-editor-status" data-local-editor-status></div><div class="ai-add-actions"><button type="button" data-cancel-local>Cancel</button><button type="button" data-save-local>Save model</button></div></div>
+<div class="ai-model-actions"><button class="ai-settings-add" data-add>+ Add remote model</button><button class="ai-settings-add" data-add-local>+ Add local model</button></div><div class="ai-model-editor-slot"><div class="ai-local-model-editor" data-local-editor hidden><h3 data-local-editor-title>Add local model</h3><label>Name<input data-local-name placeholder="Qwen3 4B Instruct · Local"></label><label>Model ID<div class="ai-model-input-row"><input data-local-model placeholder="onnx-community/owner-model-ONNX"><button type="button" data-browse-local-models>Browse</button></div></label><p class="ai-add-hint">Text/document and image support are detected automatically from the model configuration, pipeline, and Hugging Face model-card metadata.</p><div class="ai-local-editor-status" data-local-editor-status></div><div class="ai-add-actions"><button type="button" data-cancel-local>Cancel</button><button type="button" data-save-local>Save model</button></div></div>
 <div class="ai-add-model" hidden><label>Provider<select data-provider>${Object.entries(providers).filter(([id])=>id!=='local').map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>API format<select data-format>${Object.entries(aiRoot.AI_PROTOCOLS||{}).map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>Name<input data-name placeholder="My model"></label><label>Endpoint<input data-endpoint placeholder="https://api.example.com/v1"></label><label>Model ID <div class="ai-model-input-row"><input data-model placeholder="model-name"><button type="button" data-browse-models>Browse models</button></div></label><label>API key <input data-key type="password" placeholder="Enter your provider key"></label><label class="ai-check"><input data-remember type="checkbox"> Remember API key on this device</label><label class="ai-check"><input data-tools type="checkbox" checked> Supports native tool calling</label><label class="ai-check"><input data-thinking type="checkbox" checked> Supports reasoning</label><label class="ai-check"><input data-documents type="checkbox" checked> Supports text/document attachments</label><label class="ai-check"><input data-vision type="checkbox"> Supports image input (vision)</label><div class="ai-add-hint" data-protocol-hint>Select a provider to fill in its API format and endpoint. You can override the endpoint for compatible services.</div><div class="ai-add-actions"><button data-cancel-model>Cancel</button><button data-save-model>Save model</button></div></div></div><div class="ai-local-load-status" data-local-settings-status hidden><div data-local-settings-text></div><div class="ai-local-progress"><span data-local-settings-progress></span></div></div><div class="ai-hf-account"><div class="ai-section-title">Hugging Face</div><label>Your API key<input data-hf-global-key type="password" placeholder="hf_..."></label><label class="ai-check"><input data-hf-global-remember type="checkbox"> Remember your key on this device</label><div class="ai-add-hint">Used for Hugging Face models that do not have their own key. Add a key here or on an individual model.</div></div></section><section><div class="ai-section-title">Permissions</div><div class="ai-permission-list">${Object.entries(permissions.all()).map(([k,v])=>`<label><span>${escapeHtml(TOOL_PERMISSION_LABELS[k]||k)}</span><select data-permission="${k}"><option value="always" ${v==='always'?'selected':''}>Always allow</option><option value="ask" ${v==='ask'?'selected':''}>Ask each time</option><option value="never" ${v==='never'?'selected':''}>Never allow</option></select></label>`).join('')}</div><button data-reset-permissions class="ai-settings-reset">Reset permissions</button></section></div><div class="ai-settings-note">Providers can fill in the API format and default endpoint automatically. Providers may expose either a live model list or a fixed set of known models.</div></div><div data-settings-panel="context" hidden><div class="ai-context-panel"><h3 class="ai-section-title">Model context &amp; instructions</h3><p class="ai-settings-note-inline">These are added to the built-in coding-assistant instructions. They persist on this device and apply to your AI chats.</p><label>Additional instructions<textarea data-custom-instructions placeholder="Example: Prefer small, focused changes. Explain tradeoffs briefly."></textarea></label><label>Agent-only instructions<textarea data-agent-instructions placeholder="Example: Before editing, inspect related files and run a targeted verification after each major change."></textarea></label><label class="ai-check"><input data-show-activity type="checkbox"> Show agent activity in chat</label><h3 class="ai-section-title">Chat display</h3><label class="ai-check"><input data-show-attachment-previews type="checkbox" checked> Show image and audio previews in the composer and above user messages</label><h3 class="ai-section-title">Request recovery</h3><label class="ai-check"><input data-retry-429 type="checkbox"> Automatically retry HTTP 429 rate limits</label><div class="ai-retry-grid"><label>Max 429 retries<input data-max-retries type="number" min="0" max="10"></label><label>Base delay (ms)<input data-base-delay type="number" min="250" max="30000" step="250"></label></div><label class="ai-check"><input data-retry-transport type="checkbox"> Retry transport/CORS failures</label><div class="ai-retry-grid"><label>Max transport retries<input data-max-transport-retries type="number" min="0" max="10"></label><label>Transport delay (ms)<input data-transport-delay type="number" min="250" max="30000" step="250"></label></div><p class="ai-settings-note-inline">HTTP responses such as 429 are handled separately from transport failures such as CORS or connection errors.</p><h3 class="ai-section-title">Tool-call recovery</h3><label class="ai-check"><input data-tool-recovery type="checkbox"> Retry supported tool-call parse failures</label><div class="ai-retry-grid"><label>Max recovery retries<input data-tool-recovery-retries type="number" min="0" max="10"></label><span></span></div><p class="ai-settings-note-inline">Providers can opt into a recovery strategy through their API adapter. The agent itself does not special-case providers.</p></div></div><div data-settings-panel="analytics" hidden><div class="ai-analytics-panel"><div class="ai-analytics-cards" data-analytics-cards></div><h3 class="ai-section-title">By model</h3><div data-analytics-models class="ai-analytics-models"></div><button data-reset-analytics class="ai-settings-reset">Reset analytics</button></div></div><div data-settings-panel="cache" hidden><div class="ai-local-cache"><div class="ai-local-cache-heading"><strong>Persistent local AI cache</strong><button type="button" data-refresh-local-cache>Refresh</button></div><p>Model files and the Transformers.js runtime are stored in IndexedDB. Completed models can be loaded without network access.</p><div class="ai-local-cache-summary" data-local-cache-summary>Checking browser storage…</div><div class="ai-local-cache-list" data-local-cache-list></div></div></div></div>`;
       modal.querySelector('.editor-modal-close').onclick=()=>modal.remove(); modal.onclick=e=>{if(e.target===modal)modal.remove();};
       const cacheSummary=modal.querySelector('[data-local-cache-summary]');
@@ -679,13 +679,11 @@ const makeEditorTools = (() => {
       const localEditor=modal.querySelector('[data-local-editor]');
       const localNameInput=modal.querySelector('[data-local-name]');
       const localModelInput=modal.querySelector('[data-local-model]');
-      const localVisionInput=modal.querySelector('[data-local-vision]');
-      const localDocumentsInput=modal.querySelector('[data-local-documents]');
       const localEditorStatus=modal.querySelector('[data-local-editor-status]');
-      let editingLocalId='',localPipelineTask='';
+      let editingLocalId='',localPipelineTask='',localModelMetadata=null;
       function getLocalModelSearchMetadata(model){
         const config=model?.config&&typeof model.config==='object'?model.config:{};
-        const nestedConfigs=[config,config.text_config,config.thinker_config,config.language_config,config.llm_config,config.decoder_config].filter(value=>value&&typeof value==='object');
+        const nestedConfigs=[config,config.text_config,config.thinker_config,config.language_config,config.llm_config,config.decoder_config,config.vision_config,config.audio_config].filter(value=>value&&typeof value==='object');
         const contextFields=['max_position_embeddings','max_seq_len','max_sequence_length','max_context_length','context_length','n_positions','seq_length','model_max_length'];
         let contextLength=null;
         for(const nested of nestedConfigs){
@@ -695,34 +693,36 @@ const makeEditorTools = (() => {
           }
           if(contextLength)break;
         }
-        const tags=[...(Array.isArray(model?.tags)?model.tags:[]),...(Array.isArray(model?.cardData?.tags)?model.cardData.tags:[])].map(tag=>String(tag).toLowerCase());
+        const cardData=model?.cardData&&typeof model.cardData==='object'?model.cardData:{};
+        const rawTags=[...(Array.isArray(model?.tags)?model.tags:[]),...(Array.isArray(cardData.tags)?cardData.tags:[])];
+        const tags=rawTags.map(tag=>String(tag).toLowerCase());
         const tagText=tags.join(' ');
-        const task=String(model?.pipeline_tag||'').toLowerCase();
-        const architectures=Array.isArray(config.architectures)?config.architectures.map(String):[];
+        const task=String(model?.pipeline_tag||cardData.pipeline_tag||'').toLowerCase();
+        const architectures=nestedConfigs.flatMap(section=>Array.isArray(section.architectures)?section.architectures.map(String):[]);
         const architecture=architectures.join(' ');
-        const modelId=String(model?.id||'');
-        const modelHint=architecture+' '+String(config.model_type||'')+' '+modelId;
-        const supportsVision=['any-to-any','image-text-to-text','image-to-text','visual-question-answering','document-question-answering'].includes(task)
-          ||!!(config.vision_config||config.vision_tower||config.image_token_index!=null||config.vision_token_id!=null)
-          ||/(?:Gemma4|Qwen2_5Omni|Qwen3Omni|Llava|LLaVA|Vision|InternVL|Phi4Multimodal)/i.test(modelHint);
-        const supportsAudio=['any-to-any','audio-text-to-text','automatic-speech-recognition','audio-classification','zero-shot-audio-classification'].includes(task)
-          ||!!(config.audio_config||config.audio_encoder||config.audio_token_id!=null||config.audio_bos_token_id!=null)
-          ||/(?:Qwen2Audio|Qwen2_5Omni|Qwen3Omni|Phi4Multimodal|AudioFlamingo)/i.test(modelHint)||/(?:gemma[-_/]?4.*(?:e2b|e4b|12b)|(?:e2b|e4b|12b).*gemma[-_/]?4)/i.test(modelHint);
+        const modelType=nestedConfigs.map(section=>String(section.model_type||'')).filter(Boolean).join(' ');
+        const cardMetadata=[String(cardData.pipeline_tag||''),String(cardData.library_name||''),String(cardData.base_model||''),String(cardData.inference||'')].join(' ').toLowerCase();
+        const metadataText=[tagText,task,architecture,modelType,cardMetadata].join(' ');
+        const configHas=keys=>nestedConfigs.some(section=>keys.some(key=>section[key]!=null));
+        const textTasks=new Set(['text-generation','text2text-generation','conversational','question-answering','summarization','translation','fill-mask','any-to-any','image-text-to-text','audio-text-to-text']);
+        const languageArchitecture=/(?:ForCausalLM|CausalLM|ForSeq2SeqLM|Seq2SeqLM|ForConditionalGeneration|TextGeneration|LMHeadModel)/i.test(architecture);
+        const supportsDocuments=textTasks.has(task)||languageArchitecture||/(?:text-generation|text2text-generation|conversational|language-model|causal-lm)/i.test(tagText);
+        const imageTasks=new Set(['any-to-any','image-text-to-text','image-to-text','visual-question-answering','document-question-answering','image-classification','zero-shot-image-classification','image-segmentation']);
+        const supportsVision=imageTasks.has(task)||configHas(['vision_config','vision_tower','vision_model','image_token_index','image_token_id','vision_token_id','visual'])||/(?:vision|visual|image-text-to-text|image-to-text|visual-question-answering|document-question-answering|llava|internvl|qwen2.?5.?vl|qwen2.?vl|paligemma|idefics|mllama|fuyu|blip|florence|gemma.?[34])/i.test(architecture+' '+modelType+' '+tagText);
+        const audioTasks=new Set(['any-to-any','audio-text-to-text','automatic-speech-recognition','audio-classification','zero-shot-audio-classification','text-to-speech']);
+        const supportsAudio=audioTasks.has(task)||configHas(['audio_config','audio_encoder','audio_token_id','audio_bos_token_id','audio_tower'])||/(?:qwen2audio|qwen2.?5.?omni|qwen3.?omni|phi4.?multimodal|audioflamingo|whisper|wav2vec|seamlessm4t)/i.test(architecture+' '+modelType+' '+tagText);
         const chatTemplate=String(config.chat_template||config.tokenizer_config?.chat_template||'');
-        const supportsTools=/(?:tool[-_ ]?(?:use|calling)|function[-_ ]?calling|tools?[-_ ]?api)/i.test(tagText+' '+chatTemplate)
-          ||/(?:functionary|firefunction|openfunctions|nexus[-_ ]?raven|toolace)/i.test(modelId);
-        const supportsReasoning=/(?:^|[\s_-])reasoning(?:$|[\s_-])/.test(tagText)
-          ||/(?:reasoning|deepseek[-_ ]?r1|qwq|r1[-_ ]?distill)/i.test(modelId);
-        // Gemma 3's 4B/12B/27B vision variants and all Gemma 4 sizes
-        // support video understanding by sampling timestamped frames.
-        const gemmaVideo=/(?:gemma[-_/]?4|gemma[-_/]?3[-_/]?(?:4b|12b|27b))/i.test(modelHint);
-        const supportsVideo=['video-text-to-text','video-to-text'].includes(task)||/(?:Qwen2_5Omni|Qwen3Omni|VideoLlava)/i.test(modelHint)||gemmaVideo;
+        const supportsTools=/(?:tool[-_ ]?(?:use|calling)|function[-_ ]?calling|tools?[-_ ]?api)/i.test(tagText+' '+chatTemplate+' '+cardMetadata)
+          ||/(?:functionary|firefunction|openfunctions|nexus[-_ ]?raven|toolace)/i.test(architecture+' '+modelType);
+        const supportsReasoning=/(?:^|[\\s_-])reasoning(?:$|[\\s_-])/.test(tagText+' '+cardMetadata)
+          ||/(?:deepseek[-_ ]?r1|qwq|r1[-_ ]?distill)/i.test(architecture+' '+modelType+' '+cardMetadata);
+        const supportsVideo=['video-text-to-text','video-to-text'].includes(task)||/(?:video-text-to-text|video-to-text|qwen2.?5.?omni|qwen3.?omni|videollava)/i.test(architecture+' '+modelType+' '+tagText);
         const siblings=Array.isArray(model?.siblings)?model.siblings:[];
         const sizeBytes=siblings.reduce((total,file)=>{const size=Number(file?.lfs?.size??file?.size??0);return total+(Number.isFinite(size)&&size>0?size:0);},0);
         return {
           sizeBytes:Number.isFinite(sizeBytes)&&sizeBytes>0?sizeBytes:null,
           contextLength,
-          capabilities:{vision:!!supportsVision,audio:!!supportsAudio,toolCalling:!!supportsTools,reasoning:!!supportsReasoning,video:!!supportsVideo}
+          capabilities:{documents:!!supportsDocuments,vision:!!(supportsVision||supportsVideo),audio:!!supportsAudio,toolCalling:!!supportsTools,reasoning:!!supportsReasoning,video:!!supportsVideo}
         };
       }
       function formatLocalModelSize(bytes){
@@ -741,23 +741,20 @@ const makeEditorTools = (() => {
         if(network?.request){
           try{
             const encoded=String(modelId||'').split('/').map(encodeURIComponent).join('/');
-            const response=await network.request(new Request('https://huggingface.co/api/models/'+encoded+'?expand[]=config&expand[]=siblings&expand[]=tags&expand[]=pipeline_tag'),'ai');
+            const response=await network.request(new Request('https://huggingface.co/api/models/'+encoded+'?expand[]=config&expand[]=cardData&expand[]=siblings&expand[]=tags&expand[]=pipeline_tag'),'ai');
             if(response?.ok)info={...info,...await response.json()};
           }catch(error){console.warn('Could not inspect Hugging Face model metadata:',error);}
         }
-        const config=info.config&&typeof info.config==='object'?info.config:{};
-        const architectures=Array.isArray(config.architectures)?config.architectures.map(String):[];
-        const architecture=architectures.join(' ');
-        const modelType=String(config.model_type||'');
-        const task=String(info.pipeline_tag||'');
-        const audioArchitecture=/(?:Qwen2Audio|Qwen2_5Omni|Qwen3Omni|Phi4Multimodal|AudioFlamingo)/i.test(architecture+' '+modelType+' '+modelId)||/(?:gemma[-_/]?4.*(?:e2b|e4b|12b)|(?:e2b|e4b|12b).*gemma[-_/]?4)/i.test(architecture+' '+modelType+' '+modelId);
-        const audioConfig=!!(config.audio_config||config.audio_encoder||config.audio_token_id!=null||config.audio_bos_token_id!=null);
-        const supportsAudio=['any-to-any','audio-text-to-text'].includes(task)||audioArchitecture||(audioConfig&&/(?:ConditionalGeneration|ForCausalLM|Omni)/i.test(architecture));
-        const supportsVision=['any-to-any','image-text-to-text'].includes(task)||!!(config.vision_config||config.vision_tower||config.image_token_index!=null)||/(?:gemma[-_/]?4|gemma[-_/]?3[-_/]?(?:4b|12b|27b))/i.test(modelId)&&(/onnx/i.test(modelId)||task==='image-text-to-text');
-        const gemmaAnyToAny=/gemma[-_/]?4/i.test(modelId)&&task==='any-to-any';
-        const supportsVideo=['video-text-to-text','video-to-text'].includes(task)||/(?:gemma[-_/]?4|gemma[-_/]?3[-_/]?(?:4b|12b|27b)|Qwen2_5Omni|Qwen3Omni|VideoLlava)/i.test(architecture+' '+modelType+' '+modelId);
+        const detected=getLocalModelSearchMetadata({...info,id:String(modelId||info.id||'')});
+        const task=String(info.pipeline_tag||info.cardData?.pipeline_tag||'').toLowerCase();
+        const architectures=Array.isArray(info.config?.architectures)?info.config.architectures.map(String):[];
+        const modelType=String(info.config?.model_type||'');
+        const supportsVision=detected.capabilities.vision===true;
+        const supportsAudio=detected.capabilities.audio===true;
+        const supportsVideo=detected.capabilities.video===true;
+        const gemmaAnyToAny=/(?:gemma.?4)/i.test(architectures.join(' ')+' '+modelType+' '+String(info.cardData?.base_model||''))&&task==='any-to-any';
         const pipelineTask=gemmaAnyToAny?'any-to-any':(task==='audio-text-to-text'?'audio-text-to-text':(task==='image-text-to-text'||supportsVision||supportsAudio||supportsVideo?'image-text-to-text':''));
-        return {pipelineTask,capabilities:{vision:!!(supportsVision||supportsVideo),audio:!!supportsAudio,video:!!supportsVideo,documents:true,source:'huggingface',pipelineTag:task,architectures,modelType,revision:String(info.sha||'')}};
+        return {pipelineTask,capabilities:{...detected.capabilities,vision:supportsVision,audio:supportsAudio,video:supportsVideo,source:'huggingface',pipelineTag:task,architectures,modelType,revision:String(info.sha||'')}};
       }
       function openLocalModelEditor(model=null){
         form.hidden=true;
@@ -767,9 +764,8 @@ const makeEditorTools = (() => {
         localNameInput.value=model?.name||'';
         localModelInput.value=model?.model||'';
         localPipelineTask=String(model?.pipelineTask||'');
-        localDocumentsInput.checked=model?.supportsDocuments!==false;
-        localVisionInput.checked=model?.supportsVision!==undefined?!!model.supportsVision:(/gemma[-_/]?4/i.test(String(model?.model||''))&&/onnx/i.test(String(model?.model||'')))||['any-to-any','image-text-to-text'].includes(localPipelineTask);
-        localModelInput.oninput=()=>{if(/gemma[-_/]?4/i.test(localModelInput.value)&&/onnx/i.test(localModelInput.value)){localVisionInput.checked=true;localPipelineTask='any-to-any';}else if(localPipelineTask==='any-to-any')localPipelineTask='';};
+        localModelMetadata=null;
+        localModelInput.oninput=()=>{localModelMetadata=null;localPipelineTask='';};
         localEditorStatus.textContent='';
         localEditor.hidden=false;
         localEditor.querySelector('[data-save-local]').textContent=editingLocalId?'Save changes':'Save model';
@@ -791,7 +787,7 @@ const makeEditorTools = (() => {
             if(!network?.request)throw new Error('Network API is unavailable.');
             const q=search.value.trim();
             const params=new URLSearchParams({library:'transformers.js',sort:'downloads',direction:'-1',limit:'50'});
-            params.append('expand[]','config');params.append('expand[]','siblings');params.append('expand[]','tags');params.append('expand[]','pipeline_tag');
+            params.append('expand[]','config');params.append('expand[]','cardData');params.append('expand[]','siblings');params.append('expand[]','tags');params.append('expand[]','pipeline_tag');
             if(q)params.set('search',q);
             const response=await network.request(new Request('https://huggingface.co/api/models?'+params.toString()),'ai');
             if(!response)throw new Error('Hugging Face returned no response.');
@@ -849,9 +845,9 @@ const makeEditorTools = (() => {
       modal.querySelector('[data-cancel-local]').onclick=()=>{editingLocalId='';localEditor.hidden=true;};
       modal.querySelector('[data-browse-local-models]').onclick=()=>openLocalModelBrowser((id,info)=>{
         localModelInput.value=id;
-        const task=String(info?.pipeline_tag||'');
-        localPipelineTask=['any-to-any','image-text-to-text'].includes(task)?task:'';
-        if(localPipelineTask||(/gemma[-_/]?4/i.test(id)&&/onnx/i.test(id))){localVisionInput.checked=true;if(!localPipelineTask)localPipelineTask='any-to-any';}
+        localModelMetadata=info||null;
+        const task=String(info?.pipeline_tag||info?.cardData?.pipeline_tag||'');
+        localPipelineTask=['any-to-any','image-text-to-text','audio-text-to-text'].includes(task)?task:'';
         if(!localNameInput.value.trim())localNameInput.value=id.split('/').pop()+' · Local';
         localEditorStatus.textContent='';
       });
@@ -859,11 +855,12 @@ const makeEditorTools = (() => {
         const name=localNameInput.value.trim(),modelId=localModelInput.value.trim();
         if(!name||!modelId){localEditorStatus.textContent='Enter both a name and a model ID.';return;}
         localEditorStatus.textContent='Checking Hugging Face model capabilities…';
-         const inspected=await inspectHuggingFaceModel(modelId);
+         const inspected=await inspectHuggingFaceModel(modelId,localModelMetadata?.id===modelId?localModelMetadata:null);
          const capabilities=inspected.capabilities;
-         const supportsVision=localVisionInput.checked||capabilities.vision||capabilities.video;
+         const supportsDocuments=capabilities.documents===true;
+         const supportsVision=capabilities.vision===true;
          const supportsVideo=capabilities.video===true;
-         const pipelineTask=inspected.pipelineTask||localPipelineTask||(supportsVision||capabilities.audio||supportsVideo?(/gemma[-_/]?4/i.test(modelId)&&/onnx/i.test(modelId)?'any-to-any':'image-text-to-text'):'');
+         const pipelineTask=inspected.pipelineTask||localPipelineTask;
         const isLocal=m=>m.local||m.protocol==='local-transformers';
         const existing=registry.settings.models.find(m=>m.id===editingLocalId);
         if(!editingLocalId&&registry.settings.models.some(m=>isLocal(m)&&m.model===modelId)){
@@ -877,7 +874,7 @@ const makeEditorTools = (() => {
         }
         try{
           if(existing&&(existing.model!==modelId||existing.supportsVision!==supportsVision||existing.pipelineTask!==pipelineTask||existing.supportsAudio!==capabilities.audio||existing.supportsVideo!==supportsVideo)&&localManager?.isLoaded?.(id))await localManager.unload();
-          registry.add({...existing,id,name,model:modelId,remoteModel:modelId,protocol:'local-transformers',kind:'local-transformers',endpoint:'',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true,supportsDocuments:localDocumentsInput.checked,supportsVision,supportsAudio:capabilities.audio,supportsVideo,capabilities:{...capabilities,vision:supportsVision,audio:capabilities.audio,video:supportsVideo,pipelineTask},pipelineTask,builtInLocal:!!existing?.builtInLocal});
+          registry.add({...existing,id,name,model:modelId,remoteModel:modelId,protocol:'local-transformers',kind:'local-transformers',endpoint:'',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true,supportsDocuments,supportsVision,supportsAudio:capabilities.audio,supportsVideo,capabilities:{...capabilities,documents:supportsDocuments,vision:supportsVision,audio:capabilities.audio,video:supportsVideo,pipelineTask},pipelineTask,builtInLocal:!!existing?.builtInLocal});
           registry.save();
           editingLocalId='';localEditor.hidden=true;render();onChange?.();
         }catch(e){localEditorStatus.textContent=e?.message||String(e);}
