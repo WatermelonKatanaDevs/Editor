@@ -30,12 +30,12 @@
     return "no-cors";
   }
   function getPolicy(request, type, initiatorOrigin) {
-    let target = null, protocol = "";
-    try { const url = new URL(request.url); target = url.origin; protocol = url.protocol; } catch (_) {}
+    let target = null, targetUrl = null, protocol = "";
+    try { const url = new URL(request.url); target = url.origin; targetUrl = url.href.split("#", 1)[0]; protocol = url.protocol; } catch (_) {}
     const origin = originOf(initiatorOrigin);
     const credentials = request.credentials || "same-origin";
     return {
-      origin, targetOrigin:target,
+      origin, targetOrigin:target, targetUrl,
       mode:request.__wkCorsMode || inferMode(type, request),
       credentials, credentialed:credentials === "include",
       crossOrigin:!!origin && !!target && ["http:","https:"].includes(protocol) && origin !== target,
@@ -61,7 +61,7 @@
   }
   function needsPreflight(request) { return !SAFE_METHODS.has(String(request.method||"GET").toUpperCase()) || unsafeHeaderNames(request).length>0; }
   function cacheKey(policy,request) {
-    return [policy.origin,policy.targetOrigin,String(request.method||"GET").toUpperCase(),unsafeHeaderNames(request).join(","),policy.credentialed?"include":"omit"].join("|");
+    return [policy.origin,policy.targetUrl||policy.targetOrigin,String(request.method||"GET").toUpperCase(),unsafeHeaderNames(request).join(","),policy.credentialed?"include":"omit"].join("|");
   }
   function isCached(policy,request) {
     const key=cacheKey(policy,request), expiry=PREFLIGHT_CACHE.get(key)||0;

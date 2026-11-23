@@ -1872,7 +1872,7 @@
 
             try {
               const resolvedUrl = new URL(url, CURRENT_PAGE_URL).href;
-              const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, 'srcset');
+              const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, getElementCorsRequestOptions(el), 'srcset');
               if (response && response.ok) {
                 const uri = await createDataUri(response);
                 return uri ? `${uri}${descriptor ? ' ' + descriptor : ''}` : candidate.full;
@@ -2706,7 +2706,7 @@
                 
                 try {
                   const resolvedUrl = new URL(value, CURRENT_PAGE_URL).href;
-                  const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, {}, tagName);
+                  const response = await pageEmulator.network.request(resolvedUrl, BASE_ORIGIN, getElementCorsRequestOptions(this), tagName);
                   if (response && response.ok) {
                     const integrity = oldGetAttribute.call(this, "integrity") ||
                       oldGetAttribute.call(this, "data-raw-integrity");

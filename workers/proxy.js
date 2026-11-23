@@ -421,7 +421,10 @@ export default {
     // CORS PREFLIGHT
     // ========================================================
 
-    if (request.method === "OPTIONS") {
+    // Only handle browser-generated preflights for the physical proxy hop
+    // here. A real OPTIONS request initiated by project code must continue
+    // through to the upstream server.
+    if (request.method === "OPTIONS" && request.headers.has("Access-Control-Request-Method")) {
       return new Response(null, {
         status: 204,
         headers: corsHeaders
