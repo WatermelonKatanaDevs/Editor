@@ -849,6 +849,8 @@
       const hasImages=messages.some(message=>Array.isArray(message?.images)&&message.images.length>0);
       const hasAudio=messages.some(message=>Array.isArray(message?.audios)&&message.audios.length>0);
       const hasVideos=messages.some(message=>Array.isArray(message?.videos)&&message.videos.length>0);
+      const modelId=String(model?.model||model?.id||'');
+      const supportsVideoAudio=model?.supportsAudio===true&&/(?:gemma[-_/]?4.*(?:e2b|e4b|12b)|(?:e2b|e4b|12b).*gemma[-_/]?4)/i.test(modelId);
       const requestMessages=messages.map(message=>{
         const next={...message};
         const images=Array.isArray(message?.images)?message.images:[];
@@ -896,6 +898,7 @@
         const chunks=[];
         try{
           video.preload='auto';video.muted=true;video.playsInline=true;
+          if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
           await new Promise((resolve,reject)=>{
             let timer=setTimeout(()=>reject(new Error('Timed out opening the video soundtrack.')),15000);
             video.onloadedmetadata=()=>{clearTimeout(timer);resolve();};
@@ -946,7 +949,7 @@
         }finally{
           if(timeout)clearTimeout(timeout);
           video.pause();
-          video.onended=null;video.onerror=null;video.removeAttribute('src');
+          video.onloadedmetadata=null;video.onended=null;video.onerror=null;video.removeAttribute('src');
           try{video.load();}catch(_){}
           if(recorder&&recorder.state!=='inactive'){
             try{recorder.stop();await stopWait;}catch(_){}
@@ -1004,26 +1007,26 @@
               content.push({type:'text',videoFrameContext:true,text:'Video frame '+(index+1)+'/'+selected.length+' at '+formatTimestamp(timestamp)+':'});
               content.push({type:'image',image});
             }
-            if(model?.supportsAudio===true){
+            if(supportsVideoAudio){
               this.emit({inference:{stage:'prompt',label:'Extracting soundtrack '+String(decoded+1)+'/'+String(videoCount)+' · '+String(part.name||'Video'),progress:Math.round(decoded/videoCount*100)}});
               const samples=await extractVideoAudio(source,String(part.name||'Video'));
               if(samples?.length)content.push({type:'audio',samples,name:String(part.name||'Video')+' soundtrack'});
               else content.push({type:'text',text:'No audible soundtrack was detected in "'+String(part.name||'Video')+'".'});
             }
             decoded++;
-            this.emit({inference:{stage:'prompt',label:'Prepared video '+decoded+'/'+videoCount+' · '+selected.length+' frames'+(model?.supportsAudio===true?' and soundtrack':''),progress:Math.round(decoded/videoCount*100)}});
+            this.emit({inference:{stage:'prompt',label:'Prepared video '+decoded+'/'+videoCount+' · '+selected.length+' frames'+(supportsVideoAudio?' and soundtrack':''),progress:Math.round(decoded/videoCount*100)}});
           }
           prepared.push({...message,content});
         }
         return prepared;
       };
-      let generated='';
+      let generated='',preparedVideoMessages=null;
       const run=async()=>{
         generated='';
         this.emit({inference:{stage:'preparing',label:'Processing prompt',progress:null}});
         const generator=this.requireGenerator();
         const lib=await this.library();
-        const preparedMessages=hasVideos?await prepareVideoFrames(lib,requestMessages):requestMessages;
+        const preparedMessages=hasVideos?(preparedVideoMessages||(preparedVideoMessages=await prepareVideoFrames(lib,requestMessages))):requestMessages;
         const Stopper=lib.InterruptableStoppingCriteria;const stopper=Stopper?new Stopper():null;this.stopper=stopper;
         const tokenizer=generator.tokenizer||generator.processor?.tokenizer;
         const streamer=lib.TextStreamer&&tokenizer?new lib.TextStreamer(tokenizer,{skip_prompt:true,skip_special_tokens:true,callback_function:piece=>{if(this.inference?.stage!=='generating')this.emit({inference:{stage:'generating',label:'Generating response',progress:null}});generated+=String(piece||'');if(onText)onText(generated,String(piece||''));}}):null;
@@ -1098,7 +1101,7 @@
               ...generationOptions,
               ...(streamer?{streamer}:{}),
               ...(Array.isArray(options.tools)&&options.tools.length?{tools:options.tools}:{}),
-              ...((hasAudio||hasVideos&&model?.supportsAudio===true)?{audioProgress:info=>{
+              ...((hasAudio||hasVideos&&supportsVideoAudio)?{audioProgress:info=>{
                 const label=info?.stage==='synthesizing'
                   ?'Combining audio segment analyses…'
                   :info?.stage==='decoding'
