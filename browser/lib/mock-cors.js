@@ -68,7 +68,9 @@
     if(expiry<=Date.now()){PREFLIGHT_CACHE.delete(key);return false;} return true;
   }
   function cachePreflight(policy,request,response) {
-    const seconds=Math.max(0,Math.min(MAX_CACHE_SECONDS,Number(getHeader(response.headers,"access-control-max-age"))||0));
+    const headerValue=getHeader(response.headers,"access-control-max-age");
+    const parsed=headerValue==null?5:Number(headerValue);
+    const seconds=Number.isFinite(parsed)&&parsed>=0?Math.min(MAX_CACHE_SECONDS,parsed):5;
     if(seconds) PREFLIGHT_CACHE.set(cacheKey(policy,request),Date.now()+seconds*1000);
   }
   function createPreflightRequest(request,policy) {
