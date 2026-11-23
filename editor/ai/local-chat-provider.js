@@ -377,10 +377,42 @@
     }
     return flattenTokenIds(value);
   }
-  function tokenPrefixMatches(current,cached,length){
-    if(!Array.isArray(current)||!Array.isArray(cached)||!Number.isFinite(length)||length<0||length>current.length||length>cached.length)return false;
-    for(let i=0;i<length;i++)if(current[i]!==cached[i])return false;
-    return true;
+  function commonTokenPrefixLength(current,cached,limit){
+    if(!Array.isArray(current)||!Array.isArray(cached))return 0;
+    const max=Math.max(0,Math.min(Number(limit)||0,current.length,cached.length));
+    let index=0;
+    while(index<max&&current[index]===cached[index])index++;
+    return index;
+  }
+  async function cropDynamicCache(cache,targetLength,lib){
+    const currentLength=Number(cache?.get_seq_length?.())||0;
+    targetLength=Math.max(0,Math.min(currentLength,Math.floor(Number(targetLength)||0)));
+    if(targetLength===currentLength)return cache;
+    if(targetLength===0){await cache?.dispose?.();return null;}
+    // Transformers.js exposes cache tensors as named entries. Slice their sequence
+    // dimension to preserve the matching prefix without copying the entire prompt
+    // through the CPU or throwing away the reusable KV state.
+    const entries={};
+    for(const [name,tensor] of Object.entries(cache||{})){
+      if(!tensor||!Array.isArray(tensor.dims)||tensor.dims.length<3||typeof tensor.slice!=='function')continue;
+      const sequenceAxis=tensor.dims.length-2;
+      if(Number(tensor.dims[sequenceAxis])!==currentLength)continue;
+      const slices=new Array(tensor.dims.length).fill(null);
+      slices[sequenceAxis]=[0,targetLength];
+      entries[name]=tensor.slice(...slices);
+    }
+    if(!Object.keys(entries).length)throw new Error('The local model KV cache cannot be cropped safely.');
+    let cropped;
+    try{
+      cropped=new lib.DynamicCache(entries);
+      if((Number(cropped.get_seq_length?.())||0)!==targetLength)throw new Error('The cropped KV cache has an unexpected sequence length.');
+    }catch(error){
+      try{await cropped?.dispose?.();}catch(_){}
+      for(const tensor of Object.values(entries)){try{await tensor?.dispose?.();}catch(_){}}
+      throw error;
+    }
+    await cache?.dispose?.();
+    return cropped;
   }
   async function generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,onProgress,cacheState,tools){
     const tokenizer=generator.tokenizer,model=generator.model;
@@ -395,10 +427,27 @@
     const targetEnd=tokenCount-1; // Leave the final prompt token for generate() to consume.
     let cache=cacheState?.cache||null,reusedTokens=0,start=0,chunkSize=256;
     if(cache){
-      try{reusedTokens=Number(cache.get_seq_length())||0;}catch(_){reusedTokens=0;}
-      if(reusedTokens<=0||reusedTokens>targetEnd||!tokenPrefixMatches(inputTokenIds,cacheState?.tokenIds,reusedTokens)){
-        try{await cache.dispose();}catch(_){}
-        cache=null;reusedTokens=0;
+      let cacheLength=0;
+      try{cacheLength=Number(cache.get_seq_length())||0;}catch(_){}
+      reusedTokens=commonTokenPrefixLength(inputTokenIds,cacheState?.tokenIds,Math.min(cacheLength,targetEnd));
+      if(reusedTokens<cacheLength){
+        const previousCache=cache;
+        cache=await cropDynamicCache(cache,reusedTokens,lib);
+        if(cacheState){
+          cacheState.cache=cache;
+          cacheState.cacheLength=reusedTokens;
+          cacheState.tokenIds=(cacheState.tokenIds||[]).slice(0,reusedTokens);
+          cacheState.cacheBytes=cache?estimateDynamicCacheBytes(cache):0;
+        }
+        if(!cache&&previousCache){
+          reusedTokens=0;
+          if(cacheState){cacheState.cache=null;cacheState.cacheLength=0;cacheState.tokenIds=[];cacheState.cacheBytes=0;}
+        }
+      }
+      if(reusedTokens<=0){
+        if(cache){try{await cache.dispose();}catch(_){}}
+        cache=null;
+        if(cacheState){cacheState.cache=null;cacheState.cacheLength=0;cacheState.tokenIds=[];cacheState.cacheBytes=0;}
       }
     }
     // Preserve the established pipeline path for short, uncached prompts.
