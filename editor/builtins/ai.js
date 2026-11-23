@@ -1352,6 +1352,51 @@ const makeEditorTools = (() => {
       tree.querySelector('[data-new]').onclick=()=>newChat();
       tree.querySelector('[data-stop]').onclick=()=>{controller?.abort();chatAI.cancel();busy=false;render(g,t);};
       const input=tree.querySelector('[data-input]'); const send=tree.querySelector('[data-send]');
+      const compose=tree.querySelector('.ai-compose');
+      const hierarchyDragTypes=['application/x-file-manager-paths'];
+      const hasHierarchyFiles=event=>hierarchyDragTypes.some(type=>Array.from(event.dataTransfer?.types||[]).includes(type));
+      input.addEventListener('dragover',event=>{
+        if(!hasHierarchyFiles(event))return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect='copy';
+        compose?.classList.add('is-file-drop-target');
+      });
+      input.addEventListener('dragleave',event=>{
+        if(!input.contains(event.relatedTarget))compose?.classList.remove('is-file-drop-target');
+      });
+      input.addEventListener('drop',event=>{
+        if(!hasHierarchyFiles(event))return;
+        event.preventDefault();
+        event.stopPropagation();
+        compose?.classList.remove('is-file-drop-target');
+        let paths=[];
+        try{paths=JSON.parse(event.dataTransfer.getData('application/x-file-manager-paths')||'[]');}catch(_){}
+        if(!Array.isArray(paths)||!paths.length)return;
+        let added=0;
+        for(const rawPath of paths){
+          const path=String(rawPath||'');
+          if(!path||sensitiveAttachmentPath(path)||state.fs?.isDirectorySync?.(path))continue;
+          if(!state.fs?.existsSync?.(path))continue;
+          if(attachments.some(item=>item.path===path))continue;
+          if(attachments.length>=10)break;
+          try{
+            const data=state.fs.readFileSync(path,'binary');
+            if(data==null)continue;
+            const name=path.split('/').pop()||path;
+            const file=new File([data],name,{lastModified:Date.now()});
+            if(file.size>12*1024*1024)continue;
+            if(!attachmentSupported({file})){
+              continue;
+            }
+            attachments.push({key:'path:'+path,name,path,file,active:false,unavailable:false});
+            added++;
+          }catch(error){console.warn('Could not attach dropped file:',path,error);}
+        }
+        if(added){
+          renderAttachmentRow(tree);
+          updateComposerSendState(tree);
+        }
+      });
       const submit=async()=>{
         const text=input.value.trim();
         if((!text&&!attachments.some(item=>attachmentSupported(item)))||busy)return;
