@@ -1016,6 +1016,21 @@ const makeEditorTools = (() => {
       if(!url){url=URL.createObjectURL(file);imagePreviewUrls.set(file,url);}
       return url;
     }
+    function mediaAttachmentPreviewMarkup(file,item,options={}){
+      const kind=attachmentKind(file||item);
+      if(!file||!['audio','image'].includes(kind))return '';
+      const name=String(item?.name||(kind==='audio'?'Audio':'Image'));
+      const label=(item?.active?'● ':'')+name;
+      const detail=String(options.detail||item?.path||name);
+      const remove=Number.isInteger(options.removeIndex)
+        ? '<button type="button" class="ai-media-attachment-remove" data-attachment-remove="'+options.removeIndex+'" aria-label="Remove '+escapeHtml(name)+'" title="Remove attachment">×</button>'
+        : '';
+      const media=kind==='audio'
+        ? '<audio class="ai-media-attachment-player" controls preload="none" src="'+escapeHtml(audioPreviewUrl(file))+'" aria-label="Play '+escapeHtml(name)+'"></audio>'
+        : '<img class="ai-media-attachment-image" src="'+escapeHtml(imagePreviewUrl(file))+'" alt="'+escapeHtml(name)+'" loading="lazy" decoding="async">';
+      const classes='ai-media-attachment-preview ai-media-attachment-preview--'+kind+(options.supported===false?' is-unsupported':'')+(item?.unavailable?' is-unavailable':'');
+      return '<div class="'+classes+'" title="'+escapeHtml(detail)+'"><div class="ai-media-attachment-heading"><span class="ai-attachment-name">'+escapeHtml(label)+'</span>'+remove+'</div>'+media+'</div>';
+    }
     function getMessageAttachmentFile(message,index,item,retained){
       let file=retained?.[index]?.file||null;
       if(file)return file;
@@ -1111,13 +1126,11 @@ const makeEditorTools = (() => {
         const detail=item.unavailable?(item.path?'Workspace file unavailable; reattach it to resend':'Original device file is not retained in chat history; reattach it to resend'):item.active?'Currently open file':item.path||item.name;
         const chipClass='ai-attachment-chip'+(supported?'':' is-unsupported')+(item.unavailable?' is-unavailable':'');
         const kind=attachmentKind(item.file||item);
-        const audioControl=showAttachmentPreviews&&kind==='audio'&&item.file
-          ?'<audio class="ai-audio-attachment-control" controls preload="none" src="'+escapeHtml(audioPreviewUrl(item.file))+'" aria-label="Preview '+escapeHtml(item.name)+'"></audio>'
+        const preview=showAttachmentPreviews&&item.file&&(kind==='audio'||kind==='image')
+          ?mediaAttachmentPreviewMarkup(item.file,item,{removeIndex:index,supported,detail})
           :'';
-        const imageControl=showAttachmentPreviews&&kind==='image'&&item.file
-          ?'<img class="ai-image-attachment-control" src="'+escapeHtml(imagePreviewUrl(item.file))+'" alt="'+escapeHtml(item.name)+'" loading="lazy" decoding="async">'
-          :'';
-        return '<span class="'+chipClass+'" title="'+escapeHtml(detail+(supported?'':' · Unsupported by this model'))+'"><span class="ai-attachment-name">'+(item.active?'● ':'')+escapeHtml(item.name)+'</span>'+imageControl+audioControl+'<button type="button" data-attachment-remove="'+index+'" aria-label="Remove '+escapeHtml(item.name)+'" title="Remove attachment">×</button></span>';
+        if(preview)return preview;
+        return '<span class="'+chipClass+'" title="'+escapeHtml(detail+(supported?'':' · Unsupported by this model'))+'"><span class="ai-attachment-name">'+(item.active?'● ':'')+escapeHtml(item.name)+'</span><button type="button" data-attachment-remove="'+index+'" aria-label="Remove '+escapeHtml(item.name)+'" title="Remove attachment">×</button></span>';
       }).join('');
       strip.innerHTML='<button type="button" class="ai-attachment-add" data-add-attachment title="Add attachment" aria-label="Add attachment" '+(!canAdd||busy?'disabled':'')+' '+(canAdd?'':'hidden')+'>＋</button><div class="ai-attachment-list">'+chips+'</div>';
       strip.querySelector('[data-add-attachment]').onclick=()=>addAttachments(tree);
@@ -1411,34 +1424,10 @@ const makeEditorTools = (() => {
             const file=getMessageAttachmentFile(message,attachmentIndex,item,retained);
             const kind=String(item?.kind||attachmentKind(file||item));
             if(showAttachmentPreviews&&file&&(kind==='audio'||kind==='image')){
-              const preview=document.createElement('div');
-              preview.className=kind==='audio'?'ai-audio-attachment-preview':'ai-image-attachment-preview';
-              const chip=document.createElement('span');
-              chip.className='ai-attachment-chip';
-              chip.title=String(item?.path||item?.name||(kind==='audio'?'Audio attachment':'Image attachment'));
-              const name=document.createElement('span');
-              name.className='ai-attachment-name';
-              name.textContent=String(item?.name||(kind==='audio'?'Audio':'Image'));
-              chip.appendChild(name);
-              if(kind==='audio'){
-                const player=document.createElement('audio');
-                player.controls=true;
-                player.preload='none';
-                player.src=audioPreviewUrl(file);
-                player.setAttribute('aria-label','Play '+String(item?.name||'audio attachment'));
-                preview.append(chip,player);
-              }else{
-                const image=document.createElement('img');
-                image.className='ai-image-attachment';
-                image.src=imagePreviewUrl(file);
-                image.alt=String(item?.name||'Image attachment');
-                image.loading='lazy';
-                image.decoding='async';
-                preview.append(chip,image);
-              }
-              attached.appendChild(preview);
+              const template=document.createElement('template');
+              template.innerHTML=mediaAttachmentPreviewMarkup(file,item);
+              if(template.content.firstElementChild)attached.appendChild(template.content.firstElementChild);
             }else{
-              const chip=document.createElement('span');
               chip.className='ai-attachment-chip';
               chip.title=String(item?.path||item?.name||'Attachment');
               const name=document.createElement('span');
