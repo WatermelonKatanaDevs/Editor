@@ -513,10 +513,13 @@
         cache=null;
         return {result,cache:null,cacheLength:0,tokenIds:inputTokenIds,reusedTokens,generatedTokenIds:[]};
       }
-      // Only IDs actually represented by this cache are safe to replay into the
-      // next serialized assistant message. Decoding these with special tokens
-      // preserved allows Qwen's tool-call markup (and channel markers) to round-trip.
-      const generatedTokenIds=tokenIds.slice(inputTokenIds.length);
+      // Preserve the complete generated body, including a final sampled token
+      // that may not yet have been added to the KV cache. The cache's tokenIds
+      // remain sliced to cacheLength, so the next prompt can reuse the cached prefix
+      // and prefill any generated tail that was not part of that cache.
+      const generatedTokenIds=[...streamedTokenIds];
+      const eosIds=new Set([tokenizer?.eos_token_id,tokenizer?.eos_token_ids].flat().filter(value=>value!=null).map(Number));
+      while(generatedTokenIds.length&&eosIds.has(Number(generatedTokenIds[generatedTokenIds.length-1])))generatedTokenIds.pop();
       return {result,cache,cacheLength,tokenIds,reusedTokens,generatedTokenIds};
     }catch(error){
       try{await cache?.dispose?.();}catch(_){}
