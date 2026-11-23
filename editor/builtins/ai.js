@@ -717,7 +717,8 @@ const makeEditorTools = (() => {
         // support video understanding by sampling timestamped frames.
         const gemmaVideo=/(?:gemma[-_/]?4|gemma[-_/]?3[-_/]?(?:4b|12b|27b))/i.test(modelHint);
         const supportsVideo=['video-text-to-text','video-to-text'].includes(task)||/(?:Qwen2_5Omni|Qwen3Omni|VideoLlava)/i.test(modelHint)||gemmaVideo;
-        const sizeBytes=Number(model?.usedStorage??model?.used_storage??0);
+        const siblings=Array.isArray(model?.siblings)?model.siblings:[];
+        const sizeBytes=siblings.reduce((total,file)=>{const size=Number(file?.lfs?.size??file?.size??0);return total+(Number.isFinite(size)&&size>0?size:0);},0);
         return {
           sizeBytes:Number.isFinite(sizeBytes)&&sizeBytes>0?sizeBytes:null,
           contextLength,
@@ -740,7 +741,7 @@ const makeEditorTools = (() => {
         if(network?.request){
           try{
             const encoded=String(modelId||'').split('/').map(encodeURIComponent).join('/');
-            const response=await network.request(new Request('https://huggingface.co/api/models/'+encoded+'?expand[]=config&expand[]=usedStorage&expand[]=tags&expand[]=pipeline_tag'),'ai');
+            const response=await network.request(new Request('https://huggingface.co/api/models/'+encoded+'?expand[]=config&expand[]=siblings&expand[]=tags&expand[]=pipeline_tag'),'ai');
             if(response?.ok)info={...info,...await response.json()};
           }catch(error){console.warn('Could not inspect Hugging Face model metadata:',error);}
         }
@@ -790,7 +791,7 @@ const makeEditorTools = (() => {
             if(!network?.request)throw new Error('Network API is unavailable.');
             const q=search.value.trim();
             const params=new URLSearchParams({library:'transformers.js',sort:'downloads',direction:'-1',limit:'50'});
-            params.append('expand[]','config');params.append('expand[]','usedStorage');params.append('expand[]','tags');params.append('expand[]','pipeline_tag');
+            params.append('expand[]','config');params.append('expand[]','siblings');params.append('expand[]','tags');params.append('expand[]','pipeline_tag');
             if(q)params.set('search',q);
             const response=await network.request(new Request('https://huggingface.co/api/models?'+params.toString()),'ai');
             if(!response)throw new Error('Hugging Face returned no response.');
