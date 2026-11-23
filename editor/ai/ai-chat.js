@@ -296,7 +296,7 @@
   const root = window.EditorAI = window.EditorAI || {};
   const PREFS_KEY = 'editor.aiPreferences.v1';
   const ANALYTICS_KEY = 'editor.aiAnalytics.v1';
-  const DEFAULTS = { retry429:true, max429Retries:5, baseRetryDelay:1500, retryTransport:true, maxTransportRetries:2, transportRetryDelay:1000, toolRecovery:true, maxToolRecoveryRetries:2, customInstructions:'', agentInstructions:'', showActivity:true };
+  const DEFAULTS = { retry429:true, max429Retries:5, baseRetryDelay:1500, retryTransport:true, maxTransportRetries:2, transportRetryDelay:1000, toolRecovery:true, maxToolRecoveryRetries:2, customInstructions:'', agentInstructions:'', showActivity:true, showAttachmentPreviews:true };
   function read(key,fallback){try{const v=JSON.parse(localStorage.getItem(key)||'null');return v&&typeof v==='object'?v:fallback;}catch(_){return fallback;}}
   function save(key,value){try{localStorage.setItem(key,JSON.stringify(value));}catch(_) {}}
   function getAIPreferences(){return {...DEFAULTS,...read(PREFS_KEY,{})};}
