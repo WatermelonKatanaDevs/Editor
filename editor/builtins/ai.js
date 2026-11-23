@@ -683,8 +683,8 @@ const makeEditorTools = (() => {
       let editingLocalId='',localPipelineTask='',localModelMetadata=null;
       function getLocalModelSearchMetadata(model){
         const config=model?.config&&typeof model.config==='object'?model.config:{};
-        const nestedConfigs=[config,config.text_config,config.thinker_config,config.language_config,config.llm_config,config.decoder_config,config.vision_config,config.audio_config].filter(value=>value&&typeof value==='object');
-        const contextFields=['max_position_embeddings','max_seq_len','max_sequence_length','max_context_length','context_length','n_positions','seq_length','model_max_length'];
+        const nestedConfigs=[config,config.text_config,config.thinker_config,config.language_config,config.llm_config,config.decoder_config,config.vision_config,config.audio_config,config.tokenizer_config].filter(value=>value&&typeof value==='object');
+        const contextFields=['max_position_embeddings','max_seq_len','max_sequence_length','max_context_length','max_model_len','context_length','n_positions','n_ctx','seq_length','model_max_length'];
         let contextLength=null;
         for(const nested of nestedConfigs){
           for(const key of contextFields){
@@ -731,10 +731,10 @@ const makeEditorTools = (() => {
         return Number.isFinite(gb)&&gb>0?(gb>=10?gb.toFixed(1):gb.toFixed(2))+' GB':'';
       }
       function formatLocalContextLength(tokens){
-        const value=Number(tokens);
+        const value=Number(tokens),kib=1024,mib=1024*1024;
         if(!Number.isFinite(value)||value<=0)return '';
-        if(value>=1000000)return (value/1000000).toFixed(value%1000000===0?0:1)+'M';
-        if(value>=1000)return Math.round(value/1000)+'K';
+        if(value>=mib)return (value/mib).toFixed(value%mib===0?0:1)+'M';
+        if(value>=kib)return Math.round(value/kib)+'K';
         return value.toLocaleString();
       }
       async function inspectHuggingFaceModel(modelId,fallbackInfo=null){
