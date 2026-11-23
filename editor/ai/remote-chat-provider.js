@@ -77,12 +77,12 @@
   function openAIToolCall(c){return {id:c?.id,type:'function',function:{name:c?.function?.name||c?.name||'',arguments:typeof c?.function?.arguments==='string'?c.function.arguments:JSON.stringify(c?.function?.arguments||{})}};}
   function imageData(image){
     const value=String(image?.dataUrl||'');
-    const match=value.match(/^data:([^;,]+);base64,([\\s\\S]+)$/i);
+    const match=value.match(/^data:([^;,]+);base64,(.+)$/i);
     return match?{mimeType:match[1],data:match[2],dataUrl:value}:null;
   }
   function audioData(audio){
     const value=String(audio?.dataUrl||'');
-    const match=value.match(/^data:([^;,]+);base64,([\\s\\S]+)$/i);
+    const match=value.match(/^data:([^;,]+);base64,(.+)$/i);
     if(!match)return null;
     const mimeType=String(match[1]||audio?.mimeType||'').toLowerCase();
     const name=String(audio?.name||'').toLowerCase();
