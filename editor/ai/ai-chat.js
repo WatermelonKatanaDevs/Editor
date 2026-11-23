@@ -48,7 +48,7 @@
           /(?:e2b|e4b)(?:[-_/]|$)/i.test(String(model.model || model.remoteModel || '')))
         : (!!model.supportsAudio ||
           (model.protocol==='google-gemini' &&
-            /gemini-(?:2\\.5|3(?:[.-]|$)|4(?:[.-]|$))/i.test(String(model.model || model.remoteModel || '')) &&
+            /gemini-(?:2\.5|3(?:[.-]|$)|4(?:[.-]|$))/i.test(String(model.model || model.remoteModel || '')) &&
             !/(?:embedding|tts|image|robotics|live)/i.test(String(model.model || model.remoteModel || ''))) ||
           (['openai-chat','openai-responses'].includes(model.protocol) &&
             /(?:gpt-audio|gpt-4o-(?:audio|mini-audio|transcribe|mini-transcribe))/i.test(String(model.model || model.remoteModel || '')))),
