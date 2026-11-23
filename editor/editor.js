@@ -516,6 +516,7 @@ window.__editorInitPromise = (async function () {
   const RECENT_PROJECTS_KEY = 'editor.recentProjects';
   const LAYOUT_KEY_PREFIX = 'editor.projectLayout.';
   const CLOSED_TAB_RETENTION_KEY = 'editor.closedTabRetentionMs';
+  const CLOSED_TAB_RESUME_MEDIA_KEY = 'editor.resumeClosedTabMedia';
   function readEditorJson(path, fs = state.fs) {
     try {
       if (!fs?.existsSync(path)) return null;
@@ -1331,6 +1332,265 @@ window.__editorInitPromise = (async function () {
     }
     return retentionMs;
   }
+  function getResumeClosedTabMedia() {
+    try { return localStorage.getItem(CLOSED_TAB_RESUME_MEDIA_KEY) === 'true'; } catch (_) { return false; }
+  }
+  function setResumeClosedTabMedia(value) {
+    const enabled = value === true;
+    try { localStorage.setItem(CLOSED_TAB_RESUME_MEDIA_KEY, enabled ? 'true' : 'false'); } catch (_) {}
+    return enabled;
+  }
+  function ensureMediaDocumentGuard(doc, mediaState) {
+    if (!doc || !mediaState || mediaState.documentGuards.some(item => item.doc === doc)) return;
+    const guard = event => {
+      const target = event?.target;
+      if (!target || !['AUDIO', 'VIDEO'].includes(String(target.tagName || '').toUpperCase())) return;
+      try { target.pause(); } catch (_) {}
+    };
+    try {
+      doc.addEventListener('play', guard, true);
+      mediaState.documentGuards.push({doc, guard});
+    } catch (_) {}
+  }
+  function ensureMediaContextGuard(context, mediaState) {
+    if (!context || !mediaState || mediaState.contextGuards.some(item => item.context === context)) return;
+    const guard = () => {
+      try {
+        if (context.state === 'running') Promise.resolve(context.suspend()).catch(() => {});
+      } catch (_) {}
+    };
+    try {
+      context.addEventListener('statechange', guard);
+      mediaState.contextGuards.push({context, guard});
+    } catch (_) {}
+  }
+  function addMediaPauseStateToWindow(win, mediaState) {
+    if (!win || !mediaState || mediaState.windows.has(win)) return;
+    mediaState.windows.add(win);
+    try {
+      let states = win.__editorMediaPauseStates;
+      if (!(states instanceof Set)) {
+        states = new Set();
+        Object.defineProperty(win, '__editorMediaPauseStates', {value:states, configurable:true});
+      }
+      states.add(mediaState);
+      for (const context of win.__editorTrackedAudioContexts || []) {
+        ensureMediaContextGuard(context, mediaState);
+        try { if (context.state === 'running') Promise.resolve(context.suspend()).catch(() => {}); } catch (_) {}
+      }
+    } catch (_) {}
+  }
+  function installAudioContextTracking(win) {
+    if (!win) return;
+    let contexts;
+    try {
+      contexts = win.__editorTrackedAudioContexts;
+      if (!(contexts instanceof Set)) {
+        contexts = new Set();
+        Object.defineProperty(win, '__editorTrackedAudioContexts', {value:contexts, configurable:true});
+      }
+    } catch (_) { return; }
+
+    const register = context => {
+      if (!context) return;
+      contexts.add(context);
+      try {
+        for (const mediaState of win.__editorMediaPauseStates || []) {
+          ensureMediaContextGuard(context, mediaState);
+        }
+        if ((win.__editorMediaPauseStates?.size || 0) > 0) {
+          Promise.resolve(context.suspend()).catch(() => {});
+        }
+      } catch (_) {}
+    };
+
+    for (const name of ['AudioContext', 'webkitAudioContext']) {
+      let Original;
+      try { Original = win[name]; } catch (_) { continue; }
+      if (typeof Original !== 'function' || Original.__editorMediaTracked) continue;
+      try {
+        const Wrapped = new Proxy(Original, {
+          construct(target, args, newTarget) {
+            const context = Reflect.construct(target, args, newTarget);
+            register(context);
+            return context;
+          }
+        });
+        Object.defineProperty(Wrapped, '__editorMediaTracked', {value:true});
+        Object.defineProperty(win, name, {value:Wrapped, configurable:true, writable:true});
+      } catch (_) {}
+    }
+  }
+  function installTabMediaTracking(tab) {
+    if (!tab || tab._resourcesDisposed) return;
+    const tracker = tab._mediaTracker || (tab._mediaTracker = {
+      documents: [],
+      documentSet: new WeakSet(),
+      windows: [],
+      windowSet: new WeakSet(),
+      mediaElements: new Set(),
+      frames: new WeakSet(),
+      observers: [],
+      frameListeners: []
+    });
+
+    const visit = node => {
+      if (!node || tab._resourcesDisposed) return;
+      if (node.nodeType === 9) {
+        const doc = node;
+        if (tracker.documentSet.has(doc)) return;
+        tracker.documentSet.add(doc);
+        tracker.documents.push(doc);
+        const win = doc.defaultView;
+        if (win && !tracker.windowSet.has(win)) {
+          tracker.windowSet.add(win);
+          tracker.windows.push(win);
+          installAudioContextTracking(win);
+        }
+        const closedState = tab._closedMediaState;
+        if (closedState) {
+          addMediaPauseStateToWindow(win, closedState);
+          ensureMediaDocumentGuard(doc, closedState);
+        }
+        const Observer = win?.MutationObserver || window.MutationObserver;
+        try {
+          if (Observer && (doc.documentElement || doc)) {
+            const observer = new Observer(records => {
+              for (const record of records) {
+                for (const added of record.addedNodes || []) visit(added);
+              }
+            });
+            observer.observe(doc.documentElement || doc, {childList:true, subtree:true});
+            tracker.observers.push(observer);
+          }
+        } catch (_) {}
+        for (const child of doc.childNodes || []) visit(child);
+        return;
+      }
+      if (node.nodeType !== 1 && node.nodeType !== 11) return;
+
+      if (node.nodeType === 1) {
+        const tag = String(node.tagName || '').toUpperCase();
+        if (tag === 'AUDIO' || tag === 'VIDEO') {
+          tracker.mediaElements.add(node);
+          if (tab._closedMediaState) {
+            try { node.pause(); } catch (_) {}
+          }
+        }
+
+        if (tag === 'IFRAME' || tag === 'FRAME') {
+          if (!tracker.frames.has(node)) {
+            tracker.frames.add(node);
+            const onLoad = () => {
+              try { visit(node.contentWindow?.document); }
+              catch (_) {
+                try { node.contentWindow?.postMessage({type:'editor:media-control', action:'pause'}, '*'); } catch (_) {}
+              }
+            };
+            try {
+              node.addEventListener('load', onLoad);
+              tracker.frameListeners.push({frame:node, onLoad});
+            } catch (_) {}
+          }
+          try { visit(node.contentWindow?.document); }
+          catch (_) {
+            if (tab._closedMediaState) {
+              try { node.contentWindow?.postMessage({type:'editor:media-control', action:'pause'}, '*'); } catch (_) {}
+            }
+          }
+        }
+
+        try { if (node.shadowRoot) visit(node.shadowRoot); } catch (_) {}
+      }
+      for (const child of node.childNodes || []) visit(child);
+    };
+
+    for (const root of [tab._viewElement, tab._previewHost, ...[...(tab._previewInstances?.values?.() || [])].map(instance => instance?.host)]) {
+      if (root) visit(root);
+    }
+  }
+  function pauseTabMedia(tab) {
+    if (!tab) return null;
+    if (tab._closedMediaState) return tab._closedMediaState;
+    installTabMediaTracking(tab);
+    const tracker = tab._mediaTracker;
+    const mediaState = {
+      playingElements: [],
+      playingContexts: [],
+      documents: new Set(),
+      windows: new Set(),
+      documentGuards: [],
+      contextGuards: []
+    };
+    tab._closedMediaState = mediaState;
+
+    for (const doc of tracker?.documents || []) {
+      mediaState.documents.add(doc);
+      const win = doc.defaultView;
+      addMediaPauseStateToWindow(win, mediaState);
+      ensureMediaDocumentGuard(doc, mediaState);
+    }
+    for (const media of tracker?.mediaElements || []) {
+      try {
+        if (media.isConnected && !media.paused && !media.ended) mediaState.playingElements.push(media);
+        media.pause();
+      } catch (_) {}
+    }
+    for (const win of tracker?.windows || []) {
+      addMediaPauseStateToWindow(win, mediaState);
+      for (const context of win.__editorTrackedAudioContexts || []) {
+        try {
+          if (context.state === 'running') {
+            mediaState.playingContexts.push(context);
+            ensureMediaContextGuard(context, mediaState);
+            Promise.resolve(context.suspend()).catch(() => {});
+          }
+        } catch (_) {}
+      }
+    }
+    return mediaState;
+  }
+  function releaseClosedTabMedia(tab, mediaState, resumePlayback = false) {
+    if (!tab || !mediaState) return;
+    if (tab._closedMediaState === mediaState) tab._closedMediaState = null;
+
+    for (const {doc, guard} of mediaState.documentGuards || []) {
+      try { doc.removeEventListener('play', guard, true); } catch (_) {}
+    }
+    for (const {context, guard} of mediaState.contextGuards || []) {
+      try { context.removeEventListener('statechange', guard); } catch (_) {}
+    }
+    for (const win of mediaState.windows || []) {
+      try {
+        const states = win.__editorMediaPauseStates;
+        states?.delete(mediaState);
+        if (states && states.size === 0) {
+          try { delete win.__editorMediaPauseStates; } catch (_) {}
+        }
+      } catch (_) {}
+    }
+
+    if (!resumePlayback) return;
+    for (const media of mediaState.playingElements || []) {
+      try {
+        if (media.isConnected && !media.ended) Promise.resolve(media.play()).catch(() => {});
+      } catch (_) {}
+    }
+    for (const context of mediaState.playingContexts || []) {
+      try { Promise.resolve(context.resume()).catch(() => {}); } catch (_) {}
+    }
+  }
+  function disposeTabMediaTracking(tab) {
+    const tracker = tab?._mediaTracker;
+    if (!tracker) return;
+    for (const observer of tracker.observers || []) {
+      try { observer.disconnect(); } catch (_) {}
+    }
+    for (const {frame, onLoad} of tracker.frameListeners || []) {
+      try { frame.removeEventListener('load', onLoad); } catch (_) {}
+    }
+    tab._mediaTracker = null;
+  }
   function moveNodePreservingState(parent, node, before = null) {
     if (!parent || !node) return;
     if (node.parentNode === parent) {
@@ -1355,6 +1615,9 @@ window.__editorInitPromise = (async function () {
   }
   function disposeWorkbenchTab(tab) {
     if (!tab || tab._resourcesDisposed) return;
+    if (tab._closedMediaState) releaseClosedTabMedia(tab, tab._closedMediaState, false);
+    else releaseClosedTabMedia(tab, pauseTabMedia(tab), false);
+    disposeTabMediaTracking(tab);
     tab._resourcesDisposed = true;
     if (tab.builtin === 'peer') void getBuiltin('peer')?.stop(tab);
     if (tab.builtin === 'group') {
@@ -1392,10 +1655,8 @@ window.__editorInitPromise = (async function () {
     disposeWorkbenchTab(entry.tab);
     releaseRetainedTabGroup(entry.group, entry.workbench);
   }
-  function rememberClosedWorkbenchTab(t, g) {
-    if (!t || !g) return null;
-    const retentionMs = getClosedTabRetentionMs();
-    if (retentionMs <= 0) return null;
+  function rememberClosedWorkbenchTab(t, g, mediaState, retentionMs) {
+    if (!t || !g || retentionMs <= 0) return null;
     const history = state.closedTabHistory || (state.closedTabHistory = []);
     const entry = {
       tab:t,
@@ -1406,6 +1667,7 @@ window.__editorInitPromise = (async function () {
       closedAt:Date.now(),
       expiresAt:Date.now() + retentionMs,
       timer:null,
+      mediaState,
       disposed:false,
       restored:false
     };
@@ -1455,6 +1717,7 @@ window.__editorInitPromise = (async function () {
         disposeWorkbenchTab(welcome);
       }
       wb.addTab(tab, group, welcomePlaceholder ? 0 : entry.index);
+      releaseClosedTabMedia(tab, entry.mediaState, getResumeClosedTabMedia());
       releaseRetainedTabGroup(entry.group, entry.workbench);
       return true;
     }
@@ -1476,7 +1739,9 @@ window.__editorInitPromise = (async function () {
   }
   function closeWorkbenchTab(t, g, options = {}) {
     if (!t || !g) return;
-    const entry = options.retain === false ? null : rememberClosedWorkbenchTab(t, g);
+    const retentionMs = options.retain === false ? 0 : getClosedTabRetentionMs();
+    const mediaState = pauseTabMedia(t);
+    const entry = options.retain === false ? null : rememberClosedWorkbenchTab(t, g, mediaState, retentionMs);
     if (!entry) disposeWorkbenchTab(t);
     const wb = g.ownerWorkbench || state.workbench;
     wb.removeTab(g, t.id);
@@ -1553,6 +1818,7 @@ window.__editorInitPromise = (async function () {
 
     const finish = (kind, element, extra = {}) => {
       if (!isCurrent()) return;
+      installTabMediaTracking(t);
       if (!t._tabOpenEventFired) {
         t._tabOpenEventFired = true;
         emitTabLifecycle(t, g, 'tabOpen');
@@ -4198,6 +4464,8 @@ window.__editorInitPromise = (async function () {
       saveBehaviorSettings,
       getClosedTabRetentionMs,
       setClosedTabRetentionMs,
+      getResumeClosedTabMedia,
+      setResumeClosedTabMedia,
       getBrowserSettings: () => ({ ...state.browserSettings }),
       saveBrowserSettings,
       subscribeBrowserSettings: listener => {
