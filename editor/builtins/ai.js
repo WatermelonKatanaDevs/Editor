@@ -1076,8 +1076,8 @@ const makeEditorTools = (() => {
       });
       editingIndex=index;
       renderAttachmentRow(tree);
-      updateComposerSendState(tree);
       input.value=message.content;
+      updateComposerSendState(tree);
       input.focus();
       input.setSelectionRange(input.value.length,input.value.length);
       const send=view.t?._viewElement?.querySelector?.('[data-send]');
@@ -1355,7 +1355,7 @@ const makeEditorTools = (() => {
         // Keep the editor's persisted transcript aligned with ConversationAI, which
         // owns insertion of both the user and assistant messages.
         if(currentConversation?.getMessages)chatMessages=currentConversation.getMessages();
-        const sentUser=[...chatMessages].reverse().find(message=>message?.role==='user'&&message.content===text);
+        const sentUser=[...chatMessages].reverse().find(message=>message?.role==='user');
         if(sentUser&&attachmentPayload.files?.length)messageAttachmentFiles.set(sentUser,attachmentPayload.files);
         attachments=attachments.filter(item=>item.active);syncActiveAttachment();
         persist();
