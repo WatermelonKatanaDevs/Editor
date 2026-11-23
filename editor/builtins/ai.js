@@ -1129,14 +1129,17 @@ const makeEditorTools = (() => {
       persist();
       sendMessage(text,g,t,tree,attachmentPayload);
     }
-    function getAIView() {
-      let t=currentTab;
+    function getAIView(tab=currentTab) {
+      let t=tab;
       if (!t || t.kind !== 'builtin' || t.builtin !== 'ai') return null;
       let g=t.group?.ownerWorkbench?.groups?.get(t.group.id) || null;
       if (!g || !g.tabs.includes(t)) {
-        for (const instance of Workbench.getInstances?.() || [state.workbench]) for (const gg of instance.groups.values()) {
-          const found=gg.tabs.find(x=>x===t || (x.id===t.id && x.kind==='builtin' && x.builtin==='ai'));
-          if (found) { t=found; g=gg; break; }
+        for (const instance of Workbench.getInstances?.() || [state.workbench]) {
+          for (const gg of instance.groups?.values?.() || []) {
+            const found=gg.tabs?.find(x=>x===t || (x.id===t.id && x.kind==='builtin' && x.builtin==='ai'));
+            if (found) { t=found; g=gg; break; }
+          }
+          if (g) break;
         }
       }
       if (!g || !g.tabs.includes(t)) return null;
@@ -1237,16 +1240,34 @@ const makeEditorTools = (() => {
       if(title!=null){chatStore.rename(chat.id,title);render(view.g,view.t);}
     }
     function render(g, t) {
-      currentGroup = g || currentGroup || state.workbench?.getFirstLeaf?.();
-      currentTab = t || currentTab || currentGroup?.tabs?.find(x => x.builtin === 'ai');
-      if (!currentGroup || !currentTab) return;
+      const requestedTab=t || currentTab || g?.tabs?.find(x=>x.builtin==='ai');
+      if (!requestedTab) return;
+      // Render against the tab's live group, not the group captured by an
+      // event handler before the user dragged the AI tab elsewhere.
+      const liveView=getAIView(requestedTab);
+      if (liveView) {
+        currentGroup=liveView.g;
+        currentTab=liveView.t;
+      } else if (g?.tabs?.includes(requestedTab)) {
+        currentGroup=g;
+        currentTab=requestedTab;
+      } else return;
+      if (!currentGroup?.viewBody) return;
       syncChats();
       let tree = currentTab._viewElement;
-      if (!tree || tree.parentNode !== currentGroup.viewBody) {
+      if (!tree) {
         tree = document.createElement('div');
         tree.className = 'builtin-ai';
         currentTab._viewElement = tree;
         currentGroup.viewBody.appendChild(tree);
+      } else if (tree.parentNode !== currentGroup.viewBody) {
+        // Keep the existing chat DOM and its stateful children when correcting
+        // a stale parent reference; never create a second view for this tab.
+        if (typeof window.EditorMoveNodePreservingState === 'function') {
+          window.EditorMoveNodePreservingState(currentGroup.viewBody, tree);
+        } else {
+          currentGroup.viewBody.appendChild(tree);
+        }
       }
       tree.style.display = '';
       const model=registry.active(); const localModel=!!model?.local||model?.protocol==='local-transformers'; const localLoaded=!localModel||localManager.isLoaded(model.id); const chats=chatStore.list(true); const current=currentChat();
