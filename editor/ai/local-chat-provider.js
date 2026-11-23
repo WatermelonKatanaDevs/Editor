@@ -526,6 +526,51 @@
       throw error;
     }
   }
+  async function createGemma4Generator(lib,modelId,device,dtype,progress){
+    if(typeof lib.AutoModelForImageTextToText?.from_pretrained!=='function'||typeof lib.AutoProcessor?.from_pretrained!=='function'){
+      throw new Error('This Transformers.js runtime does not expose the Gemma 4 model and processor APIs. Update the local AI runtime and reload the editor.');
+    }
+    const [processor,model]=await Promise.all([
+      lib.AutoProcessor.from_pretrained(modelId,{progress_callback:progress}),
+      lib.AutoModelForImageTextToText.from_pretrained(modelId,{device,dtype,progress_callback:progress})
+    ]);
+    if(!processor?.tokenizer||typeof processor.apply_chat_template!=='function'){
+      try{await model?.dispose?.();}catch(_){}
+      throw new Error('Transformers.js could not initialize the Gemma 4 processor and tokenizer.');
+    }
+    const generate=async(messages,callOptions={})=>{
+      const {tools,...generationOptions}=callOptions||{};
+      const prompt=processor.apply_chat_template(messages,{
+        add_generation_prompt:true,
+        ...(Array.isArray(tools)&&tools.length?{tools}:{})
+      });
+      const imageSources=[];
+      for(const message of messages||[]){
+        if(!Array.isArray(message?.content))continue;
+        for(const part of message.content){
+          if(part?.type!=='image')continue;
+          const source=part.url||part.image||part.data;
+          if(source)imageSources.push(source);
+        }
+      }
+      const images=imageSources.length
+        ? await Promise.all(imageSources.map(image=>image instanceof lib.RawImage?image:lib.load_image(image)))
+        : null;
+      const inputs=await processor(prompt,images,null,{add_special_tokens:false});
+      const output=await model.generate({...inputs,...generationOptions});
+      const sequences=output?.sequences||output;
+      const allTokenIds=await tensorTokenIds(sequences);
+      const promptLength=Number(inputs?.input_ids?.dims?.at(-1))||0;
+      const generatedIds=allTokenIds.slice(promptLength);
+      const generated=processor.tokenizer.decode(generatedIds,{skip_special_tokens:true});
+      return [{generated_text:[{role:'assistant',content:String(generated||'')}]}];
+    };
+    generate.model=model;
+    generate.processor=processor;
+    generate.tokenizer=processor.tokenizer;
+    generate.dispose=()=>model?.dispose?.();
+    return generate;
+  }
   class LocalModelManager{
     constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.downloads=new Map();this.trackingFiles=false;this.inference=null;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;this.runtimeAssets=[];this.kvCaches=new Map();this.hardwareProfile=inspectCacheHardware();this.cacheBudgetBytes=this.hardwareProfile.cacheBudgetBytes;this.cacheBytesPerToken=0;this.maxReusableCacheTokens=16384;this.maxReusableCacheSessions=1;this.modelContextLimit=131072;}
     subscribe(fn){if(typeof fn!=='function')return ()=>{};this.listeners.add(fn);fn(this.status());return ()=>this.listeners.delete(fn);}
@@ -645,8 +690,16 @@
           this.emit({loading:true});
         };
         const modelId=String(model.model||'');
-        const pipelineTask=model.supportsVision===true?(model.pipelineTask||(/gemma[-_/]?4/i.test(modelId)?'any-to-any':'image-text-to-text')):'text-generation';
-        this.generator=await lib.pipeline(pipelineTask,model.model,{device:this.device,dtype:this.dtype,progress_callback:progress});
+        const isGemma4=/gemma[-_/]?4/i.test(modelId);
+        if(isGemma4){
+          // Transformers.js 4.3.2 registers Gemma4's model architecture and
+          // processor, but does not expose an 'any-to-any' pipeline task. Load
+          // the multimodal model directly rather than calling that unsupported task.
+          this.generator=await createGemma4Generator(lib,model.model,this.device,this.dtype,progress);
+        }else{
+          const pipelineTask=model.supportsVision===true?(model.pipelineTask||'image-text-to-text'):'text-generation';
+          this.generator=await lib.pipeline(pipelineTask,model.model,{device:this.device,dtype:this.dtype,progress_callback:progress});
+        }
         if(this.device==='webgpu'){
           this.hardwareProfile=inspectCacheHardware();
           this.cacheBudgetBytes=this.hardwareProfile.cacheBudgetBytes;
