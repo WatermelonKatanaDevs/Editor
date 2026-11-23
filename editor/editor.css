@@ -1101,3 +1101,10 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .ai-inference-track>span{display:block;height:100%;width:0;background:var(--editor-accent);transition:width .12s linear}
 .ai-inference-track.is-indeterminate>span{width:34%;animation:aiInferenceProgress 1.2s ease-in-out infinite}
 @keyframes aiInferenceProgress{0%{transform:translateX(-115%)}100%{transform:translateX(410%)}}
+
+/* Local AI audio attachment previews and hierarchy drop feedback. */
+.ai-compose.is-file-drop-target textarea{border-color:#63a9e8;box-shadow:0 0 0 2px #438fca33;background:#1b252e}
+.ai-audio-attachment-control{display:block;width:176px;max-width:52vw;height:26px;margin-left:2px;flex:0 0 auto}
+.ai-attachment-chip:has(.ai-audio-attachment-control){max-width:none;gap:5px}
+.ai-audio-attachment-preview{display:flex;align-items:center;gap:7px;max-width:min(360px,100%);padding:3px;border:1px solid #354b40;border-radius:5px;background:#171f1b}
+.ai-audio-attachment-preview audio{width:220px;max-width:58vw;height:28px;flex:0 1 auto}
