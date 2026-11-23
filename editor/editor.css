@@ -1082,3 +1082,12 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 .ai-local-file-heading span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--editor-muted-2,#bbb)}
 .ai-local-file-heading strong{flex:none;color:var(--editor-muted,#999);font:9px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:400}
 .ai-local-file-row .ai-local-progress{height:3px;margin-top:0}
+
+
+/* User attachment chips sit above their message bubble, matching the composer list. */
+.ai-user{align-items:flex-end;gap:4px}
+.ai-user .ai-message-content{display:flex;flex-direction:column;align-items:flex-end;gap:0;min-width:0;max-width:94%}
+.ai-user .ai-bubble{max-width:100%;box-sizing:border-box}
+.ai-user .ai-message-attachments{align-self:flex-end;max-width:100%;margin:0 0 4px;padding:1px 0;justify-content:flex-end;flex-wrap:wrap;overflow:visible}
+.ai-user .ai-edit-message{align-self:flex-end;margin:0 0 2px}
+.ai-attachment-chip.is-unavailable{border-color:#68413d;background:#2d201f;color:#d9aaa4}

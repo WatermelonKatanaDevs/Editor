@@ -869,6 +869,7 @@ const makeEditorTools = (() => {
       return {key:'active:'+path,name,path,file,active:true};
     }
     function syncActiveAttachment(){
+      if(editingIndex>=0)return;
       const active=makeActiveAttachment(),path=active?.path||'';
       if(path!==autoAttachmentPath){dismissedAutoAttachmentPath='';autoAttachmentPath=path;}
       attachments=attachments.filter(item=>!item.active);
@@ -880,8 +881,9 @@ const makeEditorTools = (() => {
       strip.hidden=!visible;if(!visible)return;
       const chips=attachments.map((item,index)=>{
         const supported=attachmentSupported(item);
-        const detail=item.active?'Currently open file':item.path||item.name;
-        return '<span class="ai-attachment-chip '+(supported?'':'is-unsupported')+'" title="'+escapeHtml(detail+(supported?'':' · Unsupported by this model'))+'"><span class="ai-attachment-name">'+(item.active?'● ':'')+escapeHtml(item.name)+'</span><button type="button" data-attachment-remove="'+index+'" aria-label="Remove '+escapeHtml(item.name)+'" title="Remove attachment">×</button></span>';
+        const detail=item.unavailable?(item.path?'Workspace file unavailable; reattach it to resend':'Original device file is not retained in chat history; reattach it to resend'):item.active?'Currently open file':item.path||item.name;
+        const chipClass='ai-attachment-chip'+(supported?'':' is-unsupported')+(item.unavailable?' is-unavailable':'');
+        return '<span class="'+chipClass+'" title="'+escapeHtml(detail+(supported?'':' · Unsupported by this model'))+'"><span class="ai-attachment-name">'+(item.active?'● ':'')+escapeHtml(item.name)+'</span><button type="button" data-attachment-remove="'+index+'" aria-label="Remove '+escapeHtml(item.name)+'" title="Remove attachment">×</button></span>';
       }).join('');
       strip.innerHTML='<button type="button" class="ai-attachment-add" data-add-attachment title="Add attachment" aria-label="Add attachment" '+(!canAdd||busy?'disabled':'')+' '+(canAdd?'':'hidden')+'>＋</button><div class="ai-attachment-list">'+chips+'</div>';
       strip.querySelector('[data-add-attachment]').onclick=()=>addAttachments(tree);
@@ -904,9 +906,11 @@ const makeEditorTools = (() => {
           if(sensitiveAttachmentPath(path||file.name)){alert('Sensitive files cannot be attached to AI chats.');continue;}
           if(!attachmentSupported({file})){alert(file.name+' is not supported by the selected model.');continue;}
           const key=path?'path:'+path:'device:'+file.name+':'+file.size+':'+file.lastModified;
+          const unavailableIndex=attachments.findIndex(item=>item.unavailable&&((path&&item.path===path)||(!path&&!item.path&&String(item.name).toLowerCase()===String(file.name).toLowerCase())));
+          if(unavailableIndex>=0)attachments.splice(unavailableIndex,1);
           if(attachments.some(item=>item.key===key||(path&&item.path===path)))continue;
           if(attachments.length>=10){alert('You can attach up to 10 files per message.');break;}
-          attachments.push({key,name:file.name,path,file,active:false});
+          attachments.push({key,name:file.name,path,file,active:false,unavailable:false});
         }
         renderAttachmentRow(tree);updateComposerSendState(tree);
       }catch(error){alert(error?.message||String(error));}
@@ -928,7 +932,12 @@ const makeEditorTools = (() => {
     async function buildAttachmentPayload(){
       const metadata=[],images=[],textParts=[];let textChars=0;
       for(const item of attachments){
-        const file=item.active?makeActiveAttachment()?.file:item.file;if(!file)continue;
+        const openTab=item.active&&activeEditor(state)?.path===item.path?makeActiveAttachment():null;
+        const file=openTab?.file||item.file;
+        if(!file){
+          if(item.unavailable)throw new Error(item.path?'The workspace file "'+item.name+'" is no longer available. Remove it or reattach it before resending.':'The original device file "'+item.name+'" is not stored in chat history. Remove it or reattach it before resending.');
+          continue;
+        }
         const kind=attachmentKind(file);
         if(!attachmentSupported({file}))throw new Error(file.name+' is not supported by the selected model. Remove it or switch to a compatible model.');
         const path=String(item.path||file.customRelativePath||'');
@@ -1039,10 +1048,33 @@ const makeEditorTools = (() => {
     function beginEdit(index) {
       if (busy || !Number.isInteger(index) || chatMessages[index]?.role !== 'user') return;
       const view=getAIView(); if (!view) return;
-      const input=view.t?._viewElement?.querySelector?.('[data-input]') || view.g?.viewBody?.querySelector?.('[data-input]');
+      const tree=view.t?._viewElement||view.g?.viewBody;
+      const input=tree?.querySelector?.('[data-input]');
       if (!input) return;
+      const message=chatMessages[index];
+      attachments=(Array.isArray(message.attachments)?message.attachments:[]).map((item,attachmentIndex)=>{
+        const path=String(item?.path||'');
+        let file=null;
+        if(path&&!sensitiveAttachmentPath(path)){
+          try{
+            const data=state.fs?.readFileSync?.(path);
+            if(data!=null){
+              const mimeType=String(item.mimeType||window.EditorInferMime?.(path)||attachmentMimeType({name:item.name,type:item.mimeType},item.kind)||'application/octet-stream');
+              file=new File([data],String(item.name||path.split('/').pop()||'attachment'),{type:mimeType,lastModified:Date.now()});
+              Object.defineProperties(file,{customRelativePath:{value:path},__wkWorkspacePath:{value:path}});
+            }
+          }catch(_){}
+        }
+        return {
+          key:path?'path:'+path:'history:'+index+':'+attachmentIndex+':'+String(item?.name||'attachment'),
+          name:String(item?.name||'attachment'),path,file,active:!!item?.active,
+          type:String(item?.mimeType||''),unavailable:!file
+        };
+      });
       editingIndex=index;
-      input.value=chatMessages[index].content;
+      renderAttachmentRow(tree);
+      updateComposerSendState(tree);
+      input.value=message.content;
       input.focus();
       input.setSelectionRange(input.value.length,input.value.length);
       const send=view.t?._viewElement?.querySelector?.('[data-send]');
@@ -1073,12 +1105,12 @@ const makeEditorTools = (() => {
       // Keep the text in the composer: it can now be sent as a normal new message.
       input?.dispatchEvent?.(new Event('input',{bubbles:true}));
     }
-    function resendMessage(index,text,g,t,tree) {
+    function resendMessage(index,text,g,t,tree,attachmentPayload) {
       if (!Number.isInteger(index) || chatMessages[index]?.role !== 'user') return;
       chatMessages=chatMessages.slice(0,index);
       editingIndex=-1;
       persist();
-      sendMessage(text,g,t,tree);
+      sendMessage(text,g,t,tree,attachmentPayload);
     }
     function getAIView() {
       let t=currentTab;
@@ -1093,7 +1125,44 @@ const makeEditorTools = (() => {
       if (!g || !g.tabs.includes(t)) return null;
       return {g,t};
     }
-    function addMessage(chat,role,text,index,message){const row=document.createElement('div');row.className='ai-message '+(role==='user'?'ai-user':'ai-assistant');if(role==='assistant'&&message?.activity?.length){const activity=renderActivity(chat,message.activity,false);row.appendChild(activity);}const bubble=document.createElement('div');bubble.className='ai-bubble';if(role==='user')bubble.textContent=text;else renderMessage(bubble,text,code=>insertCode(code));row.appendChild(bubble);if(role==='user'&&message?.attachments?.length){const attached=document.createElement('div');attached.className='ai-message-attachments';attached.textContent=message.attachments.map(item=>item.name).join(' · ');row.appendChild(attached);}if(role==='user'&&Number.isInteger(index)){const edit=document.createElement('button');edit.className='ai-edit-message';edit.textContent='✎';edit.title='Edit and resend';edit.setAttribute('aria-label','Edit and resend prompt');edit.disabled=busy;edit.onclick=()=>beginEdit(index);row.appendChild(edit);}chat.appendChild(row);return bubble;}
+    function addMessage(chat,role,text,index,message){
+      const row=document.createElement('div');
+      row.className='ai-message '+(role==='user'?'ai-user':'ai-assistant');
+      if(role==='assistant'&&message?.activity?.length)row.appendChild(renderActivity(chat,message.activity,false));
+      const bubble=document.createElement('div');
+      bubble.className='ai-bubble';
+      if(role==='user')bubble.textContent=text;
+      else renderMessage(bubble,text,code=>insertCode(code));
+      if(role==='user'){
+        const content=document.createElement('div');
+        content.className='ai-message-content';
+        if(Array.isArray(message?.attachments)&&message.attachments.length){
+          const attached=document.createElement('div');
+          attached.className='ai-message-attachments ai-attachment-list';
+          for(const item of message.attachments){
+            const chip=document.createElement('span');
+            chip.className='ai-attachment-chip';
+            chip.title=String(item?.path||item?.name||'Attachment');
+            const name=document.createElement('span');
+            name.className='ai-attachment-name';
+            name.textContent=(item?.active?'● ':'')+String(item?.name||'Attachment');
+            chip.appendChild(name);
+            attached.appendChild(chip);
+          }
+          content.appendChild(attached);
+        }
+        content.appendChild(bubble);
+        row.appendChild(content);
+      }else row.appendChild(bubble);
+      if(role==='user'&&Number.isInteger(index)){
+        const edit=document.createElement('button');
+        edit.className='ai-edit-message';edit.textContent='✎';edit.title='Edit and resend';
+        edit.setAttribute('aria-label','Edit and resend prompt');edit.disabled=busy;
+        edit.onclick=()=>beginEdit(index);row.appendChild(edit);
+      }
+      chat.appendChild(row);
+      return bubble;
+    }
     async function insertCode(code){
       const tab=activeEditor(state); if(!tab){alert('Open a text file to insert this snippet.');return;} if(!tab.editor){onOpen?.(tab.path);setTimeout(()=>insertCode(code),150);return;}
       const tool=toolset.map.get('insert_code'); if(!tool)return;
@@ -1182,7 +1251,21 @@ const makeEditorTools = (() => {
       tree.querySelector('[data-new]').onclick=()=>newChat();
       tree.querySelector('[data-stop]').onclick=()=>{controller?.abort();chatAI.cancel();busy=false;render(g,t);};
       const input=tree.querySelector('[data-input]'); const send=tree.querySelector('[data-send]');
-      const submit=async()=>{const text=input.value.trim();if((!text&&!attachments.some(item=>attachmentSupported(item)))||busy)return;if(editingIndex>=0){const index=editingIndex;input.value='';resendMessage(index,text,g,t,tree);}else{let payload;try{payload=await buildAttachmentPayload();}catch(error){const status=tree.querySelector('[data-status]');if(status){status.textContent=error?.message||String(error);status.hidden=false;}return;}input.value='';await sendMessage(text,g,t,tree,payload);}};
+      const submit=async()=>{
+        const text=input.value.trim();
+        if((!text&&!attachments.some(item=>attachmentSupported(item)))||busy)return;
+        let payload;
+        try{payload=await buildAttachmentPayload();}
+        catch(error){const status=tree.querySelector('[data-status]');if(status){status.textContent=error?.message||String(error);status.hidden=false;}return;}
+        if(editingIndex>=0){
+          const index=editingIndex;
+          input.value='';
+          resendMessage(index,text,g,t,tree,payload);
+        }else{
+          input.value='';
+          await sendMessage(text,g,t,tree,payload);
+        }
+      };
       send.textContent=editingIndex>=0?'Resend':'Send';
       const updateSendState=()=>updateComposerSendState(tree);
       input.addEventListener('input',updateSendState);
