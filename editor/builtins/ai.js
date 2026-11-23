@@ -752,10 +752,11 @@ const makeEditorTools = (() => {
         const audioArchitecture=/(?:Gemma4|Qwen2Audio|Qwen2_5Omni|Qwen3Omni|Phi4Multimodal|AudioFlamingo)/i.test(architecture+' '+modelType+' '+modelId);
         const audioConfig=!!(config.audio_config||config.audio_encoder||config.audio_token_id!=null||config.audio_bos_token_id!=null);
         const supportsAudio=['any-to-any','audio-text-to-text'].includes(task)||audioArchitecture||(audioConfig&&/(?:ConditionalGeneration|ForCausalLM|Omni)/i.test(architecture));
-        const supportsVision=['any-to-any','image-text-to-text'].includes(task)||!!(config.vision_config||config.vision_tower||config.image_token_index!=null)||/gemma[-_/]?4/i.test(modelId)&&/onnx/i.test(modelId);
+        const supportsVision=['any-to-any','image-text-to-text'].includes(task)||!!(config.vision_config||config.vision_tower||config.image_token_index!=null)||/(?:gemma[-_/]?4|gemma[-_/]?3[-_/]?(?:4b|12b|27b))/i.test(modelId)&&(/onnx/i.test(modelId)||task==='image-text-to-text');
         const gemmaAnyToAny=/gemma[-_/]?4/i.test(modelId)&&task==='any-to-any';
-        const pipelineTask=gemmaAnyToAny?'any-to-any':(task==='audio-text-to-text'?'audio-text-to-text':(task==='image-text-to-text'||supportsVision||supportsAudio?'image-text-to-text':''));
-        return {pipelineTask,capabilities:{vision:!!supportsVision,audio:!!supportsAudio,documents:true,source:'huggingface',pipelineTag:task,architectures,modelType,revision:String(info.sha||'')}};
+        const supportsVideo=['video-text-to-text','video-to-text'].includes(task)||/(?:gemma[-_/]?4|gemma[-_/]?3[-_/]?(?:4b|12b|27b)|Qwen2_5Omni|Qwen3Omni|VideoLlava)/i.test(architecture+' '+modelType+' '+modelId);
+        const pipelineTask=gemmaAnyToAny?'any-to-any':(task==='audio-text-to-text'?'audio-text-to-text':(task==='image-text-to-text'||supportsVision||supportsAudio||supportsVideo?'image-text-to-text':''));
+        return {pipelineTask,capabilities:{vision:!!(supportsVision||supportsVideo),audio:!!supportsAudio,video:!!supportsVideo,documents:true,source:'huggingface',pipelineTag:task,architectures,modelType,revision:String(info.sha||'')}};
       }
       function openLocalModelEditor(model=null){
         form.hidden=true;
@@ -859,8 +860,9 @@ const makeEditorTools = (() => {
         localEditorStatus.textContent='Checking Hugging Face model capabilities…';
          const inspected=await inspectHuggingFaceModel(modelId);
          const capabilities=inspected.capabilities;
-         const supportsVision=localVisionInput.checked||capabilities.vision;
-         const pipelineTask=inspected.pipelineTask||localPipelineTask||(supportsVision||capabilities.audio?(/gemma[-_/]?4/i.test(modelId)&&/onnx/i.test(modelId)?'any-to-any':'image-text-to-text'):'');
+         const supportsVision=localVisionInput.checked||capabilities.vision||capabilities.video;
+         const supportsVideo=capabilities.video===true;
+         const pipelineTask=inspected.pipelineTask||localPipelineTask||(supportsVision||capabilities.audio||supportsVideo?(/gemma[-_/]?4/i.test(modelId)&&/onnx/i.test(modelId)?'any-to-any':'image-text-to-text'):'');
         const isLocal=m=>m.local||m.protocol==='local-transformers';
         const existing=registry.settings.models.find(m=>m.id===editingLocalId);
         if(!editingLocalId&&registry.settings.models.some(m=>isLocal(m)&&m.model===modelId)){
@@ -873,8 +875,8 @@ const makeEditorTools = (() => {
           if(registry.settings.models.some(m=>m.id===id))id+='-'+Math.random().toString(36).slice(2,7);
         }
         try{
-          if(existing&&(existing.model!==modelId||existing.supportsVision!==supportsVision||existing.pipelineTask!==pipelineTask||existing.supportsAudio!==capabilities.audio)&&localManager?.isLoaded?.(id))await localManager.unload();
-          registry.add({...existing,id,name,model:modelId,remoteModel:modelId,protocol:'local-transformers',kind:'local-transformers',endpoint:'',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true,supportsDocuments:localDocumentsInput.checked,supportsVision,supportsAudio:capabilities.audio,capabilities:{...capabilities,vision:supportsVision,audio:capabilities.audio,pipelineTask},pipelineTask,builtInLocal:!!existing?.builtInLocal});
+          if(existing&&(existing.model!==modelId||existing.supportsVision!==supportsVision||existing.pipelineTask!==pipelineTask||existing.supportsAudio!==capabilities.audio||existing.supportsVideo!==supportsVideo)&&localManager?.isLoaded?.(id))await localManager.unload();
+          registry.add({...existing,id,name,model:modelId,remoteModel:modelId,protocol:'local-transformers',kind:'local-transformers',endpoint:'',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true,supportsDocuments:localDocumentsInput.checked,supportsVision,supportsAudio:capabilities.audio,supportsVideo,capabilities:{...capabilities,vision:supportsVision,audio:capabilities.audio,video:supportsVideo,pipelineTask},pipelineTask,builtInLocal:!!existing?.builtInLocal});
           registry.save();
           editingLocalId='';localEditor.hidden=true;render();onChange?.();
         }catch(e){localEditorStatus.textContent=e?.message||String(e);}
@@ -1004,6 +1006,7 @@ const makeEditorTools = (() => {
     const messageAttachmentFiles=new WeakMap();
     const audioPreviewUrls=new WeakMap();
     const imagePreviewUrls=new WeakMap();
+    const videoPreviewUrls=new WeakMap();
     function audioPreviewUrl(file){
       if(!file)return '';
       let url=audioPreviewUrls.get(file);
@@ -1016,10 +1019,16 @@ const makeEditorTools = (() => {
       if(!url){url=URL.createObjectURL(file);imagePreviewUrls.set(file,url);}
       return url;
     }
+    function videoPreviewUrl(file){
+      if(!file)return '';
+      let url=videoPreviewUrls.get(file);
+      if(!url){url=URL.createObjectURL(file);videoPreviewUrls.set(file,url);}
+      return url;
+    }
     function mediaAttachmentPreviewMarkup(file,item,options={}){
       const kind=attachmentKind(file||item);
-      if(!file||!['audio','image'].includes(kind))return '';
-      const name=String(item?.name||(kind==='audio'?'Audio':'Image'));
+      if(!file||!['audio','image','video'].includes(kind))return '';
+      const name=String(item?.name||(kind==='audio'?'Audio':kind==='video'?'Video':'Image'));
       const label=(item?.active?'● ':'')+name;
       const detail=String(options.detail||item?.path||name);
       const remove=Number.isInteger(options.removeIndex)
@@ -1027,7 +1036,9 @@ const makeEditorTools = (() => {
         : '';
       const media=kind==='audio'
         ? '<audio class="ai-media-attachment-player" controls preload="none" src="'+escapeHtml(audioPreviewUrl(file))+'" aria-label="Play '+escapeHtml(name)+'"></audio>'
-        : '<img class="ai-media-attachment-image" src="'+escapeHtml(imagePreviewUrl(file))+'" alt="'+escapeHtml(name)+'" loading="lazy" decoding="async">';
+        :kind==='video'
+          ? '<video class="ai-media-attachment-video" controls preload="metadata" playsinline src="'+escapeHtml(videoPreviewUrl(file))+'" aria-label="Preview '+escapeHtml(name)+'"></video>'
+          : '<img class="ai-media-attachment-image" src="'+escapeHtml(imagePreviewUrl(file))+'" alt="'+escapeHtml(name)+'" loading="lazy" decoding="async">';
       const classes='ai-media-attachment-preview ai-media-attachment-preview--'+kind+(options.supported===false?' is-unsupported':'')+(item?.unavailable?' is-unavailable':'');
       return '<div class="'+classes+'" title="'+escapeHtml(detail)+'"><div class="ai-media-attachment-heading"><span class="ai-attachment-name">'+escapeHtml(label)+'</span>'+remove+'</div>'+media+'</div>';
     }
@@ -1056,11 +1067,14 @@ const makeEditorTools = (() => {
     const TEXT_ATTACHMENT_EXTENSIONS=['txt','md','markdown','js','mjs','cjs','ts','tsx','jsx','json','jsonc','json5','html','htm','css','scss','less','xml','svg','yaml','yml','py','java','c','h','cpp','hpp','cc','rs','go','wgsl','glsl','vert','frag','shader','toml','ini','sh','bash','bat','ps1','vue','svelte','php','rb','swift','kt','lua','sql','csv','log','diff','patch',''];
     const IMAGE_ATTACHMENT_EXTENSIONS=['png','jpg','jpeg','webp','gif'];
     const AUDIO_ATTACHMENT_EXTENSIONS=['wav','mp3','m4a','aac','ogg','opus','flac'];
+    const VIDEO_ATTACHMENT_EXTENSIONS=['mp4','m4v','mov','webm'];
     const AUDIO_ATTACHMENT_MAX_BYTES=12*1024*1024;
+    const VIDEO_ATTACHMENT_MAX_BYTES=32*1024*1024;
     function attachmentExtension(file){const name=String(file?.name||'').toLowerCase(),dot=name.lastIndexOf('.');return dot<0?'':name.slice(dot+1);}
     function attachmentKind(file){
       const ext=attachmentExtension(file),mime=String(file?.type||'').toLowerCase();
       if(ext==='svg')return 'text';
+      if(VIDEO_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('video/'))return 'video';
       if(AUDIO_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('audio/'))return 'audio';
       if(IMAGE_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('image/')&&ext!=='svg')return 'image';
       if(TEXT_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('text/'))return 'text';
@@ -1082,7 +1096,8 @@ const makeEditorTools = (() => {
       return {
         documents:model?.supportsDocuments!==false&&capabilities.documents!==false,
         vision:imageProtocol&&model?.supportsVision===true&&capabilities.vision===true,
-        audio:(local?model?.supportsAudio===true:audioProtocol&&model?.supportsAudio===true)&&capabilities.audio===true
+        audio:(local?model?.supportsAudio===true:audioProtocol&&model?.supportsAudio===true)&&capabilities.audio===true,
+        video:local&&model?.supportsVideo===true&&capabilities.video===true
       };
     }
     function attachmentSupported(item,model=registry.active()){
@@ -1090,6 +1105,7 @@ const makeEditorTools = (() => {
       if(kind==='text')return caps.documents;
       if(kind==='image')return caps.vision;
       if(kind==='audio')return caps.audio&&supportedAudioAttachmentExtensions(model).includes(attachmentExtension(file));
+      if(kind==='video')return caps.video&&VIDEO_ATTACHMENT_EXTENSIONS.includes(attachmentExtension(file));
       return false;
     }
     function supportedAttachmentExtensions(model=registry.active()){
@@ -1097,7 +1113,8 @@ const makeEditorTools = (() => {
       return [
         ...(caps.documents?TEXT_ATTACHMENT_EXTENSIONS:[]),
         ...(caps.vision?IMAGE_ATTACHMENT_EXTENSIONS:[]),
-        ...(caps.audio?supportedAudioAttachmentExtensions(model):[])
+        ...(caps.audio?supportedAudioAttachmentExtensions(model):[]),
+        ...(caps.video?VIDEO_ATTACHMENT_EXTENSIONS:[])
       ].filter(Boolean);
     }
     function makeActiveAttachment(){
@@ -1118,7 +1135,7 @@ const makeEditorTools = (() => {
     }
     function renderAttachmentRow(tree){
       const strip=tree?.querySelector?.('[data-attachments]');if(!strip)return;
-      const caps=attachmentCapabilities(),canAdd=caps.documents||caps.vision||caps.audio,visible=canAdd||attachments.length>0;
+      const caps=attachmentCapabilities(),canAdd=caps.documents||caps.vision||caps.audio||caps.video,visible=canAdd||attachments.length>0;
       strip.hidden=!visible;if(!visible)return;
       const showAttachmentPreviews=aiRoot.getAIPreferences?.().showAttachmentPreviews!==false;
       const chips=attachments.map((item,index)=>{
@@ -1146,7 +1163,7 @@ const makeEditorTools = (() => {
       if(!picker?.open){alert('The Editor workspace file picker is unavailable.');return;}
       const active=activeEditor(state);
       try{
-        const selected=await picker.open({title:'Add AI attachments',extensions,multiple:true,allowDevice:true,maxFileBytes:12*1024*1024,startPath:active?.path?.includes('/')?active.path.slice(0,active.path.lastIndexOf('/')):''});
+        const selected=await picker.open({title:'Add AI attachments',extensions,multiple:true,allowDevice:true,maxFileBytes:attachmentCapabilities().video?VIDEO_ATTACHMENT_MAX_BYTES:12*1024*1024,startPath:active?.path?.includes('/')?active.path.slice(0,active.path.lastIndexOf('/')):''});
         if(!Array.isArray(selected)||!selected.length)return;
         for(const file of selected){
           const path=String(file.customRelativePath||file.__wkWorkspacePath||'');
@@ -1168,7 +1185,8 @@ const makeEditorTools = (() => {
       const ext=attachmentExtension(file);
       const imageMimes={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',bmp:'image/bmp',avif:'image/avif',apng:'image/apng',ico:'image/x-icon'};
       const audioMimes={wav:'audio/wav',mp3:'audio/mpeg',m4a:'audio/mp4',aac:'audio/aac',ogg:'audio/ogg',opus:'audio/ogg',flac:'audio/flac'};
-      return kind==='image'?(imageMimes[ext]||'image/png'):kind==='audio'?(supplied.startsWith('audio/')?supplied:(audioMimes[ext]||'application/octet-stream')):(supplied||'text/plain');
+      const videoMimes={mp4:'video/mp4',m4v:'video/x-m4v',mov:'video/quicktime',webm:'video/webm'};
+      return kind==='image'?(imageMimes[ext]||'image/png'):kind==='audio'?(supplied.startsWith('audio/')?supplied:(audioMimes[ext]||'application/octet-stream')):kind==='video'?(supplied.startsWith('video/')?supplied:(videoMimes[ext]||'application/octet-stream')):(supplied||'text/plain');
     }
     function fileAsDataUrl(file,mimeType){
       return new Promise((resolve,reject)=>{
@@ -1178,7 +1196,7 @@ const makeEditorTools = (() => {
       });
     }
     async function buildAttachmentPayload(){
-      const metadata=[],images=[],audios=[],files=[],textParts=[];let textChars=0,audioBytes=0;
+      const metadata=[],images=[],audios=[],videos=[],files=[],textParts=[];let textChars=0,audioBytes=0,videoBytes=0;
       for(const item of attachments){
         const openTab=item.active&&activeEditor(state)?.path===item.path?makeActiveAttachment():null;
         const file=openTab?.file||item.file;
@@ -1210,9 +1228,14 @@ const makeEditorTools = (() => {
           if(audioBytes>24*1024*1024)throw new Error('Combined audio attachments must be smaller than 24 MiB.');
           const mimeType=attachmentMimeType(file,kind);
           audios.push({name:String(file.name),mimeType,dataUrl:await fileAsDataUrl(file,mimeType)});
+        }else if(kind==='video'){
+          if(file.size>VIDEO_ATTACHMENT_MAX_BYTES)throw new Error(file.name+' is larger than the 32 MiB video attachment limit.');
+          videoBytes+=file.size;
+          if(videoBytes>VIDEO_ATTACHMENT_MAX_BYTES)throw new Error('Combined video attachments must be smaller than 32 MiB.');
+          videos.push({name:String(file.name),mimeType:attachmentMimeType(file,kind),file});
         }
       }
-      return {metadata,images,audios,files,textContext:textParts.length?'\n\n'+textParts.join('\n\n'):''};
+      return {metadata,images,audios,videos,files,textContext:textParts.length?'\n\n'+textParts.join('\n\n'):''};
     }
     function decorateAttachmentMessages(messages,payload){
       const output=(messages||[]).map(message=>({...message,images:undefined}));
@@ -1221,6 +1244,7 @@ const makeEditorTools = (() => {
         user.content=String(user.content||'')+String(payload?.textContext||'');
         if(payload?.images?.length)user.images=payload.images;
         if(payload?.audios?.length)user.audios=payload.audios;
+        if(payload?.videos?.length)user.videos=payload.videos;
         delete user.attachments;
       }
       return output;
@@ -1625,7 +1649,7 @@ const makeEditorTools = (() => {
       if(editingIndex>=0){const cancel=document.createElement('button');cancel.type='button';cancel.dataset.cancelEdit='';cancel.textContent='Cancel';cancel.title='Cancel prompt editing and send a new message instead';cancel.onclick=()=>cancelEdit(input,send);send.parentNode.insertBefore(cancel,send);}
       if(chatMessages.length)chat.scrollTop=chat.scrollHeight;
     }
-    async function sendMessage(text,g,t,tree,attachmentPayload={metadata:[],images:[],textContext:''}){
+    async function sendMessage(text,g,t,tree,attachmentPayload={metadata:[],images:[],audios:[],videos:[],files:[],textContext:''}){
       if(!g?.viewBody || !t) return;
       const chatRecord=currentChat();
       busy=true; controller=new AbortController();
