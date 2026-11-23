@@ -8,6 +8,8 @@
       saveBehaviorSettings,
       getClosedTabRetentionMs,
       setClosedTabRetentionMs,
+      getResumeClosedTabMedia,
+      setResumeClosedTabMedia,
       getBrowserSettings,
       saveBrowserSettings,
       subscribeBrowserSettings
@@ -35,9 +37,10 @@
           </div>
           <div class="editor-settings-section">
             <h3>Recently Closed Tabs</h3>
-            <label>Keep closed tabs for
+            <label class="setting-duration-label">
+              <span>Keep closed tabs for</span>
               <div class="setting-duration-control">
-                <input id="setting-closed-tab-retention" type="number" min="0" step="1">
+                <input id="setting-closed-tab-retention" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="Closed tab retention duration">
                 <select id="setting-closed-tab-retention-unit">
                   <option value="1000">Seconds</option>
                   <option value="60000">Minutes</option>
@@ -46,6 +49,8 @@
               </div>
             </label>
             <p class="editor-settings-note">Editor-wide preference. Ctrl+Shift+T restores a closed tab with its original editor and preview instances. Changes also apply to tabs already closed; set to 0 to dispose them immediately.</p>
+            <label class="setting-check"><input id="setting-closed-tab-resume-media" type="checkbox"><span>Resume media when reopening a closed tab</span></label>
+            <p class="editor-settings-note">When enabled, audio and video that was playing when a tab closed starts again when that tab is restored.</p>
           </div>
           <div class="editor-settings-section">
             <h3>Git</h3>
@@ -97,6 +102,7 @@
       const piskelAutoSave = $('setting-piskel-auto-save');
       const closedTabRetention = $('setting-closed-tab-retention');
       const closedTabRetentionUnit = $('setting-closed-tab-retention-unit');
+      const resumeClosedTabMedia = $('setting-closed-tab-resume-media');
       const b = $('setting-hide-browser-bar');
       const restoreTabs = $('setting-browser-restore-tabs');
       const defaultTab = $('setting-browser-default-tab');
@@ -127,12 +133,13 @@
       d.checked = !!state.behavior.confirmBeforeDelete;
       h.checked = !!state.behavior.showHiddenFiles;
       hideNodeModules.checked = !!state.behavior.hideNodeModules;
-      const retentionMs = Math.max(0, Number(getClosedTabRetentionMs?.() ?? state.behavior.recentlyClosedRetentionMs ?? 300000) || 0);
-      const retentionUnit = retentionMs === 0 ? 60000
+      let retentionMs = Math.max(0, Number(getClosedTabRetentionMs?.() ?? state.behavior.recentlyClosedRetentionMs ?? 300000) || 0);
+      let retentionUnit = retentionMs === 0 ? 60000
         : retentionMs % 3600000 === 0 ? 3600000
         : retentionMs % 60000 === 0 ? 60000 : 1000;
       closedTabRetentionUnit.value = String(retentionUnit);
       closedTabRetention.value = String(retentionMs / retentionUnit);
+      resumeClosedTabMedia.checked = getResumeClosedTabMedia?.() === true;
       try { const stored = localStorage.getItem('node-editor.piskel.autoSave'); piskelAutoSave.checked = stored === null ? true : stored === 'true'; } catch (_) { piskelAutoSave.checked = true; }
       b.checked = !!state.browserSettings.hideBrowserBar;
       restoreTabs.checked = state.browserSettings.restoreTabs !== false;
@@ -170,9 +177,20 @@
           state.behavior.recentlyClosedRetentionMs = value;
           saveBehaviorSettings();
         }
+        // Keep the fallback in sync with the last valid change so an invalid
+        // edit never jumps back to the value that was present when Settings opened.
+        retentionMs = value;
+        retentionUnit = unit;
       };
       closedTabRetention.onchange = saveClosedTabRetention;
+      closedTabRetention.onkeydown = event => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        saveClosedTabRetention();
+        closedTabRetention.blur();
+      };
       closedTabRetentionUnit.onchange = saveClosedTabRetention;
+      resumeClosedTabMedia.onchange = () => setResumeClosedTabMedia?.(resumeClosedTabMedia.checked);
       b.onchange = () => writeBrowserSettings({hideBrowserBar: b.checked});
       restoreTabs.onchange = () => writeBrowserSettings({restoreTabs: restoreTabs.checked});
 

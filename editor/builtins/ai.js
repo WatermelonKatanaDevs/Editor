@@ -41,6 +41,50 @@ const makeEditorTools = (() => {
   }
   function makeTools(options) {
     const {state, openFile, onRefresh, runConfigured, ensureNodeRuntime} = options;
+    // AI filesystem writes must not leave stale Monaco/Piskel/HTML preview instances
+    // mounted. Dispose every affected tab's view, then rerender active tabs from disk.
+    function invalidateChangedPaths(paths) {
+      const changed = [...new Set((paths || []).map(normalize).filter(Boolean))];
+      if (!changed.length) return;
+      const affected = path => changed.some(rootPath =>
+        path === rootPath || path.startsWith(rootPath + '/')
+      );
+      const active = [];
+      const tabs = new Set();
+      for (const wb of Workbench.getInstances?.() || []) {
+        for (const group of wb.groups?.values?.() || []) {
+          for (const tab of group.tabs || []) {
+            if (tab.kind !== 'file' || !affected(String(tab.path || ''))) continue;
+            tabs.add(tab);
+            if (group.active === tab.id) active.push({wb, group, tab});
+          }
+        }
+      }
+      // Include retained closed tabs so Ctrl+Shift+T cannot resurrect stale views.
+      for (const entry of state.closedTabHistory || []) {
+        const tab = entry?.tab;
+        if (tab?.kind === 'file' && affected(String(tab.path || ''))) tabs.add(tab);
+      }
+      for (const tab of tabs) {
+        try { state.previews?.dispose(tab); } catch (_) {}
+        // Some editor providers keep their own model/editor handles on the tab.
+        try { tab.listener?.dispose?.(); } catch (_) {}
+        try { tab.editor?.dispose?.(); } catch (_) {}
+        try { tab.model?.dispose?.(); } catch (_) {}
+        try { tab._viewElement?.remove?.(); } catch (_) {}
+        tab.listener = null;
+        tab.editor = null;
+        tab.model = null;
+        tab._viewElement = null;
+        tab._viewCreatePromise = null;
+        tab._resourcesDisposed = false;
+      }
+      for (const item of active) {
+        try { item.wb.activateTab(item.group, item.tab.id); } catch (error) {
+          console.warn('[EditorAI] Failed to reload changed file view:', item.tab.path, error);
+        }
+      }
+    }
     const tools = new Map();
     function add(def) { tools.set(def.name, def); }
     add({name:'exit_early', permission:'none', description:'Finish the task immediately and return the supplied message directly as the final answer. Use when all necessary tool work is complete and no further tool or model turn is needed. Put the complete answer or summary in message; do not leave the message empty.', parameters:{type:'object',properties:{message:{type:'string',description:'Optional final message to show the user.'}},additionalProperties:false}, execute:async args => ({exitEarly:true,message:String(args?.message||'')})});
@@ -50,13 +94,13 @@ const makeEditorTools = (() => {
       const query=String(args.query||'').toLowerCase(); if(!query) return {results:[]}; const prefix=normalize(args.path||''); const limit=Math.max(1,Math.min(500,Number(args.maxResults)||100)); const results=[];
       for(const path of state.fs?.listFilesSync?.()||[]) { if(prefix && path!==prefix && !path.startsWith(prefix+'/')) continue; if(!textFile(path)) continue; let content=''; try{content=String(state.fs.readFileSync(path,'utf8')||'')}catch(_){continue;} const lines=content.split(/\r?\n/); for(let i=0;i<lines.length;i++){let from=0;const lower=lines[i].toLowerCase();while(from<lower.length){const col=lower.indexOf(query,from);if(col<0)break;results.push({path,line:i+1,column:col+1,text:lines[i]});if(results.length>=limit)return {results};from=col+Math.max(query.length,1);}}} return {results};
     }});
-    add({name:'create_file', permission:'createFiles', description:'Create a new text file in the project.', parameters:{type:'object',required:['path','content'],properties:{path:{type:'string'},content:{type:'string'}},additionalProperties:false}, execute:async args => { const path=normalize(args.path); if(!path)throw new Error('Invalid file path.'); if(state.fs.existsSync(path))throw new Error(`File already exists: ${path}`); state.fs.writeFileSync(path,String(args.content??'')); state.markDirty?.(path); onRefresh?.(); return {path,created:true}; }});
-    add({name:'write_file', permission:'modifyFiles', description:'Create a new text file or replace the contents of an existing file.', parameters:{type:'object',required:['path','content'],properties:{path:{type:'string'},content:{type:'string'}},additionalProperties:false}, execute:async args => { const path=normalize(args.path); if(!path)throw new Error('Invalid file path.'); const exists=!!state.fs.existsSync(path); const old=exists?String(state.fs.readFileSync(path,'utf8')||''):''; const content=String(args.content??''); state.fs.writeFileSync(path,content); state.markDirty?.(path); onRefresh?.(); return {path,created:!exists,changed:!exists||old!==content,diff:exists?fileDiff(old,content):null}; }});
-    add({name:'delete_file', permission:'deleteFiles', description:'Delete a file or directory from the project.', parameters:{type:'object',required:['path'],properties:{path:{type:'string'},directory:{type:'boolean'}},additionalProperties:false}, execute:async args => { const path=normalize(args.path); if(!path)throw new Error('Cannot delete the project root.'); const isDir=!!args.directory || state.fs.isDirectorySync?.(path); const ok=isDir ? state.fs.deleteDirectorySync(path) : state.fs.deleteFileSync(path); if(!ok)throw new Error(`Nothing deleted at ${path}`); state.markDirty?.(path); onRefresh?.(); return {path,deleted:true,directory:isDir}; }});
-    add({name:'move_file', permission:'modifyFiles', description:'Move or rename a file or directory without reading its contents into the agent.', parameters:{type:'object',required:['source','destination'],properties:{source:{type:'string',description:'Existing file or directory path.'},destination:{type:'string',description:'New file or directory path.'}},additionalProperties:false}, execute:async args => { const source=normalize(args.source); const destination=normalize(args.destination); if(!source)throw new Error('Source path is required.'); if(!destination)throw new Error('Destination path is required.'); if(source===destination)return {source,destination,moved:false}; if(!state.fs?.existsSync(source) && !state.fs?.isDirectorySync?.(source))throw new Error(`Path not found: ${source}`); const isDir=!!state.fs.isDirectorySync?.(source); state.fs.moveSync(source,destination); state.markDirty?.(source); state.markDirty?.(destination); state.fileManager?.onMove?.(source,destination,isDir); onRefresh?.(); return {source,destination,moved:true,directory:isDir}; }});    add({name:'copy_file', permission:'modifyFiles', description:'Copy a file or directory without reading its contents into the agent.', parameters:{type:'object',required:['source','destination'],properties:{source:{type:'string',description:'Existing file or directory path.'},destination:{type:'string',description:'New file or directory path.'}},additionalProperties:false}, execute:async args => { const source=normalize(args.source); const destination=normalize(args.destination); if(!source)throw new Error('Source path is required.'); if(!destination)throw new Error('Destination path is required.'); if(!state.fs?.existsSync(source) && !state.fs?.isDirectorySync?.(source))throw new Error(`Path not found: ${source}`); if(state.fs.existsSync(destination) || state.fs.isDirectorySync?.(destination))throw new Error(`Destination already exists: ${destination}`); if(source===destination)throw new Error('Source and destination are the same.'); if(destination.startsWith(source+'/'))throw new Error('Cannot copy a path into itself.'); const isDir=!!state.fs.isDirectorySync?.(source); const files=(isDir ? state.fs.listFilesSync().filter(path=>path===source||path.startsWith(source+'/')) : [source]); for(const path of files){ const target=destination+path.slice(source.length); state.fs.writeFileSync(target,state.fs.readFileSync(path,'binary')); } state.markDirty?.(destination); onRefresh?.(); return {source,destination,copied:true,directory:isDir,files:files.length}; }});
+    add({name:'create_file', permission:'createFiles', description:'Create a new text file in the project.', parameters:{type:'object',required:['path','content'],properties:{path:{type:'string'},content:{type:'string'}},additionalProperties:false}, execute:async args => { const path=normalize(args.path); if(!path)throw new Error('Invalid file path.'); if(state.fs.existsSync(path))throw new Error(`File already exists: ${path}`); state.fs.writeFileSync(path,String(args.content??'')); state.markDirty?.(path); invalidateChangedPaths([path]); onRefresh?.(); return {path,created:true}; }});
+    add({name:'write_file', permission:'modifyFiles', description:'Create a new text file or replace the contents of an existing file.', parameters:{type:'object',required:['path','content'],properties:{path:{type:'string'},content:{type:'string'}},additionalProperties:false}, execute:async args => { const path=normalize(args.path); if(!path)throw new Error('Invalid file path.'); const exists=!!state.fs.existsSync(path); const old=exists?String(state.fs.readFileSync(path,'utf8')||''):''; const content=String(args.content??''); state.fs.writeFileSync(path,content); state.markDirty?.(path); if(!exists||old!==content) invalidateChangedPaths([path]); onRefresh?.(); return {path,created:!exists,changed:!exists||old!==content,diff:exists?fileDiff(old,content):null}; }});
+    add({name:'delete_file', permission:'deleteFiles', description:'Delete a file or directory from the project.', parameters:{type:'object',required:['path'],properties:{path:{type:'string'},directory:{type:'boolean'}},additionalProperties:false}, execute:async args => { const path=normalize(args.path); if(!path)throw new Error('Cannot delete the project root.'); const isDir=!!args.directory || state.fs.isDirectorySync?.(path); const ok=isDir ? state.fs.deleteDirectorySync(path) : state.fs.deleteFileSync(path); if(!ok)throw new Error(`Nothing deleted at ${path}`); state.markDirty?.(path); invalidateChangedPaths([path]); onRefresh?.(); return {path,deleted:true,directory:isDir}; }});
+    add({name:'move_file', permission:'modifyFiles', description:'Move or rename a file or directory without reading its contents into the agent.', parameters:{type:'object',required:['source','destination'],properties:{source:{type:'string',description:'Existing file or directory path.'},destination:{type:'string',description:'New file or directory path.'}},additionalProperties:false}, execute:async args => { const source=normalize(args.source); const destination=normalize(args.destination); if(!source)throw new Error('Source path is required.'); if(!destination)throw new Error('Destination path is required.'); if(source===destination)return {source,destination,moved:false}; if(!state.fs?.existsSync(source) && !state.fs?.isDirectorySync?.(source))throw new Error(`Path not found: ${source}`); const isDir=!!state.fs.isDirectorySync?.(source); state.fs.moveSync(source,destination); state.markDirty?.(source); state.markDirty?.(destination); state.fileManager?.onMove?.(source,destination,isDir); invalidateChangedPaths([source,destination]); onRefresh?.(); return {source,destination,moved:true,directory:isDir}; }});    add({name:'copy_file', permission:'modifyFiles', description:'Copy a file or directory without reading its contents into the agent.', parameters:{type:'object',required:['source','destination'],properties:{source:{type:'string',description:'Existing file or directory path.'},destination:{type:'string',description:'New file or directory path.'}},additionalProperties:false}, execute:async args => { const source=normalize(args.source); const destination=normalize(args.destination); if(!source)throw new Error('Source path is required.'); if(!destination)throw new Error('Destination path is required.'); if(!state.fs?.existsSync(source) && !state.fs?.isDirectorySync?.(source))throw new Error(`Path not found: ${source}`); if(state.fs.existsSync(destination) || state.fs.isDirectorySync?.(destination))throw new Error(`Destination already exists: ${destination}`); if(source===destination)throw new Error('Source and destination are the same.'); if(destination.startsWith(source+'/'))throw new Error('Cannot copy a path into itself.'); const isDir=!!state.fs.isDirectorySync?.(source); const files=(isDir ? state.fs.listFilesSync().filter(path=>path===source||path.startsWith(source+'/')) : [source]); for(const path of files){ const target=destination+path.slice(source.length); state.fs.writeFileSync(target,state.fs.readFileSync(path,'binary')); } state.markDirty?.(destination); invalidateChangedPaths([destination]); onRefresh?.(); return {source,destination,copied:true,directory:isDir,files:files.length}; }});
     add({name:'get_file_info', permission:'readFiles', description:'Get filesystem metadata without reading a file into the agent.', parameters:{type:'object',required:['path'],properties:{path:{type:'string'}},additionalProperties:false}, execute:async args => { const path=normalize(args.path); if(!path)throw new Error('Path is required.'); const isDir=!!state.fs?.isDirectorySync?.(path); if(!state.fs?.existsSync(path) && !isDir)throw new Error(`Path not found: ${path}`); if(isDir){ const prefix=path+'/'; const files=(state.fs.listFilesSync?.()||[]).filter(p=>p===path||p.startsWith(prefix)); const dirs=(state.fs.listDirectoriesSync?.()||[]).filter(p=>p===path||p.startsWith(prefix)); return {path,type:'directory',fileCount:files.length,directoryCount:dirs.length}; } const data=state.fs.readFileSync(path,'binary'); const bytes=data?.byteLength ?? data?.length ?? 0; return {path,type:'file',size:bytes,extension:(path.match(/\.([^.\/]+)$/)?.[1]||'').toLowerCase(),textFile:textFile(path)}; }});
     add({name:'find_files', permission:'searchFiles', description:'Find project files by glob-like path pattern without reading their contents.', parameters:{type:'object',properties:{pattern:{type:'string'},path:{type:'string'},extension:{type:'string'},maxResults:{type:'number',minimum:1,maximum:2000}},additionalProperties:false}, execute:async args => { const pattern=String(args.pattern||'').trim(); const prefix=normalize(args.path||''); const extension=String(args.extension||'').trim().toLowerCase(); const limit=Math.max(1,Math.min(2000,Number(args.maxResults)||500)); const files=state.fs?.listFilesSync?.()||[]; const globToRegex=g=>{let out='';for(let i=0;i<g.length;i++){const c=g[i];if(c==='*'){if(g[i+1]==='*'){out+='.*';i++;}else out+='[^/]*';}else if(c==='?')out+='[^/]';else out+=c.replace(/[\\^$+?.()|{}\[\]]/g,'\\$&');}return new RegExp('^'+out+'$','i');}; const re=pattern?globToRegex(pattern):null; const results=[]; for(const file of files){if(prefix&&file!==prefix&&!file.startsWith(prefix+'/'))continue;if(extension&&!file.toLowerCase().endsWith(extension.startsWith('.')?extension:'.'+extension))continue;if(re&&!re.test(file))continue;results.push(file);if(results.length>=limit)break;} return {pattern:pattern||null,results}; }});
-    add({name:'replace_in_files', permission:'modifyFiles', description:'Replace text across selected project files without requiring the agent to rewrite whole files.', parameters:{type:'object',required:['search','replace'],properties:{search:{type:'string'},replace:{type:'string'},path:{type:'string'},regex:{type:'boolean'},caseSensitive:{type:'boolean'},maxFiles:{type:'number'},dryRun:{type:'boolean'}},additionalProperties:false}, execute:async args => { const search=String(args.search??''); if(!search)throw new Error('Search text is required.'); const replacement=String(args.replace??''); const prefix=normalize(args.path||''); const maxFiles=Math.max(1,Math.min(500,Number(args.maxFiles)||100)); let matcher; try { matcher=args.regex ? new RegExp(search,args.caseSensitive?'g':'gi') : new RegExp(search.replace(/[\\^$.*+?()[\]{}|]/g,'\\$&'),args.caseSensitive?'g':'gi'); } catch(e){throw new Error(`Invalid search pattern: ${e.message}`);} const changes=[]; for(const path of state.fs?.listFilesSync?.()||[]){if(changes.length>=maxFiles)break;if(prefix&&path!==prefix&&!path.startsWith(prefix+'/'))continue;if(!textFile(path))continue;let old='';try{old=String(state.fs.readFileSync(path,'utf8')||'')}catch(_){continue;} matcher.lastIndex=0;const matches=old.match(matcher);if(!matches?.length)continue;const next=old.replace(matcher,replacement);changes.push({path,count:matches.length,changed:old!==next});if(!args.dryRun&&old!==next){state.fs.writeFileSync(path,next);state.markDirty?.(path);}} if(!args.dryRun)onRefresh?.(); return {changed:changes.filter(x=>x.changed).length,files:changes,dryRun:!!args.dryRun}; }});
+    add({name:'replace_in_files', permission:'modifyFiles', description:'Replace text across selected project files without requiring the agent to rewrite whole files.', parameters:{type:'object',required:['search','replace'],properties:{search:{type:'string'},replace:{type:'string'},path:{type:'string'},regex:{type:'boolean'},caseSensitive:{type:'boolean'},maxFiles:{type:'number'},dryRun:{type:'boolean'}},additionalProperties:false}, execute:async args => { const search=String(args.search??''); if(!search)throw new Error('Search text is required.'); const replacement=String(args.replace??''); const prefix=normalize(args.path||''); const maxFiles=Math.max(1,Math.min(500,Number(args.maxFiles)||100)); let matcher; try { matcher=args.regex ? new RegExp(search,args.caseSensitive?'g':'gi') : new RegExp(search.replace(/[\\^$.*+?()[\]{}|]/g,'\\$&'),args.caseSensitive?'g':'gi'); } catch(e){throw new Error(`Invalid search pattern: ${e.message}`);} const changes=[]; for(const path of state.fs?.listFilesSync?.()||[]){if(changes.length>=maxFiles)break;if(prefix&&path!==prefix&&!path.startsWith(prefix+'/'))continue;if(!textFile(path))continue;let old='';try{old=String(state.fs.readFileSync(path,'utf8')||'')}catch(_){continue;} matcher.lastIndex=0;const matches=old.match(matcher);if(!matches?.length)continue;const next=old.replace(matcher,replacement);changes.push({path,count:matches.length,changed:old!==next});if(!args.dryRun&&old!==next){state.fs.writeFileSync(path,next);state.markDirty?.(path);}} if(!args.dryRun){const changedPaths=changes.filter(x=>x.changed).map(x=>x.path);if(changedPaths.length)invalidateChangedPaths(changedPaths);onRefresh?.();} return {changed:changes.filter(x=>x.changed).length,files:changes,dryRun:!!args.dryRun}; }});
 
 
     add({name:'get_active_file', permission:'readEditor', description:'Get the active editor file, cursor, and selection.', parameters:{type:'object',properties:{includeContent:{type:'boolean'}},additionalProperties:false}, execute:async args => { const t=currentTab(state); if(!t || t.kind!=='file')return {path:null}; const model=t.editor?.getModel?.(); const selection=t.editor?.getSelection?.(); const result={path:t.path,view:t.view||null}; if(t.editor?.getPosition)result.cursor=t.editor.getPosition(); if(selection && model)result.selection=model.getValueInRange(selection); if(args.includeContent)result.content=String(t.editor?.getValue?.()||state.fs.readFileSync(t.path,'utf8')||''); return result; }});
@@ -304,6 +348,24 @@ const makeEditorTools = (() => {
     return state.lastTextTab?.kind === 'file' ? state.lastTextTab : null;
   }
   function renderMessage(container, text, onInsertCode) {
+    // Keep the unrendered response available for native browser copy operations.
+    // The copy event is shared by Ctrl/Cmd+C and the browser context-menu Copy command.
+    container.__aiRawMarkdown = String(text ?? '');
+    if (!container.__aiRawCopyHandler) {
+      container.__aiRawCopyHandler = event => {
+        const selection = window.getSelection?.();
+        if (!selection || selection.isCollapsed || !container.contains(selection.anchorNode) || !container.contains(selection.focusNode)) return;
+        // Preserve the browser's normal code-selection behavior; code blocks also
+        // have their own Copy button which copies the exact code payload.
+        const anchorElement = selection.anchorNode?.nodeType === 1 ? selection.anchorNode : selection.anchorNode?.parentElement;
+        const focusElement = selection.focusNode?.nodeType === 1 ? selection.focusNode : selection.focusNode?.parentElement;
+        if (anchorElement?.closest('pre') && focusElement?.closest('pre')) return;
+        if (!event.clipboardData) return;
+        event.preventDefault();
+        event.clipboardData.setData('text/plain', container.__aiRawMarkdown || '');
+      };
+      container.addEventListener('copy', container.__aiRawCopyHandler);
+    }
     const math = protectMath(text);
     container.innerHTML = sanitizeHtml(markdown(math.text));
     renderMathExpressions(container, math.expressions);
@@ -333,7 +395,16 @@ const makeEditorTools = (() => {
     return first.length > 48 ? first.slice(0, 45) + '…' : first;
   }
   function validMessages(messages) {
-    return Array.isArray(messages) ? messages.filter(m => m && ['user','assistant'].includes(m.role) && typeof m.content === 'string') : [];
+    if(!Array.isArray(messages))return [];
+    return messages.filter(m=>m&&['user','assistant'].includes(m.role)&&typeof m.content==='string').map(message=>{
+      const clean={...message};
+      delete clean.images;
+      if(Array.isArray(message.attachments))clean.attachments=message.attachments.filter(item=>item&&typeof item.name==='string').map(item=>({
+        name:String(item.name),path:String(item.path||''),kind:String(item.kind||'file'),
+        mimeType:String(item.mimeType||''),size:Math.max(0,Number(item.size)||0),active:!!item.active
+      }));
+      return clean;
+    });
   }
   function makeChatStore(state) {
     let loadedProjectId = null;
@@ -465,8 +536,8 @@ const makeEditorTools = (() => {
   return '<div class="ai-model-row '+(active?'active ':'')+(local?'local':'remote')+'"><div class="ai-model-main"><strong>'+escapeHtml(m.name)+'</strong><span title="'+escapeHtml(details)+'">'+escapeHtml(details)+'</span></div><button data-use="'+escapeHtml(m.id)+'" '+(active&&(!local||loaded)?'disabled':'')+'>'+action+'</button>'+edit+'<button data-remove="'+escapeHtml(m.id)+'" '+(models.length<=1?'disabled title="At least one model must remain"':'')+'>×</button></div>';
 }).join('')}</div>
 
-<div class="ai-model-actions"><button class="ai-settings-add" data-add>+ Add remote model</button><button class="ai-settings-add" data-add-local>+ Add local model</button></div><div class="ai-model-editor-slot"><div class="ai-local-model-editor" data-local-editor hidden><h3 data-local-editor-title>Add local model</h3><label>Name<input data-local-name placeholder="Qwen3 4B Instruct · Local"></label><label>Model ID<div class="ai-model-input-row"><input data-local-model placeholder="onnx-community/owner-model-ONNX"><button type="button" data-browse-local-models>Browse</button></div></label><div class="ai-local-editor-status" data-local-editor-status></div><div class="ai-add-actions"><button type="button" data-cancel-local>Cancel</button><button type="button" data-save-local>Save model</button></div></div>
-<div class="ai-add-model" hidden><label>Provider<select data-provider>${Object.entries(providers).filter(([id])=>id!=='local').map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>API format<select data-format>${Object.entries(aiRoot.AI_PROTOCOLS||{}).map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>Name<input data-name placeholder="My model"></label><label>Endpoint<input data-endpoint placeholder="https://api.example.com/v1"></label><label>Model ID <div class="ai-model-input-row"><input data-model placeholder="model-name"><button type="button" data-browse-models>Browse models</button></div></label><label>API key <input data-key type="password" placeholder="Enter your provider key"></label><label class="ai-check"><input data-remember type="checkbox"> Remember API key on this device</label><label class="ai-check"><input data-tools type="checkbox" checked> Supports native tool calling</label><label class="ai-check"><input data-thinking type="checkbox" checked> Supports reasoning</label><div class="ai-add-hint" data-protocol-hint>Select a provider to fill in its API format and endpoint. You can override the endpoint for compatible services.</div><div class="ai-add-actions"><button data-cancel-model>Cancel</button><button data-save-model>Save model</button></div></div></div><div class="ai-local-load-status" data-local-settings-status hidden><div data-local-settings-text></div><div class="ai-local-progress"><span data-local-settings-progress></span></div></div><div class="ai-hf-account"><div class="ai-section-title">Hugging Face</div><label>Your API key<input data-hf-global-key type="password" placeholder="hf_..."></label><label class="ai-check"><input data-hf-global-remember type="checkbox"> Remember your key on this device</label><div class="ai-add-hint">Used for Hugging Face models that do not have their own key. Add a key here or on an individual model.</div></div></section><section><div class="ai-section-title">Permissions</div><div class="ai-permission-list">${Object.entries(permissions.all()).map(([k,v])=>`<label><span>${escapeHtml(TOOL_PERMISSION_LABELS[k]||k)}</span><select data-permission="${k}"><option value="always" ${v==='always'?'selected':''}>Always allow</option><option value="ask" ${v==='ask'?'selected':''}>Ask each time</option><option value="never" ${v==='never'?'selected':''}>Never allow</option></select></label>`).join('')}</div><button data-reset-permissions class="ai-settings-reset">Reset permissions</button></section></div><div class="ai-settings-note">Providers can fill in the API format and default endpoint automatically. Providers may expose either a live model list or a fixed set of known models.</div></div><div data-settings-panel="context" hidden><div class="ai-context-panel"><h3 class="ai-section-title">Model context &amp; instructions</h3><p class="ai-settings-note-inline">These are added to the built-in coding-assistant instructions. They persist on this device and apply to your AI chats.</p><label>Additional instructions<textarea data-custom-instructions placeholder="Example: Prefer small, focused changes. Explain tradeoffs briefly."></textarea></label><label>Agent-only instructions<textarea data-agent-instructions placeholder="Example: Before editing, inspect related files and run a targeted verification after each major change."></textarea></label><label class="ai-check"><input data-show-activity type="checkbox"> Show agent activity in chat</label><h3 class="ai-section-title">Request recovery</h3><label class="ai-check"><input data-retry-429 type="checkbox"> Automatically retry HTTP 429 rate limits</label><div class="ai-retry-grid"><label>Max 429 retries<input data-max-retries type="number" min="0" max="10"></label><label>Base delay (ms)<input data-base-delay type="number" min="250" max="30000" step="250"></label></div><label class="ai-check"><input data-retry-transport type="checkbox"> Retry transport/CORS failures</label><div class="ai-retry-grid"><label>Max transport retries<input data-max-transport-retries type="number" min="0" max="10"></label><label>Transport delay (ms)<input data-transport-delay type="number" min="250" max="30000" step="250"></label></div><p class="ai-settings-note-inline">HTTP responses such as 429 are handled separately from transport failures such as CORS or connection errors.</p><h3 class="ai-section-title">Tool-call recovery</h3><label class="ai-check"><input data-tool-recovery type="checkbox"> Retry supported tool-call parse failures</label><div class="ai-retry-grid"><label>Max recovery retries<input data-tool-recovery-retries type="number" min="0" max="10"></label><span></span></div><p class="ai-settings-note-inline">Providers can opt into a recovery strategy through their API adapter. The agent itself does not special-case providers.</p></div></div><div data-settings-panel="analytics" hidden><div class="ai-analytics-panel"><div class="ai-analytics-cards" data-analytics-cards></div><h3 class="ai-section-title">By model</h3><div data-analytics-models class="ai-analytics-models"></div><button data-reset-analytics class="ai-settings-reset">Reset analytics</button></div></div><div data-settings-panel="cache" hidden><div class="ai-local-cache"><div class="ai-local-cache-heading"><strong>Persistent local AI cache</strong><button type="button" data-refresh-local-cache>Refresh</button></div><p>Model files and the Transformers.js runtime are stored in IndexedDB. Completed models can be loaded without network access.</p><div class="ai-local-cache-summary" data-local-cache-summary>Checking browser storage…</div><div class="ai-local-cache-list" data-local-cache-list></div></div></div></div>`;
+<div class="ai-model-actions"><button class="ai-settings-add" data-add>+ Add remote model</button><button class="ai-settings-add" data-add-local>+ Add local model</button></div><div class="ai-model-editor-slot"><div class="ai-local-model-editor" data-local-editor hidden><h3 data-local-editor-title>Add local model</h3><label>Name<input data-local-name placeholder="Qwen3 4B Instruct · Local"></label><label>Model ID<div class="ai-model-input-row"><input data-local-model placeholder="onnx-community/owner-model-ONNX"><button type="button" data-browse-local-models>Browse</button></div></label><label class="ai-check"><input data-local-documents type="checkbox" checked> Supports text/document attachments</label><label class="ai-check"><input data-local-vision type="checkbox"> Supports image input (vision)</label><div class="ai-local-editor-status" data-local-editor-status></div><div class="ai-add-actions"><button type="button" data-cancel-local>Cancel</button><button type="button" data-save-local>Save model</button></div></div>
+<div class="ai-add-model" hidden><label>Provider<select data-provider>${Object.entries(providers).filter(([id])=>id!=='local').map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>API format<select data-format>${Object.entries(aiRoot.AI_PROTOCOLS||{}).map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(p.label)}</option>`).join('')}</select></label><label>Name<input data-name placeholder="My model"></label><label>Endpoint<input data-endpoint placeholder="https://api.example.com/v1"></label><label>Model ID <div class="ai-model-input-row"><input data-model placeholder="model-name"><button type="button" data-browse-models>Browse models</button></div></label><label>API key <input data-key type="password" placeholder="Enter your provider key"></label><label class="ai-check"><input data-remember type="checkbox"> Remember API key on this device</label><label class="ai-check"><input data-tools type="checkbox" checked> Supports native tool calling</label><label class="ai-check"><input data-thinking type="checkbox" checked> Supports reasoning</label><label class="ai-check"><input data-documents type="checkbox" checked> Supports text/document attachments</label><label class="ai-check"><input data-vision type="checkbox"> Supports image input (vision)</label><div class="ai-add-hint" data-protocol-hint>Select a provider to fill in its API format and endpoint. You can override the endpoint for compatible services.</div><div class="ai-add-actions"><button data-cancel-model>Cancel</button><button data-save-model>Save model</button></div></div></div><div class="ai-local-load-status" data-local-settings-status hidden><div data-local-settings-text></div><div class="ai-local-progress"><span data-local-settings-progress></span></div></div><div class="ai-hf-account"><div class="ai-section-title">Hugging Face</div><label>Your API key<input data-hf-global-key type="password" placeholder="hf_..."></label><label class="ai-check"><input data-hf-global-remember type="checkbox"> Remember your key on this device</label><div class="ai-add-hint">Used for Hugging Face models that do not have their own key. Add a key here or on an individual model.</div></div></section><section><div class="ai-section-title">Permissions</div><div class="ai-permission-list">${Object.entries(permissions.all()).map(([k,v])=>`<label><span>${escapeHtml(TOOL_PERMISSION_LABELS[k]||k)}</span><select data-permission="${k}"><option value="always" ${v==='always'?'selected':''}>Always allow</option><option value="ask" ${v==='ask'?'selected':''}>Ask each time</option><option value="never" ${v==='never'?'selected':''}>Never allow</option></select></label>`).join('')}</div><button data-reset-permissions class="ai-settings-reset">Reset permissions</button></section></div><div class="ai-settings-note">Providers can fill in the API format and default endpoint automatically. Providers may expose either a live model list or a fixed set of known models.</div></div><div data-settings-panel="context" hidden><div class="ai-context-panel"><h3 class="ai-section-title">Model context &amp; instructions</h3><p class="ai-settings-note-inline">These are added to the built-in coding-assistant instructions. They persist on this device and apply to your AI chats.</p><label>Additional instructions<textarea data-custom-instructions placeholder="Example: Prefer small, focused changes. Explain tradeoffs briefly."></textarea></label><label>Agent-only instructions<textarea data-agent-instructions placeholder="Example: Before editing, inspect related files and run a targeted verification after each major change."></textarea></label><label class="ai-check"><input data-show-activity type="checkbox"> Show agent activity in chat</label><h3 class="ai-section-title">Chat display</h3><label class="ai-check"><input data-show-attachment-previews type="checkbox" checked> Show image and audio previews in the composer and above user messages</label><h3 class="ai-section-title">Request recovery</h3><label class="ai-check"><input data-retry-429 type="checkbox"> Automatically retry HTTP 429 rate limits</label><div class="ai-retry-grid"><label>Max 429 retries<input data-max-retries type="number" min="0" max="10"></label><label>Base delay (ms)<input data-base-delay type="number" min="250" max="30000" step="250"></label></div><label class="ai-check"><input data-retry-transport type="checkbox"> Retry transport/CORS failures</label><div class="ai-retry-grid"><label>Max transport retries<input data-max-transport-retries type="number" min="0" max="10"></label><label>Transport delay (ms)<input data-transport-delay type="number" min="250" max="30000" step="250"></label></div><p class="ai-settings-note-inline">HTTP responses such as 429 are handled separately from transport failures such as CORS or connection errors.</p><h3 class="ai-section-title">Tool-call recovery</h3><label class="ai-check"><input data-tool-recovery type="checkbox"> Retry supported tool-call parse failures</label><div class="ai-retry-grid"><label>Max recovery retries<input data-tool-recovery-retries type="number" min="0" max="10"></label><span></span></div><p class="ai-settings-note-inline">Providers can opt into a recovery strategy through their API adapter. The agent itself does not special-case providers.</p></div></div><div data-settings-panel="analytics" hidden><div class="ai-analytics-panel"><div class="ai-analytics-cards" data-analytics-cards></div><h3 class="ai-section-title">By model</h3><div data-analytics-models class="ai-analytics-models"></div><button data-reset-analytics class="ai-settings-reset">Reset analytics</button></div></div><div data-settings-panel="cache" hidden><div class="ai-local-cache"><div class="ai-local-cache-heading"><strong>Persistent local AI cache</strong><button type="button" data-refresh-local-cache>Refresh</button></div><p>Model files and the Transformers.js runtime are stored in IndexedDB. Completed models can be loaded without network access.</p><div class="ai-local-cache-summary" data-local-cache-summary>Checking browser storage…</div><div class="ai-local-cache-list" data-local-cache-list></div></div></div></div>`;
       modal.querySelector('.editor-modal-close').onclick=()=>modal.remove(); modal.onclick=e=>{if(e.target===modal)modal.remove();};
       const cacheSummary=modal.querySelector('[data-local-cache-summary]');
       const cacheList=modal.querySelector('[data-local-cache-list]');
@@ -534,10 +605,10 @@ const makeEditorTools = (() => {
       const tabButtons=[...modal.querySelectorAll('[data-settings-tab]')], panels=[...modal.querySelectorAll('[data-settings-panel]')];
       function selectSettingsTab(name){tabButtons.forEach(b=>b.classList.toggle('active',b.dataset.settingsTab===name));panels.forEach(p=>p.hidden=p.dataset.settingsPanel!==name);if(name==='analytics')renderAnalytics();if(name==='cache')renderLocalCache();}
       tabButtons.forEach(b=>b.onclick=()=>selectSettingsTab(b.dataset.settingsTab));
-      const customInstructions=modal.querySelector('[data-custom-instructions]'),agentInstructions=modal.querySelector('[data-agent-instructions]'),retry429=modal.querySelector('[data-retry-429]'),maxRetries=modal.querySelector('[data-max-retries]'),baseDelay=modal.querySelector('[data-base-delay]'),retryTransport=modal.querySelector('[data-retry-transport]'),maxTransportRetries=modal.querySelector('[data-max-transport-retries]'),transportDelay=modal.querySelector('[data-transport-delay]'),toolRecovery=modal.querySelector('[data-tool-recovery]'),toolRecoveryRetries=modal.querySelector('[data-tool-recovery-retries]'),showActivity=modal.querySelector('[data-show-activity]');
-      customInstructions.value=prefs.customInstructions||''; agentInstructions.value=prefs.agentInstructions||''; retry429.checked=prefs.retry429!==false; maxRetries.value=prefs.max429Retries??5; baseDelay.value=prefs.baseRetryDelay??1500; retryTransport.checked=prefs.retryTransport!==false; maxTransportRetries.value=prefs.maxTransportRetries??2; transportDelay.value=prefs.transportRetryDelay??1000; toolRecovery.checked=prefs.toolRecovery!==false; toolRecoveryRetries.value=prefs.maxToolRecoveryRetries??2; showActivity.checked=prefs.showActivity!==false;
-      const savePrefs=()=>{aiRoot.setAIPreferences?.({customInstructions:customInstructions.value,agentInstructions:agentInstructions.value,retry429:retry429.checked,max429Retries:Number(maxRetries.value),baseRetryDelay:Number(baseDelay.value),retryTransport:retryTransport.checked,maxTransportRetries:Number(maxTransportRetries.value),transportRetryDelay:Number(transportDelay.value),toolRecovery:toolRecovery.checked,maxToolRecoveryRetries:Number(toolRecoveryRetries.value),showActivity:showActivity.checked});onChange?.();};
-      [customInstructions,agentInstructions,retry429,maxRetries,baseDelay,retryTransport,maxTransportRetries,transportDelay,toolRecovery,toolRecoveryRetries,showActivity].forEach(x=>x.addEventListener('change',savePrefs));
+      const customInstructions=modal.querySelector('[data-custom-instructions]'),agentInstructions=modal.querySelector('[data-agent-instructions]'),retry429=modal.querySelector('[data-retry-429]'),maxRetries=modal.querySelector('[data-max-retries]'),baseDelay=modal.querySelector('[data-base-delay]'),retryTransport=modal.querySelector('[data-retry-transport]'),maxTransportRetries=modal.querySelector('[data-max-transport-retries]'),transportDelay=modal.querySelector('[data-transport-delay]'),toolRecovery=modal.querySelector('[data-tool-recovery]'),toolRecoveryRetries=modal.querySelector('[data-tool-recovery-retries]'),showActivity=modal.querySelector('[data-show-activity]'),showAttachmentPreviews=modal.querySelector('[data-show-attachment-previews]');
+      customInstructions.value=prefs.customInstructions||''; agentInstructions.value=prefs.agentInstructions||''; retry429.checked=prefs.retry429!==false; maxRetries.value=prefs.max429Retries??5; baseDelay.value=prefs.baseRetryDelay??1500; retryTransport.checked=prefs.retryTransport!==false; maxTransportRetries.value=prefs.maxTransportRetries??2; transportDelay.value=prefs.transportRetryDelay??1000; toolRecovery.checked=prefs.toolRecovery!==false; toolRecoveryRetries.value=prefs.maxToolRecoveryRetries??2; showActivity.checked=prefs.showActivity!==false; showAttachmentPreviews.checked=prefs.showAttachmentPreviews!==false;
+      const savePrefs=()=>{aiRoot.setAIPreferences?.({customInstructions:customInstructions.value,agentInstructions:agentInstructions.value,retry429:retry429.checked,max429Retries:Number(maxRetries.value),baseRetryDelay:Number(baseDelay.value),retryTransport:retryTransport.checked,maxTransportRetries:Number(maxTransportRetries.value),transportRetryDelay:Number(transportDelay.value),toolRecovery:toolRecovery.checked,maxToolRecoveryRetries:Number(toolRecoveryRetries.value),showActivity:showActivity.checked,showAttachmentPreviews:showAttachmentPreviews.checked});onChange?.();};
+      [customInstructions,agentInstructions,retry429,maxRetries,baseDelay,retryTransport,maxTransportRetries,transportDelay,toolRecovery,toolRecoveryRetries,showActivity,showAttachmentPreviews].forEach(x=>x.addEventListener('change',savePrefs));
       function fmt(n){return Number(n||0).toLocaleString();}
       function renderAnalytics(){const a=aiRoot.getAIAnalytics?.()||{};const cards=modal.querySelector('[data-analytics-cards]');if(!cards)return;cards.innerHTML=[["Requests",a.requests],["Input tokens",a.inputTokens],["Output tokens",a.outputTokens],["Reasoning tokens",a.reasoningTokens],["Total tokens",a.totalTokens],["429 retries",a.retries429],["Transport retries",a.transportRetries],["Tool recoveries",a.toolRecoveries]].map(([k,v])=>`<div class="ai-analytics-card"><strong>${fmt(v)}</strong><span>${k}</span></div>`).join('');const list=modal.querySelector('[data-analytics-models]');const rows=Object.values(a.byModel||{}).sort((x,y)=>y.totalTokens-x.totalTokens);list.innerHTML=rows.length?rows.map(m=>`<div class="ai-analytics-row"><strong>${escapeHtml(m.name)}</strong><span>${fmt(m.totalTokens)} total · ${fmt(m.inputTokens)} in · ${fmt(m.outputTokens)} out · ${fmt(m.reasoningTokens)} reasoning · ${fmt(m.retries429)} retries</span></div>`).join(''):'<div class="ai-settings-note-inline">No usage recorded yet.</div>';}
       modal.querySelector('[data-reset-analytics]').onclick=()=>{aiRoot.resetAIAnalytics?.();renderAnalytics();};
@@ -608,8 +679,85 @@ const makeEditorTools = (() => {
       const localEditor=modal.querySelector('[data-local-editor]');
       const localNameInput=modal.querySelector('[data-local-name]');
       const localModelInput=modal.querySelector('[data-local-model]');
+      const localVisionInput=modal.querySelector('[data-local-vision]');
+      const localDocumentsInput=modal.querySelector('[data-local-documents]');
       const localEditorStatus=modal.querySelector('[data-local-editor-status]');
-      let editingLocalId='';
+      let editingLocalId='',localPipelineTask='';
+      function getLocalModelSearchMetadata(model){
+        const config=model?.config&&typeof model.config==='object'?model.config:{};
+        const nestedConfigs=[config,config.text_config,config.thinker_config,config.language_config,config.llm_config,config.decoder_config].filter(value=>value&&typeof value==='object');
+        const contextFields=['max_position_embeddings','max_seq_len','max_sequence_length','max_context_length','context_length','n_positions','seq_length','model_max_length'];
+        let contextLength=null;
+        for(const nested of nestedConfigs){
+          for(const key of contextFields){
+            const value=Number(nested[key]);
+            if(Number.isFinite(value)&&value>0&&value<10000000){contextLength=Math.floor(value);break;}
+          }
+          if(contextLength)break;
+        }
+        const tags=[...(Array.isArray(model?.tags)?model.tags:[]),...(Array.isArray(model?.cardData?.tags)?model.cardData.tags:[])].map(tag=>String(tag).toLowerCase());
+        const tagText=tags.join(' ');
+        const task=String(model?.pipeline_tag||'').toLowerCase();
+        const architectures=Array.isArray(config.architectures)?config.architectures.map(String):[];
+        const architecture=architectures.join(' ');
+        const modelId=String(model?.id||'');
+        const modelHint=architecture+' '+String(config.model_type||'')+' '+modelId;
+        const supportsVision=['any-to-any','image-text-to-text','image-to-text','visual-question-answering','document-question-answering'].includes(task)
+          ||!!(config.vision_config||config.vision_tower||config.image_token_index!=null||config.vision_token_id!=null)
+          ||/(?:Gemma4|Qwen2_5Omni|Qwen3Omni|Llava|LLaVA|Vision|InternVL|Phi4Multimodal)/i.test(modelHint);
+        const supportsAudio=['any-to-any','audio-text-to-text','automatic-speech-recognition','audio-classification','zero-shot-audio-classification'].includes(task)
+          ||!!(config.audio_config||config.audio_encoder||config.audio_token_id!=null||config.audio_bos_token_id!=null)
+          ||/(?:Gemma4|Qwen2Audio|Qwen2_5Omni|Qwen3Omni|Phi4Multimodal|AudioFlamingo)/i.test(modelHint);
+        const chatTemplate=String(config.chat_template||config.tokenizer_config?.chat_template||'');
+        const supportsTools=/(?:tool[-_ ]?(?:use|calling)|function[-_ ]?calling|tools?[-_ ]?api)/i.test(tagText+' '+chatTemplate)
+          ||/(?:functionary|firefunction|openfunctions|nexus[-_ ]?raven|toolace)/i.test(modelId);
+        const supportsReasoning=/(?:^|[\s_-])reasoning(?:$|[\s_-])/.test(tagText)
+          ||/(?:reasoning|deepseek[-_ ]?r1|qwq|r1[-_ ]?distill)/i.test(modelId);
+        // Gemma 3's 4B/12B/27B vision variants and all Gemma 4 sizes
+        // support video understanding by sampling timestamped frames.
+        const gemmaVideo=/(?:gemma[-_/]?4|gemma[-_/]?3[-_/]?(?:4b|12b|27b))/i.test(modelHint);
+        const supportsVideo=['video-text-to-text','video-to-text'].includes(task)||/(?:Qwen2_5Omni|Qwen3Omni|VideoLlava)/i.test(modelHint)||gemmaVideo;
+        const sizeBytes=Number(model?.usedStorage??model?.used_storage??0);
+        return {
+          sizeBytes:Number.isFinite(sizeBytes)&&sizeBytes>0?sizeBytes:null,
+          contextLength,
+          capabilities:{vision:!!supportsVision,audio:!!supportsAudio,toolCalling:!!supportsTools,reasoning:!!supportsReasoning,video:!!supportsVideo}
+        };
+      }
+      function formatLocalModelSize(bytes){
+        const gb=Number(bytes)/1000000000;
+        return Number.isFinite(gb)&&gb>0?(gb>=10?gb.toFixed(1):gb.toFixed(2))+' GB':'';
+      }
+      function formatLocalContextLength(tokens){
+        const value=Number(tokens);
+        if(!Number.isFinite(value)||value<=0)return '';
+        if(value>=1000000)return (value/1000000).toFixed(value%1000000===0?0:1)+'M';
+        if(value>=1000)return Math.round(value/1000)+'K';
+        return value.toLocaleString();
+      }
+      async function inspectHuggingFaceModel(modelId,fallbackInfo=null){
+        let info=fallbackInfo&&typeof fallbackInfo==='object'?fallbackInfo:{};
+        if(network?.request){
+          try{
+            const encoded=String(modelId||'').split('/').map(encodeURIComponent).join('/');
+            const response=await network.request(new Request('https://huggingface.co/api/models/'+encoded+'?expand[]=config&expand[]=usedStorage&expand[]=tags&expand[]=pipeline_tag'),'ai');
+            if(response?.ok)info={...info,...await response.json()};
+          }catch(error){console.warn('Could not inspect Hugging Face model metadata:',error);}
+        }
+        const config=info.config&&typeof info.config==='object'?info.config:{};
+        const architectures=Array.isArray(config.architectures)?config.architectures.map(String):[];
+        const architecture=architectures.join(' ');
+        const modelType=String(config.model_type||'');
+        const task=String(info.pipeline_tag||'');
+        const audioArchitecture=/(?:Gemma4|Qwen2Audio|Qwen2_5Omni|Qwen3Omni|Phi4Multimodal|AudioFlamingo)/i.test(architecture+' '+modelType+' '+modelId);
+        const audioConfig=!!(config.audio_config||config.audio_encoder||config.audio_token_id!=null||config.audio_bos_token_id!=null);
+        const supportsAudio=['any-to-any','audio-text-to-text'].includes(task)||audioArchitecture||(audioConfig&&/(?:ConditionalGeneration|ForCausalLM|Omni)/i.test(architecture));
+        const supportsVision=['any-to-any','image-text-to-text'].includes(task)||!!(config.vision_config||config.vision_tower||config.image_token_index!=null)||/(?:gemma[-_/]?4|gemma[-_/]?3[-_/]?(?:4b|12b|27b))/i.test(modelId)&&(/onnx/i.test(modelId)||task==='image-text-to-text');
+        const gemmaAnyToAny=/gemma[-_/]?4/i.test(modelId)&&task==='any-to-any';
+        const supportsVideo=['video-text-to-text','video-to-text'].includes(task)||/(?:gemma[-_/]?4|gemma[-_/]?3[-_/]?(?:4b|12b|27b)|Qwen2_5Omni|Qwen3Omni|VideoLlava)/i.test(architecture+' '+modelType+' '+modelId);
+        const pipelineTask=gemmaAnyToAny?'any-to-any':(task==='audio-text-to-text'?'audio-text-to-text':(task==='image-text-to-text'||supportsVision||supportsAudio||supportsVideo?'image-text-to-text':''));
+        return {pipelineTask,capabilities:{vision:!!(supportsVision||supportsVideo),audio:!!supportsAudio,video:!!supportsVideo,documents:true,source:'huggingface',pipelineTag:task,architectures,modelType,revision:String(info.sha||'')}};
+      }
       function openLocalModelEditor(model=null){
         form.hidden=true;
         editingId='';
@@ -617,6 +765,10 @@ const makeEditorTools = (() => {
         localEditor.querySelector('[data-local-editor-title]').textContent=editingLocalId?'Edit local model':'Add local model';
         localNameInput.value=model?.name||'';
         localModelInput.value=model?.model||'';
+        localPipelineTask=String(model?.pipelineTask||'');
+        localDocumentsInput.checked=model?.supportsDocuments!==false;
+        localVisionInput.checked=model?.supportsVision!==undefined?!!model.supportsVision:(/gemma[-_/]?4/i.test(String(model?.model||''))&&/onnx/i.test(String(model?.model||'')))||['any-to-any','image-text-to-text'].includes(localPipelineTask);
+        localModelInput.oninput=()=>{if(/gemma[-_/]?4/i.test(localModelInput.value)&&/onnx/i.test(localModelInput.value)){localVisionInput.checked=true;localPipelineTask='any-to-any';}else if(localPipelineTask==='any-to-any')localPipelineTask='';};
         localEditorStatus.textContent='';
         localEditor.hidden=false;
         localEditor.querySelector('[data-save-local]').textContent=editingLocalId?'Save changes':'Save model';
@@ -626,18 +778,19 @@ const makeEditorTools = (() => {
       function openLocalModelBrowser(onSelect){
         const browser=document.createElement('div');
         browser.className='editor-modal ai-hf-browser-modal';
-        browser.innerHTML='<div class="editor-modal-content ai-hf-browser-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>Browse local models</h2><p>Choose a Hugging Face model supported by Transformers.js, or use a model ID directly.</p><div class="ai-hf-browser-toolbar"><input data-local-search placeholder="Search model IDs…"><button data-local-search-button>Search</button><button data-local-search-refresh>Refresh</button></div><div class="ai-local-add-row"><input data-local-model-id placeholder="Hugging Face model ID"><button data-local-use-id>Use ID</button></div><div class="ai-hf-browser-status" data-local-status>Loading models…</div><div class="ai-hf-browser-list" data-local-list></div></div>';
+        browser.innerHTML='<div class="editor-modal-content ai-hf-browser-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>Browse local models</h2><p>Search models tagged for Transformers.js. A library tag does not guarantee every task or architecture works in this editor runtime. Results show approximate repository size, configured context length, and detected capabilities.</p><div class="ai-hf-browser-toolbar"><input data-local-search placeholder="Search model IDs…"><button data-local-filter-toggle type="button" aria-expanded="false">Filters</button><button data-local-search-button>Search</button><button data-local-search-refresh>Refresh</button></div><div class="ai-local-model-filters" data-local-filters hidden><div class="ai-local-filter-group"><span>Capabilities</span><label><input type="checkbox" data-capability="vision"> Images</label><label><input type="checkbox" data-capability="audio"> Audio</label><label><input type="checkbox" data-capability="toolCalling"> Native tool calling</label><label><input type="checkbox" data-capability="reasoning"> Reasoning</label><label><input type="checkbox" data-capability="video"> Video</label></div><div class="ai-local-filter-group ai-local-range-filters"><label>Min size (GB)<input type="number" min="0" step="0.1" data-size-min placeholder="Any"></label><label>Max size (GB)<input type="number" min="0" step="0.1" data-size-max placeholder="Any"></label><label>Min context<input type="number" min="0" step="1024" data-context-min placeholder="Any"></label><label>Max context<input type="number" min="0" step="1024" data-context-max placeholder="Any"></label></div><p>Size is total Hugging Face repository storage, not a RAM estimate. Context is read from model configuration when available. Image/audio/video support is inferred from task, architecture, and config; a video badge means sampled-frame understanding, not that this editor currently accepts video attachments. Tool calling requires an explicit metadata signal. Missing badges mean not detected, not necessarily unsupported.</p></div><div class="ai-local-add-row"><input data-local-model-id placeholder="Hugging Face model ID"><button data-local-use-id>Use ID</button></div><div class="ai-hf-browser-status" data-local-status>Loading models…</div><div class="ai-hf-browser-list" data-local-list></div></div>';
         document.body.appendChild(browser);requestAnimationFrame(()=>browser.classList.add('show'));
-        const search=browser.querySelector('[data-local-search]'),status=browser.querySelector('[data-local-status]'),list=browser.querySelector('[data-local-list]'),idInput=browser.querySelector('[data-local-model-id]');
+        const search=browser.querySelector('[data-local-search]'),status=browser.querySelector('[data-local-status]'),list=browser.querySelector('[data-local-list]'),idInput=browser.querySelector('[data-local-model-id]'),filters=browser.querySelector('[data-local-filters]');
         let all=[];
         browser.querySelector('.editor-modal-close').onclick=()=>browser.remove();browser.onclick=e=>{if(e.target===browser)browser.remove();};
-        const choose=id=>{const modelId=String(id||'').trim();if(!modelId){status.textContent='Enter a Hugging Face model ID first.';return;}onSelect?.(modelId);browser.remove();};
+        const choose=(id,modelInfo=null)=>{const modelId=String(id||'').trim();if(!modelId){status.textContent='Enter a Hugging Face model ID first.';return;}onSelect?.(modelId,modelInfo);browser.remove();};
         async function load(){
           status.textContent='Searching Hugging Face…';list.innerHTML='';
           try{
             if(!network?.request)throw new Error('Network API is unavailable.');
             const q=search.value.trim();
-            const params=new URLSearchParams({pipeline_tag:'text-generation',library:'transformers.js',sort:'downloads',direction:'-1',limit:'50'});
+            const params=new URLSearchParams({library:'transformers.js',sort:'downloads',direction:'-1',limit:'50'});
+            params.append('expand[]','config');params.append('expand[]','usedStorage');params.append('expand[]','tags');params.append('expand[]','pipeline_tag');
             if(q)params.set('search',q);
             const response=await network.request(new Request('https://huggingface.co/api/models?'+params.toString()),'ai');
             if(!response)throw new Error('Hugging Face returned no response.');
@@ -647,26 +800,69 @@ const makeEditorTools = (() => {
         }
         function renderList(){
           const q=search.value.trim().toLowerCase();
-          const rows=all.filter(m=>{const id=String(m?.id||'');return id&&(!q||id.toLowerCase().includes(q));}).slice(0,200);
-          status.textContent=rows.length+' compatible model'+(rows.length===1?'':'s')+' found';
-          list.innerHTML=rows.map(m=>'<div class="ai-hf-model-row"><div class="ai-model-main"><strong>'+escapeHtml(m.id)+'</strong><span>'+Number(m.downloads||0).toLocaleString()+' downloads · '+Number(m.likes||0).toLocaleString()+' likes</span></div><button data-local-select="'+escapeHtml(m.id)+'">Select</button></div>').join('');
-          list.querySelectorAll('[data-local-select]').forEach(b=>b.onclick=()=>choose(b.dataset.localSelect));
+          const checkedCapabilities=Array.from(filters.querySelectorAll('[data-capability]:checked')).map(input=>input.dataset.capability);
+          const minSize=Number(filters.querySelector('[data-size-min]').value),maxSize=Number(filters.querySelector('[data-size-max]').value);
+          const minContext=Number(filters.querySelector('[data-context-min]').value),maxContext=Number(filters.querySelector('[data-context-max]').value);
+          const hasMinSize=filters.querySelector('[data-size-min]').value.trim()!=='',hasMaxSize=filters.querySelector('[data-size-max]').value.trim()!=='';
+          const hasMinContext=filters.querySelector('[data-context-min]').value.trim()!=='',hasMaxContext=filters.querySelector('[data-context-max]').value.trim()!=='';
+          const rows=all.filter(m=>{
+            const id=String(m?.id||''),task=String(m?.pipeline_tag||'');
+            if(!id||!['text-generation','any-to-any','image-text-to-text','audio-text-to-text'].includes(task))return false;
+            const metadata=getLocalModelSearchMetadata(m);
+            const capabilityText=Object.entries(metadata.capabilities).filter(([,enabled])=>enabled).map(([key])=>({vision:'images vision',audio:'audio',toolCalling:'tool calling native tools function calling',reasoning:'reasoning',video:'video'}[key]||key)).join(' ');
+            const tagText=(Array.isArray(m.tags)?m.tags:[]).join(' ');
+            const searchable=(id+' '+task+' '+tagText+' '+capabilityText).toLowerCase();
+            if(q&&!searchable.includes(q))return false;
+            if(checkedCapabilities.some(key=>!metadata.capabilities[key]))return false;
+            if(hasMinSize&&(!metadata.sizeBytes||metadata.sizeBytes/1000000000<minSize))return false;
+            if(hasMaxSize&&(!metadata.sizeBytes||metadata.sizeBytes/1000000000>maxSize))return false;
+            if(hasMinContext&&(!metadata.contextLength||metadata.contextLength<minContext))return false;
+            if(hasMaxContext&&(!metadata.contextLength||metadata.contextLength>maxContext))return false;
+            return true;
+          }).slice(0,200);
+          status.textContent=rows.length+' matching model'+(rows.length===1?'':'s')+' from '+all.length+' Hugging Face result'+(all.length===1?'':'s');
+          list.innerHTML=rows.map(m=>{
+            const metadata=getLocalModelSearchMetadata(m),caps=metadata.capabilities;
+            const size=metadata.sizeBytes?('≈ '+formatLocalModelSize(metadata.sizeBytes)):'Size unavailable';
+            const context=metadata.contextLength?(formatLocalContextLength(metadata.contextLength)+' context'):'Context unknown';
+            const task=String(m.pipeline_tag||'');
+            const details=[size,context,task,Number(m.downloads||0).toLocaleString()+' downloads'].filter(Boolean).join(' · ');
+            const badges=[caps.vision?'Images':'',caps.audio?'Audio':'',caps.toolCalling?'Tools':'',caps.reasoning?'Reasoning':'',caps.video?'Video':''].filter(Boolean);
+            const capabilityMarkup=badges.length?'<div class="ai-local-model-capabilities">'+badges.map(label=>'<span>'+label+'</span>').join('')+'</div>':'';
+            const sizeTitle='Approximate total storage used by this Hugging Face repository; may include multiple formats or checkpoint files. It is not the model\'s runtime memory requirement.';
+            return '<div class="ai-hf-model-row"><div class="ai-model-main"><strong title="'+escapeHtml(m.id)+'">'+escapeHtml(m.id)+'</strong><span class="ai-local-model-metadata" title="'+escapeHtml(sizeTitle)+'">'+escapeHtml(details)+'</span>'+capabilityMarkup+'</div><button data-local-select="'+escapeHtml(m.id)+'">Select</button></div>';
+          }).join('');
+          list.querySelectorAll('[data-local-select]').forEach(b=>b.onclick=()=>choose(b.dataset.localSelect,all.find(model=>model.id===b.dataset.localSelect)||null));
         }
-        browser.querySelector('[data-local-search-button]').onclick=load;browser.querySelector('[data-local-search-refresh]').onclick=load;search.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();load();}};
+        browser.querySelector('[data-local-filter-toggle]').onclick=()=>{
+          filters.hidden=!filters.hidden;
+          browser.querySelector('[data-local-filter-toggle]').setAttribute('aria-expanded',String(!filters.hidden));
+        };
+        filters.querySelectorAll('input').forEach(input=>input.addEventListener('input',renderList));
+        browser.querySelector('[data-local-search-button]').onclick=load;browser.querySelector('[data-local-search-refresh]').onclick=load;search.oninput=renderList;search.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();load();}};
         browser.querySelector('[data-local-use-id]').onclick=()=>choose(idInput.value);
         idInput.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();choose(idInput.value);}};
         load();
       }
       modal.querySelector('[data-add-local]').onclick=()=>openLocalModelEditor();
       modal.querySelector('[data-cancel-local]').onclick=()=>{editingLocalId='';localEditor.hidden=true;};
-      modal.querySelector('[data-browse-local-models]').onclick=()=>openLocalModelBrowser(id=>{
+      modal.querySelector('[data-browse-local-models]').onclick=()=>openLocalModelBrowser((id,info)=>{
         localModelInput.value=id;
+        const task=String(info?.pipeline_tag||'');
+        localPipelineTask=['any-to-any','image-text-to-text'].includes(task)?task:'';
+        if(localPipelineTask||(/gemma[-_/]?4/i.test(id)&&/onnx/i.test(id))){localVisionInput.checked=true;if(!localPipelineTask)localPipelineTask='any-to-any';}
         if(!localNameInput.value.trim())localNameInput.value=id.split('/').pop()+' · Local';
         localEditorStatus.textContent='';
       });
       modal.querySelector('[data-save-local]').onclick=async()=>{
         const name=localNameInput.value.trim(),modelId=localModelInput.value.trim();
         if(!name||!modelId){localEditorStatus.textContent='Enter both a name and a model ID.';return;}
+        localEditorStatus.textContent='Checking Hugging Face model capabilities…';
+         const inspected=await inspectHuggingFaceModel(modelId);
+         const capabilities=inspected.capabilities;
+         const supportsVision=localVisionInput.checked||capabilities.vision||capabilities.video;
+         const supportsVideo=capabilities.video===true;
+         const pipelineTask=inspected.pipelineTask||localPipelineTask||(supportsVision||capabilities.audio||supportsVideo?(/gemma[-_/]?4/i.test(modelId)&&/onnx/i.test(modelId)?'any-to-any':'image-text-to-text'):'');
         const isLocal=m=>m.local||m.protocol==='local-transformers';
         const existing=registry.settings.models.find(m=>m.id===editingLocalId);
         if(!editingLocalId&&registry.settings.models.some(m=>isLocal(m)&&m.model===modelId)){
@@ -679,8 +875,8 @@ const makeEditorTools = (() => {
           if(registry.settings.models.some(m=>m.id===id))id+='-'+Math.random().toString(36).slice(2,7);
         }
         try{
-          if(existing&&existing.model!==modelId&&localManager?.isLoaded?.(id))await localManager.unload();
-          registry.add({...existing,id,name,model:modelId,remoteModel:modelId,protocol:'local-transformers',kind:'local-transformers',endpoint:'',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true,builtInLocal:!!existing?.builtInLocal});
+          if(existing&&(existing.model!==modelId||existing.supportsVision!==supportsVision||existing.pipelineTask!==pipelineTask||existing.supportsAudio!==capabilities.audio||existing.supportsVideo!==supportsVideo)&&localManager?.isLoaded?.(id))await localManager.unload();
+          registry.add({...existing,id,name,model:modelId,remoteModel:modelId,protocol:'local-transformers',kind:'local-transformers',endpoint:'',provider:'local',local:true,requiresKey:false,supportsTools:false,supportsAgentTools:true,supportsReasoning:false,supportsStreaming:true,supportsDocuments:localDocumentsInput.checked,supportsVision,supportsAudio:capabilities.audio,supportsVideo,capabilities:{...capabilities,vision:supportsVision,audio:capabilities.audio,video:supportsVideo,pipelineTask},pipelineTask,builtInLocal:!!existing?.builtInLocal});
           registry.save();
           editingLocalId='';localEditor.hidden=true;render();onChange?.();
         }catch(e){localEditorStatus.textContent=e?.message||String(e);}
@@ -690,7 +886,7 @@ const makeEditorTools = (() => {
         if(model)openLocalModelEditor(model);
       });
       const form=modal.querySelector('.ai-add-model'),add=modal.querySelector('[data-add]'),providerInput=form.querySelector('[data-provider]'),formatInput=form.querySelector('[data-format]'),endpointInput=form.querySelector('[data-endpoint]'),nameInput=form.querySelector('[data-name]'),modelInput=form.querySelector('[data-model]'),keyInput=form.querySelector('[data-key]'),hint=form.querySelector('[data-protocol-hint]');
-      const hfGlobalKey=modal.querySelector('[data-hf-global-key]'),hfGlobalRemember=modal.querySelector('[data-hf-global-remember]');
+      const hfGlobalKey=modal.querySelector('[data-hf-global-key]'),hfGlobalRemember=modal.querySelector('[data-hf-global-remember]'),visionInput=form.querySelector('[data-vision]'),documentsInput=form.querySelector('[data-documents]');
       hfGlobalKey.value=registry.getHuggingFaceApiKey?.()||''; hfGlobalRemember.checked=!!registry.settings.huggingFaceRememberKey;
       function updateProviderFields(force=true){
         const id=providerInput.value, preset=registry.provider(id)||registry.provider('custom');
@@ -767,7 +963,7 @@ const makeEditorTools = (() => {
       form.querySelector('[data-browse-models]').onclick=()=>openModelBrowser(providerInput.value);
       providerInput.onchange=()=>updateProviderFields(true);
       endpointInput.oninput=()=>{if(providerInput.value==='custom')hint.textContent='Custom provider. The endpoint and API format will be used as entered.';};
-      function fill(model){editingLocalId='';localEditor.hidden=true;editingId=model?.id||'';form.hidden=false;const providerId=registry.providerForModel(model);providerInput.value=providerId;formatInput.value=model?.protocol||registry.provider(providerId)?.protocol||'openai-chat';formatInput.disabled=providerId!=='custom';nameInput.value=model?.name||'';endpointInput.value=model?.endpoint||'';modelInput.value=model?.model||'';keyInput.value=model?.apiKey||'';form.querySelector('[data-remember]').checked=!!model?.rememberKey;form.querySelector('[data-tools]').checked=model?.supportsTools!==false;form.querySelector('[data-thinking]').checked=model?.supportsReasoning!==false;form.querySelector('[data-save-model]').textContent=editingId?'Save changes':'Save model';updateProviderFields(false);}
+      function fill(model){editingLocalId='';localEditor.hidden=true;editingId=model?.id||'';form.hidden=false;const providerId=registry.providerForModel(model);providerInput.value=providerId;formatInput.value=model?.protocol||registry.provider(providerId)?.protocol||'openai-chat';formatInput.disabled=providerId!=='custom';nameInput.value=model?.name||'';endpointInput.value=model?.endpoint||'';modelInput.value=model?.model||'';keyInput.value=model?.apiKey||'';form.querySelector('[data-remember]').checked=!!model?.rememberKey;form.querySelector('[data-tools]').checked=model?.supportsTools!==false;form.querySelector('[data-thinking]').checked=model?.supportsReasoning!==false;documentsInput.checked=model?.supportsDocuments!==false;visionInput.checked=!!model?.supportsVision;form.querySelector('[data-save-model]').textContent=editingId?'Save changes':'Save model';updateProviderFields(false);}
       add.onclick=()=>{
         const wasOpen=!form.hidden&&!editingId;
         editingLocalId='';
@@ -777,13 +973,13 @@ const makeEditorTools = (() => {
         providerInput.value='custom';formatInput.value='openai-chat';formatInput.disabled=false;
         nameInput.value='';endpointInput.value='';modelInput.value='';keyInput.value='';
         form.querySelector('[data-remember]').checked=false;
-        form.querySelector('[data-tools]').checked=true;form.querySelector('[data-thinking]').checked=true;
+        form.querySelector('[data-tools]').checked=true;form.querySelector('[data-thinking]').checked=true;documentsInput.checked=true;visionInput.checked=false;
         hint.textContent='Select a provider to fill in its API format and endpoint.';
         form.hidden=false;
       };
       modal.querySelectorAll('[data-edit]').forEach(x=>x.onclick=()=>{const model=registry.settings.models.find(m=>m.id===x.dataset.edit);if(model)fill(model);});
       modal.querySelector('[data-cancel-model]').onclick=()=>{editingId='';form.hidden=true;};
-      modal.querySelector('[data-save-model]').onclick=()=>{const provider=providerInput.value.trim()||'custom',preset=registry.provider(provider)||registry.provider('custom'),name=nameInput.value.trim(),endpoint=endpointInput.value.trim(),modelId=modelInput.value.trim(),apiKey=keyInput.value,remember=form.querySelector('[data-remember]').checked,tools=form.querySelector('[data-tools]').checked,thinking=form.querySelector('[data-thinking]').checked,protocol=provider==='custom'?formatInput.value:preset.protocol;if(!name||!endpoint||!modelId){alert('Name, endpoint, and model ID are required.');return;}registry.setHuggingFaceApiKey(hfGlobalKey.value,hfGlobalRemember.checked);registry.save();const id=editingId||'model-'+Math.random().toString(36).slice(2);try{const clean=registry.add({id,provider,name,endpoint,model:modelId,apiKey,rememberKey:remember,supportsTools:tools,supportsReasoning:thinking,requiresKey:!!apiKey,protocol});registry.setActive(clean.id);editingId='';render();onChange?.();}catch(e){alert(e?.message||String(e));}};
+      modal.querySelector('[data-save-model]').onclick=async()=>{const provider=providerInput.value.trim()||'custom',preset=registry.provider(provider)||registry.provider('custom'),name=nameInput.value.trim(),endpoint=endpointInput.value.trim(),modelId=modelInput.value.trim(),apiKey=keyInput.value,remember=form.querySelector('[data-remember]').checked,tools=form.querySelector('[data-tools]').checked,thinking=form.querySelector('[data-thinking]').checked,documents=documentsInput.checked,vision=visionInput.checked,protocol=provider==='custom'?formatInput.value:preset.protocol;if(!name||!endpoint||!modelId){alert('Name, endpoint, and model ID are required.');return;}const inspected=modelId.includes('/')?await inspectHuggingFaceModel(modelId):null;const capabilities=inspected?.capabilities||{};registry.setHuggingFaceApiKey(hfGlobalKey.value,hfGlobalRemember.checked);registry.save();const id=editingId||'model-'+Math.random().toString(36).slice(2);try{const clean=registry.add({id,provider,name,endpoint,model:modelId,apiKey,rememberKey:remember,supportsTools:tools,supportsReasoning:thinking,supportsDocuments:documents,supportsVision:vision||capabilities.vision===true,capabilities,requiresKey:!!apiKey,protocol});registry.setActive(clean.id);editingId='';render();onChange?.();}catch(e){alert(e?.message||String(e));}};
       hfGlobalKey.onchange=()=>{registry.setHuggingFaceApiKey(hfGlobalKey.value,hfGlobalRemember.checked);registry.save();onChange?.();}; hfGlobalRemember.onchange=()=>{registry.setHuggingFaceApiKey(hfGlobalKey.value,hfGlobalRemember.checked);registry.save();onChange?.();};
       modal.querySelectorAll('[data-permission]').forEach(x=>x.onchange=()=>{permissions.set(x.dataset.permission,x.value);onChange?.();});
       modal.querySelector('[data-reset-permissions]').onclick=()=>{permissions.reset();render();onChange?.();};
@@ -806,6 +1002,61 @@ const makeEditorTools = (() => {
     let chatMessages=[];
     let loadedProjectId=null;
     let busy=false, controller=null, editingIndex=-1;
+    let attachments=[];
+    const messageAttachmentFiles=new WeakMap();
+    const audioPreviewUrls=new WeakMap();
+    const imagePreviewUrls=new WeakMap();
+    const videoPreviewUrls=new WeakMap();
+    function audioPreviewUrl(file){
+      if(!file)return '';
+      let url=audioPreviewUrls.get(file);
+      if(!url){url=URL.createObjectURL(file);audioPreviewUrls.set(file,url);}
+      return url;
+    }
+    function imagePreviewUrl(file){
+      if(!file)return '';
+      let url=imagePreviewUrls.get(file);
+      if(!url){url=URL.createObjectURL(file);imagePreviewUrls.set(file,url);}
+      return url;
+    }
+    function videoPreviewUrl(file){
+      if(!file)return '';
+      let url=videoPreviewUrls.get(file);
+      if(!url){url=URL.createObjectURL(file);videoPreviewUrls.set(file,url);}
+      return url;
+    }
+    function mediaAttachmentPreviewMarkup(file,item,options={}){
+      const kind=attachmentKind(file||item);
+      if(!file||!['audio','image','video'].includes(kind))return '';
+      const name=String(item?.name||(kind==='audio'?'Audio':kind==='video'?'Video':'Image'));
+      const label=(item?.active?'● ':'')+name;
+      const detail=String(options.detail||item?.path||name);
+      const remove=Number.isInteger(options.removeIndex)
+        ? '<button type="button" class="ai-media-attachment-remove" data-attachment-remove="'+options.removeIndex+'" aria-label="Remove '+escapeHtml(name)+'" title="Remove attachment">×</button>'
+        : '';
+      const media=kind==='audio'
+        ? '<audio class="ai-media-attachment-player" controls preload="none" src="'+escapeHtml(audioPreviewUrl(file))+'" aria-label="Play '+escapeHtml(name)+'"></audio>'
+        :kind==='video'
+          ? '<video class="ai-media-attachment-video" controls preload="metadata" playsinline src="'+escapeHtml(videoPreviewUrl(file))+'" aria-label="Preview '+escapeHtml(name)+'"></video>'
+          : '<img class="ai-media-attachment-image" src="'+escapeHtml(imagePreviewUrl(file))+'" alt="'+escapeHtml(name)+'" loading="lazy" decoding="async">';
+      const classes='ai-media-attachment-preview ai-media-attachment-preview--'+kind+(options.supported===false?' is-unsupported':'')+(item?.unavailable?' is-unavailable':'');
+      return '<div class="'+classes+'" title="'+escapeHtml(detail)+'"><div class="ai-media-attachment-heading"><span class="ai-attachment-name">'+escapeHtml(label)+'</span>'+remove+'</div>'+media+'</div>';
+    }
+    function getMessageAttachmentFile(message,index,item,retained){
+      let file=retained?.[index]?.file||null;
+      if(file)return file;
+      const path=String(item?.path||'');
+      if(!path||sensitiveAttachmentPath(path))return null;
+      try{
+        const data=state.fs?.readFileSync?.(path);
+        if(data==null)return null;
+        const mimeType=String(item?.mimeType||window.EditorInferMime?.(path)||attachmentMimeType({name:item?.name,type:item?.mimeType},item?.kind)||'application/octet-stream');
+        file=new File([data],String(item?.name||path.split('/').pop()||'attachment'),{type:mimeType,lastModified:Date.now()});
+        Object.defineProperties(file,{customRelativePath:{value:path},__wkWorkspacePath:{value:path}});
+        return file;
+      }catch(_){return null;}
+    }
+    let autoAttachmentPath='', dismissedAutoAttachmentPath='';
     const toolset=makeEditorTools({state,openFile:onOpen,onRefresh:()=>{state.fileManager?.refresh?.();updateStatus?.();},runConfigured,ensureNodeRuntime:()=>state.ensureNodeRuntime?.()});
     const client=new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork);
     // All editor conversations share one agent; each conversation opts in independently.
@@ -813,6 +1064,196 @@ const makeEditorTools = (() => {
     const agent=chatAI.createAgent({id:'editor',name:'Editor Assistant',client,permissions,requestPermission:permissionPrompt,toolInstructions:AGENT_TOOL_INSTRUCTIONS,finalInstructions:AGENT_FINAL_INSTRUCTIONS,beforeTool:async payload=>(await editorExtensionHooks('ai.beforeTool',payload))||payload,afterTool:async payload=>(await editorExtensionHooks('ai.afterTool',payload))||payload});
     agent.registerTools(toolset.list());
     let currentConversation=null;
+    const TEXT_ATTACHMENT_EXTENSIONS=['txt','md','markdown','js','mjs','cjs','ts','tsx','jsx','json','jsonc','json5','html','htm','css','scss','less','xml','svg','yaml','yml','py','java','c','h','cpp','hpp','cc','rs','go','wgsl','glsl','vert','frag','shader','toml','ini','sh','bash','bat','ps1','vue','svelte','php','rb','swift','kt','lua','sql','csv','log','diff','patch',''];
+    const IMAGE_ATTACHMENT_EXTENSIONS=['png','jpg','jpeg','webp','gif'];
+    const AUDIO_ATTACHMENT_EXTENSIONS=['wav','mp3','m4a','aac','ogg','opus','flac'];
+    const VIDEO_ATTACHMENT_EXTENSIONS=['mp4','m4v','mov','webm'];
+    const AUDIO_ATTACHMENT_MAX_BYTES=12*1024*1024;
+    const VIDEO_ATTACHMENT_MAX_BYTES=32*1024*1024;
+    function attachmentExtension(file){const name=String(file?.name||'').toLowerCase(),dot=name.lastIndexOf('.');return dot<0?'':name.slice(dot+1);}
+    function attachmentKind(file){
+      const ext=attachmentExtension(file),mime=String(file?.type||'').toLowerCase();
+      if(ext==='svg')return 'text';
+      if(VIDEO_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('video/'))return 'video';
+      if(AUDIO_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('audio/'))return 'audio';
+      if(IMAGE_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('image/')&&ext!=='svg')return 'image';
+      if(TEXT_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('text/'))return 'text';
+      return 'file';
+    }
+    function sensitiveAttachmentPath(path){return /(^|\/)(?:\.editor(?:\/.*)?|\.git(?:\/.*)?|\.env(?:\..*)?|.*(?:secret|credential|password|token|private[-_]?key).*)$/i.test(String(path||''));}
+    function isLocalAudioModel(model){return !!(model?.local||model?.protocol==='local-transformers')&&model?.supportsAudio===true;}
+    function supportedAudioAttachmentExtensions(model=registry.active()){
+      if(isLocalAudioModel(model))return AUDIO_ATTACHMENT_EXTENSIONS;
+      if(['openai-chat','openai-responses'].includes(model?.protocol))return ['wav','mp3'];
+      if(model?.protocol==='google-gemini')return AUDIO_ATTACHMENT_EXTENSIONS;
+      return [];
+    }
+    function attachmentCapabilities(model=registry.active()){
+      const capabilities=chatAI.getCapabilities(model?.id)||{};
+      const local=!!(model?.local||model?.protocol==='local-transformers');
+      const imageProtocol=local||['openai-chat','openai-responses','anthropic-messages','google-gemini'].includes(model?.protocol);
+      const audioProtocol=['openai-chat','openai-responses','google-gemini'].includes(model?.protocol);
+      return {
+        documents:model?.supportsDocuments!==false&&capabilities.documents!==false,
+        vision:imageProtocol&&model?.supportsVision===true&&capabilities.vision===true,
+        audio:(local?model?.supportsAudio===true:audioProtocol&&model?.supportsAudio===true)&&capabilities.audio===true,
+        video:local&&model?.supportsVideo===true&&capabilities.video===true
+      };
+    }
+    function attachmentSupported(item,model=registry.active()){
+      const file=item?.file||item,kind=attachmentKind(file),caps=attachmentCapabilities(model);
+      if(kind==='text')return caps.documents;
+      if(kind==='image')return caps.vision;
+      if(kind==='audio')return caps.audio&&supportedAudioAttachmentExtensions(model).includes(attachmentExtension(file));
+      if(kind==='video')return caps.video&&VIDEO_ATTACHMENT_EXTENSIONS.includes(attachmentExtension(file));
+      return false;
+    }
+    function supportedAttachmentExtensions(model=registry.active()){
+      const caps=attachmentCapabilities(model);
+      return [
+        ...(caps.documents?TEXT_ATTACHMENT_EXTENSIONS:[]),
+        ...(caps.vision?IMAGE_ATTACHMENT_EXTENSIONS:[]),
+        ...(caps.audio?supportedAudioAttachmentExtensions(model):[]),
+        ...(caps.video?VIDEO_ATTACHMENT_EXTENSIONS:[])
+      ].filter(Boolean);
+    }
+    function makeActiveAttachment(){
+      const tab=activeEditor(state),path=String(tab?.path||''),name=path.split('/').pop()||'';
+      if(!tab||!path||!attachmentCapabilities().documents||!TEXT_ATTACHMENT_EXTENSIONS.includes(attachmentExtension({name}))||sensitiveAttachmentPath(path))return null;
+      let content='';
+      try{content=String(tab.editor?.getValue?.()??state.fs?.readFileSync?.(path,'utf8')??'');}catch(_){return null;}
+      const file=new File([content],name,{type:window.EditorInferMime?.(path)||'text/plain',lastModified:Date.now()});
+      Object.defineProperties(file,{customRelativePath:{value:path},__wkWorkspacePath:{value:path}});
+      return {key:'active:'+path,name,path,file,active:true};
+    }
+    function syncActiveAttachment(){
+      if(editingIndex>=0)return;
+      const active=makeActiveAttachment(),path=active?.path||'';
+      if(path!==autoAttachmentPath){dismissedAutoAttachmentPath='';autoAttachmentPath=path;}
+      attachments=attachments.filter(item=>!item.active);
+      if(active&&path!==dismissedAutoAttachmentPath)attachments.unshift(active);
+    }
+    function renderAttachmentRow(tree){
+      const strip=tree?.querySelector?.('[data-attachments]');if(!strip)return;
+      const caps=attachmentCapabilities(),canAdd=caps.documents||caps.vision||caps.audio||caps.video,visible=canAdd||attachments.length>0;
+      strip.hidden=!visible;if(!visible)return;
+      const showAttachmentPreviews=aiRoot.getAIPreferences?.().showAttachmentPreviews!==false;
+      const chips=attachments.map((item,index)=>{
+        const supported=attachmentSupported(item);
+        const detail=item.unavailable?(item.path?'Workspace file unavailable; reattach it to resend':'Original device file is not retained in chat history; reattach it to resend'):item.active?'Currently open file':item.path||item.name;
+        const chipClass='ai-attachment-chip'+(supported?'':' is-unsupported')+(item.unavailable?' is-unavailable':'');
+        const kind=attachmentKind(item.file||item);
+        const preview=showAttachmentPreviews&&item.file&&(kind==='audio'||kind==='image'||kind==='video')
+          ?mediaAttachmentPreviewMarkup(item.file,item,{removeIndex:index,supported,detail})
+          :'';
+        if(preview)return preview;
+        return '<span class="'+chipClass+'" title="'+escapeHtml(detail+(supported?'':' · Unsupported by this model'))+'"><span class="ai-attachment-name">'+(item.active?'● ':'')+escapeHtml(item.name)+'</span><button type="button" data-attachment-remove="'+index+'" aria-label="Remove '+escapeHtml(item.name)+'" title="Remove attachment">×</button></span>';
+      }).join('');
+      strip.innerHTML='<button type="button" class="ai-attachment-add" data-add-attachment title="Add attachment" aria-label="Add attachment" '+(!canAdd||busy?'disabled':'')+' '+(canAdd?'':'hidden')+'>＋</button><div class="ai-attachment-list ai-media-attachment-list">'+chips+'</div>';
+      strip.querySelector('[data-add-attachment]').onclick=()=>addAttachments(tree);
+      strip.querySelectorAll('[data-attachment-remove]').forEach(button=>button.onclick=()=>{
+        const index=Number(button.dataset.attachmentRemove),item=attachments[index];
+        if(item?.active)dismissedAutoAttachmentPath=item.path;
+        attachments.splice(index,1);renderAttachmentRow(tree);updateComposerSendState(tree);
+      });
+    }
+    async function addAttachments(tree){
+      const extensions=supportedAttachmentExtensions();if(!extensions.length)return;
+      const picker=window.EditorApp?.getWorkspacePicker?.(tree);
+      if(!picker?.open){alert('The Editor workspace file picker is unavailable.');return;}
+      const active=activeEditor(state);
+      try{
+        const selected=await picker.open({title:'Add AI attachments',extensions,multiple:true,allowDevice:true,maxFileBytes:attachmentCapabilities().video?VIDEO_ATTACHMENT_MAX_BYTES:12*1024*1024,startPath:active?.path?.includes('/')?active.path.slice(0,active.path.lastIndexOf('/')):''});
+        if(!Array.isArray(selected)||!selected.length)return;
+        for(const file of selected){
+          const path=String(file.customRelativePath||file.__wkWorkspacePath||'');
+          if(sensitiveAttachmentPath(path||file.name)){alert('Sensitive files cannot be attached to AI chats.');continue;}
+          if(!attachmentSupported({file})){alert(file.name+' is not supported by the selected model.');continue;}
+          const key=path?'path:'+path:'device:'+file.name+':'+file.size+':'+file.lastModified;
+          const unavailableIndex=attachments.findIndex(item=>item.unavailable&&((path&&item.path===path)||(!path&&!item.path&&String(item.name).toLowerCase()===String(file.name).toLowerCase())));
+          if(unavailableIndex>=0)attachments.splice(unavailableIndex,1);
+          if(attachments.some(item=>item.key===key||(path&&item.path===path)))continue;
+          if(attachments.length>=10){alert('You can attach up to 10 files per message.');break;}
+          attachments.push({key,name:file.name,path,file,active:false,unavailable:false});
+        }
+        renderAttachmentRow(tree);updateComposerSendState(tree);
+      }catch(error){alert(error?.message||String(error));}
+    }
+    function attachmentMimeType(file,kind){
+      const supplied=String(file?.type||'').toLowerCase();
+      if(kind==='image'&&supplied.startsWith('image/'))return supplied;
+      const ext=attachmentExtension(file);
+      const imageMimes={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',bmp:'image/bmp',avif:'image/avif',apng:'image/apng',ico:'image/x-icon'};
+      const audioMimes={wav:'audio/wav',mp3:'audio/mpeg',m4a:'audio/mp4',aac:'audio/aac',ogg:'audio/ogg',opus:'audio/ogg',flac:'audio/flac'};
+      const videoMimes={mp4:'video/mp4',m4v:'video/x-m4v',mov:'video/quicktime',webm:'video/webm'};
+      return kind==='image'?(imageMimes[ext]||'image/png'):kind==='audio'?(supplied.startsWith('audio/')?supplied:(audioMimes[ext]||'application/octet-stream')):kind==='video'?(supplied.startsWith('video/')?supplied:(videoMimes[ext]||'application/octet-stream')):(supplied||'text/plain');
+    }
+    function fileAsDataUrl(file,mimeType){
+      return new Promise((resolve,reject)=>{
+        const reader=new FileReader(),source=mimeType&&file.type!==mimeType?new Blob([file],{type:mimeType}):file;
+        reader.onload=()=>resolve(String(reader.result||''));
+        reader.onerror=()=>reject(reader.error||new Error('Could not read '+file.name));reader.readAsDataURL(source);
+      });
+    }
+    async function buildAttachmentPayload(){
+      const metadata=[],images=[],audios=[],videos=[],files=[],textParts=[];let textChars=0,audioBytes=0,videoBytes=0;
+      for(const item of attachments){
+        const openTab=item.active&&activeEditor(state)?.path===item.path?makeActiveAttachment():null;
+        const file=openTab?.file||item.file;
+        if(!file){
+          if(item.unavailable)throw new Error(item.path?'The workspace file "'+item.name+'" is no longer available. Remove it or reattach it before resending.':'The original device file "'+item.name+'" is not stored in chat history. Remove it or reattach it before resending.');
+          continue;
+        }
+        const kind=attachmentKind(file);
+        if(!attachmentSupported({file}))throw new Error(file.name+' is not supported by the selected model. Remove it or switch to a compatible model.');
+        const path=String(item.path||file.customRelativePath||'');
+        if(sensitiveAttachmentPath(path||file.name))throw new Error('Sensitive files cannot be attached to AI chats.');
+        metadata.push({name:String(file.name),path,kind,mimeType:String(file.type||''),size:Number(file.size)||0,active:!!item.active});
+        files.push({name:String(file.name),path,file,active:!!item.active});
+        if(kind==='text'){
+          if(file.size>4*1024*1024)throw new Error(file.name+' is larger than the 4 MiB text attachment limit.');
+          let content=await file.text();
+          const remaining=Math.max(0,100000-textChars);
+          if(content.length>remaining)content=content.slice(0,remaining)+'\n… [truncated to fit the attachment context limit]';
+          textChars+=content.length;
+          if(content)textParts.push('Attached file: '+(path||file.name)+'\n'+content+'\n[End attached file]');
+        }else if(kind==='image'){
+          if(file.size>12*1024*1024)throw new Error(file.name+' is larger than the 12 MiB image attachment limit.');
+          if(images.reduce((total,image)=>total+Math.floor(image.dataUrl.length*3/4),0)+file.size>24*1024*1024)throw new Error('Combined image attachments must be smaller than 24 MiB.');
+          const mimeType=attachmentMimeType(file,kind);
+          images.push({mimeType,dataUrl:await fileAsDataUrl(file,mimeType)});
+        }else if(kind==='audio'){
+          if(file.size>AUDIO_ATTACHMENT_MAX_BYTES)throw new Error(file.name+' is larger than the 12 MiB audio attachment limit.');
+          audioBytes+=file.size;
+          if(audioBytes>24*1024*1024)throw new Error('Combined audio attachments must be smaller than 24 MiB.');
+          const mimeType=attachmentMimeType(file,kind);
+          audios.push({name:String(file.name),mimeType,dataUrl:await fileAsDataUrl(file,mimeType)});
+        }else if(kind==='video'){
+          if(file.size>VIDEO_ATTACHMENT_MAX_BYTES)throw new Error(file.name+' is larger than the 32 MiB video attachment limit.');
+          videoBytes+=file.size;
+          if(videoBytes>VIDEO_ATTACHMENT_MAX_BYTES)throw new Error('Combined video attachments must be smaller than 32 MiB.');
+          videos.push({name:String(file.name),mimeType:attachmentMimeType(file,kind),file});
+        }
+      }
+      return {metadata,images,audios,videos,files,textContext:textParts.length?'\n\n'+textParts.join('\n\n'):''};
+    }
+    function decorateAttachmentMessages(messages,payload){
+      const output=(messages||[]).map(message=>({...message,images:undefined}));
+      const user=[...output].reverse().find(message=>message.role==='user');
+      if(user){
+        user.content=String(user.content||'')+String(payload?.textContext||'');
+        if(payload?.images?.length)user.images=payload.images;
+        if(payload?.audios?.length)user.audios=payload.audios;
+        if(payload?.videos?.length)user.videos=payload.videos;
+        delete user.attachments;
+      }
+      return output;
+    }
+    function updateComposerSendState(tree){
+      const input=tree?.querySelector?.('[data-input]'),send=tree?.querySelector?.('[data-send]');if(!send)return;
+      const model=registry.active(),needsLoad=!!(model?.local||model?.protocol==='local-transformers')&&!localManager.isLoaded(model.id);
+      send.disabled=busy||needsLoad||(!input?.value?.trim()&&!attachments.some(item=>attachmentSupported(item,model)));
+    }
     async function activateModel(id){
       const target=registry.settings.models.find(x=>x.id===id);
       if(!target)throw new Error('AI model not found.');
@@ -841,16 +1282,49 @@ const makeEditorTools = (() => {
       const model=registry.active(),local=!!model?.local||model?.protocol==='local-transformers';
       const label=tree.querySelector('.ai-model-label');if(label)label.textContent=makeModelLabel(model,registry,localManager);
       const loaded=local&&localManager.isLoaded(model.id);
-      const status=tree.querySelector('[data-local-status]'),text=tree.querySelector('[data-local-status-text]'),bar=tree.querySelector('[data-local-status-progress]'),button=tree.querySelector('[data-local-load]'),input=tree.querySelector('[data-input]'),send=tree.querySelector('[data-send]');
-      if(status){status.hidden=!local||(!info?.loading&&!loaded);}
-      if(text)text.textContent=info?.loading?(info.text||'Loading local model…'):(loaded?(info?.text||'Local model ready.'):'Local model is not loaded.');
-      if(bar)bar.style.width=(info?.loading?Math.max(0,Math.min(100,Number(info.progress)||0)):loaded?100:0)+'%';
+      const status=tree.querySelector('[data-local-status]'),statusText=tree.querySelector('[data-local-status-text]'),progress=tree.querySelector('[data-local-status-progress]');
+      const downloadList=tree.querySelector('[data-local-status-files]'),fallbackProgress=tree.querySelector('[data-local-status-fallback]');
+      const inferenceStatus=tree.querySelector('[data-inference-status]'),inferenceLabel=tree.querySelector('[data-inference-label]'),inferenceTrack=tree.querySelector('[data-inference-track]'),inferenceBar=tree.querySelector('[data-inference-progress]');
+      const button=tree.querySelector('[data-local-load]'),input=tree.querySelector('[data-input]');
+      if(status)status.hidden=!local||!info?.loading;
+      if(statusText&&info?.loading)statusText.textContent=info.text||'Loading local model…';
+      const trackingFiles=!!info?.trackingFiles;
+      if(downloadList){
+        const downloads=Array.isArray(info?.downloads)?info.downloads:[];
+        downloadList.hidden=!trackingFiles;
+        downloadList.innerHTML=downloads.map(download=>{
+          const percent=Math.max(0,Math.min(100,Number(download.progress)||0));
+          const name=String(download.name||download.file||'Model file');
+          const fullName=String(download.file||name);
+          return '<div class="ai-local-file-row"><div class="ai-local-file-heading"><span title="'+escapeHtml(fullName)+'">'+escapeHtml(name)+'</span><strong>'+percent.toFixed(0)+'%</strong></div><div class="ai-local-progress"><span style="width:'+percent+'%"></span></div></div>';
+        }).join('');
+      }
+      if(fallbackProgress)fallbackProgress.hidden=trackingFiles;
+      if(progress)progress.style.width=(info?.loading&&!trackingFiles?Math.max(0,Math.min(100,Number(info.progress)||0)):0)+'%';
+      const inference=local?info?.inference:null;
+      if(inferenceStatus)inferenceStatus.hidden=!inference;
+      if(inferenceLabel&&inference){
+        const detail=inference.detail||'';
+        inferenceLabel.textContent=(inference.label||'Processing prompt')+(detail?' · '+detail:'');
+      }
+      if(inferenceTrack){
+        const determinate=inference?.progress!=null&&Number.isFinite(Number(inference.progress));
+        inferenceTrack.classList.toggle('is-indeterminate',!!inference&&!determinate);
+        if(inferenceBar)inferenceBar.style.width=determinate?Math.max(0,Math.min(100,Number(inference.progress)))+'%':'';
+        if(determinate)inferenceTrack.setAttribute('aria-valuenow',String(Math.round(Number(inference.progress))));
+        else inferenceTrack.removeAttribute('aria-valuenow');
+      }
       if(button){button.disabled=!!info?.loading;button.textContent=info?.loading?'Loading…':loaded?'Loaded':'Load model';}
       const needsLoad=local&&!loaded;
       if(input){input.disabled=needsLoad||busy;input.placeholder=needsLoad?'Load the local model first…':'Ask anything about your project…';}
-      if(send)send.disabled=needsLoad||busy||!input?.value?.trim();
+      updateComposerSendState(tree);
     }
     localManager.subscribe(updateLocalStatusUI);
+    window.EditorApp?.onTabActivate?.(()=>{
+      syncActiveAttachment();
+      const view=currentTab?._viewElement;
+      if(view){renderAttachmentRow(view);updateComposerSendState(view);}
+    });
     function syncChats() {
       const pid=state.projectId || 'global';
       if (loadedProjectId===pid && currentChatId) return;
@@ -863,7 +1337,7 @@ const makeEditorTools = (() => {
       currentConversation=chatAI.openConversation({id:currentChatId,messages:chatMessages,modelId:registry.active()?.id,agentId:chat.agentId||null});
     }
     function currentChat() { syncChats(); return chatStore.get(currentChatId); }
-    function activeMessages() { return (currentConversation?.getMessages?.() || chatMessages).map(m=>({role:m.role,content:m.content})); }
+    function activeMessages() { return (currentConversation?.getMessages?.() || chatMessages).map(m=>({...m,images:undefined})); }
     function persist() {
       const chat=currentChat();chat.messages=chatMessages;currentConversation?.setMessages?.(chatMessages);
       const attached=currentConversation?.getAgent?.();if(attached)chat.agentId=attached.id;else delete chat.agentId;
@@ -872,10 +1346,34 @@ const makeEditorTools = (() => {
     function beginEdit(index) {
       if (busy || !Number.isInteger(index) || chatMessages[index]?.role !== 'user') return;
       const view=getAIView(); if (!view) return;
-      const input=view.t?._viewElement?.querySelector?.('[data-input]') || view.g?.viewBody?.querySelector?.('[data-input]');
+      const tree=view.t?._viewElement||view.g?.viewBody;
+      const input=tree?.querySelector?.('[data-input]');
       if (!input) return;
+      const message=chatMessages[index];
+      const retainedFiles=messageAttachmentFiles.get(message)||[];
+      attachments=(Array.isArray(message.attachments)?message.attachments:[]).map((item,attachmentIndex)=>{
+        const path=String(item?.path||'');
+        let file=retainedFiles[attachmentIndex]?.file||null;
+        if(!file&&path&&!sensitiveAttachmentPath(path)){
+          try{
+            const data=state.fs?.readFileSync?.(path);
+            if(data!=null){
+              const mimeType=String(item.mimeType||window.EditorInferMime?.(path)||attachmentMimeType({name:item.name,type:item.mimeType},item.kind)||'application/octet-stream');
+              file=new File([data],String(item.name||path.split('/').pop()||'attachment'),{type:mimeType,lastModified:Date.now()});
+              Object.defineProperties(file,{customRelativePath:{value:path},__wkWorkspacePath:{value:path}});
+            }
+          }catch(_){}
+        }
+        return {
+          key:path?'path:'+path:'history:'+index+':'+attachmentIndex+':'+String(item?.name||'attachment'),
+          name:String(item?.name||'attachment'),path,file,active:!!item?.active,
+          type:String(item?.mimeType||''),unavailable:!file
+        };
+      });
       editingIndex=index;
-      input.value=chatMessages[index].content;
+      renderAttachmentRow(tree);
+      input.value=message.content;
+      updateComposerSendState(tree);
       input.focus();
       input.setSelectionRange(input.value.length,input.value.length);
       const send=view.t?._viewElement?.querySelector?.('[data-send]');
@@ -906,34 +1404,84 @@ const makeEditorTools = (() => {
       // Keep the text in the composer: it can now be sent as a normal new message.
       input?.dispatchEvent?.(new Event('input',{bubbles:true}));
     }
-    function resendMessage(index,text,g,t,tree) {
+    function resendMessage(index,text,g,t,tree,attachmentPayload) {
       if (!Number.isInteger(index) || chatMessages[index]?.role !== 'user') return;
       chatMessages=chatMessages.slice(0,index);
       editingIndex=-1;
       persist();
-      sendMessage(text,g,t,tree);
+      sendMessage(text,g,t,tree,attachmentPayload);
     }
-    function getAIView() {
-      let t=currentTab;
+    function getAIView(tab=currentTab) {
+      let t=tab;
       if (!t || t.kind !== 'builtin' || t.builtin !== 'ai') return null;
       let g=t.group?.ownerWorkbench?.groups?.get(t.group.id) || null;
       if (!g || !g.tabs.includes(t)) {
-        for (const instance of Workbench.getInstances?.() || [state.workbench]) for (const gg of instance.groups.values()) {
-          const found=gg.tabs.find(x=>x===t || (x.id===t.id && x.kind==='builtin' && x.builtin==='ai'));
-          if (found) { t=found; g=gg; break; }
+        for (const instance of Workbench.getInstances?.() || [state.workbench]) {
+          for (const gg of instance.groups?.values?.() || []) {
+            const found=gg.tabs?.find(x=>x===t || (x.id===t.id && x.kind==='builtin' && x.builtin==='ai'));
+            if (found) { t=found; g=gg; break; }
+          }
+          if (g) break;
         }
       }
       if (!g || !g.tabs.includes(t)) return null;
       return {g,t};
     }
-    function addMessage(chat,role,text,index,message){const row=document.createElement('div');row.className='ai-message '+(role==='user'?'ai-user':'ai-assistant');if(role==='assistant'&&message?.activity?.length){const activity=renderActivity(chat,message.activity,false);row.appendChild(activity);}const bubble=document.createElement('div');bubble.className='ai-bubble';if(role==='user')bubble.textContent=text;else renderMessage(bubble,text,code=>insertCode(code));row.appendChild(bubble);if(role==='user'&&Number.isInteger(index)){const edit=document.createElement('button');edit.className='ai-edit-message';edit.textContent='✎';edit.title='Edit and resend';edit.setAttribute('aria-label','Edit and resend prompt');edit.disabled=busy;edit.onclick=()=>beginEdit(index);row.appendChild(edit);}chat.appendChild(row);return bubble;}
+    function addMessage(chat,role,text,index,message){
+      const row=document.createElement('div');
+      row.className='ai-message '+(role==='user'?'ai-user':'ai-assistant');
+      if(role==='assistant'&&message?.activity?.length)row.appendChild(renderActivity(chat,message.activity,false,message.activityDurationMs));
+      const bubble=document.createElement('div');
+      bubble.className='ai-bubble';
+      // User prompts use the same Markdown/LaTeX renderer as assistant responses.
+      // renderMessage also preserves the raw source for Ctrl/Cmd+C and native Copy.
+      renderMessage(bubble,text,role==='assistant'?code=>insertCode(code):null);
+      if(role==='user'){
+        const content=document.createElement('div');
+        content.className='ai-message-content';
+        if(Array.isArray(message?.attachments)&&message.attachments.length){
+          const attached=document.createElement('div');
+          attached.className='ai-message-attachments ai-attachment-list ai-media-attachment-list';
+          const retained=messageAttachmentFiles.get(message)||[];
+          const showAttachmentPreviews=aiRoot.getAIPreferences?.().showAttachmentPreviews!==false;
+          for(const [attachmentIndex,item] of message.attachments.entries()){
+            const file=getMessageAttachmentFile(message,attachmentIndex,item,retained);
+            const kind=String(item?.kind||attachmentKind(file||item));
+            if(showAttachmentPreviews&&file&&(kind==='audio'||kind==='image'||kind==='video')){
+              const template=document.createElement('template');
+              template.innerHTML=mediaAttachmentPreviewMarkup(file,item);
+              if(template.content.firstElementChild)attached.appendChild(template.content.firstElementChild);
+            }else{
+              chip.className='ai-attachment-chip';
+              chip.title=String(item?.path||item?.name||'Attachment');
+              const name=document.createElement('span');
+              name.className='ai-attachment-name';
+              name.textContent=(item?.active?'● ':'')+String(item?.name||'Attachment');
+              chip.appendChild(name);
+              attached.appendChild(chip);
+            }
+          }
+          content.appendChild(attached);
+        }
+        content.appendChild(bubble);
+        row.appendChild(content);
+      }else row.appendChild(bubble);
+      if(role==='user'&&Number.isInteger(index)){
+        const edit=document.createElement('button');
+        edit.className='ai-edit-message';edit.textContent='✎';edit.title='Edit and resend';
+        edit.setAttribute('aria-label','Edit and resend prompt');edit.disabled=busy;
+        edit.onclick=()=>beginEdit(index);row.appendChild(edit);
+      }
+      chat.appendChild(row);
+      return bubble;
+    }
     async function insertCode(code){
       const tab=activeEditor(state); if(!tab){alert('Open a text file to insert this snippet.');return;} if(!tab.editor){onOpen?.(tab.path);setTimeout(()=>insertCode(code),150);return;}
       const tool=toolset.map.get('insert_code'); if(!tool)return;
       try { await (async()=>{const policy=permissions.get(tool.permission);if(policy==='never')throw new Error('Editor modification permission is disabled.');if(policy==='ask'){const d=await permissionPrompt({tool,args:{code},preview:{path:tab.path,code:code.slice(0,4000)}});if(d==='deny')return;if(d==='always')permissions.set(tool.permission,'always');}await tool.execute({code});})(); } catch(e){alert(e?.message||String(e));}
     }
     function systemPrompt(forAgent=false) {
-      const context=aiRoot.buildContext(state,{maxFileChars:20000});
+      const context=aiRoot.buildContext(state,{maxFileChars:20000,includeActiveFile:false});
       const prefs=aiRoot.getAIPreferences?.()||{};
       const custom=String(prefs.customInstructions||'').trim();
       const agentExtra=forAgent?String(prefs.agentInstructions||'').trim():'';
@@ -960,6 +1508,7 @@ const makeEditorTools = (() => {
       if (busy || !id || id===currentChatId) return;
       const view=getAIView(); if (!view) return;
       persist();
+      attachments=attachments.filter(item=>item.active);
       currentChatId=id;
       chatMessages=chatStore.get(id).messages;
       currentConversation=chatAI.openConversation({id,messages:chatMessages,modelId:registry.active()?.id,agentId:chatStore.get(id)?.agentId||null});
@@ -969,6 +1518,7 @@ const makeEditorTools = (() => {
       if (busy) return;
       const view=getAIView(); if (!view) return;
       persist();
+      attachments=attachments.filter(item=>item.active);
       const chat=chatStore.create();
       currentChatId=chat.id;
       chatMessages=chat.messages;
@@ -982,22 +1532,41 @@ const makeEditorTools = (() => {
       if(title!=null){chatStore.rename(chat.id,title);render(view.g,view.t);}
     }
     function render(g, t) {
-      currentGroup = g || currentGroup || state.workbench?.getFirstLeaf?.();
-      currentTab = t || currentTab || currentGroup?.tabs?.find(x => x.builtin === 'ai');
-      if (!currentGroup || !currentTab) return;
+      const requestedTab=t || currentTab || g?.tabs?.find(x=>x.builtin==='ai');
+      if (!requestedTab) return;
+      // Render against the tab's live group, not the group captured by an
+      // event handler before the user dragged the AI tab elsewhere.
+      const liveView=getAIView(requestedTab);
+      if (liveView) {
+        currentGroup=liveView.g;
+        currentTab=liveView.t;
+      } else if (g?.tabs?.includes(requestedTab)) {
+        currentGroup=g;
+        currentTab=requestedTab;
+      } else return;
+      if (!currentGroup?.viewBody) return;
       syncChats();
       let tree = currentTab._viewElement;
-      if (!tree || tree.parentNode !== currentGroup.viewBody) {
+      if (!tree) {
         tree = document.createElement('div');
         tree.className = 'builtin-ai';
         currentTab._viewElement = tree;
         currentGroup.viewBody.appendChild(tree);
+      } else if (tree.parentNode !== currentGroup.viewBody) {
+        // Keep the existing chat DOM and its stateful children when correcting
+        // a stale parent reference; never create a second view for this tab.
+        if (typeof window.EditorMoveNodePreservingState === 'function') {
+          window.EditorMoveNodePreservingState(currentGroup.viewBody, tree);
+        } else {
+          currentGroup.viewBody.appendChild(tree);
+        }
       }
       tree.style.display = '';
       const model=registry.active(); const localModel=!!model?.local||model?.protocol==='local-transformers'; const localLoaded=!localModel||localManager.isLoaded(model.id); const chats=chatStore.list(true); const current=currentChat();
+      syncActiveAttachment();
       if(!model.supportsTools&&!model.supportsAgentTools&&currentConversation?.getAgent?.()){currentConversation.removeAgent();delete current.agentId;persist();}
       const agentMode=!!currentConversation?.getAgent?.();
-      tree.innerHTML=`<div class="ai-panel-inner"><div class="ai-header"><div class="ai-header-left"><strong>AI Chat</strong><span class="ai-model-label">${escapeHtml(makeModelLabel(model,registry,localManager))}</span></div><div class="ai-header-right"><select class="ai-chat-select" data-chat-select ${busy?'disabled':''} title="Recent chats">${chats.map(c=>`<option value="${escapeHtml(c.id)}" ${c.id===currentChatId?'selected':''}>${escapeHtml(c.title)}</option>`).join('')}${!chats.length?'<option>No chats</option>':''}</select><div class="ai-head-actions"><button data-chat-manage ${busy?'disabled':''} title="Manage chats" aria-label="Manage chats">☰</button><button data-new ${busy?'disabled':''} title="New chat" aria-label="New chat">＋</button><button data-settings title="AI Settings" aria-label="AI Settings">⚙</button></div><div class="ai-local-head-action">${localModel&&!localLoaded?'<button data-local-load>Load model</button>':''}</div></div></div><div class="ai-chat" data-chat>${chatMessages.length ? '' : '<div class="ai-chat-disclaimer">Chats are saved inside this project. If this project is published or pushed to Git, saved chats may be visible to others.</div>'}</div><div class="ai-request-status" data-status ${busy?'':'hidden'}>${busy?'Working…':''}</div><div class="ai-local-status" data-local-status hidden><div data-local-status-text></div><div class="ai-local-progress"><span data-local-status-progress></span></div></div><div class="ai-compose"><textarea data-input placeholder="Ask anything about your project…" rows="3"></textarea><div class="ai-compose-bar"><label class="ai-agent-toggle"><input data-agent type="checkbox" ${agentMode?'checked':''} ${model.supportsTools||model.supportsAgentTools?'':'disabled'}> Agent mode${model.supportsTools||model.supportsAgentTools?'':' (not supported by this model)'}</label><label class="ai-agent-steps">Steps <input data-agent-steps type="number" min="1" max="100" step="1" value="${Math.max(1,Math.min(100,Number(agent.maxSteps)||24))}" ${model.supportsTools||model.supportsAgentTools?'':'disabled'}></label><button data-stop ${busy?'':'disabled'}>Stop</button><button class="primary" data-send ${busy?'disabled':''}>Send</button></div></div></div>`;
+      tree.innerHTML=`<div class="ai-panel-inner"><div class="ai-header"><div class="ai-header-left"><strong>AI Chat</strong><span class="ai-model-label">${escapeHtml(makeModelLabel(model,registry,localManager))}</span></div><div class="ai-header-right"><select class="ai-chat-select" data-chat-select ${busy?'disabled':''} title="Recent chats">${chats.map(c=>`<option value="${escapeHtml(c.id)}" ${c.id===currentChatId?'selected':''}>${escapeHtml(c.title)}</option>`).join('')}${!chats.length?'<option>No chats</option>':''}</select><div class="ai-head-actions"><button data-chat-manage ${busy?'disabled':''} title="Manage chats" aria-label="Manage chats">☰</button><button data-new ${busy?'disabled':''} title="New chat" aria-label="New chat">＋</button><button data-settings title="AI Settings" aria-label="AI Settings">⚙</button></div><div class="ai-local-head-action">${localModel&&!localLoaded?'<button data-local-load>Load model</button>':''}</div></div></div><div class="ai-chat" data-chat>${chatMessages.length ? '' : '<div class="ai-chat-disclaimer">Chats are saved inside this project. If this project is published or pushed to Git, saved chats may be visible to others.</div>'}</div><div class="ai-request-status" data-status ${busy?'':'hidden'}>${busy?'Working…':''}</div><div class="ai-inference-status" data-inference-status hidden><div class="ai-inference-label" data-inference-label></div><div class="ai-inference-track" data-inference-track role="progressbar" aria-label="AI prompt processing" aria-valuemin="0" aria-valuemax="100"><span data-inference-progress></span></div></div><div class="ai-local-status" data-local-status hidden><div data-local-status-text></div><div class="ai-local-files" data-local-status-files hidden></div><div class="ai-local-progress ai-local-status-fallback" data-local-status-fallback><span data-local-status-progress></span></div></div><div class="ai-compose"><div class="ai-attachments" data-attachments></div><textarea data-input placeholder="Ask anything about your project…" rows="3"></textarea><div class="ai-compose-bar"><label class="ai-agent-toggle"><input data-agent type="checkbox" ${agentMode?'checked':''} ${model.supportsTools||model.supportsAgentTools?'':'disabled'}> Agent mode${model.supportsTools||model.supportsAgentTools?'':' (not supported by this model)'}</label><label class="ai-agent-steps">Steps <input data-agent-steps type="number" min="1" max="100" step="1" value="${Math.max(1,Math.min(100,Number(agent.maxSteps)||24))}" ${model.supportsTools||model.supportsAgentTools?'':'disabled'}></label><button data-stop ${busy?'':'disabled'}>Stop</button><button class="primary" data-send ${busy?'disabled':''}>Send</button></div></div></div>`;
       const chat=tree.querySelector('[data-chat]');
       for(let i=0;i<chatMessages.length;i++){const m=chatMessages[i];addMessage(chat,m.role,m.content,i,m);}
       tree.querySelector('[data-agent]').onchange=e=>{if(e.target.checked)currentConversation?.setAgent(agent);else currentConversation?.removeAgent();persist();};
@@ -1008,26 +1577,86 @@ const makeEditorTools = (() => {
       tree.querySelector('[data-chat-manage]').onclick=()=>chatManageModal();
       tree.querySelector('[data-local-load]')?.addEventListener('click',async()=>{try{await activateModel(model.id);render(g,t);}catch(e){alert(e?.message||String(e));updateLocalStatusUI(localManager.status());}});
       updateLocalStatusUI(localManager.status());
+      renderAttachmentRow(tree);
       tree.querySelector('[data-new]').onclick=()=>newChat();
       tree.querySelector('[data-stop]').onclick=()=>{controller?.abort();chatAI.cancel();busy=false;render(g,t);};
       const input=tree.querySelector('[data-input]'); const send=tree.querySelector('[data-send]');
-      const submit=async()=>{const text=input.value.trim();if(!text||busy)return;if(editingIndex>=0){const index=editingIndex;input.value='';resendMessage(index,text,g,t,tree);}else{input.value='';await sendMessage(text,g,t,tree);}};
+      const compose=tree.querySelector('.ai-compose');
+      const hierarchyDragTypes=['application/x-file-manager-paths'];
+      const hasHierarchyFiles=event=>hierarchyDragTypes.some(type=>Array.from(event.dataTransfer?.types||[]).includes(type));
+      input.addEventListener('dragover',event=>{
+        if(!hasHierarchyFiles(event))return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect='copy';
+        compose?.classList.add('is-file-drop-target');
+      });
+      input.addEventListener('dragleave',event=>{
+        if(!input.contains(event.relatedTarget))compose?.classList.remove('is-file-drop-target');
+      });
+      input.addEventListener('drop',event=>{
+        if(!hasHierarchyFiles(event))return;
+        event.preventDefault();
+        event.stopPropagation();
+        compose?.classList.remove('is-file-drop-target');
+        let paths=[];
+        try{paths=JSON.parse(event.dataTransfer.getData('application/x-file-manager-paths')||'[]');}catch(_){}
+        if(!Array.isArray(paths)||!paths.length)return;
+        let added=0;
+        for(const rawPath of paths){
+          const path=String(rawPath||'');
+          if(!path||sensitiveAttachmentPath(path)||state.fs?.isDirectorySync?.(path))continue;
+          if(!state.fs?.existsSync?.(path))continue;
+          if(attachments.some(item=>item.path===path))continue;
+          if(attachments.length>=10)break;
+          try{
+            const data=state.fs.readFileSync(path,'binary');
+            if(data==null)continue;
+            const name=path.split('/').pop()||path;
+            const file=new File([data],name,{lastModified:Date.now()});
+            if(file.size>12*1024*1024)continue;
+            if(!attachmentSupported({file})){
+              continue;
+            }
+            attachments.push({key:'path:'+path,name,path,file,active:false,unavailable:false});
+            added++;
+          }catch(error){console.warn('Could not attach dropped file:',path,error);}
+        }
+        if(added){
+          renderAttachmentRow(tree);
+          updateComposerSendState(tree);
+        }
+      });
+      const submit=async()=>{
+        const text=input.value.trim();
+        if((!text&&!attachments.some(item=>attachmentSupported(item)))||busy)return;
+        let payload;
+        try{payload=await buildAttachmentPayload();}
+        catch(error){const status=tree.querySelector('[data-status]');if(status){status.textContent=error?.message||String(error);status.hidden=false;}return;}
+        if(editingIndex>=0){
+          const index=editingIndex;
+          input.value='';
+          resendMessage(index,text,g,t,tree,payload);
+        }else{
+          input.value='';
+          await sendMessage(text,g,t,tree,payload);
+        }
+      };
       send.textContent=editingIndex>=0?'Resend':'Send';
-      const updateSendState=()=>{const active=registry.active();send.disabled=!input.value.trim()||busy||!!((active?.local||active?.protocol==='local-transformers')&&!localManager.isLoaded(active.id));};
+      const updateSendState=()=>updateComposerSendState(tree);
       input.addEventListener('input',updateSendState);
       send.onclick=submit; input.addEventListener('keydown',e=>{if(e.key==='Enter' && !e.shiftKey){e.preventDefault();submit();}});
       updateSendState();
       if(editingIndex>=0){const cancel=document.createElement('button');cancel.type='button';cancel.dataset.cancelEdit='';cancel.textContent='Cancel';cancel.title='Cancel prompt editing and send a new message instead';cancel.onclick=()=>cancelEdit(input,send);send.parentNode.insertBefore(cancel,send);}
       if(chatMessages.length)chat.scrollTop=chat.scrollHeight;
     }
-    async function sendMessage(text,g,t,tree){
+    async function sendMessage(text,g,t,tree,attachmentPayload={metadata:[],images:[],audios:[],videos:[],files:[],textContext:''}){
       if(!g?.viewBody || !t) return;
       const chatRecord=currentChat();
       busy=true; controller=new AbortController();
       currentConversation=currentConversation||chatAI.openConversation({id:chatRecord.id,messages:chatMessages,modelId:registry.active()?.id,agentId:chatRecord.agentId||null});
       currentConversation.modelId=registry.active()?.id||null;
       currentConversation.setMessages(chatMessages);
-      if(chatRecord.title==='New Chat') chatStore.rename(chatRecord.id,chatTitle(text));
+      if(chatRecord.title==='New Chat') chatStore.rename(chatRecord.id,chatTitle(text||attachmentPayload.metadata?.map(item=>item.name).join(' ')||'Attached files'));
       persist();
       render(g,t);
       await new Promise(resolve => requestAnimationFrame(resolve));
@@ -1037,11 +1666,12 @@ const makeEditorTools = (() => {
       const setStatus=text=>{const el=tree.querySelector('[data-status]');if(!el)return;el.replaceChildren(document.createTextNode(text||''));el.hidden=!text;};
       // Show the user's prompt immediately. ConversationAI.send() records the same
       // message in history below; the final render rebuilds the transcript from that history.
-      addMessage(chat,'user',text);
+      addMessage(chat,'user',text,undefined,{attachments:attachmentPayload.metadata||[]});
       chat.querySelector('.ai-chat-disclaimer')?.remove();
       chat.scrollTop=chat.scrollHeight;
       const activeAgent=currentConversation?.getAgent?.()||null;
       const prefs=aiRoot.getAIPreferences?.()||{}; const liveActivity=activeAgent&&prefs.showActivity!==false?beginActivity(chat,true):null;
+      let activityMessage=null;
       const bubble=addMessage(chat,'assistant',''); if(liveActivity && bubble.parentNode?.parentNode===chat) chat.insertBefore(liveActivity.host,bubble.parentNode); let partial='';
       try {
         if(activeAgent){
@@ -1058,28 +1688,30 @@ const makeEditorTools = (() => {
             else if(event.type==='reasoning_summary'){appendActivity(liveActivity,{kind:'reasoning_summary',text:event.text});} else if(event.type==='reasoning'){appendActivity(liveActivity,{kind:'reasoning',text:event.text||'Model reasoning is active.'});}
           };
           const prompt=systemPrompt(true);
-          let hookInput={messages:[...activeMessages(),{role:'user',content:text}],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'};
+          let hookInput={messages:[...activeMessages(),{role:'user',content:text,attachments:attachmentPayload.metadata||[]}],agentMode:true,projectId:state.projectId||null,projectName:state.projectName||'Workspace'};
           const response=await currentConversation.send(text,{
             systemPrompt:prompt,maxTokens:2048,retryTransport:prefs.retryTransport,maxTransportRetries:prefs.maxTransportRetries,
             transportRetryDelay:prefs.transportRetryDelay,signal:controller.signal,emit:emitAgentEvent,
             prepareMessages:async messages=>{
+              const originalUser=[...messages].reverse().find(message=>message.role==='user');
+              if(originalUser&&attachmentPayload.metadata?.length)originalUser.attachments=attachmentPayload.metadata;
               hookInput={...hookInput,messages:[...messages]};
               const prepared=await editorExtensionHooks('ai.beforeRun',hookInput);
-              return [{role:'system',content:prompt},...(prepared?.messages||messages.filter(message=>message.role!=='system'))];
+              return decorateAttachmentMessages([{role:'system',content:prompt},...(prepared?.messages||messages.filter(message=>message.role!=='system'))],attachmentPayload);
             },
             onRetry:info=>emitAgentEvent({type:info?.kind==='tool_parse_recovery'?'provider_retry':info?.kind==='transport_retry'?'transport_retry':'retry',...info})
           });
           await editorExtensionHooks('ai.afterRun',{...hookInput,result:response.result});
           partial=response.text||partial;renderMessage(bubble,partial,code=>insertCode(code));
-          if(response.message)response.message.activity=liveActivity?.items||[];
+          if(response.message){activityMessage=response.message;activityMessage.activity=liveActivity?.items||[];}
           if(liveActivity)liveActivity.details.open=false;
         } else {
           // Unlike the agent path, plain chat streams directly from the provider.
           // Record the prompt in the conversation before building the request so
           // the final render cannot discard the temporary user bubble.
-          currentConversation.addMessage({role:'user',content:text});
+          currentConversation.addMessage({role:'user',content:text,attachments:attachmentPayload.metadata||[]});
           chatMessages=currentConversation.getMessages();
-          const messages=[{role:'system',content:systemPrompt(false)},...activeMessages()];
+          const messages=decorateAttachmentMessages([{role:'system',content:systemPrompt(false)},...activeMessages()],attachmentPayload);
           const model=chatAI.getModel();
           for await(const chunk of chatAI.stream(messages,{modelId:model?.id,conversationId:currentConversation.id,thinking:true,maxTokens:2048,temperature:.7,topP:.9,signal:controller.signal,systemPrompt:systemPrompt(false),onRetry:info=>setStatus(info?.kind==='tool_parse_recovery' ? (info.text||'Retrying tool-call generation…') : info?.kind==='transport_retry' ? `Network retry in ${Math.ceil((info.waitMs||0)/1000)}s (attempt ${info.attempt}/${info.maxRetries})` : `Rate limited — retrying in ${Math.ceil(info.waitMs/1000)}s (attempt ${info.attempt}/${info.maxRetries})`)})){
             partial=chunk.text??partial;
@@ -1091,27 +1723,56 @@ const makeEditorTools = (() => {
         }
         persist();
       } catch(e) {
-        if(e?.name!=='AbortError') { partial=`**Error:** ${e?.message||String(e)}`; renderMessage(bubble,partial); if(liveActivity) appendActivity(liveActivity,{kind:'error',text:e?.message||String(e)}); const activityData=liveActivity?.items||[]; chatMessages.push({role:'assistant',content:partial,activity:activityData}); if(liveActivity) liveActivity.details.open=false; persist(); }
+        if(e?.name!=='AbortError') { partial=`**Error:** ${e?.message||String(e)}`; renderMessage(bubble,partial); if(liveActivity) appendActivity(liveActivity,{kind:'error',text:e?.message||String(e)}); const activityData=liveActivity?.items||[]; activityMessage={role:'assistant',content:partial,activity:activityData}; chatMessages.push(activityMessage); if(liveActivity) liveActivity.details.open=false; persist(); }
       } finally {
         // Keep the editor's persisted transcript aligned with ConversationAI, which
         // owns insertion of both the user and assistant messages.
         if(currentConversation?.getMessages)chatMessages=currentConversation.getMessages();
+        const sentUser=[...chatMessages].reverse().find(message=>message?.role==='user');
+        if(sentUser&&attachmentPayload.files?.length)messageAttachmentFiles.set(sentUser,attachmentPayload.files);
+        attachments=attachments.filter(item=>item.active);syncActiveAttachment();
+        if(liveActivity){
+          const durationMs=finishActivity(liveActivity);
+          if(activityMessage){activityMessage.activity=liveActivity.items||[];activityMessage.activityDurationMs=durationMs;}
+        }
         persist();
         busy=false; controller=null; render(g,t);
       }
     }
     function activityValue(value,maxChars=20000){let text;try{text=JSON.stringify(value,null,2);}catch(_){text=String(value);}text=String(text??'');return text.length<=maxChars?text:text.slice(0,maxChars)+`\n… [truncated ${text.length-maxChars} characters]`;}
-    function activitySummary(items){const list=items||[];const steps=list.filter(x=>x?.kind==='step').length;const tools=list.filter(x=>x?.kind==='tool_call').length;const retries=list.filter(x=>['retry','transport_retry','provider_retry'].includes(x?.kind)).length;const parts=['Agent activity'];if(steps)parts.push(`${steps} step${steps===1?'':'s'}`);if(tools)parts.push(`${tools} tool${tools===1?'':'s'}`);if(retries)parts.push(`${retries} retr${retries===1?'y':'ies'}`);return parts.join(' · ');}
-    function renderActivity(chat,items,open){
+    function formatActivityDuration(milliseconds){
+      const totalSeconds=Math.max(0,milliseconds)/1000;
+      if(totalSeconds<60)return totalSeconds.toFixed(1)+'s';
+      const wholeSeconds=Math.floor(totalSeconds),minutes=Math.floor(wholeSeconds/60),seconds=wholeSeconds%60;
+      if(minutes<60)return minutes+'m '+String(seconds).padStart(2,'0')+'s';
+      const hours=Math.floor(minutes/60),remainingMinutes=minutes%60;
+      return hours+'h '+String(remainingMinutes).padStart(2,'0')+'m';
+    }
+    function activitySummary(items,durationMs){
+      const list=items||[];const steps=list.filter(x=>x?.kind==='step').length;const tools=list.filter(x=>x?.kind==='tool_call').length;const retries=list.filter(x=>['retry','transport_retry','provider_retry'].includes(x?.kind)).length;const parts=['Agent activity'];if(steps)parts.push(`${steps} step${steps===1?'':'s'}`);if(tools)parts.push(`${tools} tool${tools===1?'':'s'}`);if(retries)parts.push(`${retries} retr${retries===1?'y':'ies'}`);if(Number.isFinite(Number(durationMs)))parts.push(formatActivityDuration(Number(durationMs)));return parts.join(' · ');
+    }
+    function renderActivity(chat,items,open,durationMs){
       const details=document.createElement('details'); details.className='ai-activity'; details.open=!!open;
-      const summary=document.createElement('summary'); summary.textContent=activitySummary(items); details.appendChild(summary);
+      const summary=document.createElement('summary'); summary.textContent=activitySummary(items,durationMs); details.appendChild(summary);
       const body=document.createElement('div'); body.className='ai-activity-body'; details.appendChild(body);
-      const activity={body,items:items||[],details}; for(const item of [...(items||[])]) appendActivity(activity,item,false); summary.textContent=activitySummary(activity.items);
+      const activity={body,items:items||[],details,durationMs:Number.isFinite(Number(durationMs))?Number(durationMs):null}; for(const item of [...(items||[])]) appendActivity(activity,item,false); summary.textContent=activitySummary(activity.items,activity.durationMs);
       return details;
     }
     function beginActivity(chat,open){
       const details=renderActivity(chat,[],open); const body=details.querySelector('.ai-activity-body');
-      chat.appendChild(details); return {details,body,host:details,items:[]};
+      const summary=details.querySelector('summary');
+      const activity={details,body,host:details,summary,items:[],startedAt:Date.now(),timer:null,durationMs:null};
+      const update=()=>{if(activity.summary)activity.summary.textContent=activitySummary(activity.items,Date.now()-activity.startedAt);};
+      activity.timer=setInterval(update,100);
+      update();
+      chat.appendChild(details); return activity;
+    }
+    function finishActivity(activity){
+      if(!activity)return 0;
+      if(activity.timer){clearInterval(activity.timer);activity.timer=null;}
+      activity.durationMs=Math.max(0,Date.now()-(activity.startedAt||Date.now()));
+      if(activity.summary)activity.summary.textContent=activitySummary(activity.items,activity.durationMs);
+      return activity.durationMs;
     }
     function appendActivity(activity,item,record=true){
       if(!activity?.body)return;
@@ -1129,7 +1790,7 @@ const makeEditorTools = (() => {
       else if(item.kind==='error'){row.innerHTML=`<strong>Error</strong><pre>${escapeHtml(String(item.text||''))}</pre>`;}
       else {row.innerHTML=`<strong>${escapeHtml(item.kind||'Activity')}</strong><span>${escapeHtml(String(item.text||''))}</span>`;}
       activity.body.appendChild(row);
-      if(activity.details){const summary=activity.details.querySelector('summary');if(summary)summary.textContent=activitySummary(activity.items);activity.details.scrollIntoView?.({block:'nearest'});}
+      if(activity.details){const summary=activity.details.querySelector('summary');if(summary){const elapsed=activity.startedAt?Date.now()-activity.startedAt:activity.durationMs;summary.textContent=activitySummary(activity.items,elapsed);}activity.details.scrollIntoView?.({block:'nearest'});}
     }
     return {
       title:'AI Chat',

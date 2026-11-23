@@ -118,6 +118,7 @@
       option.textContent = (rate === 1 ? '1' : String(rate)) + '×';
       speed.appendChild(option);
     }
+    speed.value = '1';
     const loop = button('Loop off', ICONS.loop);
     const pip = button('Picture in picture', ICONS.pip);
     const fullscreen = button('Fullscreen', ICONS.fullscreen);

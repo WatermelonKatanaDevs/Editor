@@ -39,6 +39,21 @@
       requiresKey:model.requiresKey !== undefined ? !!model.requiresKey : !local,
       supportsTools:model.supportsTools !== false, supportsAgentTools:!!model.supportsAgentTools,
       supportsReasoning:model.supportsReasoning !== false, supportsStreaming:model.supportsStreaming !== false,
+      supportsDocuments:model.supportsDocuments !== false,
+      supportsVision:model.supportsVision !== undefined ? !!model.supportsVision : (model.capabilities?.vision === true || (['any-to-any','image-text-to-text'].includes(String(model.pipelineTask||model.task||''))) || (/gemma[-_/]?4/i.test(String(model.model || model.remoteModel || '')) && /onnx/i.test(String(model.model || model.remoteModel || '')))),
+      // Infer hosted audio support from model metadata or known provider model families.
+      supportsAudio:local
+        ? (model.capabilities?.audio === true || (/gemma[-_/ ]?4/i.test(String(model.model || model.remoteModel || '')) &&
+          /(?:e2b|e4b)(?:[-_/]|$)/i.test(String(model.model || model.remoteModel || ''))))
+        : (model.capabilities?.audio === true ||
+          (protocol==='google-gemini' &&
+            /gemini-(?:2\.5|3(?:[.-]|$)|4(?:[.-]|$))/i.test(String(model.model || model.remoteModel || '')) &&
+            !/(?:embedding|tts|image|robotics|live)/i.test(String(model.model || model.remoteModel || ''))) ||
+          (['openai-chat','openai-responses'].includes(protocol) &&
+            /(?:gpt-audio|gpt-4o-(?:audio|mini-audio|transcribe|mini-transcribe))/i.test(String(model.model || model.remoteModel || '')))),
+      supportsVideo:!!model.supportsVideo,
+      pipelineTask:String(model.pipelineTask||model.task||''),
+      capabilities:model.capabilities&&typeof model.capabilities==='object'?{...model.capabilities}:{},
       public:!!model.public, useSharedKeys:model.useSharedKeys !== false, local, builtInLocal:!!model.builtInLocal
     };
   }
@@ -66,7 +81,7 @@
     const storedById=new Map(stored.filter(x=>allBuiltinIds.has(x.id)).map(x=>[x.id,x]));
     let builtins=builtinDefaults.filter(base=>!disabledBuiltInIds.has(base.id)).map(base=>{
       const saved=storedById.get(base.id);
-      return saved ? cleanModel({...base,name:saved.name||base.name,model:saved.model||base.model,remoteModel:saved.model||base.model}) : base;
+      return saved ? cleanModel({...base,name:saved.name||base.name,model:saved.model||base.model,remoteModel:saved.model||base.model,supportsVision:saved.supportsVision,supportsAudio:saved.supportsAudio,pipelineTask:saved.pipelineTask,capabilities:saved.capabilities}) : base;
     });
     const custom=stored.filter(x=>!allBuiltinIds.has(x.id));
     let models=[...builtins,...custom];
@@ -91,7 +106,7 @@
     });
     const builtinOverrides=builtins.filter((model,index)=>{
       const base=builtinDefaults.find(x=>x.id===model.id);
-      return base&&(model.name!==base.name||model.model!==base.model);
+      return base&&(model.name!==base.name||model.model!==base.model||model.supportsVision!==base.supportsVision||model.supportsAudio!==base.supportsAudio||model.pipelineTask!==base.pipelineTask||JSON.stringify(model.capabilities||{})!==JSON.stringify(base.capabilities||{}));
     });
     const custom=input.filter(x=>x.id && !allBuiltinIds.has(x.id) && x.protocol && (x.protocol==='local-transformers' ? x.model : x.endpoint));
     let models=[...builtins,...custom];
@@ -229,8 +244,8 @@
       `Files: ${projectFiles.length} files`,
       tab?.kind === 'file' ? `Active file: ${tab.path}` : 'Active file: none'
     ];
-    if (activeContent && !sensitivePath(tab?.path) && activeContent.length <= (options.maxFileChars || 20000)) parts.push(`Active file contents:\n${activeContent}`);
-    else if (activeContent && sensitivePath(tab?.path)) parts.push('Active file contents are omitted from automatic context because the filename looks sensitive.');
+    if (options.includeActiveFile !== false && activeContent && !sensitivePath(tab?.path) && activeContent.length <= (options.maxFileChars || 20000)) parts.push(`Active file contents:\n${activeContent}`);
+    else if (options.includeActiveFile !== false && activeContent && sensitivePath(tab?.path)) parts.push('Active file contents are omitted from automatic context because the filename looks sensitive.');
     if (selection) parts.push(`Current selection:\n${selection}`);
     return parts.join('\n\n');
   }
@@ -281,7 +296,7 @@
   const root = window.EditorAI = window.EditorAI || {};
   const PREFS_KEY = 'editor.aiPreferences.v1';
   const ANALYTICS_KEY = 'editor.aiAnalytics.v1';
-  const DEFAULTS = { retry429:true, max429Retries:5, baseRetryDelay:1500, retryTransport:true, maxTransportRetries:2, transportRetryDelay:1000, toolRecovery:true, maxToolRecoveryRetries:2, customInstructions:'', agentInstructions:'', showActivity:true };
+  const DEFAULTS = { retry429:true, max429Retries:5, baseRetryDelay:1500, retryTransport:true, maxTransportRetries:2, transportRetryDelay:1000, toolRecovery:true, maxToolRecoveryRetries:2, customInstructions:'', agentInstructions:'', showActivity:true, showAttachmentPreviews:true };
   function read(key,fallback){try{const v=JSON.parse(localStorage.getItem(key)||'null');return v&&typeof v==='object'?v:fallback;}catch(_){return fallback;}}
   function save(key,value){try{localStorage.setItem(key,JSON.stringify(value));}catch(_) {}}
   function getAIPreferences(){return {...DEFAULTS,...read(PREFS_KEY,{})};}
@@ -529,10 +544,13 @@
       if(!provider)throw new Error('No AI provider is available.');
       const registeredTools=this.listTools(),toolDefs=toolSchema(registeredTools);
       const canNative=!!model.supportsTools&&registeredTools.length>0;
+      // Local Transformers.js pipelines support tool-aware chat templates. Use
+      // their structured tool input instead of relying on schemas in plain text.
+      const canTemplateTools=!canNative&&provider.kind==='local'&&model.supportsAgentTools===true&&registeredTools.length>0;
       const runOptions={emit:sendEvent,permissions:options.permissions||this.permissions,requestPermission:options.requestPermission||this.requestPermission,beforeTool:options.beforeTool||this.beforeTool,afterTool:options.afterTool||this.afterTool};
       const working=messages.map(x=>({role:x.role,content:x.content,...(x.tool_call_id?{tool_call_id:x.tool_call_id}:{}),...(x.name?{name:x.name}:{}),...(Array.isArray(x.tool_calls)?{tool_calls:x.tool_calls}:{}),...(x.role==='assistant'&&x._geminiContent?{_geminiContent:x._geminiContent}:{}),...(x._geminiCallId?{_geminiCallId:x._geminiCallId}:{})}));
       if(!canNative) {
-        const instructions=String(options.toolInstructions||this.toolInstructions||'')+(registeredTools.length?'\n\nAvailable tool schemas:\n'+registeredTools.map(t=>JSON.stringify({name:t.name,description:t.description,parameters:t.parameters||{type:'object',properties:{}}})).join('\n'):'');
+        const instructions=String(options.toolInstructions||this.toolInstructions||'')+(registeredTools.length&&!canTemplateTools?'\n\nAvailable tool schemas:\n'+registeredTools.map(t=>JSON.stringify({name:t.name,description:t.description,parameters:t.parameters||{type:'object',properties:{}}})).join('\n'):'');
         if(working[0]?.role==='system')working[0]={...working[0],content:working[0].content+instructions};
         else working.unshift({role:'system',content:(options.systemPrompt||'')+instructions});
       }
@@ -551,9 +569,9 @@
           working.push({role:'assistant',content:msg.content||'',tool_calls:msg.tool_calls,_geminiContent:msg._geminiContent||null});
           for(const call of calls){const result=await this.executeTool(call,runOptions);if(result?.exitEarly===true){finalText=String(result.message||narration||'');sendEvent({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'tool',tool_call_id:call.id,_geminiCallId:call._geminiCallId,name:call.name,content:stringifyResult(result)});}
         } else {
-          let text='',lastReasoning='';
+          let text='',lastReasoning='',rawAssistantContent=null;
           sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps});
-          const streamOptions={model,conversationId:options.conversationId,modelId:options.modelId||model.id||null,signal:options.signal,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay};
+          const streamOptions={model,conversationId:options.conversationId,modelId:options.modelId||model.id||null,signal:options.signal,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay,...(canTemplateTools?{tools:toolDefs,onRawGeneratedText:value=>{rawAssistantContent=String(value??'');}}:{})};
           for await(const chunk of provider.streamEvents(working,streamOptions)){
             if(chunk.text!==undefined){
               const next=String(chunk.text??'');
@@ -569,8 +587,24 @@
           }
           const calls=parseToolProtocol(text,registeredTools);
           if(!calls.length){finalText=stripToolProtocol(text,registeredTools);sendEvent({type:'assistant',text:finalText});sendEvent({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
-          const clean=stripToolProtocol(text,registeredTools);if(clean)sendEvent({type:'assistant_activity',text:clean});working.push({role:'assistant',content:clean});
-          for(const call of calls){const result=await this.executeTool(call,runOptions);if(result?.exitEarly===true){finalText=String(result.message||clean||'');sendEvent({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'user',content:'Tool result for '+call.name+':\n'+stringifyResult(result)});}
+          const clean=stripToolProtocol(text,registeredTools);if(clean)sendEvent({type:'assistant_activity',text:clean});
+          if(canTemplateTools){
+            // Preserve the exact generated token text where the local runtime
+            // can provide it. This includes special channel markers that the visible
+            // TextStreamer intentionally omits. Qwen templates serialize assistant
+            // content verbatim; rebuilding a structured tool_calls object changes
+            // the generated token sequence and breaks KV-prefix reuse.
+            working.push({role:'assistant',content:rawAssistantContent??text});
+          }else{
+            working.push({role:'assistant',content:clean});
+          }
+          for(const call of calls){
+            const result=await this.executeTool(call,runOptions);
+            if(result?.exitEarly===true){finalText=String(result.message||clean||'');sendEvent({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}
+            working.push(canTemplateTools
+              ? {role:'tool',name:call.name,content:stringifyResult(result)}
+              : {role:'user',content:'Tool result for '+call.name+':\n'+stringifyResult(result)});
+          }
         }
       }
       sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',final:true});
@@ -604,6 +638,9 @@
         tools: !!options.capabilities?.tools,
         reasoning: !!options.capabilities?.reasoning,
         vision: !!options.capabilities?.vision,
+        documents: options.capabilities?.documents !== false,
+        audio: !!options.capabilities?.audio,
+        video: !!options.capabilities?.video,
         structuredOutput: !!options.capabilities?.structuredOutput,
         ...(options.capabilities || {})
       });
@@ -644,6 +681,9 @@
         reasoning:model.supportsReasoning === true,
         streaming:model.supportsStreaming !== false,
         vision:model.supportsVision === true,
+        documents:model.supportsDocuments !== false,
+        audio:model.supportsAudio === true,
+        video:model.supportsVideo === true,
         structuredOutput:model.supportsStructuredOutput === true
       };
     }
