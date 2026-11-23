@@ -865,6 +865,24 @@
         }
         return next;
       });
+      const readVideoDuration=source=>new Promise((resolve,reject)=>{
+        if(!(source instanceof Blob)){reject(new Error('The video attachment is not a readable browser file.'));return;}
+        const video=document.createElement('video'),url=URL.createObjectURL(source);
+        let timeout=null,settled=false;
+        const finish=(error,value)=>{
+          if(settled)return;settled=true;
+          if(timeout)clearTimeout(timeout);
+          video.onloadedmetadata=null;video.onerror=null;
+          video.pause();video.removeAttribute('src');video.load();URL.revokeObjectURL(url);
+          if(error)reject(error);else resolve(value);
+        };
+        timeout=setTimeout(()=>finish(new Error('Timed out reading video metadata.')),15000);
+        video.preload='metadata';video.muted=true;video.playsInline=true;
+        video.onloadedmetadata=()=>finish(null,Number(video.duration));
+        video.onerror=()=>finish(new Error('The browser could not read this video format.'));
+        video.src=url;
+        try{video.load();}catch(error){finish(error);}
+      });
       const prepareVideoFrames=async(lib,sourceMessages)=>{
         if(typeof lib.load_video!=='function')throw new Error('This Transformers.js runtime does not include browser video decoding. Reload the editor to update its local AI runtime.');
         const videoCount=sourceMessages.reduce((count,message)=>count+(Array.isArray(message?.content)?message.content.filter(part=>part?.type==='video').length:0),0);
@@ -886,13 +904,16 @@
             if(part?.type!=='video'){content.push(part);continue;}
             const source=part.source||part.blob||part.file;
             if(!source)throw new Error('The video attachment "'+String(part.name||'Video')+'" is missing its file data.');
-            this.emit({inference:{stage:'prompt',label:'Decoding video '+String(decoded+1)+'/'+String(videoCount)+' · '+String(part.name||'Video'),progress:Math.round(decoded/videoCount*100)}});
+            this.emit({inference:{stage:'prompt',label:'Reading video metadata '+String(decoded+1)+'/'+String(videoCount)+' · '+String(part.name||'Video'),progress:Math.round(decoded/videoCount*100)}});
+            let duration=0;
+            try{duration=await readVideoDuration(source);}
+            catch(error){throw new Error('Could not read video "'+String(part.name||'Video')+'". Try MP4 (H.264) or WebM (VP9). '+(error?.message||String(error)));}
+            if(!Number.isFinite(duration)||duration<=0)throw new Error('The video "'+String(part.name||'Video')+'" has no readable duration.');
+            if(duration>60)throw new Error('Video attachments are limited to 60 seconds. Trim "'+String(part.name||'Video')+'" and try again.');
             let video;
             try{video=await lib.load_video(source,{fps:1});}
             catch(error){throw new Error('Could not decode video "'+String(part.name||'Video')+'". Try MP4 (H.264) or WebM (VP9). '+(error?.message||String(error)));}
-            const duration=Number(video?.duration)||0;
-            if(!Number.isFinite(duration)||duration<=0)throw new Error('The video "'+String(part.name||'Video')+'" has no readable duration.');
-            if(duration>60)throw new Error('Video attachments are limited to 60 seconds. Trim "'+String(part.name||'Video')+'" and try again.');
+            duration=Number(video?.duration)||duration;
             const frames=Array.isArray(video?.frames)?video.frames:[];
             if(!frames.length)throw new Error('No frames could be decoded from "'+String(part.name||'Video')+'".');
             const indexes=frames.length<=perVideoFrameBudget
