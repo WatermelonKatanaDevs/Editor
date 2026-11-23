@@ -1364,7 +1364,7 @@ window.__editorInitPromise = (async function () {
       mediaState.contextGuards.push({context, guard});
     } catch (_) {}
   }
-  function addMediaPauseStateToWindow(win, mediaState) {
+  function addMediaPauseStateToWindow(win, mediaState, capturePlayback = false) {
     if (!win || !mediaState || mediaState.windows.has(win)) return;
     mediaState.windows.add(win);
     try {
@@ -1376,7 +1376,16 @@ window.__editorInitPromise = (async function () {
       states.add(mediaState);
       for (const context of win.__editorTrackedAudioContexts || []) {
         ensureMediaContextGuard(context, mediaState);
-        try { if (context.state === 'running') Promise.resolve(context.suspend()).catch(() => {}); } catch (_) {}
+        if (capturePlayback) {
+          try {
+            if (context.state === 'running' && !mediaState.playingContexts.includes(context)) {
+              mediaState.playingContexts.push(context);
+              Promise.resolve(context.suspend()).catch(() => {});
+            }
+          } catch (_) {}
+        } else {
+          try { if (context.state === 'running') Promise.resolve(context.suspend()).catch(() => {}); } catch (_) {}
+        }
       }
     } catch (_) {}
   }
@@ -1526,8 +1535,6 @@ window.__editorInitPromise = (async function () {
 
     for (const doc of tracker?.documents || []) {
       mediaState.documents.add(doc);
-      const win = doc.defaultView;
-      addMediaPauseStateToWindow(win, mediaState);
       ensureMediaDocumentGuard(doc, mediaState);
     }
     for (const media of tracker?.mediaElements || []) {
@@ -1537,16 +1544,7 @@ window.__editorInitPromise = (async function () {
       } catch (_) {}
     }
     for (const win of tracker?.windows || []) {
-      addMediaPauseStateToWindow(win, mediaState);
-      for (const context of win.__editorTrackedAudioContexts || []) {
-        try {
-          if (context.state === 'running') {
-            mediaState.playingContexts.push(context);
-            ensureMediaContextGuard(context, mediaState);
-            Promise.resolve(context.suspend()).catch(() => {});
-          }
-        } catch (_) {}
-      }
+      addMediaPauseStateToWindow(win, mediaState, true);
     }
     return mediaState;
   }
