@@ -292,9 +292,12 @@ class Network extends EventHandler {
     };
     const sendSync=(currentRequest,currentType,responseFilter)=>{
       this.dispatchEvent('requeststart',currentRequest,currentType);
+      const currentPolicy=MockCORS.getPolicy(currentRequest,currentType,currentRequest.__wkInitiatorOrigin||null);
       const endpoints=isEmulatedLoopbackRequest(currentRequest)
         ?this.endpoints.filter(endpoint=>endpoint&&!endpoint.__browserDefaultFallback&&!endpoint.__browserProxyEndpoint)
-        :this.endpoints;
+        :currentPolicy.crossOrigin&&currentPolicy.mode==='cors'
+          ?this.endpoints.filter(endpoint=>endpoint&&endpoint.__browserProxyEndpoint)
+          :this.endpoints;
       const accept=typeof responseFilter==='function'?responseFilter:response=>response.ok;
       let selected=null,fallbackError=null,last=null,lastError=null;
       for(const endpoint of endpoints){
@@ -377,13 +380,17 @@ class Network extends EventHandler {
   async _requestObjectRaw(request,type,filter) {
     request.__original_url=request.url;request.request_type=type;
     this.dispatchEvent('requeststart',request,type);
+    const corsPolicy=MockCORS.getPolicy(request,type,request.__wkInitiatorOrigin||null);
     const endpoints=isEmulatedLoopbackRequest(request)
       ?this.endpoints.filter(endpoint=>endpoint&&!endpoint.__browserDefaultFallback&&!endpoint.__browserProxyEndpoint)
-      :this.endpoints;
+      :corsPolicy.crossOrigin&&corsPolicy.mode==='cors'
+        ?this.endpoints.filter(endpoint=>endpoint&&endpoint.__browserProxyEndpoint)
+        :this.endpoints;
     const response=await this.searchEndpoints(async function(endpoint){
       endpoint.dispatchEvent('handlerequest',request,type);
       const endpointRequest=request.clone();
       if(request.__wkInitiatorOrigin)endpointRequest.__wkInitiatorOrigin=request.__wkInitiatorOrigin;
+      if(request.__wkCorsMode)endpointRequest.__wkCorsMode=request.__wkCorsMode;
       const endpointResponse=await endpoint.handleRequest(endpointRequest,type);
       if(!endpointResponse)return null;
       endpoint.dispatchEvent('returnresponse',endpointResponse,request,type);
@@ -550,7 +557,11 @@ class NetworkEndpoint extends EventHandler {
 
 function buildProxyRequestURLForNetwork(proxy,request,type,obscureURL=true){
   const url=new URL(buildProxyRequestURL(proxy,request.url,obscureURL));
-  if(request.__wkInitiatorOrigin)url.searchParams.set('wk_origin',request.__wkInitiatorOrigin);
+  let targetOrigin=null;
+  try{targetOrigin=new URL(request.url).origin;}catch(_){}
+  if(request.__wkCorsMode==='cors'&&request.__wkInitiatorOrigin&&targetOrigin&&targetOrigin!==request.__wkInitiatorOrigin){
+    url.searchParams.set('wk_origin',request.__wkInitiatorOrigin);
+  }
   if(type==='cors-preflight'){
     url.searchParams.set('wk_cors_preflight','1');
     url.searchParams.set('wk_cors_request_method',request.headers?.get?.('Access-Control-Request-Method')||'GET');
