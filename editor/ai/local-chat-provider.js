@@ -611,7 +611,8 @@
             await this.evictKVCache(conversationId);
           }
           if(result===null){
-            if(this.inference?.stage!=='generating')this.emit({inference:{stage:'generating',label:'Generating response',progress:null}});
+            // Keep the indeterminate status on prompt processing until the streamer
+            // confirms that generated output has started.
             result=await generator(requestMessages,{...generationOptions,...(streamer?{streamer}:{})});
           }
           if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
