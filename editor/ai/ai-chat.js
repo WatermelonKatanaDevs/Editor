@@ -81,7 +81,7 @@
     const storedById=new Map(stored.filter(x=>allBuiltinIds.has(x.id)).map(x=>[x.id,x]));
     let builtins=builtinDefaults.filter(base=>!disabledBuiltInIds.has(base.id)).map(base=>{
       const saved=storedById.get(base.id);
-      return saved ? cleanModel({...base,name:saved.name||base.name,model:saved.model||base.model,remoteModel:saved.model||base.model}) : base;
+      return saved ? cleanModel({...base,name:saved.name||base.name,model:saved.model||base.model,remoteModel:saved.model||base.model,supportsVision:saved.supportsVision,supportsAudio:saved.supportsAudio,pipelineTask:saved.pipelineTask,capabilities:saved.capabilities}) : base;
     });
     const custom=stored.filter(x=>!allBuiltinIds.has(x.id));
     let models=[...builtins,...custom];
@@ -106,7 +106,7 @@
     });
     const builtinOverrides=builtins.filter((model,index)=>{
       const base=builtinDefaults.find(x=>x.id===model.id);
-      return base&&(model.name!==base.name||model.model!==base.model);
+      return base&&(model.name!==base.name||model.model!==base.model||model.supportsVision!==base.supportsVision||model.supportsAudio!==base.supportsAudio||model.pipelineTask!==base.pipelineTask||JSON.stringify(model.capabilities||{})!==JSON.stringify(base.capabilities||{}));
     });
     const custom=input.filter(x=>x.id && !allBuiltinIds.has(x.id) && x.protocol && (x.protocol==='local-transformers' ? x.model : x.endpoint));
     let models=[...builtins,...custom];
