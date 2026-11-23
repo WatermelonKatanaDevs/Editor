@@ -360,7 +360,7 @@ class Network extends EventHandler {
       const validity=MockCORS.validateNoCorsRequest(request);
       if(!validity.ok)throw new TypeError(validity.reason);
       const response=await this._requestObjectRaw(request,type,responseFilter||(()=>true));
-      if(response&&type==='fetch')return MockCORS.createOpaqueResponse();
+      if(response&&(type==='fetch'||type==='worker-fetch'))return MockCORS.createOpaqueResponse();
       return response;
     }
     if(policy.mode!=='cors')return await this._requestObjectRaw(request,type,filter);
