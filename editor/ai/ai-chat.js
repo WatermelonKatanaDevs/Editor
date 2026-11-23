@@ -533,10 +533,13 @@
       if(!provider)throw new Error('No AI provider is available.');
       const registeredTools=this.listTools(),toolDefs=toolSchema(registeredTools);
       const canNative=!!model.supportsTools&&registeredTools.length>0;
+      // Local Transformers.js pipelines support tool-aware chat templates. Use
+      // their structured tool input instead of relying on schemas in plain text.
+      const canTemplateTools=!canNative&&provider.kind==='local'&&model.supportsAgentTools===true&&registeredTools.length>0;
       const runOptions={emit:sendEvent,permissions:options.permissions||this.permissions,requestPermission:options.requestPermission||this.requestPermission,beforeTool:options.beforeTool||this.beforeTool,afterTool:options.afterTool||this.afterTool};
       const working=messages.map(x=>({role:x.role,content:x.content,...(x.tool_call_id?{tool_call_id:x.tool_call_id}:{}),...(x.name?{name:x.name}:{}),...(Array.isArray(x.tool_calls)?{tool_calls:x.tool_calls}:{}),...(x.role==='assistant'&&x._geminiContent?{_geminiContent:x._geminiContent}:{}),...(x._geminiCallId?{_geminiCallId:x._geminiCallId}:{})}));
       if(!canNative) {
-        const instructions=String(options.toolInstructions||this.toolInstructions||'')+(registeredTools.length?'\n\nAvailable tool schemas:\n'+registeredTools.map(t=>JSON.stringify({name:t.name,description:t.description,parameters:t.parameters||{type:'object',properties:{}}})).join('\n'):'');
+        const instructions=String(options.toolInstructions||this.toolInstructions||'')+(registeredTools.length&&!canTemplateTools?'\n\nAvailable tool schemas:\n'+registeredTools.map(t=>JSON.stringify({name:t.name,description:t.description,parameters:t.parameters||{type:'object',properties:{}}})).join('\n'):'');
         if(working[0]?.role==='system')working[0]={...working[0],content:working[0].content+instructions};
         else working.unshift({role:'system',content:(options.systemPrompt||'')+instructions});
       }
@@ -557,7 +560,7 @@
         } else {
           let text='',lastReasoning='';
           sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps});
-          const streamOptions={model,conversationId:options.conversationId,modelId:options.modelId||model.id||null,signal:options.signal,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay};
+          const streamOptions={model,conversationId:options.conversationId,modelId:options.modelId||model.id||null,signal:options.signal,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay,...(canTemplateTools?{tools:toolDefs}:{})};
           for await(const chunk of provider.streamEvents(working,streamOptions)){
             if(chunk.text!==undefined){
               const next=String(chunk.text??'');
@@ -573,8 +576,21 @@
           }
           const calls=parseToolProtocol(text,registeredTools);
           if(!calls.length){finalText=stripToolProtocol(text,registeredTools);sendEvent({type:'assistant',text:finalText});sendEvent({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
-          const clean=stripToolProtocol(text,registeredTools);if(clean)sendEvent({type:'assistant_activity',text:clean});working.push({role:'assistant',content:clean});
-          for(const call of calls){const result=await this.executeTool(call,runOptions);if(result?.exitEarly===true){finalText=String(result.message||clean||'');sendEvent({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'user',content:'Tool result for '+call.name+':\n'+stringifyResult(result)});}
+          const clean=stripToolProtocol(text,registeredTools);if(clean)sendEvent({type:'assistant_activity',text:clean});
+          if(canTemplateTools){
+            // Qwen-style templates serialize assistant tool_calls and tool-role
+            // messages into their native tool-call and tool-response format.
+            working.push({role:'assistant',content:clean,tool_calls:calls.map(call=>({id:call.id,type:'function',function:{name:call.name,arguments:call.arguments}}))});
+          }else{
+            working.push({role:'assistant',content:clean});
+          }
+          for(const call of calls){
+            const result=await this.executeTool(call,runOptions);
+            if(result?.exitEarly===true){finalText=String(result.message||clean||'');sendEvent({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}
+            working.push(canTemplateTools
+              ? {role:'tool',name:call.name,content:stringifyResult(result)}
+              : {role:'user',content:'Tool result for '+call.name+':\n'+stringifyResult(result)});
+          }
         }
       }
       sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',final:true});
