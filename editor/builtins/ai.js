@@ -925,7 +925,7 @@ const makeEditorTools = (() => {
       return {
         documents:model?.supportsDocuments!==false&&capabilities.documents!==false,
         vision:imageProtocol&&model?.supportsVision===true&&capabilities.vision===true,
-        audio:local&&model?.supportsAudio===true&&capabilities.audio===true
+        audio:local&&model?.supportsAudio===true&&capabilities.audio===true&&/gemma[-_/ ]?4/i.test(String(model?.model||model?.remoteModel||''))
       };
     }
     function attachmentSupported(item,model=registry.active()){
