@@ -538,8 +538,11 @@
       try{await model?.dispose?.();}catch(_){}
       throw new Error('Transformers.js could not initialize the Gemma 4 processor and tokenizer.');
     }
-    const generate=async(messages,callOptions={})=>{
-      const {tools,...generationOptions}=callOptions||{};
+    if(typeof lib.load_audio!=='function'){
+      try{await model?.dispose?.();}catch(_){}
+      throw new Error('This Transformers.js runtime does not include browser audio decoding support.');
+    }
+    const generateOnce=async(messages,generationOptions,tools,audio=null)=>{
       const prompt=processor.apply_chat_template(messages,{
         add_generation_prompt:true,
         ...(Array.isArray(tools)&&tools.length?{tools}:{})
@@ -556,7 +559,7 @@
       const images=imageSources.length
         ? await Promise.all(imageSources.map(image=>image instanceof lib.RawImage?image:lib.load_image(image)))
         : null;
-      const inputs=await processor(prompt,images,null,{add_special_tokens:false});
+      const inputs=await processor(prompt,images,audio,{add_special_tokens:false});
       let output=null;
       try{
         output=await model.generate({...inputs,...generationOptions});
@@ -565,11 +568,101 @@
         const promptLength=Number(inputs?.input_ids?.dims?.at(-1))||0;
         const generatedIds=allTokenIds.slice(promptLength);
         const generated=processor.tokenizer.decode(generatedIds,{skip_special_tokens:true});
-        return [{generated_text:[{role:'assistant',content:String(generated||'')}]}];
+        return String(generated||'');
       }finally{
         const tensors=new Set([...Object.values(inputs||{}),output?.sequences||output].filter(value=>value&&typeof value.dispose==='function'));
         for(const tensor of tensors){try{await tensor.dispose();}catch(_){}}
       }
+    };
+    const loadAudio=async source=>{
+      let objectUrl='';
+      try{
+        const response=await fetch(source);
+        if(!response.ok)throw new Error('Could not read the attached audio file ('+response.status+').');
+        const blob=await response.blob();
+        objectUrl=URL.createObjectURL(blob);
+        const waveform=await lib.load_audio(objectUrl,16000);
+        if(!waveform?.length)throw new Error('The attached audio file contains no decodable audio.');
+        return waveform instanceof Float32Array?waveform:Float32Array.from(waveform);
+      }catch(error){
+        throw new Error('Could not decode the attached audio. Try WAV, MP3, M4A, AAC, OGG, or FLAC. '+(error?.message||String(error)));
+      }finally{
+        if(objectUrl)URL.revokeObjectURL(objectUrl);
+      }
+    };
+    const generate=async(messages,callOptions={})=>{
+      const {tools,audioProgress,...generationOptions}=callOptions||{};
+      let audioMessageIndex=-1,audioParts=[];
+      for(let i=0;i<(messages||[]).length;i++){
+        const message=messages[i];
+        if(message?.role!=='user'||!Array.isArray(message.content))continue;
+        const parts=message.content.filter(part=>part?.type==='audio');
+        if(parts.length){audioMessageIndex=i;audioParts=parts;}
+      }
+      if(!audioParts.length)return [{generated_text:[{role:'assistant',content:await generateOnce(messages,generationOptions,tools,null)}]}];
+      const audioMessage=messages[audioMessageIndex];
+      const allContent=audioMessage.content||[];
+      const originalPrompt=allContent.filter(part=>part?.type==='text').map(part=>String(part.text||'')).join('\n').trim()||'Please analyze this audio.';
+      const imageParts=allContent.filter(part=>part?.type==='image');
+      const maxSamples=30*16000;
+      const segments=[];
+      let totalDuration=0;
+      for(const part of audioParts){
+        const source=part.url||part.data||part.src;
+        if(!source)throw new Error('An audio attachment is missing its file data.');
+        const waveform=await loadAudio(source);
+        const segmentCount=Math.max(1,Math.ceil(waveform.length/maxSamples));
+        const segmentSamples=Math.ceil(waveform.length/segmentCount);
+        totalDuration+=waveform.length/16000;
+        if(totalDuration>10*60)throw new Error('Audio attachments are limited to 10 minutes in total. Trim the recording and try again.');
+        for(let index=0;index<segmentCount;index++){
+          const start=index*segmentSamples,end=Math.min(waveform.length,start+segmentSamples);
+          if(end<=start)continue;
+          segments.push({
+            samples:waveform.slice(start,end),
+            name:String(part.name||part.filename||'Audio'),
+            startSeconds:start/16000,
+            endSeconds:end/16000
+          });
+        }
+      }
+      if(!segments.length)throw new Error('No usable audio segments were found.');
+      if(segments.length===1){
+        audioProgress?.({index:1,total:1,name:segments[0].name,startSeconds:0,endSeconds:totalDuration});
+        const singleMessage={...audioMessage,content:[...imageParts,{type:'audio'},{type:'text',text:originalPrompt}]};
+        return [{generated_text:[{role:'assistant',content:await generateOnce([...messages.slice(0,audioMessageIndex),singleMessage],generationOptions,tools,segments[0].samples)}]}];
+      }
+
+      // Gemma 4 accepts at most 30 seconds of audio per processor call. Analyze
+      // evenly sized segments in order, carrying text summaries forward, then
+      // synthesize one answer to the user's original prompt.
+      const workingMessages=messages.slice(0,audioMessageIndex);
+      const segmentSummaries=[];
+      const segmentOptions={...generationOptions,max_new_tokens:Math.min(384,Number(generationOptions.max_new_tokens)||384)};
+      delete segmentOptions.streamer;
+      for(let index=0;index<segments.length;index++){
+        const segment=segments[index];
+        const segmentPrompt=originalPrompt+
+          '\n\nThis is audio segment '+(index+1)+' of '+segments.length+
+          ' from "'+segment.name+'", covering '+segment.startSeconds.toFixed(1)+'–'+segment.endSeconds.toFixed(1)+
+          ' seconds. Analyze this segment in relation to the original request. Give concise observations grounded only in what is audible; do not guess details that this segment cannot establish.';
+        audioProgress?.({index:index+1,total:segments.length,name:segment.name,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds});
+        const segmentMessage={...audioMessage,content:[...imageParts,{type:'audio'},{type:'text',text:segmentPrompt}]};
+        const summary=await generateOnce([...workingMessages,segmentMessage],segmentOptions,tools,segment.samples);
+        segmentSummaries.push({name:segment.name,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds,text:summary});
+        workingMessages.push({role:'user',content:segmentPrompt},{role:'assistant',content:summary});
+      }
+      const notes=segmentSummaries.map((item,index)=>
+        'Segment '+(index+1)+' ('+item.name+', '+item.startSeconds.toFixed(1)+'–'+item.endSeconds.toFixed(1)+'s):\n'+item.text
+      ).join('\n\n');
+      workingMessages.push({
+        role:'user',
+        content:'Original request: '+originalPrompt+
+          '\n\nThe complete recording was analyzed in sequential segments. Combine the observations below and answer the original request. Preserve useful timestamps, distinguish observations from uncertain guesses, and avoid inventing details.\n\n'+notes
+      });
+      audioProgress?.({stage:'synthesizing',index:segments.length,total:segments.length,name:'Combining segment analyses'});
+      const finalText=await generateOnce(workingMessages,generationOptions,tools,null);
+      return [{generated_text:[{role:'assistant',content:finalText}]}];
     };
     generate.model=model;
     generate.processor=processor;
@@ -743,14 +836,19 @@
       const signal=options.signal,model=this.model;
       if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
       const hasImages=messages.some(message=>Array.isArray(message?.images)&&message.images.length>0);
+      const hasAudio=messages.some(message=>Array.isArray(message?.audios)&&message.audios.length>0);
       const requestMessages=messages.map(message=>{
         const next={...message};
-        if(Array.isArray(message?.images)&&message.images.length){
+        const images=Array.isArray(message?.images)?message.images:[];
+        const audios=Array.isArray(message?.audios)?message.audios:[];
+        if(images.length||audios.length){
           next.content=[
-            ...message.images.map(image=>({type:'image',url:image.dataUrl})),
+            ...images.map(image=>({type:'image',url:image.dataUrl})),
+            ...audios.map(audio=>({type:'audio',url:audio.dataUrl,name:audio.name})),
             {type:'text',text:String(message.content||'')}
           ];
           delete next.images;
+          delete next.audios;
         }
         return next;
       });
@@ -765,7 +863,7 @@
         try{
           const generationOptions={max_new_tokens:Math.max(64,Math.min(4096,Number(options.maxTokens)||1024)),do_sample:true,temperature:options.temperature!=null?options.temperature:.7,top_p:options.topP!=null?options.topP:.9,...(stopper?{stopping_criteria:[stopper]}:{})};
           let result=null;
-          if(this.device==='webgpu'&&!hasImages&&model?.supportsVision!==true){
+          if(this.device==='webgpu'&&!hasImages&&!hasAudio&&model?.supportsVision!==true){
             const conversationId=String(options.conversationId||'');
             let cacheState=null;
             const previousState=conversationId?this.kvCaches.get(conversationId):null;
@@ -829,7 +927,17 @@
           if(result===null){
             // Keep the indeterminate status on prompt processing until the streamer
             // confirms that generated output has started.
-            result=await generator(requestMessages,{...generationOptions,...(streamer?{streamer}:{}),...(Array.isArray(options.tools)&&options.tools.length?{tools:options.tools}:{})});
+            result=await generator(requestMessages,{
+              ...generationOptions,
+              ...(streamer?{streamer}:{}),
+              ...(Array.isArray(options.tools)&&options.tools.length?{tools:options.tools}:{}),
+              ...(hasAudio?{audioProgress:info=>{
+                const label=info?.stage==='synthesizing'
+                  ?'Combining audio segment analyses…'
+                  :'Analyzing audio segment '+String(info?.index||1)+'/'+String(info?.total||1)+' · '+String(info?.name||'Audio');
+                this.emit({inference:{stage:'prompt',label,progress:info?.total?Math.max(0,Math.min(100,(Number(info.index)||0)/Number(info.total)*100)):null}});
+              }}:{})
+            });
           }
           if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
           return generatedText(result,generated)||generated;
