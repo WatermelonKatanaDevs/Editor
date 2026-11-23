@@ -1143,7 +1143,7 @@ const makeEditorTools = (() => {
         const detail=item.unavailable?(item.path?'Workspace file unavailable; reattach it to resend':'Original device file is not retained in chat history; reattach it to resend'):item.active?'Currently open file':item.path||item.name;
         const chipClass='ai-attachment-chip'+(supported?'':' is-unsupported')+(item.unavailable?' is-unavailable':'');
         const kind=attachmentKind(item.file||item);
-        const preview=showAttachmentPreviews&&item.file&&(kind==='audio'||kind==='image')
+        const preview=showAttachmentPreviews&&item.file&&(kind==='audio'||kind==='image'||kind==='video')
           ?mediaAttachmentPreviewMarkup(item.file,item,{removeIndex:index,supported,detail})
           :'';
         if(preview)return preview;
@@ -1447,7 +1447,7 @@ const makeEditorTools = (() => {
           for(const [attachmentIndex,item] of message.attachments.entries()){
             const file=getMessageAttachmentFile(message,attachmentIndex,item,retained);
             const kind=String(item?.kind||attachmentKind(file||item));
-            if(showAttachmentPreviews&&file&&(kind==='audio'||kind==='image')){
+            if(showAttachmentPreviews&&file&&(kind==='audio'||kind==='image'||kind==='video')){
               const template=document.createElement('template');
               template.innerHTML=mediaAttachmentPreviewMarkup(file,item);
               if(template.content.firstElementChild)attached.appendChild(template.content.firstElementChild);
