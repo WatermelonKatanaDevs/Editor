@@ -283,7 +283,7 @@
     // Browsers deliberately coarsen this value. Budget 40% of reported RAM for
     // one retained KV cache, capped to avoid reserving most of a large machine.
     // When unavailable, use a smaller fallback; WebGPU exposes no free-VRAM API.
-    const cacheBudgetBytes=memoryGiB===null?2*GiB:Math.max(512*1024*1024,Math.min(6*GiB,memoryGiB*.4*GiB));
+    const cacheBudgetBytes=memoryGiB===null?3*GiB:Math.max(512*1024*1024,Math.min(6*GiB,memoryGiB*.4*GiB));
     return {memoryGiB,cacheBudgetBytes,source:memoryGiB===null?'fallback':'navigator.deviceMemory'};
   }
   function tensorByteLength(value){
@@ -716,8 +716,8 @@
         try{return await run();}
         catch(error){
           if(options.conversationId)await this.clearKVCache(String(options.conversationId));
-          // ORT's WebGPU buffer-download failure means the GPU inference context
-          // is no longer usable. If prefill failed before emitting any text, retry
+          // A WebGPU allocation/buffer failure means the GPU inference context may
+          // no longer be usable. If prefill failed before emitting any text, retry
           // this exact request on WASM rather than making the user restart Agent.
           const canFallback=this.device==='webgpu'&&!!model&&!generated&&isWebGPUBufferFailure(error)&&!(signal&&signal.aborted);
           if(!canFallback)throw error;
