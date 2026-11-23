@@ -41,12 +41,11 @@
       supportsReasoning:model.supportsReasoning !== false, supportsStreaming:model.supportsStreaming !== false,
       supportsDocuments:model.supportsDocuments !== false,
       supportsVision:model.supportsVision !== undefined ? !!model.supportsVision : ((['any-to-any','image-text-to-text'].includes(String(model.pipelineTask||model.task||''))) || (/gemma[-_/]?4/i.test(String(model.model || model.remoteModel || '')) && /onnx/i.test(String(model.model || model.remoteModel || '')))),
-      // Older saved model records may already contain supportsAudio:false from
-      // before Gemma 4 audio was wired into the editor, so infer supported variants
-      // even when that legacy false value is present.
-      supportsAudio:!!model.supportsAudio ||
-        (local && /gemma[-_/ ]?4/i.test(String(model.model || model.remoteModel || '')) &&
-          /(?:e2b|e4b)(?:[-_/]|$)/i.test(String(model.model || model.remoteModel || ''))),
+      // Infer Gemma audio support even when old saved records contain a stale
+      // supportsAudio:false value. The current browser ONNX path is E2B/E4B only.
+      supportsAudio:local && /gemma[-_/ ]?4/i.test(String(model.model || model.remoteModel || ''))
+        ? /(?:e2b|e4b)(?:[-_/]|$)/i.test(String(model.model || model.remoteModel || ''))
+        : !!model.supportsAudio,
       supportsVideo:!!model.supportsVideo,
       pipelineTask:String(model.pipelineTask||model.task||''),
       public:!!model.public, useSharedKeys:model.useSharedKeys !== false, local, builtInLocal:!!model.builtInLocal
