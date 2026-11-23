@@ -889,6 +889,13 @@ const makeEditorTools = (() => {
     let busy=false, controller=null, editingIndex=-1;
     let attachments=[];
     const messageAttachmentFiles=new WeakMap();
+    const audioPreviewUrls=new WeakMap();
+    function audioPreviewUrl(file){
+      if(!file)return '';
+      let url=audioPreviewUrls.get(file);
+      if(!url){url=URL.createObjectURL(file);audioPreviewUrls.set(file,url);}
+      return url;
+    }
     let autoAttachmentPath='', dismissedAutoAttachmentPath='';
     const toolset=makeEditorTools({state,openFile:onOpen,onRefresh:()=>{state.fileManager?.refresh?.();updateStatus?.();},runConfigured,ensureNodeRuntime:()=>state.ensureNodeRuntime?.()});
     const client=new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork);
@@ -899,10 +906,13 @@ const makeEditorTools = (() => {
     let currentConversation=null;
     const TEXT_ATTACHMENT_EXTENSIONS=['txt','md','markdown','js','mjs','cjs','ts','tsx','jsx','json','jsonc','json5','html','htm','css','scss','less','xml','svg','yaml','yml','py','java','c','h','cpp','hpp','cc','rs','go','wgsl','glsl','vert','frag','shader','toml','ini','sh','bash','bat','ps1','vue','svelte','php','rb','swift','kt','lua','sql','csv','log','diff','patch',''];
     const IMAGE_ATTACHMENT_EXTENSIONS=['png','jpg','jpeg','webp','gif'];
+    const AUDIO_ATTACHMENT_EXTENSIONS=['wav','mp3','m4a','aac','ogg','opus','flac'];
+    const AUDIO_ATTACHMENT_MAX_BYTES=12*1024*1024;
     function attachmentExtension(file){const name=String(file?.name||'').toLowerCase(),dot=name.lastIndexOf('.');return dot<0?'':name.slice(dot+1);}
     function attachmentKind(file){
       const ext=attachmentExtension(file),mime=String(file?.type||'').toLowerCase();
       if(ext==='svg')return 'text';
+      if(AUDIO_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('audio/'))return 'audio';
       if(IMAGE_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('image/')&&ext!=='svg')return 'image';
       if(TEXT_ATTACHMENT_EXTENSIONS.includes(ext)||mime.startsWith('text/'))return 'text';
       return 'file';
@@ -912,15 +922,23 @@ const makeEditorTools = (() => {
       const capabilities=chatAI.getCapabilities(model?.id)||{};
       const local=!!(model?.local||model?.protocol==='local-transformers');
       const imageProtocol=local||['openai-chat','openai-responses','anthropic-messages','google-gemini'].includes(model?.protocol);
-      return {documents:model?.supportsDocuments!==false&&capabilities.documents!==false,vision:imageProtocol&&model?.supportsVision===true&&capabilities.vision===true};
+      return {
+        documents:model?.supportsDocuments!==false&&capabilities.documents!==false,
+        vision:imageProtocol&&model?.supportsVision===true&&capabilities.vision===true,
+        audio:local&&model?.supportsAudio===true&&capabilities.audio===true
+      };
     }
     function attachmentSupported(item,model=registry.active()){
       const caps=attachmentCapabilities(model),kind=attachmentKind(item?.file||item);
-      return kind==='text'?caps.documents:kind==='image'?caps.vision:false;
+      return kind==='text'?caps.documents:kind==='image'?caps.vision:kind==='audio'?caps.audio:false;
     }
     function supportedAttachmentExtensions(model=registry.active()){
       const caps=attachmentCapabilities(model);
-      return [...(caps.documents?TEXT_ATTACHMENT_EXTENSIONS:[]),...(caps.vision?IMAGE_ATTACHMENT_EXTENSIONS:[])].filter(Boolean);
+      return [
+        ...(caps.documents?TEXT_ATTACHMENT_EXTENSIONS:[]),
+        ...(caps.vision?IMAGE_ATTACHMENT_EXTENSIONS:[]),
+        ...(caps.audio?AUDIO_ATTACHMENT_EXTENSIONS:[])
+      ].filter(Boolean);
     }
     function makeActiveAttachment(){
       const tab=activeEditor(state),path=String(tab?.path||''),name=path.split('/').pop()||'';
@@ -940,7 +958,7 @@ const makeEditorTools = (() => {
     }
     function renderAttachmentRow(tree){
       const strip=tree?.querySelector?.('[data-attachments]');if(!strip)return;
-      const caps=attachmentCapabilities(),canAdd=caps.documents||caps.vision,visible=canAdd||attachments.length>0;
+      const caps=attachmentCapabilities(),canAdd=caps.documents||caps.vision||caps.audio,visible=canAdd||attachments.length>0;
       strip.hidden=!visible;if(!visible)return;
       const chips=attachments.map((item,index)=>{
         const supported=attachmentSupported(item);
@@ -983,7 +1001,8 @@ const makeEditorTools = (() => {
       if(kind==='image'&&supplied.startsWith('image/'))return supplied;
       const ext=attachmentExtension(file);
       const imageMimes={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',bmp:'image/bmp',avif:'image/avif',apng:'image/apng',ico:'image/x-icon'};
-      return kind==='image'?(imageMimes[ext]||'image/png'):(supplied||'text/plain');
+      const audioMimes={wav:'audio/wav',mp3:'audio/mpeg',m4a:'audio/mp4',aac:'audio/aac',ogg:'audio/ogg',opus:'audio/ogg',flac:'audio/flac'};
+      return kind==='image'?(imageMimes[ext]||'image/png'):kind==='audio'?(supplied.startsWith('audio/')?supplied:(audioMimes[ext]||'application/octet-stream')):(supplied||'text/plain');
     }
     function fileAsDataUrl(file,mimeType){
       return new Promise((resolve,reject)=>{
@@ -993,7 +1012,7 @@ const makeEditorTools = (() => {
       });
     }
     async function buildAttachmentPayload(){
-      const metadata=[],images=[],files=[],textParts=[];let textChars=0;
+      const metadata=[],images=[],audios=[],files=[],textParts=[];let textChars=0,audioBytes=0;
       for(const item of attachments){
         const openTab=item.active&&activeEditor(state)?.path===item.path?makeActiveAttachment():null;
         const file=openTab?.file||item.file;
@@ -1019,14 +1038,25 @@ const makeEditorTools = (() => {
           if(images.reduce((total,image)=>total+Math.floor(image.dataUrl.length*3/4),0)+file.size>24*1024*1024)throw new Error('Combined image attachments must be smaller than 24 MiB.');
           const mimeType=attachmentMimeType(file,kind);
           images.push({mimeType,dataUrl:await fileAsDataUrl(file,mimeType)});
+        }else if(kind==='audio'){
+          if(file.size>AUDIO_ATTACHMENT_MAX_BYTES)throw new Error(file.name+' is larger than the 12 MiB audio attachment limit.');
+          audioBytes+=file.size;
+          if(audioBytes>24*1024*1024)throw new Error('Combined audio attachments must be smaller than 24 MiB.');
+          const mimeType=attachmentMimeType(file,kind);
+          audios.push({name:String(file.name),mimeType,dataUrl:await fileAsDataUrl(file,mimeType)});
         }
       }
-      return {metadata,images,files,textContext:textParts.length?'\n\n'+textParts.join('\n\n'):''};
+      return {metadata,images,audios,files,textContext:textParts.length?'\n\n'+textParts.join('\n\n'):''};
     }
     function decorateAttachmentMessages(messages,payload){
       const output=(messages||[]).map(message=>({...message,images:undefined}));
       const user=[...output].reverse().find(message=>message.role==='user');
-      if(user){user.content=String(user.content||'')+String(payload?.textContext||'');if(payload?.images?.length)user.images=payload.images;delete user.attachments;}
+      if(user){
+        user.content=String(user.content||'')+String(payload?.textContext||'');
+        if(payload?.images?.length)user.images=payload.images;
+        if(payload?.audios?.length)user.audios=payload.audios;
+        delete user.attachments;
+      }
       return output;
     }
     function updateComposerSendState(tree){
@@ -1222,15 +1252,36 @@ const makeEditorTools = (() => {
         if(Array.isArray(message?.attachments)&&message.attachments.length){
           const attached=document.createElement('div');
           attached.className='ai-message-attachments ai-attachment-list';
-          for(const item of message.attachments){
-            const chip=document.createElement('span');
-            chip.className='ai-attachment-chip';
-            chip.title=String(item?.path||item?.name||'Attachment');
-            const name=document.createElement('span');
-            name.className='ai-attachment-name';
-            name.textContent=(item?.active?'● ':'')+String(item?.name||'Attachment');
-            chip.appendChild(name);
-            attached.appendChild(chip);
+          const retained=messageAttachmentFiles.get(message)||[];
+          for(const [attachmentIndex,item] of message.attachments.entries()){
+            const file=retained[attachmentIndex]?.file;
+            if(item?.kind==='audio'&&file){
+              const preview=document.createElement('div');
+              preview.className='ai-audio-attachment-preview';
+              const chip=document.createElement('span');
+              chip.className='ai-attachment-chip';
+              chip.title=String(item?.path||item?.name||'Audio attachment');
+              const name=document.createElement('span');
+              name.className='ai-attachment-name';
+              name.textContent=String(item?.name||'Audio');
+              chip.appendChild(name);
+              const player=document.createElement('audio');
+              player.controls=true;
+              player.preload='none';
+              player.src=audioPreviewUrl(file);
+              player.setAttribute('aria-label','Play '+String(item?.name||'audio attachment'));
+              preview.append(chip,player);
+              attached.appendChild(preview);
+            }else{
+              const chip=document.createElement('span');
+              chip.className='ai-attachment-chip';
+              chip.title=String(item?.path||item?.name||'Attachment');
+              const name=document.createElement('span');
+              name.className='ai-attachment-name';
+              name.textContent=(item?.active?'● ':'')+String(item?.name||'Attachment');
+              chip.appendChild(name);
+              attached.appendChild(chip);
+            }
           }
           content.appendChild(attached);
         }
