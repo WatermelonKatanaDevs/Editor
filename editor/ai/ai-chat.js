@@ -47,10 +47,10 @@
         ? (/gemma[-_/ ]?4/i.test(String(model.model || model.remoteModel || '')) &&
           /(?:e2b|e4b)(?:[-_/]|$)/i.test(String(model.model || model.remoteModel || '')))
         : (!!model.supportsAudio ||
-          (model.protocol==='google-gemini' &&
+          (protocol==='google-gemini' &&
             /gemini-(?:2\.5|3(?:[.-]|$)|4(?:[.-]|$))/i.test(String(model.model || model.remoteModel || '')) &&
             !/(?:embedding|tts|image|robotics|live)/i.test(String(model.model || model.remoteModel || ''))) ||
-          (['openai-chat','openai-responses'].includes(model.protocol) &&
+          (['openai-chat','openai-responses'].includes(protocol) &&
             /(?:gpt-audio|gpt-4o-(?:audio|mini-audio|transcribe|mini-transcribe))/i.test(String(model.model || model.remoteModel || '')))),
       supportsVideo:!!model.supportsVideo,
       pipelineTask:String(model.pipelineTask||model.task||''),
