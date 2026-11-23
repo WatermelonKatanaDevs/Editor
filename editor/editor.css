@@ -1121,3 +1121,18 @@ input[type="number"]:disabled::-webkit-outer-spin-button {
 
 /* Local model browser: capability and hardware-fit metadata */
 .ai-local-model-filters{display:flex;flex-direction:column;gap:9px;margin:7px 0 10px;padding:9px;background:#191919;border:1px solid #303030;border-radius:3px}.ai-local-filter-group{display:flex;align-items:center;flex-wrap:wrap;gap:8px 13px}.ai-local-filter-group>span{color:var(--editor-muted);font-size:10px;font-weight:600;margin-right:3px}.ai-local-filter-group label{display:inline-flex;align-items:center;gap:4px;color:var(--editor-text-secondary);font-size:10px}.ai-local-filter-group input[type=checkbox]{width:auto;margin:0}.ai-local-range-filters label{flex-direction:column;align-items:flex-start;gap:3px}.ai-local-range-filters input{width:100px;box-sizing:border-box;background:var(--editor-bg);color:var(--editor-text-secondary);border:1px solid #3a3a3a;padding:5px;font:10px monospace}.ai-local-model-filters p{margin:0;color:#777;font-size:9px;line-height:1.4}.ai-local-model-metadata{line-height:1.5}.ai-local-model-capabilities{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}.ai-local-model-capabilities span{display:inline-block;padding:2px 5px;border:1px solid #3b4c40;border-radius:2px;background:#1c2920;color:#9fc8a7;font-size:9px;line-height:1.2}
+
+
+/* Keep media attachment cards identical in the composer and sent prompts. */
+.ai-media-attachment-list{display:flex;flex-direction:row;align-items:flex-start;gap:7px;flex-wrap:wrap;min-width:0;max-width:100%;overflow:visible;scrollbar-width:thin}
+.ai-media-attachment-list>.ai-media-attachment-preview{flex:0 1 auto;align-self:flex-start;box-sizing:border-box}
+.ai-compose .ai-media-attachment-list{flex:1 1 auto}
+.ai-user .ai-media-attachment-list{align-self:flex-end;justify-content:flex-end;width:fit-content;max-width:100%;margin:0 0 5px;padding:1px 0}
+.ai-media-attachment-preview{display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:0;max-width:min(360px,100%);padding:6px;box-sizing:border-box;border:1px solid #354b40;border-radius:5px;background:#171f1b;color:#b9d5c4}
+.ai-media-attachment-heading{display:flex;align-items:center;gap:7px;min-width:0;font-size:10px}
+.ai-media-attachment-heading .ai-attachment-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-media-attachment-remove{flex:0 0 auto;padding:0 2px;background:transparent;color:inherit;border:0;font-size:14px;line-height:1;cursor:pointer}
+.ai-media-attachment-remove:hover{color:#fff}
+.ai-media-attachment-player{display:block;width:260px;max-width:100%;height:32px;flex:0 1 auto}
+.ai-media-attachment-image{display:block;max-width:min(320px,100%);max-height:220px;width:auto;height:auto;object-fit:contain;align-self:flex-start;border-radius:3px}
+.ai-media-attachment-preview.is-unsupported,.ai-media-attachment-preview.is-unavailable{border-color:#68413d;background:#2d201f;color:#d9aaa4}
