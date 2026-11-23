@@ -918,26 +918,41 @@ const makeEditorTools = (() => {
       return 'file';
     }
     function sensitiveAttachmentPath(path){return /(^|\/)(?:\.editor(?:\/.*)?|\.git(?:\/.*)?|\.env(?:\..*)?|.*(?:secret|credential|password|token|private[-_]?key).*)$/i.test(String(path||''));}
+    function isLocalGemmaAudioModel(model){
+      return !!(model?.local||model?.protocol==='local-transformers')&&
+        /gemma[-_/ ]?4/i.test(String(model?.model||model?.remoteModel||''))&&
+        /(?:e2b|e4b)(?:[-_/]|$)/i.test(String(model?.model||model?.remoteModel||''));
+    }
+    function supportedAudioAttachmentExtensions(model=registry.active()){
+      if(isLocalGemmaAudioModel(model))return AUDIO_ATTACHMENT_EXTENSIONS;
+      if(['openai-chat','openai-responses'].includes(model?.protocol))return ['wav','mp3'];
+      if(model?.protocol==='google-gemini')return AUDIO_ATTACHMENT_EXTENSIONS;
+      return [];
+    }
     function attachmentCapabilities(model=registry.active()){
       const capabilities=chatAI.getCapabilities(model?.id)||{};
       const local=!!(model?.local||model?.protocol==='local-transformers');
       const imageProtocol=local||['openai-chat','openai-responses','anthropic-messages','google-gemini'].includes(model?.protocol);
+      const audioProtocol=['openai-chat','openai-responses','google-gemini'].includes(model?.protocol);
       return {
         documents:model?.supportsDocuments!==false&&capabilities.documents!==false,
         vision:imageProtocol&&model?.supportsVision===true&&capabilities.vision===true,
-        audio:local&&model?.supportsAudio===true&&capabilities.audio===true&&/gemma[-_/ ]?4/i.test(String(model?.model||model?.remoteModel||''))
+        audio:(local?isLocalGemmaAudioModel(model):audioProtocol&&model?.supportsAudio===true)&&capabilities.audio===true
       };
     }
     function attachmentSupported(item,model=registry.active()){
-      const caps=attachmentCapabilities(model),kind=attachmentKind(item?.file||item);
-      return kind==='text'?caps.documents:kind==='image'?caps.vision:kind==='audio'?caps.audio:false;
+      const file=item?.file||item,kind=attachmentKind(file),caps=attachmentCapabilities(model);
+      if(kind==='text')return caps.documents;
+      if(kind==='image')return caps.vision;
+      if(kind==='audio')return caps.audio&&supportedAudioAttachmentExtensions(model).includes(attachmentExtension(file));
+      return false;
     }
     function supportedAttachmentExtensions(model=registry.active()){
       const caps=attachmentCapabilities(model);
       return [
         ...(caps.documents?TEXT_ATTACHMENT_EXTENSIONS:[]),
         ...(caps.vision?IMAGE_ATTACHMENT_EXTENSIONS:[]),
-        ...(caps.audio?AUDIO_ATTACHMENT_EXTENSIONS:[])
+        ...(caps.audio?supportedAudioAttachmentExtensions(model):[])
       ].filter(Boolean);
     }
     function makeActiveAttachment(){
