@@ -831,21 +831,22 @@ const makeEditorTools = (() => {
         async function loadRepositoryDetails(models,version){
           const targets=models.filter(model=>model?.id);
           if(!targets.length)return;
-          metadataProgress={done:0,total:targets.length,failed:0};
+          const progress={done:0,total:targets.length,failed:0};
+          metadataProgress=progress;
           renderList();
           let next=0;
           const worker=async()=>{
             while(next<targets.length){
               const model=targets[next++];
-              if(!await fetchRepositoryDetails(model))metadataProgress.failed++;
-              metadataProgress.done++;
+              if(!await fetchRepositoryDetails(model))progress.failed++;
+              progress.done++;
               if(version!==loadVersion)return;
-              if(metadataProgress.done===metadataProgress.total||metadataProgress.done%5===0)renderList();
+              if(progress.done===progress.total||progress.done%5===0)renderList();
             }
           };
           await Promise.all(Array.from({length:Math.min(4,targets.length)},()=>worker()));
           if(version!==loadVersion)return;
-          const failed=metadataProgress.failed;
+          const failed=progress.failed;
           metadataProgress=null;
           metadataNote=failed?('Repository details unavailable for '+failed+' model'+(failed===1?'':'s')):'Repository metadata loaded';
           renderList();
