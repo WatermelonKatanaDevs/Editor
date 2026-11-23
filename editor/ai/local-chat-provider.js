@@ -393,13 +393,11 @@
     // dimension to preserve the matching prefix without copying the entire prompt
     // through the CPU or throwing away the reusable KV state.
     const tensorEntries=Object.entries(cache||{}).filter(([,tensor])=>tensor&&typeof tensor==='object'&&Array.isArray(tensor.dims));
-    if(!tensorEntries.length)throw new Error('The local model KV cache cannot be cropped safely.');
-    for(const [,tensor] of tensorEntries){
+    const unsupported=!tensorEntries.length||tensorEntries.some(([,tensor])=>{
       const sequenceAxis=tensor.dims.length-2;
-      if(tensor.dims.length<3||typeof tensor.slice!=='function'||Number(tensor.dims[sequenceAxis])!==currentLength){
-        throw new Error('The local model KV cache contains a state that cannot be cropped safely.');
-      }
-    }
+      return tensor.dims.length<3||typeof tensor.slice!=='function'||Number(tensor.dims[sequenceAxis])!==currentLength;
+    });
+    if(unsupported){await cache?.dispose?.();return null;}
     const entries={};
     try{
       // Slice and release one tensor at a time to avoid holding two full KV caches
@@ -415,7 +413,9 @@
       return cropped;
     }catch(error){
       for(const tensor of Object.values(entries)){try{await tensor?.dispose?.();}catch(_){}}
-      throw error;
+      try{await cache?.dispose?.();}catch(_){}
+      if(isWebGPUBufferFailure(error))throw error;
+      return null;
     }
   }
   async function generateWebGPUChunked(generator,lib,messages,generationOptions,streamer,signal,onProgress,cacheState,tools){
