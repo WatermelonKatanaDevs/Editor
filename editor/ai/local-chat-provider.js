@@ -458,19 +458,6 @@
     // Once a conversation has a cache, even a short continuation can reuse it.
     if(tokenCount<=256&&!cache)return null;
     start=reusedTokens;
-    const streamedTokenIds=[];
-    if(streamer&&typeof streamer.put==='function'){
-      const originalPut=streamer.put.bind(streamer);
-      let firstPut=true;
-      streamer.put=tokenIds=>{
-        // Transformers.js sends the prompt to the streamer first. Later values are
-        // generated token IDs (bigint[][]), which can be retained without touching
-        // GPU-resident attention tensors.
-        if(firstPut)firstPut=false;
-        else streamedTokenIds.push(...flattenTokenIds(tokenIds));
-        return originalPut(tokenIds);
-      };
-    }
     try{
       onProgress?.({processed:start,total:targetEnd,cached:reusedTokens,chunkSize});
       while(start<targetEnd){
