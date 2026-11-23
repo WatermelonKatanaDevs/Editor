@@ -71,6 +71,7 @@ const makeEditorTools = (() => {
         try { tab.listener?.dispose?.(); } catch (_) {}
         try { tab.editor?.dispose?.(); } catch (_) {}
         try { tab.model?.dispose?.(); } catch (_) {}
+        try { tab._viewElement?.remove?.(); } catch (_) {}
         tab.listener = null;
         tab.editor = null;
         tab.model = null;
