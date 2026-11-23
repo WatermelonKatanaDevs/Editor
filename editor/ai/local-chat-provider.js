@@ -124,8 +124,8 @@
       await done;
       return !!existing;
     }
-    beginModel(id,model,variant){
-      this.activeModel={id:String(id),model:String(model),variant:String(variant),files:new Map()};
+    beginModel(id,model,variant,capabilities={}){
+      this.activeModel={id:String(id),model:String(model),variant:String(variant),capabilities:capabilities&&typeof capabilities==='object'?{...capabilities}:{},files:new Map()};
     }
     async finishModel(){
       const session=this.activeModel;
@@ -141,6 +141,7 @@
         fileCount:files.length,
         bytes:files.reduce((sum,file)=>sum+file.size,0),
         cachedAt:Date.now(),
+        capabilities:{...session.capabilities},
         complete:true
       };
       const db=await this.open(),tx=db.transaction(MODELS,'readwrite'),done=transactionDone(tx);
@@ -770,12 +771,14 @@
         const runtimeHits=await Promise.all(this.runtimeAssets.map(url=>this.cache.match(url).then(Boolean)));
         const runtimeCached=runtimeHits.every(Boolean);
         const cached=!strictOffline&&runtimeCached&&await this.cache.isModelCached(model.id,model.model,variant);
+        const cachedManifest=cached?await this.cache.getModel(model.id,model.model,variant):null;
+        if(cachedManifest?.capabilities){model.capabilities={...cachedManifest.capabilities,...(model.capabilities||{})};model.supportsVision=model.capabilities.vision===true;model.supportsAudio=model.capabilities.audio===true;model.pipelineTask=String(model.capabilities.pipelineTask||model.pipelineTask||'');}
         this.cacheHit=!!cached;
         this.offlineOnly=!!(strictOffline||cached);
         if(lib.env)lib.env.allowRemoteModels=!this.offlineOnly;
         await this.unload(false);
         this.loading=true;this.device=requestedDevice;this.dtype=(this.device==='webgpu'?'q4f16':'q4');
-        this.cache.beginModel(model.id,model.model,variant);
+        this.cache.beginModel(model.id,model.model,variant,{...(model.capabilities||{}),vision:model.supportsVision===true,audio:model.supportsAudio===true,pipelineTask:model.pipelineTask||model.capabilities?.pipelineTask||''});
         this.emit({loading:true,progress:0,statusText:(this.offlineOnly?'INDEXEDDB CACHE':'DOWNLOADING')+' · '+this.device.toUpperCase()+' · '+model.model});
         const progress=info=>{
           let p=Number(info&&info.progress);if(!Number.isFinite(p))p=null;if(info&&info.status==='ready')p=100;
@@ -802,7 +805,7 @@
           // the multimodal model directly rather than calling that unsupported task.
           this.generator=await createGemma4Generator(lib,model.model,this.device,this.dtype,progress);
         }else{
-          const pipelineTask=model.supportsVision===true?(model.pipelineTask||'image-text-to-text'):'text-generation';
+          const pipelineTask=(model.supportsVision===true||model.supportsAudio===true)?(model.pipelineTask||'image-text-to-text'):'text-generation';
           this.generator=await lib.pipeline(pipelineTask,model.model,{device:this.device,dtype:this.dtype,progress_callback:progress});
         }
         if(this.device==='webgpu'){
