@@ -558,9 +558,9 @@
           working.push({role:'assistant',content:msg.content||'',tool_calls:msg.tool_calls,_geminiContent:msg._geminiContent||null});
           for(const call of calls){const result=await this.executeTool(call,runOptions);if(result?.exitEarly===true){finalText=String(result.message||narration||'');sendEvent({type:'final',text:finalText,reasoning,exitedEarly:true});return {text:finalText,reasoning,exitedEarly:true};}working.push({role:'tool',tool_call_id:call.id,_geminiCallId:call._geminiCallId,name:call.name,content:stringifyResult(result)});}
         } else {
-          let text='',lastReasoning='';
+          let text='',lastReasoning='',rawAssistantContent=null;
           sendEvent({type:'request_start',model:model.model||model.id||'model',protocol:model.protocol||model.kind||'unknown',step:step+1,maxSteps});
-          const streamOptions={model,conversationId:options.conversationId,modelId:options.modelId||model.id||null,signal:options.signal,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay,...(canTemplateTools?{tools:toolDefs}:{})};
+          const streamOptions={model,conversationId:options.conversationId,modelId:options.modelId||model.id||null,signal:options.signal,systemPrompt:options.systemPrompt,thinking:true,maxTokens:options.maxTokens,onRetry:options.onRetry,max429Retries:options.max429Retries,baseRetryDelay:options.baseRetryDelay,retry429:options.retry429,retryTransport:options.retryTransport,maxTransportRetries:options.maxTransportRetries,transportRetryDelay:options.transportRetryDelay,...(canTemplateTools?{tools:toolDefs,onRawGeneratedText:value=>{rawAssistantContent=String(value??'');}}:{})};
           for await(const chunk of provider.streamEvents(working,streamOptions)){
             if(chunk.text!==undefined){
               const next=String(chunk.text??'');
@@ -578,12 +578,12 @@
           if(!calls.length){finalText=stripToolProtocol(text,registeredTools);sendEvent({type:'assistant',text:finalText});sendEvent({type:'final',text:finalText,reasoning});return {text:finalText,reasoning};}
           const clean=stripToolProtocol(text,registeredTools);if(clean)sendEvent({type:'assistant_activity',text:clean});
           if(canTemplateTools){
-            // Preserve the exact generated tool-call text. Qwen chat templates
-            // serialize it as assistant content verbatim, so the next prompt begins
-            // with the same token sequence already represented by the KV cache.
-            // Rebuilding this from parsed JSON changes whitespace/formatting and
-            // breaks prefix equality, forcing a full prefill on every tool step.
-            working.push({role:'assistant',content:text});
+            // Preserve the exact generated token text where the local runtime
+            // can provide it. This includes special channel markers that the visible
+            // TextStreamer intentionally omits. Qwen templates serialize assistant
+            // content verbatim; rebuilding a structured tool_calls object changes
+            // the generated token sequence and breaks KV-prefix reuse.
+            working.push({role:'assistant',content:rawAssistantContent??text});
           }else{
             working.push({role:'assistant',content:clean});
           }
