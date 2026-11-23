@@ -348,6 +348,24 @@ const makeEditorTools = (() => {
     return state.lastTextTab?.kind === 'file' ? state.lastTextTab : null;
   }
   function renderMessage(container, text, onInsertCode) {
+    // Keep the unrendered response available for native browser copy operations.
+    // The copy event is shared by Ctrl/Cmd+C and the browser context-menu Copy command.
+    container.__aiRawMarkdown = String(text ?? '');
+    if (!container.__aiRawCopyHandler) {
+      container.__aiRawCopyHandler = event => {
+        const selection = window.getSelection?.();
+        if (!selection || selection.isCollapsed || !container.contains(selection.anchorNode) || !container.contains(selection.focusNode)) return;
+        // Preserve the browser's normal code-selection behavior; code blocks also
+        // have their own Copy button which copies the exact code payload.
+        const anchorElement = selection.anchorNode?.nodeType === 1 ? selection.anchorNode : selection.anchorNode?.parentElement;
+        const focusElement = selection.focusNode?.nodeType === 1 ? selection.focusNode : selection.focusNode?.parentElement;
+        if (anchorElement?.closest('pre') && focusElement?.closest('pre')) return;
+        if (!event.clipboardData) return;
+        event.preventDefault();
+        event.clipboardData.setData('text/plain', container.__aiRawMarkdown || '');
+      };
+      container.addEventListener('copy', container.__aiRawCopyHandler);
+    }
     const math = protectMath(text);
     container.innerHTML = sanitizeHtml(markdown(math.text));
     renderMathExpressions(container, math.expressions);
