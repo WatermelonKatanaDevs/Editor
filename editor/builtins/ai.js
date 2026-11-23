@@ -826,6 +826,7 @@ const makeEditorTools = (() => {
     let loadedProjectId=null;
     let busy=false, controller=null, editingIndex=-1;
     let attachments=[];
+    const messageAttachmentFiles=new WeakMap();
     let autoAttachmentPath='', dismissedAutoAttachmentPath='';
     const toolset=makeEditorTools({state,openFile:onOpen,onRefresh:()=>{state.fileManager?.refresh?.();updateStatus?.();},runConfigured,ensureNodeRuntime:()=>state.ensureNodeRuntime?.()});
     const client=new aiRoot.AIClient(registry,state.browserNetwork||window.__sharedBrowserNetwork);
@@ -930,7 +931,7 @@ const makeEditorTools = (() => {
       });
     }
     async function buildAttachmentPayload(){
-      const metadata=[],images=[],textParts=[];let textChars=0;
+      const metadata=[],images=[],files=[],textParts=[];let textChars=0;
       for(const item of attachments){
         const openTab=item.active&&activeEditor(state)?.path===item.path?makeActiveAttachment():null;
         const file=openTab?.file||item.file;
@@ -943,6 +944,7 @@ const makeEditorTools = (() => {
         const path=String(item.path||file.customRelativePath||'');
         if(sensitiveAttachmentPath(path||file.name))throw new Error('Sensitive files cannot be attached to AI chats.');
         metadata.push({name:String(file.name),path,kind,mimeType:String(file.type||''),size:Number(file.size)||0,active:!!item.active});
+        files.push({name:String(file.name),path,file,active:!!item.active});
         if(kind==='text'){
           if(file.size>4*1024*1024)throw new Error(file.name+' is larger than the 4 MiB text attachment limit.');
           let content=await file.text();
@@ -957,7 +959,7 @@ const makeEditorTools = (() => {
           images.push({mimeType,dataUrl:await fileAsDataUrl(file,mimeType)});
         }
       }
-      return {metadata,images,textContext:textParts.length?'\n\n'+textParts.join('\n\n'):''};
+      return {metadata,images,files,textContext:textParts.length?'\n\n'+textParts.join('\n\n'):''};
     }
     function decorateAttachmentMessages(messages,payload){
       const output=(messages||[]).map(message=>({...message,images:undefined}));
@@ -1052,10 +1054,11 @@ const makeEditorTools = (() => {
       const input=tree?.querySelector?.('[data-input]');
       if (!input) return;
       const message=chatMessages[index];
+      const retainedFiles=messageAttachmentFiles.get(message)||[];
       attachments=(Array.isArray(message.attachments)?message.attachments:[]).map((item,attachmentIndex)=>{
         const path=String(item?.path||'');
-        let file=null;
-        if(path&&!sensitiveAttachmentPath(path)){
+        let file=retainedFiles[attachmentIndex]?.file||null;
+        if(!file&&path&&!sensitiveAttachmentPath(path)){
           try{
             const data=state.fs?.readFileSync?.(path);
             if(data!=null){
@@ -1352,6 +1355,8 @@ const makeEditorTools = (() => {
         // Keep the editor's persisted transcript aligned with ConversationAI, which
         // owns insertion of both the user and assistant messages.
         if(currentConversation?.getMessages)chatMessages=currentConversation.getMessages();
+        const sentUser=[...chatMessages].reverse().find(message=>message?.role==='user'&&message.content===text);
+        if(sentUser&&attachmentPayload.files?.length)messageAttachmentFiles.set(sentUser,attachmentPayload.files);
         attachments=attachments.filter(item=>item.active);syncActiveAttachment();
         persist();
         busy=false; controller=null; render(g,t);
