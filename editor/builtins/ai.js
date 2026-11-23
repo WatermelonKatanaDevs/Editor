@@ -717,7 +717,9 @@ const makeEditorTools = (() => {
           ||/(?:deepseek[-_ ]?r1|qwq|r1[-_ ]?distill)/i.test(architecture+' '+modelType+' '+cardMetadata);
         const supportsVideo=['video-text-to-text','video-to-text'].includes(task)||/(?:video-text-to-text|video-to-text|qwen2.?5.?omni|qwen3.?omni|videollava)/i.test(architecture+' '+modelType+' '+tagText);
         const siblings=Array.isArray(model?.siblings)?model.siblings:[];
-        const sizeBytes=siblings.reduce((total,file)=>{const size=Number(file?.lfs?.size??file?.size??0);return total+(Number.isFinite(size)&&size>0?size:0);},0);
+        const reportedSize=Number(model?.usedStorage??model?.used_storage??0);
+        const siblingSize=siblings.reduce((total,file)=>{const size=Number(file?.lfs?.size??file?.size??0);return total+(Number.isFinite(size)&&size>0?size:0);},0);
+        const sizeBytes=Number.isFinite(reportedSize)&&reportedSize>0?reportedSize:siblingSize;
         return {
           sizeBytes:Number.isFinite(sizeBytes)&&sizeBytes>0?sizeBytes:null,
           contextLength,
@@ -740,7 +742,7 @@ const makeEditorTools = (() => {
         if(network?.request){
           try{
             const encoded=String(modelId||'').split('/').map(encodeURIComponent).join('/');
-            const response=await network.request(new Request('https://huggingface.co/api/models/'+encoded+'?expand[]=config&expand[]=cardData&expand[]=siblings&expand[]=tags&expand[]=pipeline_tag'),'ai');
+            const response=await network.request(new Request('https://huggingface.co/api/models/'+encoded+'?blobs=true'),'ai');
             if(response?.ok)info={...info,...await response.json()};
           }catch(error){console.warn('Could not inspect Hugging Face model metadata:',error);}
         }
@@ -777,22 +779,76 @@ const makeEditorTools = (() => {
         browser.innerHTML='<div class="editor-modal-content ai-hf-browser-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>Browse local models</h2><p>Search models tagged for Transformers.js. A library tag does not guarantee every task or architecture works in this editor runtime. Results show approximate repository size, configured context length, and detected capabilities.</p><div class="ai-hf-browser-toolbar"><input data-local-search placeholder="Search model IDs…"><button data-local-filter-toggle type="button" aria-expanded="false">Filters</button><button data-local-search-button>Search</button><button data-local-search-refresh>Refresh</button></div><div class="ai-local-model-filters" data-local-filters hidden><div class="ai-local-filter-group"><span>Capabilities</span><label><input type="checkbox" data-capability="documents"> Text/docs</label><label><input type="checkbox" data-capability="vision"> Images</label><label><input type="checkbox" data-capability="audio"> Audio</label><label><input type="checkbox" data-capability="toolCalling"> Native tool calling</label><label><input type="checkbox" data-capability="reasoning"> Reasoning</label><label><input type="checkbox" data-capability="video"> Video</label></div><div class="ai-local-filter-group ai-local-range-filters"><label>Min size (GB)<input type="number" min="0" step="0.1" data-size-min placeholder="Any"></label><label>Max size (GB)<input type="number" min="0" step="0.1" data-size-max placeholder="Any"></label><label>Min context<input type="number" min="0" step="1024" data-context-min placeholder="Any"></label><label>Max context<input type="number" min="0" step="1024" data-context-max placeholder="Any"></label></div><p>Size is total Hugging Face repository storage, not a RAM estimate. Context is read from model configuration when available. Text/document and image/audio/video support is inferred from task, architecture, config, and model-card metadata; a video badge means sampled-frame understanding, not that this editor currently accepts video attachments. Tool calling requires an explicit metadata signal. Missing badges mean not detected, not necessarily unsupported.</p></div><div class="ai-local-add-row"><input data-local-model-id placeholder="Hugging Face model ID"><button data-local-use-id>Use ID</button></div><div class="ai-hf-browser-status" data-local-status>Loading models…</div><div class="ai-hf-browser-list" data-local-list></div></div>';
         document.body.appendChild(browser);requestAnimationFrame(()=>browser.classList.add('show'));
         const search=browser.querySelector('[data-local-search]'),status=browser.querySelector('[data-local-status]'),list=browser.querySelector('[data-local-list]'),idInput=browser.querySelector('[data-local-model-id]'),filters=browser.querySelector('[data-local-filters]');
-        let all=[];
+        let all=[],loadVersion=0,metadataProgress=null,metadataNote='';
+        const repositoryDetails=new Map();
         browser.querySelector('.editor-modal-close').onclick=()=>browser.remove();browser.onclick=e=>{if(e.target===browser)browser.remove();};
         const choose=(id,modelInfo=null)=>{const modelId=String(id||'').trim();if(!modelId){status.textContent='Enter a Hugging Face model ID first.';return;}onSelect?.(modelId,modelInfo);browser.remove();};
         async function load(){
+          const version=++loadVersion;
+          metadataProgress=null;metadataNote='';
           status.textContent='Searching Hugging Face…';list.innerHTML='';
           try{
             if(!network?.request)throw new Error('Network API is unavailable.');
             const q=search.value.trim();
             const params=new URLSearchParams({library:'transformers.js',sort:'downloads',direction:'-1',limit:'50'});
-            params.append('expand[]','config');params.append('expand[]','cardData');params.append('expand[]','siblings');params.append('expand[]','tags');params.append('expand[]','pipeline_tag');
+            params.append('expand[]','config');params.append('expand[]','cardData');params.append('expand[]','tags');params.append('expand[]','pipeline_tag');
             if(q)params.set('search',q);
             const response=await network.request(new Request('https://huggingface.co/api/models?'+params.toString()),'ai');
             if(!response)throw new Error('Hugging Face returned no response.');
             if(!response.ok)throw new Error('Hugging Face returned '+response.status+': '+await response.text());
-            all=await response.json();if(!Array.isArray(all))all=[];renderList();
-          }catch(e){status.textContent=e?.message||String(e);}
+            const results=await response.json();
+            if(version!==loadVersion)return;
+            all=Array.isArray(results)?results:[];
+            renderList();
+            void loadRepositoryDetails(all.slice(),version);
+          }catch(e){if(version===loadVersion)status.textContent=e?.message||String(e);}
+        }
+        async function fetchRepositoryDetails(model){
+          const id=String(model?.id||'');
+          if(!id)return false;
+          let pending=repositoryDetails.get(id);
+          if(!pending){
+            pending=(async()=>{
+              const encoded=id.split('/').map(encodeURIComponent).join('/');
+              const response=await network.request(new Request('https://huggingface.co/api/models/'+encoded+'?blobs=true'),'ai');
+              if(!response?.ok)return null;
+              const details=await response.json();
+              return details&&typeof details==='object'?details:null;
+            })();
+            repositoryDetails.set(id,pending);
+          }
+          try{
+            const details=await pending;
+            if(!details){repositoryDetails.delete(id);return false;}
+            Object.assign(model,details);
+            return true;
+          }catch(error){
+            repositoryDetails.delete(id);
+            console.warn('Could not load Hugging Face repository details for '+id+':',error);
+            return false;
+          }
+        }
+        async function loadRepositoryDetails(models,version){
+          const targets=models.filter(model=>model?.id);
+          if(!targets.length)return;
+          metadataProgress={done:0,total:targets.length,failed:0};
+          renderList();
+          let next=0;
+          const worker=async()=>{
+            while(next<targets.length){
+              const model=targets[next++];
+              if(!await fetchRepositoryDetails(model))metadataProgress.failed++;
+              metadataProgress.done++;
+              if(version!==loadVersion)return;
+              if(metadataProgress.done===metadataProgress.total||metadataProgress.done%5===0)renderList();
+            }
+          };
+          await Promise.all(Array.from({length:Math.min(4,targets.length)},()=>worker()));
+          if(version!==loadVersion)return;
+          const failed=metadataProgress.failed;
+          metadataProgress=null;
+          metadataNote=failed?('Repository details unavailable for '+failed+' model'+(failed===1?'':'s')):'Repository metadata loaded';
+          renderList();
         }
         function renderList(){
           const q=search.value.trim().toLowerCase();
@@ -816,7 +872,8 @@ const makeEditorTools = (() => {
             if(hasMaxContext&&(!metadata.contextLength||metadata.contextLength>maxContext))return false;
             return true;
           }).slice(0,200);
-          status.textContent=rows.length+' matching model'+(rows.length===1?'':'s')+' from '+all.length+' Hugging Face result'+(all.length===1?'':'s');
+          const resultSummary=rows.length+' matching model'+(rows.length===1?'':'s')+' from '+all.length+' Hugging Face result'+(all.length===1?'':'s');
+          status.textContent=resultSummary+(metadataProgress?' · Loading repository details '+metadataProgress.done+'/'+metadataProgress.total:metadataNote?' · '+metadataNote:'');
           list.innerHTML=rows.map(m=>{
             const metadata=getLocalModelSearchMetadata(m),caps=metadata.capabilities;
             const size=metadata.sizeBytes?('≈ '+formatLocalModelSize(metadata.sizeBytes)):'Size unavailable';
