@@ -604,17 +604,19 @@
       if(!audioParts.length)return [{generated_text:[{role:'assistant',content:await generateOnce(messages,generationOptions,tools,null)}]}];
       const audioMessage=messages[audioMessageIndex];
       const allContent=audioMessage.content||[];
-      const originalPrompt=allContent.filter(part=>part?.type==='text').map(part=>String(part.text||'')).join('\n').trim()||'Please analyze this audio.';
-      const imageParts=allContent.filter(part=>part?.type==='image');
+      const originalPrompt=allContent.filter(part=>part?.type==='text'&&part.videoFrameContext!==true).map(part=>String(part.text||'')).join('\n').trim()||'Please analyze this audio.';
+      // Retain the frame labels in their original order beside each image when
+      // audio segmentation rebuilds the multimodal user message.
+      const visualParts=allContent.filter(part=>part?.type==='image'||part?.videoFrameContext===true);
       const maxSamples=30*16000;
       const segments=[];
       let totalDuration=0;
       for(let partIndex=0;partIndex<audioParts.length;partIndex++){
         const part=audioParts[partIndex];
         const source=part.url||part.data||part.src;
-        if(!source)throw new Error('An audio attachment is missing its file data.');
+        if(!source&&!(part.samples instanceof Float32Array))throw new Error('An audio attachment is missing its file data.');
         audioProgress?.({stage:'decoding',index:partIndex+1,total:audioParts.length,name:String(part.name||part.filename||'Audio')});
-        const waveform=await loadAudio(source);
+        const waveform=part.samples instanceof Float32Array?part.samples:await loadAudio(source);
         if(typeof processor._compute_audio_num_tokens==='function'&&processor._compute_audio_num_tokens(waveform.length,16000)<=0){
           throw new Error('The audio in "'+String(part.name||part.filename||'attachment')+'" is too short to process. Use a clip at least 0.05 seconds long.');
         }
@@ -636,7 +638,7 @@
       if(!segments.length)throw new Error('No usable audio segments were found.');
       if(segments.length===1){
         audioProgress?.({index:1,total:1,name:segments[0].name,startSeconds:0,endSeconds:totalDuration});
-        const singleMessage={...audioMessage,content:[...imageParts,{type:'audio'},{type:'text',text:originalPrompt}]};
+        const singleMessage={...audioMessage,content:[...visualParts,{type:'audio'},{type:'text',text:originalPrompt}]};
         return [{generated_text:[{role:'assistant',content:await generateOnce([...messages.slice(0,audioMessageIndex),singleMessage],generationOptions,tools,segments[0].samples)}]}];
       }
 
@@ -654,7 +656,7 @@
           ' from "'+segment.name+'", covering '+segment.startSeconds.toFixed(1)+'–'+segment.endSeconds.toFixed(1)+
           ' seconds. Analyze this segment in relation to the original request. Give concise observations grounded only in what is audible; do not guess details that this segment cannot establish.';
         audioProgress?.({index:index+1,total:segments.length,name:segment.name,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds});
-        const segmentMessage={...audioMessage,content:[...imageParts,{type:'audio'},{type:'text',text:segmentPrompt}]};
+        const segmentMessage={...audioMessage,content:[...visualParts,{type:'audio'},{type:'text',text:segmentPrompt}]};
         const summary=await generateOnce([...workingMessages,segmentMessage],segmentOptions,null,segment.samples);
         segmentSummaries.push({name:segment.name,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds,text:summary});
         workingMessages.push({role:'user',content:segmentPrompt},{role:'assistant',content:summary});
@@ -847,6 +849,8 @@
       const hasImages=messages.some(message=>Array.isArray(message?.images)&&message.images.length>0);
       const hasAudio=messages.some(message=>Array.isArray(message?.audios)&&message.audios.length>0);
       const hasVideos=messages.some(message=>Array.isArray(message?.videos)&&message.videos.length>0);
+      const modelId=String(model?.model||model?.id||'');
+      const supportsVideoAudio=model?.supportsAudio===true&&/(?:gemma[-_/]?4.*(?:e2b|e4b|12b)|(?:e2b|e4b|12b).*gemma[-_/]?4)/i.test(modelId);
       const requestMessages=messages.map(message=>{
         const next={...message};
         const images=Array.isArray(message?.images)?message.images:[];
@@ -883,12 +887,83 @@
         video.src=url;
         try{video.load();}catch(error){finish(error);}
       });
+      const extractVideoAudio=async(source,name)=>{
+        const captureStreamPrototype=HTMLMediaElement.prototype;
+        const captureStream=captureStreamPrototype.captureStream||captureStreamPrototype.mozCaptureStream;
+        if(typeof captureStream!=='function'||typeof MediaRecorder!=='function'){
+          throw new Error('This browser cannot extract audio from video attachments. Use a current Chromium-based browser or attach the soundtrack separately.');
+        }
+        const video=document.createElement('video'),url=URL.createObjectURL(source);
+        let stream=null,recorder=null,timeout=null,stopWait=null;
+        const chunks=[];
+        try{
+          video.preload='auto';video.muted=true;video.playsInline=true;
+          if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
+          await new Promise((resolve,reject)=>{
+            let timer=setTimeout(()=>reject(new Error('Timed out opening the video soundtrack.')),15000);
+            video.onloadedmetadata=()=>{clearTimeout(timer);resolve();};
+            video.onerror=()=>{clearTimeout(timer);reject(new Error('The browser could not open the video soundtrack.'));};
+            video.src=url;
+            try{video.load();}catch(error){clearTimeout(timer);reject(error);}
+          });
+          stream=captureStream.call(video);
+          const audioTracks=stream.getAudioTracks();
+          if(!audioTracks.length)return null;
+          const audioStream=new MediaStream(audioTracks);
+          const mimeTypes=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4'];
+          const mimeType=mimeTypes.find(type=>MediaRecorder.isTypeSupported?.(type));
+          recorder=new MediaRecorder(audioStream,mimeType?{mimeType}:undefined);
+          recorder.ondataavailable=event=>{if(event.data?.size)chunks.push(event.data);};
+          let recorderError=null;
+          recorder.onerror=event=>{recorderError=event.error||new Error('The browser failed while recording the video soundtrack.');};
+          stopWait=new Promise(resolve=>recorder.addEventListener('stop',resolve,{once:true}));
+          recorder.start();
+          await new Promise((resolve,reject)=>{
+            timeout=setTimeout(()=>reject(new Error('Timed out extracting the video soundtrack.')),65000);
+            const cleanup=()=>{
+              if(timeout)clearTimeout(timeout);
+              video.onended=null;video.onerror=null;
+              if(signal)signal.removeEventListener('abort',onAbort);
+            };
+            const onAbort=()=>{cleanup();reject(new DOMException('Aborted','AbortError'));};
+            video.onended=()=>{cleanup();resolve();};
+            video.onerror=()=>{cleanup();reject(new Error('The browser stopped decoding the video before its soundtrack finished.'));};
+            if(signal)signal.addEventListener('abort',onAbort,{once:true});
+            video.play().catch(error=>{cleanup();reject(new Error('Could not play the video silently to extract its soundtrack. '+(error?.message||String(error))));});
+          });
+          if(recorder.state!=='inactive')recorder.stop();
+          await stopWait;
+          if(recorderError)throw recorderError;
+          const blob=new Blob(chunks,{type:recorder.mimeType||chunks[0]?.type||'audio/webm'});
+          if(!blob.size)return null;
+          const audioUrl=URL.createObjectURL(blob);
+          try{
+            const waveform=await lib.load_audio(audioUrl,16000);
+            if(!waveform?.length)return null;
+            const samples=waveform instanceof Float32Array?waveform:Float32Array.from(waveform);
+            let energy=0;
+            for(let i=0;i<samples.length;i+=Math.max(1,Math.floor(samples.length/10000)))energy+=samples[i]*samples[i];
+            if(energy===0)return null;
+            return samples;
+          }finally{URL.revokeObjectURL(audioUrl);}
+        }finally{
+          if(timeout)clearTimeout(timeout);
+          video.pause();
+          video.onloadedmetadata=null;video.onended=null;video.onerror=null;video.removeAttribute('src');
+          try{video.load();}catch(_){}
+          if(recorder&&recorder.state!=='inactive'){
+            try{recorder.stop();await stopWait;}catch(_){}
+          }
+          for(const track of stream?.getTracks?.()||[]){try{track.stop();}catch(_){}}
+          URL.revokeObjectURL(url);
+        }
+      };
       const prepareVideoFrames=async(lib,sourceMessages)=>{
         if(typeof lib.load_video!=='function')throw new Error('This Transformers.js runtime does not include browser video decoding. Reload the editor to update its local AI runtime.');
         const videoCount=sourceMessages.reduce((count,message)=>count+(Array.isArray(message?.content)?message.content.filter(part=>part?.type==='video').length:0),0);
         if(!videoCount)return sourceMessages;
-        const perVideoFrameBudget=Math.max(1,Math.floor(32/videoCount));
-        let decoded=0;
+        const perVideoFrameBudget=60;
+        let decoded=0,totalVideoDuration=0,totalSampledFrames=0;
         const prepared=[];
         const formatTimestamp=value=>{
           const seconds=Math.max(0,Number(value)||0),minutes=Math.floor(seconds/60),whole=Math.floor(seconds%60),tenths=Math.floor((seconds-Math.floor(seconds))*10);
@@ -910,38 +985,48 @@
             catch(error){throw new Error('Could not read video "'+String(part.name||'Video')+'". Try MP4 (H.264) or WebM (VP9). '+(error?.message||String(error)));}
             if(!Number.isFinite(duration)||duration<=0)throw new Error('The video "'+String(part.name||'Video')+'" has no readable duration.');
             if(duration>60)throw new Error('Video attachments are limited to 60 seconds. Trim "'+String(part.name||'Video')+'" and try again.');
+            totalVideoDuration+=duration;
+            if(totalVideoDuration>60)throw new Error('Combined video attachments are limited to 60 seconds. Remove or trim one of the videos and try again.');
             let video;
             try{video=await lib.load_video(source,{fps:1});}
             catch(error){throw new Error('Could not decode video "'+String(part.name||'Video')+'". Try MP4 (H.264) or WebM (VP9). '+(error?.message||String(error)));}
             duration=Number(video?.duration)||duration;
             const frames=Array.isArray(video?.frames)?video.frames:[];
             if(!frames.length)throw new Error('No frames could be decoded from "'+String(part.name||'Video')+'".');
-            const indexes=frames.length<=perVideoFrameBudget
+            const remainingFrameBudget=Math.max(1,perVideoFrameBudget-totalSampledFrames);
+            const indexes=frames.length<=remainingFrameBudget
               ?frames.map((_,index)=>index)
-              :Array.from({length:perVideoFrameBudget},(_,index)=>Math.round(index*(frames.length-1)/Math.max(1,perVideoFrameBudget-1)));
+              :Array.from({length:remainingFrameBudget},(_,index)=>Math.round(index*(frames.length-1)/Math.max(1,remainingFrameBudget-1)));
             const selected=[...new Set(indexes)].map(index=>frames[index]).filter(Boolean);
-            content.push({type:'text',text:'Video attachment "'+String(part.name||'Video')+'" · '+duration.toFixed(1)+' seconds. The following sampled frames are in chronological order; each has its original timestamp. Treat them as a sequence, not unrelated images.'});
+            totalSampledFrames+=selected.length;
+            content.push({type:'text',videoFrameContext:true,text:'Video attachment "'+String(part.name||'Video')+'" · '+duration.toFixed(1)+' seconds. The following sampled frames are in chronological order; each has its original timestamp. Treat them as a sequence, not unrelated images.'});
             for(let index=0;index<selected.length;index++){
               const frame=selected[index],image=frame?.image||frame;
               if(!image)continue;
               const timestamp=Number.isFinite(Number(frame?.timestamp))?Number(frame.timestamp):(duration*index/Math.max(1,selected.length));
-              content.push({type:'text',text:'Video frame '+(index+1)+'/'+selected.length+' at '+formatTimestamp(timestamp)+':'});
+              content.push({type:'text',videoFrameContext:true,text:'Video frame '+(index+1)+'/'+selected.length+' at '+formatTimestamp(timestamp)+':'});
               content.push({type:'image',image});
             }
+            if(supportsVideoAudio){
+              this.emit({inference:{stage:'prompt',label:'Extracting soundtrack '+String(decoded+1)+'/'+String(videoCount)+' · '+String(part.name||'Video'),progress:Math.round(decoded/videoCount*100)}});
+              const samples=await extractVideoAudio(source,String(part.name||'Video'));
+              if(samples?.length)content.push({type:'audio',samples,name:String(part.name||'Video')+' soundtrack'});
+              else content.push({type:'text',text:'No audible soundtrack was detected in "'+String(part.name||'Video')+'".'});
+            }
             decoded++;
-            this.emit({inference:{stage:'prompt',label:'Sampled video '+decoded+'/'+videoCount+' · '+selected.length+' frames',progress:Math.round(decoded/videoCount*100)}});
+            this.emit({inference:{stage:'prompt',label:'Prepared video '+decoded+'/'+videoCount+' · '+selected.length+' frames'+(supportsVideoAudio?' and soundtrack':''),progress:Math.round(decoded/videoCount*100)}});
           }
           prepared.push({...message,content});
         }
         return prepared;
       };
-      let generated='';
+      let generated='',preparedVideoMessages=null;
       const run=async()=>{
         generated='';
         this.emit({inference:{stage:'preparing',label:'Processing prompt',progress:null}});
         const generator=this.requireGenerator();
         const lib=await this.library();
-        const preparedMessages=hasVideos?await prepareVideoFrames(lib,requestMessages):requestMessages;
+        const preparedMessages=hasVideos?(preparedVideoMessages||(preparedVideoMessages=await prepareVideoFrames(lib,requestMessages))):requestMessages;
         const Stopper=lib.InterruptableStoppingCriteria;const stopper=Stopper?new Stopper():null;this.stopper=stopper;
         const tokenizer=generator.tokenizer||generator.processor?.tokenizer;
         const streamer=lib.TextStreamer&&tokenizer?new lib.TextStreamer(tokenizer,{skip_prompt:true,skip_special_tokens:true,callback_function:piece=>{if(this.inference?.stage!=='generating')this.emit({inference:{stage:'generating',label:'Generating response',progress:null}});generated+=String(piece||'');if(onText)onText(generated,String(piece||''));}}):null;
@@ -1016,7 +1101,7 @@
               ...generationOptions,
               ...(streamer?{streamer}:{}),
               ...(Array.isArray(options.tools)&&options.tools.length?{tools:options.tools}:{}),
-              ...(hasAudio?{audioProgress:info=>{
+              ...((hasAudio||hasVideos&&supportsVideoAudio)?{audioProgress:info=>{
                 const label=info?.stage==='synthesizing'
                   ?'Combining audio segment analyses…'
                   :info?.stage==='decoding'

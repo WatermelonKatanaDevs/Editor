@@ -707,7 +707,7 @@ const makeEditorTools = (() => {
           ||/(?:Gemma4|Qwen2_5Omni|Qwen3Omni|Llava|LLaVA|Vision|InternVL|Phi4Multimodal)/i.test(modelHint);
         const supportsAudio=['any-to-any','audio-text-to-text','automatic-speech-recognition','audio-classification','zero-shot-audio-classification'].includes(task)
           ||!!(config.audio_config||config.audio_encoder||config.audio_token_id!=null||config.audio_bos_token_id!=null)
-          ||/(?:Gemma4|Qwen2Audio|Qwen2_5Omni|Qwen3Omni|Phi4Multimodal|AudioFlamingo)/i.test(modelHint);
+          ||/(?:Qwen2Audio|Qwen2_5Omni|Qwen3Omni|Phi4Multimodal|AudioFlamingo)/i.test(modelHint)||/(?:gemma[-_/]?4.*(?:e2b|e4b|12b)|(?:e2b|e4b|12b).*gemma[-_/]?4)/i.test(modelHint);
         const chatTemplate=String(config.chat_template||config.tokenizer_config?.chat_template||'');
         const supportsTools=/(?:tool[-_ ]?(?:use|calling)|function[-_ ]?calling|tools?[-_ ]?api)/i.test(tagText+' '+chatTemplate)
           ||/(?:functionary|firefunction|openfunctions|nexus[-_ ]?raven|toolace)/i.test(modelId);
@@ -749,7 +749,7 @@ const makeEditorTools = (() => {
         const architecture=architectures.join(' ');
         const modelType=String(config.model_type||'');
         const task=String(info.pipeline_tag||'');
-        const audioArchitecture=/(?:Gemma4|Qwen2Audio|Qwen2_5Omni|Qwen3Omni|Phi4Multimodal|AudioFlamingo)/i.test(architecture+' '+modelType+' '+modelId);
+        const audioArchitecture=/(?:Qwen2Audio|Qwen2_5Omni|Qwen3Omni|Phi4Multimodal|AudioFlamingo)/i.test(architecture+' '+modelType+' '+modelId)||/(?:gemma[-_/]?4.*(?:e2b|e4b|12b)|(?:e2b|e4b|12b).*gemma[-_/]?4)/i.test(architecture+' '+modelType+' '+modelId);
         const audioConfig=!!(config.audio_config||config.audio_encoder||config.audio_token_id!=null||config.audio_bos_token_id!=null);
         const supportsAudio=['any-to-any','audio-text-to-text'].includes(task)||audioArchitecture||(audioConfig&&/(?:ConditionalGeneration|ForCausalLM|Omni)/i.test(architecture));
         const supportsVision=['any-to-any','image-text-to-text'].includes(task)||!!(config.vision_config||config.vision_tower||config.image_token_index!=null)||/(?:gemma[-_/]?4|gemma[-_/]?3[-_/]?(?:4b|12b|27b))/i.test(modelId)&&(/onnx/i.test(modelId)||task==='image-text-to-text');
