@@ -1213,8 +1213,9 @@ const makeEditorTools = (() => {
       if(role==='assistant'&&message?.activity?.length)row.appendChild(renderActivity(chat,message.activity,false,message.activityDurationMs));
       const bubble=document.createElement('div');
       bubble.className='ai-bubble';
-      if(role==='user')bubble.textContent=text;
-      else renderMessage(bubble,text,code=>insertCode(code));
+      // User prompts use the same Markdown/LaTeX renderer as assistant responses.
+      // renderMessage also preserves the raw source for Ctrl/Cmd+C and native Copy.
+      renderMessage(bubble,text,role==='assistant'?code=>insertCode(code):null);
       if(role==='user'){
         const content=document.createElement('div');
         content.className='ai-message-content';
