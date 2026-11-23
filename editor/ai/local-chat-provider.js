@@ -369,6 +369,7 @@
       if(signal?.aborted)throw new DOMException('Aborted','AbortError');
       // generate() mutates this cache as it consumes the final prompt token and
       // emits new tokens. Keep the same GPU cache; never clone its GPU tensors.
+      onProgress?.({stage:'generating',processed:targetEnd,total:targetEnd,cached:reusedTokens,chunkSize});
       const result=await model.generate({
         ...inputs,
         ...(cache?{past_key_values:cache,attention_mask:lib.ones(dims)}:{}),
@@ -389,9 +390,9 @@
     }
   }
   class LocalModelManager{
-    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.downloads=new Map();this.trackingFiles=false;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;this.runtimeAssets=[];this.kvCaches=new Map();this.maxReusableCacheTokens=4096;this.maxReusableCacheSessions=2;this.maxReusableCacheTotalTokens=4096;}
+    constructor(){this.libraryPromise=null;this.libraryBlobUrl='';this.generator=null;this.model=null;this.loadedModelId='';this.loading=false;this.progress=0;this.downloads=new Map();this.trackingFiles=false;this.inference=null;this.statusText='';this.device='';this.dtype='';this.stopper=null;this.listeners=new Set();this.cache=root.LocalModelCache||new root.IndexedDBModelCache();this.offlineOnly=false;this.cacheHit=false;this.runtimeAssets=[];this.kvCaches=new Map();this.maxReusableCacheTokens=4096;this.maxReusableCacheSessions=2;this.maxReusableCacheTotalTokens=4096;}
     subscribe(fn){if(typeof fn!=='function')return ()=>{};this.listeners.add(fn);fn(this.status());return ()=>this.listeners.delete(fn);}
-    status(){return {loading:this.loading,loadedModelId:this.loadedModelId,loaded:!!this.generator,progress:this.progress,downloads:Array.from(this.downloads.values()),trackingFiles:this.trackingFiles,text:this.statusText,device:this.device,dtype:this.dtype,offlineOnly:this.offlineOnly,cacheHit:this.cacheHit};}
+    status(){return {loading:this.loading,loadedModelId:this.loadedModelId,loaded:!!this.generator,progress:this.progress,downloads:Array.from(this.downloads.values()),trackingFiles:this.trackingFiles,inference:this.inference,text:this.statusText,device:this.device,dtype:this.dtype,offlineOnly:this.offlineOnly,cacheHit:this.cacheHit};}
     emit(patch){Object.assign(this,patch||{});const state=this.status();for(const fn of this.listeners){try{fn(state);}catch(e){console.warn('Local AI status listener failed:',e);}}}
     isLoaded(id){return !!this.generator&&(!id||this.loadedModelId===String(id));}
     async library(){
@@ -463,7 +464,7 @@
         await this.clearKVCache(candidates[0][0]);
       }
     }
-    async unload(notify=true){this.downloads.clear();this.trackingFiles=false;await this.clearKVCache();const old=this.generator;this.generator=null;this.model=null;this.loadedModelId='';this.stopper=null;if(old&&old.dispose){try{await old.dispose();}catch(e){console.warn('Local AI model disposal failed:',e);}}if(notify)this.emit({loading:false,progress:0,statusText:'Model unloaded.'});}
+    async unload(notify=true){this.downloads.clear();this.trackingFiles=false;this.inference=null;await this.clearKVCache();const old=this.generator;this.generator=null;this.model=null;this.loadedModelId='';this.stopper=null;if(old&&old.dispose){try{await old.dispose();}catch(e){console.warn('Local AI model disposal failed:',e);}}if(notify)this.emit({loading:false,progress:0,statusText:'Model unloaded.'});}
     async load(model,options={}){
       if(!model||model.protocol!=='local-transformers')throw new Error('Not a local browser model.');
       if(this.loading)throw new Error('A local model is already loading.');
@@ -553,10 +554,11 @@
       let generated='';
       const run=async()=>{
         generated='';
+        this.emit({inference:{stage:'preparing',label:'Processing prompt',progress:null}});
         const generator=this.requireGenerator();
         const lib=await this.library();const Stopper=lib.InterruptableStoppingCriteria;const stopper=Stopper?new Stopper():null;this.stopper=stopper;
         const tokenizer=generator.tokenizer||generator.processor?.tokenizer;
-        const streamer=lib.TextStreamer&&tokenizer?new lib.TextStreamer(tokenizer,{skip_prompt:true,skip_special_tokens:true,callback_function:piece=>{generated+=String(piece||'');if(onText)onText(generated,String(piece||''));}}):null;
+        const streamer=lib.TextStreamer&&tokenizer?new lib.TextStreamer(tokenizer,{skip_prompt:true,skip_special_tokens:true,callback_function:piece=>{if(this.inference?.stage!=='generating')this.emit({inference:{stage:'generating',label:'Generating response',progress:null}});generated+=String(piece||'');if(onText)onText(generated,String(piece||''));}}):null;
         try{
           const generationOptions={max_new_tokens:Math.max(64,Math.min(4096,Number(options.maxTokens)||1024)),do_sample:true,temperature:options.temperature!=null?options.temperature:.7,top_p:options.topP!=null?options.topP:.9,...(stopper?{stopping_criteria:[stopper]}:{})};
           let result=null;
@@ -574,8 +576,12 @@
             let cachedGeneration=null;
             try{
               cachedGeneration=await generateWebGPUChunked(generator,lib,requestMessages,generationOptions,streamer,signal,progress=>{
-                const reused=progress.cached?' · reused '+progress.cached+' cached tokens':'';
-                this.emit({statusText:'WEBGPU · preparing prompt '+progress.processed+'/'+progress.total+' tokens'+reused});
+                if(progress.stage==='generating')this.emit({inference:{stage:'generating',label:'Generating response',progress:null}});
+                else{
+                  const total=Math.max(0,Number(progress.total)||0),processed=Math.max(0,Number(progress.processed)||0);
+                  const reused=progress.cached?' · reused '+progress.cached+' cached tokens':'';
+                  this.emit({inference:{stage:'prompt',label:'Preparing prompt',processed,total,cached:Math.max(0,Number(progress.cached)||0),progress:total?Math.min(100,processed/total*100):null,detail:processed+'/'+total+' tokens'+reused}});
+                }
               },cacheState);
             }catch(error){
               if(conversationId)await this.clearKVCache(conversationId);
@@ -604,7 +610,10 @@
             if(previousState)previousState.inUse=false;
             await this.evictKVCache(conversationId);
           }
-          if(result===null)result=await generator(requestMessages,{...generationOptions,...(streamer?{streamer}:{})});
+          if(result===null){
+            if(this.inference?.stage!=='generating')this.emit({inference:{stage:'generating',label:'Generating response',progress:null}});
+            result=await generator(requestMessages,{...generationOptions,...(streamer?{streamer}:{})});
+          }
           if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
           return generatedText(result,generated)||generated;
         }finally{if(this.stopper===stopper)this.stopper=null;}
@@ -625,7 +634,7 @@
           if(signal&&signal.aborted)throw new DOMException('Aborted','AbortError');
           return await run();
         }
-      }finally{if(signal&&signal.removeEventListener)signal.removeEventListener('abort',abort);}
+      }finally{this.emit({inference:null});if(signal&&signal.removeEventListener)signal.removeEventListener('abort',abort);}
     }
     async complete(messages,options){return {role:'assistant',content:await this.generate(messages,options||{}),tool_calls:[],reasoning_content:''};}
     async *stream(messages,options){
