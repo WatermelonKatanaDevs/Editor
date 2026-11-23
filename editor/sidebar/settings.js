@@ -35,9 +35,10 @@
           </div>
           <div class="editor-settings-section">
             <h3>Recently Closed Tabs</h3>
-            <label>Keep closed tabs for
+            <label class="setting-duration-label">
+              <span>Keep closed tabs for</span>
               <div class="setting-duration-control">
-                <input id="setting-closed-tab-retention" type="number" min="0" step="1">
+                <input id="setting-closed-tab-retention" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="Closed tab retention duration">
                 <select id="setting-closed-tab-retention-unit">
                   <option value="1000">Seconds</option>
                   <option value="60000">Minutes</option>
@@ -127,8 +128,8 @@
       d.checked = !!state.behavior.confirmBeforeDelete;
       h.checked = !!state.behavior.showHiddenFiles;
       hideNodeModules.checked = !!state.behavior.hideNodeModules;
-      const retentionMs = Math.max(0, Number(getClosedTabRetentionMs?.() ?? state.behavior.recentlyClosedRetentionMs ?? 300000) || 0);
-      const retentionUnit = retentionMs === 0 ? 60000
+      let retentionMs = Math.max(0, Number(getClosedTabRetentionMs?.() ?? state.behavior.recentlyClosedRetentionMs ?? 300000) || 0);
+      let retentionUnit = retentionMs === 0 ? 60000
         : retentionMs % 3600000 === 0 ? 3600000
         : retentionMs % 60000 === 0 ? 60000 : 1000;
       closedTabRetentionUnit.value = String(retentionUnit);
@@ -170,8 +171,18 @@
           state.behavior.recentlyClosedRetentionMs = value;
           saveBehaviorSettings();
         }
+        // Keep the fallback in sync with the last valid change so an invalid
+        // edit never jumps back to the value that was present when Settings opened.
+        retentionMs = value;
+        retentionUnit = unit;
       };
       closedTabRetention.onchange = saveClosedTabRetention;
+      closedTabRetention.onkeydown = event => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        saveClosedTabRetention();
+        closedTabRetention.blur();
+      };
       closedTabRetentionUnit.onchange = saveClosedTabRetention;
       b.onchange = () => writeBrowserSettings({hideBrowserBar: b.checked});
       restoreTabs.onchange = () => writeBrowserSettings({restoreTabs: restoreTabs.checked});
