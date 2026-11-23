@@ -1132,7 +1132,7 @@ const makeEditorTools = (() => {
         if(preview)return preview;
         return '<span class="'+chipClass+'" title="'+escapeHtml(detail+(supported?'':' · Unsupported by this model'))+'"><span class="ai-attachment-name">'+(item.active?'● ':'')+escapeHtml(item.name)+'</span><button type="button" data-attachment-remove="'+index+'" aria-label="Remove '+escapeHtml(item.name)+'" title="Remove attachment">×</button></span>';
       }).join('');
-      strip.innerHTML='<button type="button" class="ai-attachment-add" data-add-attachment title="Add attachment" aria-label="Add attachment" '+(!canAdd||busy?'disabled':'')+' '+(canAdd?'':'hidden')+'>＋</button><div class="ai-attachment-list">'+chips+'</div>';
+      strip.innerHTML='<button type="button" class="ai-attachment-add" data-add-attachment title="Add attachment" aria-label="Add attachment" '+(!canAdd||busy?'disabled':'')+' '+(canAdd?'':'hidden')+'>＋</button><div class="ai-attachment-list ai-media-attachment-list">'+chips+'</div>';
       strip.querySelector('[data-add-attachment]').onclick=()=>addAttachments(tree);
       strip.querySelectorAll('[data-attachment-remove]').forEach(button=>button.onclick=()=>{
         const index=Number(button.dataset.attachmentRemove),item=attachments[index];
@@ -1417,7 +1417,7 @@ const makeEditorTools = (() => {
         content.className='ai-message-content';
         if(Array.isArray(message?.attachments)&&message.attachments.length){
           const attached=document.createElement('div');
-          attached.className='ai-message-attachments ai-attachment-list';
+          attached.className='ai-message-attachments ai-attachment-list ai-media-attachment-list';
           const retained=messageAttachmentFiles.get(message)||[];
           const showAttachmentPreviews=aiRoot.getAIPreferences?.().showAttachmentPreviews!==false;
           for(const [attachmentIndex,item] of message.attachments.entries()){
