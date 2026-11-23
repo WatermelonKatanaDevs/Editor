@@ -295,7 +295,7 @@ class Network extends EventHandler {
       const currentPolicy=MockCORS.getPolicy(currentRequest,currentType,currentRequest.__wkInitiatorOrigin||null);
       const endpoints=isEmulatedLoopbackRequest(currentRequest)
         ?this.endpoints.filter(endpoint=>endpoint&&!endpoint.__browserDefaultFallback&&!endpoint.__browserProxyEndpoint)
-        :currentPolicy.crossOrigin&&currentPolicy.mode==='cors'
+        :currentPolicy.crossOrigin
           ?this.endpoints.filter(endpoint=>endpoint&&endpoint.__browserProxyEndpoint)
           :this.endpoints;
       const accept=typeof responseFilter==='function'?responseFilter:response=>response.ok;
@@ -384,7 +384,7 @@ class Network extends EventHandler {
     const corsPolicy=MockCORS.getPolicy(request,type,request.__wkInitiatorOrigin||null);
     const endpoints=isEmulatedLoopbackRequest(request)
       ?this.endpoints.filter(endpoint=>endpoint&&!endpoint.__browserDefaultFallback&&!endpoint.__browserProxyEndpoint)
-      :corsPolicy.crossOrigin&&corsPolicy.mode==='cors'
+      :corsPolicy.crossOrigin
         ?this.endpoints.filter(endpoint=>endpoint&&endpoint.__browserProxyEndpoint)
         :this.endpoints;
     const response=await this.searchEndpoints(async function(endpoint){
