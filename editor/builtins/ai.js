@@ -717,9 +717,9 @@ const makeEditorTools = (() => {
           ||/(?:deepseek[-_ ]?r1|qwq|r1[-_ ]?distill)/i.test(architecture+' '+modelType+' '+cardMetadata);
         const supportsVideo=['video-text-to-text','video-to-text'].includes(task)||/(?:video-text-to-text|video-to-text|qwen2.?5.?omni|qwen3.?omni|videollava)/i.test(architecture+' '+modelType+' '+tagText);
         const siblings=Array.isArray(model?.siblings)?model.siblings:[];
-        const reportedSize=Number(model?.usedStorage??model?.used_storage??0);
-        const siblingSize=siblings.reduce((total,file)=>{const size=Number(file?.lfs?.size??file?.size??0);return total+(Number.isFinite(size)&&size>0?size:0);},0);
-        const sizeBytes=Number.isFinite(reportedSize)&&reportedSize>0?reportedSize:siblingSize;
+        // Sum the files in this revision. Hugging Face usedStorage can include
+        // blobs not present in the current file listing, inflating the displayed size.
+        const sizeBytes=siblings.reduce((total,file)=>{const size=Number(file?.lfs?.size??file?.size??0);return total+(Number.isFinite(size)&&size>0?size:0);},0);
         return {
           sizeBytes:Number.isFinite(sizeBytes)&&sizeBytes>0?sizeBytes:null,
           contextLength,
@@ -737,6 +737,20 @@ const makeEditorTools = (() => {
         if(value>=kib)return Math.round(value/kib)+'K';
         return value.toLocaleString();
       }
+      async function fetchHuggingFaceModelConfig(modelId,revision='main'){
+        if(!network?.request)return null;
+        const encoded=String(modelId||'').split('/').map(encodeURIComponent).join('/');
+        const ref=encodeURIComponent(String(revision||'main'));
+        try{
+          const response=await network.request(new Request('https://huggingface.co/'+encoded+'/raw/'+ref+'/config.json'),'ai');
+          if(!response?.ok)return null;
+          const config=await response.json();
+          return config&&typeof config==='object'?config:null;
+        }catch(error){
+          console.warn('Could not load raw Hugging Face config for '+modelId+':',error);
+          return null;
+        }
+      }
       async function inspectHuggingFaceModel(modelId,fallbackInfo=null){
         let info=fallbackInfo&&typeof fallbackInfo==='object'?fallbackInfo:{};
         if(network?.request){
@@ -744,6 +758,8 @@ const makeEditorTools = (() => {
             const encoded=String(modelId||'').split('/').map(encodeURIComponent).join('/');
             const response=await network.request(new Request('https://huggingface.co/api/models/'+encoded+'?blobs=true'),'ai');
             if(response?.ok)info={...info,...await response.json()};
+            const rawConfig=await fetchHuggingFaceModelConfig(modelId,info.sha||'main');
+            if(rawConfig)info.config=rawConfig;
           }catch(error){console.warn('Could not inspect Hugging Face model metadata:',error);}
         }
         const detected=getLocalModelSearchMetadata({...info,id:String(modelId||info.id||'')});
@@ -776,7 +792,7 @@ const makeEditorTools = (() => {
       function openLocalModelBrowser(onSelect){
         const browser=document.createElement('div');
         browser.className='editor-modal ai-hf-browser-modal';
-        browser.innerHTML='<div class="editor-modal-content ai-hf-browser-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>Browse local models</h2><p>Search models tagged for Transformers.js. A library tag does not guarantee every task or architecture works in this editor runtime. Results show approximate repository size, configured context length, and detected capabilities.</p><div class="ai-hf-browser-toolbar"><input data-local-search placeholder="Search model IDs…"><button data-local-filter-toggle type="button" aria-expanded="false">Filters</button><button data-local-search-button>Search</button><button data-local-search-refresh>Refresh</button></div><div class="ai-local-model-filters" data-local-filters hidden><div class="ai-local-filter-group"><span>Capabilities</span><label><input type="checkbox" data-capability="documents"> Text/docs</label><label><input type="checkbox" data-capability="vision"> Images</label><label><input type="checkbox" data-capability="audio"> Audio</label><label><input type="checkbox" data-capability="toolCalling"> Native tool calling</label><label><input type="checkbox" data-capability="reasoning"> Reasoning</label><label><input type="checkbox" data-capability="video"> Video</label></div><div class="ai-local-filter-group ai-local-range-filters"><label>Min size (GB)<input type="number" min="0" step="0.1" data-size-min placeholder="Any"></label><label>Max size (GB)<input type="number" min="0" step="0.1" data-size-max placeholder="Any"></label><label>Min context<input type="number" min="0" step="1024" data-context-min placeholder="Any"></label><label>Max context<input type="number" min="0" step="1024" data-context-max placeholder="Any"></label></div><p>Size is total Hugging Face repository storage, not a RAM estimate. Context is read from model configuration when available. Text/document and image/audio/video support is inferred from task, architecture, config, and model-card metadata; a video badge means sampled-frame understanding, not that this editor currently accepts video attachments. Tool calling requires an explicit metadata signal. Missing badges mean not detected, not necessarily unsupported.</p></div><div class="ai-local-add-row"><input data-local-model-id placeholder="Hugging Face model ID"><button data-local-use-id>Use ID</button></div><div class="ai-hf-browser-status" data-local-status>Loading models…</div><div class="ai-hf-browser-list" data-local-list></div></div>';
+        browser.innerHTML='<div class="editor-modal-content ai-hf-browser-content"><button class="editor-modal-close" aria-label="Close">×</button><h2>Browse local models</h2><p>Search models tagged for Transformers.js. A library tag does not guarantee every task or architecture works in this editor runtime. Results show approximate repository size, configured context length, and detected capabilities.</p><div class="ai-hf-browser-toolbar"><input data-local-search placeholder="Search model IDs…"><button data-local-filter-toggle type="button" aria-expanded="false">Filters</button><button data-local-search-button>Search</button><button data-local-search-refresh>Refresh</button></div><div class="ai-local-model-filters" data-local-filters hidden><div class="ai-local-filter-group"><span>Capabilities</span><label><input type="checkbox" data-capability="documents"> Text/docs</label><label><input type="checkbox" data-capability="vision"> Images</label><label><input type="checkbox" data-capability="audio"> Audio</label><label><input type="checkbox" data-capability="toolCalling"> Native tool calling</label><label><input type="checkbox" data-capability="reasoning"> Reasoning</label><label><input type="checkbox" data-capability="video"> Video</label></div><div class="ai-local-filter-group ai-local-range-filters"><label>Min size (GB)<input type="number" min="0" step="0.1" data-size-min placeholder="Any"></label><label>Max size (GB)<input type="number" min="0" step="0.1" data-size-max placeholder="Any"></label><label>Min context<input type="number" min="0" step="1024" data-context-min placeholder="Any"></label><label>Max context<input type="number" min="0" step="1024" data-context-max placeholder="Any"></label></div><p>Size is the sum of files in the current Hugging Face repository revision, not a RAM estimate. Context is read from model configuration when available. Text/document and image/audio/video support is inferred from task, architecture, config, and model-card metadata; a video badge means sampled-frame understanding, not that this editor currently accepts video attachments. Tool calling requires an explicit metadata signal. Missing badges mean not detected, not necessarily unsupported.</p></div><div class="ai-local-add-row"><input data-local-model-id placeholder="Hugging Face model ID"><button data-local-use-id>Use ID</button></div><div class="ai-hf-browser-status" data-local-status>Loading models…</div><div class="ai-hf-browser-list" data-local-list></div></div>';
         document.body.appendChild(browser);requestAnimationFrame(()=>browser.classList.add('show'));
         const search=browser.querySelector('[data-local-search]'),status=browser.querySelector('[data-local-status]'),list=browser.querySelector('[data-local-list]'),idInput=browser.querySelector('[data-local-model-id]'),filters=browser.querySelector('[data-local-filters]');
         let all=[],loadVersion=0,metadataProgress=null,metadataNote='';
@@ -813,7 +829,10 @@ const makeEditorTools = (() => {
               const response=await network.request(new Request('https://huggingface.co/api/models/'+encoded+'?blobs=true'),'ai');
               if(!response?.ok)return null;
               const details=await response.json();
-              return details&&typeof details==='object'?details:null;
+              if(!details||typeof details!=='object')return null;
+              const rawConfig=await fetchHuggingFaceModelConfig(id,details.sha||'main');
+              if(rawConfig)details.config=rawConfig;
+              return details;
             })();
             repositoryDetails.set(id,pending);
           }
